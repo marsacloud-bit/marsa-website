@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" class="no-js">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>قراءة الفواتير والمستندات (OCR) | مرسى MARSA</title>
+  <meta name="description" content="حوّل صور الفواتير والبوالص والبيانات الجمركية وملفات PDF الممسوحة إلى نص وبيانات منظمة داخل متصفحك: رقم الفاتورة والتاريخ والرقم الضريبي والمبالغ والبنود وأرقام الحاويات ورمز QR للفاتورة الإلكترونية، مع النسخ إلى Excel والتنزيل والحفظ.">
+  <meta name="theme-color" content="#0B3A6E">
+  <link rel="icon" type="image/png" href="assets/img/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/style.css">
+  <link rel="stylesheet" href="assets/css/pages/ocr.css">
+</head>
+<body data-page="ocr">
+  <a class="skip-link" href="#main">تخطَّ إلى المحتوى</a>
+  <!-- ============ HEADER (shared) ============ -->
+  <div class="topbar">
+    <div class="container">
+      <span>منصة سعودية للتخليص الجمركي والشحن أونلاين</span>
+      <div class="topbar-links">
+        <nav class="topbar-auth" aria-label="الدخول إلى المنصة">
+          <a href="login.html#client"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>دخول العملاء</a>
+          <a href="login.html#staff"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/></svg>دخول الموظفين</a>
+          <a href="portal.html" data-account-link hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>بوابتي</a>
+        </nav>
+        <a href="tel:+966126143270"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><span dir="ltr">+966 12 614 3270</span></a>
+        <a href="mailto:info@marsa-sa.com"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span dir="ltr">info@marsa-sa.com</span></a>
+      </div>
+    </div>
+  </div>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="مرسى - الصفحة الرئيسية">
+        <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="84" height="58">
+      </a>
+      <nav class="main-nav" aria-label="القائمة الرئيسية">
+        <ul class="nav-list">
+          <li><a class="nav-link" href="index.html">الرئيسية</a></li>
+          <li><a class="nav-link" href="services.html">خدماتنا</a></li>
+          <li><a class="nav-link" href="calculator.html">حاسبة الرسوم</a></li>
+          <li><a class="nav-link" href="tracking.html">تتبع الشحنة</a></li>
+          <li><a class="nav-link" href="bulk-upload.html">الرفع الجماعي</a></li>
+          <li><a class="nav-link" href="ocr.html">قراءة المستندات</a></li>
+          <li><a class="nav-link" href="about.html">من نحن</a></li>
+          <li><a class="nav-link" href="contact.html">تواصل معنا</a></li>
+        </ul>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn-primary btn-cta" href="request.html">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/></svg>
+          اطلب تخليص
+        </a>
+        <button class="nav-toggle" type="button" aria-label="فتح القائمة" aria-expanded="false" aria-controls="mobile-drawer">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+  <div class="site-demo-banner" role="note" data-demo-banner>
+    <div class="container">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 16v-4M12 8h.01"/></svg>
+      <p data-demo-banner-text>نسخة عرض تجريبية — البيانات والأرقام توضيحية ولا تُرسل أي بيانات إلى خادم.</p>
+      <button class="site-demo-banner-close" type="button" aria-label="إخفاء تنبيه نسخة العرض لهذه الجلسة" data-demo-banner-close>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <aside class="drawer" id="mobile-drawer" aria-label="القائمة الجانبية" aria-hidden="true">
+    <div class="drawer-head">
+      <img src="assets/img/logo-header.png" alt="مرسى MARSA" width="72" height="50">
+      <button class="drawer-close" type="button" aria-label="إغلاق القائمة">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <ul class="drawer-nav">
+      <li><a href="index.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/></svg>الرئيسية</a></li>
+      <li><a href="services.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>خدماتنا</a></li>
+      <li><a href="calculator.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15v3M8 18h4"/></svg>حاسبة الرسوم الجمركية</a></li>
+      <li><a href="tracking.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>تتبع الشحنة</a></li>
+      <li><a href="request.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/></svg>اطلب تخليص</a></li>
+      <li><a href="bulk-upload.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5M12 3v12"/></svg>الرفع الجماعي للبيانات</a></li>
+      <li><a href="ocr.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 9h10M7 12h10M7 15h6"/></svg>قراءة المستندات (OCR)</a></li>
+      <li><a href="about.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2"/><path d="M12 7v14M5 13H3a9 9 0 0 0 18 0h-2M8 11h8"/></svg>من نحن</a></li>
+      <li><a href="contact.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/></svg>تواصل معنا</a></li>
+      <li><a href="login.html#client"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>دخول العملاء</a></li>
+      <li><a href="login.html#staff"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/></svg>دخول الموظفين</a></li>
+      <li data-account-item hidden><a href="portal.html" data-account-link><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>بوابتي</a></li>
+    </ul>
+    <div class="drawer-foot">
+      <a class="btn btn-primary btn-block" href="request.html">اطلب تخليص الآن</a>
+      <a href="tel:+966126143270"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><span dir="ltr">+966 12 614 3270</span></a>
+      <a href="mailto:info@marsa-sa.com"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span dir="ltr">info@marsa-sa.com</span></a>
+    </div>
+  </aside>
+  <div class="drawer-backdrop" aria-hidden="true"></div>
+  <!-- ============ /HEADER ============ -->
+  <main id="main">
+    <section class="page-hero" aria-labelledby="page-title">
+      <div class="container">
+        <nav class="breadcrumb" aria-label="مسار التنقل">
+          <ol>
+            <li><a href="index.html">الرئيسية</a></li>
+            <li aria-current="page">قراءة المستندات (OCR)</li>
+          </ol>
+        </nav>
+        <h1 id="page-title">قراءة الفواتير والمستندات (OCR)</h1>
+        <p class="lead">صوّر الفاتورة أو البوليصة أو البيان الجمركي أو ارفع ملف PDF ممسوحًا ضوئيًا، وسنحوّله إلى نص وبيانات منظمة: رقم الفاتورة والتاريخ والرقم الضريبي والمبالغ والبنود وأرقام الحاويات. راجع النتيجة وعدّلها، ثم انسخها أو نزّلها أو استخدمها مباشرة في طلب تخليص.</p>
+      </div>
+      <svg class="page-hero-wave" viewBox="0 0 1440 120" preserveAspectRatio="none" aria-hidden="true">
+        <path class="w-back" d="M0,40 C180,90 360,10 560,40 C760,70 900,20 1100,35 C1260,48 1360,70 1440,50 L1440,120 L0,120 Z"/>
+        <path class="w-mid" d="M0,70 C220,30 420,100 640,70 C860,40 1040,95 1240,70 C1330,60 1400,55 1440,60 L1440,120 L0,120 Z"/>
+        <path class="w-front" d="M0,90 C240,60 460,115 720,90 C980,65 1200,110 1440,85 L1440,120 L0,120 Z"/>
+      </svg>
+    </section>
+
+    <section class="section overlap-up" aria-label="أداة قراءة المستندات">
+      <div class="container">
+        <div class="card shadow-lg ocr-card" id="ocr-card">
+
+          <!-- ===== How it works ===== -->
+          <ol class="ocr-how" aria-label="كيف تعمل">
+            <li>
+              <span class="icon-box icon-box-sm icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></svg></span>
+              <div><strong>1. صوّر أو ارفع المستند</strong><span>صورة JPG أو PNG أو WEBP، أو ملف PDF ممسوح ضوئيًا (حتى 20 صفحة).</span></div>
+            </li>
+            <li>
+              <span class="icon-box icon-box-sm icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h7"/><path d="m15 17 2 2 4-4"/></svg></span>
+              <div><strong>2. راجع النص والبيانات</strong><span>نقرأ النص بالعربية والإنجليزية ونستخرج الحقول، ونتحقق من الرقم الضريبي وأرقام الحاويات ورمز QR للفاتورة الإلكترونية.</span></div>
+            </li>
+            <li>
+              <span class="icon-box icon-box-sm icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg></span>
+              <div><strong>3. انسخ أو نزّل أو احفظ</strong><span>انسخ إلى Excel، أو نزّل TXT / CSV / JSON / Excel، أو انقل البيانات إلى طلب تخليص، أو احفظها في السجل.</span></div>
+            </li>
+          </ol>
+
+          <!-- ===== Step 1: settings ===== -->
+          <div class="ocr-block">
+            <div class="ocr-block-head">
+              <span class="ocr-num" aria-hidden="true">1</span>
+              <div>
+                <h2>نوع المستند وإعدادات القراءة</h2>
+                <p>نوع المستند يساعدنا على فهم الحقول (مثل الشاحن والمرسل إليه في البوليصة).</p>
+              </div>
+            </div>
+            <div class="form">
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label" for="ocr-doc-type">نوع المستند</label>
+                  <select class="form-control" id="ocr-doc-type">
+                    <option value="commercial_invoice">فاتورة تجارية</option>
+                    <option value="operator_invoice">فاتورة مشغل / مورد</option>
+                    <option value="bill_of_lading">بوليصة شحن</option>
+                    <option value="customs_declaration">بيان جمركي</option>
+                    <option value="packing_list">قائمة تعبئة</option>
+                    <option value="certificate_of_origin">شهادة منشأ</option>
+                    <option value="other">أخرى</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="ocr-langs">لغة المستند</label>
+                  <select class="form-control" id="ocr-langs" aria-describedby="ocr-langs-hint">
+                    <option value="ara+eng">العربية والإنجليزية</option>
+                    <option value="eng">الإنجليزية فقط</option>
+                    <option value="ara">العربية فقط</option>
+                  </select>
+                  <span class="form-hint" id="ocr-langs-hint">اختيار لغة واحدة أسرع وأدق إن كان المستند بلغة واحدة.</span>
+                </div>
+              </div>
+              <fieldset class="fieldset ocr-options">
+                <legend class="form-label">تحسين الصورة قبل القراءة</legend>
+                <label class="check"><input type="checkbox" id="ocr-enhance" checked> تحويل إلى تدرّج رمادي مع رفع التباين</label>
+                <label class="check"><input type="checkbox" id="ocr-threshold"> تحويل إلى أبيض وأسود (مفيد للصور الباهتة أو المظللة)</label>
+                <label class="check"><input type="checkbox" id="ocr-qr" checked> البحث عن رمز QR للفاتورة الإلكترونية (هيئة الزكاة والضريبة والجمارك)</label>
+              </fieldset>
+            </div>
+          </div>
+
+          <!-- ===== Step 2: files ===== -->
+          <div class="ocr-block">
+            <div class="ocr-block-head">
+              <span class="ocr-num" aria-hidden="true">2</span>
+              <div>
+                <h2>المستندات</h2>
+                <p>يمكنك إضافة عدة ملفات وقراءتها بالترتيب. استخدم أزرار التدوير إن كانت الصورة مائلة أو مقلوبة.</p>
+              </div>
+            </div>
+            <div class="dropzone ocr-dropzone" id="ocr-dropzone">
+              <input type="file" id="ocr-file" multiple accept=".jpg,.jpeg,.png,.webp,.bmp,.gif,.heic,.heif,.pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf" aria-describedby="ocr-drop-sub">
+              <span class="icon-box icon-box-lg icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></span>
+              <label class="dropzone-title" for="ocr-file">اسحب المستندات وأفلتها هنا، أو اضغط لاختيارها</label>
+              <p class="dropzone-sub" id="ocr-drop-sub">الصيغ: <span dir="ltr">.jpg</span> و <span dir="ltr">.png</span> و <span dir="ltr">.webp</span> و <span dir="ltr">.pdf</span> (و <span dir="ltr">.heic</span> إن كان متصفحك يدعمها) — حتى 25 ميغابايت للملف.</p>
+            </div>
+            <div class="ocr-camera-row">
+              <button type="button" class="btn btn-secondary" id="ocr-camera-btn">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>
+                التقاط صورة بالكاميرا
+              </button>
+              <input type="file" id="ocr-camera" accept="image/*" capture="environment" class="ocr-hidden-input" tabindex="-1" aria-hidden="true">
+              <span class="text-xs text-muted">على الجوال تُفتح الكاميرا الخلفية مباشرة. صوّر المستند كاملًا في إضاءة جيدة ومن الأعلى.</span>
+            </div>
+            <p class="demo-note mt-2">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+              <span>الملفات تُعالج داخل متصفحك ولا تُرسل لأي خادم أثناء القراءة؛ يتم تنزيل ملفات اللغة فقط (من jsDelivr وcdnjs عند أول استخدام). <span data-show-mode="online" hidden>لا يُرفع شيء إلى خادم الاختبار إلا عند ضغطك «حفظ» بحساب موظف.</span></span>
+            </p>
+
+            <ul class="file-list ocr-queue" id="ocr-queue" aria-label="المستندات المضافة"></ul>
+
+            <div class="ocr-progress" id="ocr-progress" hidden>
+              <div class="progress-meta"><span id="ocr-progress-label">جارٍ التحضير…</span><span class="num" id="ocr-progress-pct">0%</span></div>
+              <div class="progress" role="progressbar" aria-labelledby="ocr-progress-label" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="ocr-progress-bar"><div class="progress-bar"></div></div>
+            </div>
+            <p class="sr-only" id="ocr-status" role="status" aria-live="polite" aria-atomic="true"></p>
+
+            <div class="ocr-actions" id="ocr-queue-actions" hidden>
+              <button type="button" class="btn btn-ghost" id="ocr-clear">مسح القائمة</button>
+              <button type="button" class="btn btn-secondary" id="ocr-cancel" hidden>
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                إيقاف القراءة
+              </button>
+              <button type="button" class="btn btn-primary btn-lg" id="ocr-start">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></svg>
+                بدء القراءة <span class="num" id="ocr-start-count"></span>
+              </button>
+            </div>
+          </div>
+
+          <!-- ===== Step 3: result ===== -->
+          <div class="ocr-block" id="ocr-result-block" hidden>
+            <div class="ocr-block-head">
+              <span class="ocr-num" aria-hidden="true">3</span>
+              <div>
+                <h2 id="ocr-result-title" tabindex="-1">النتيجة</h2>
+                <p>عدّل أي قيمة غير صحيحة؛ الحقول المعلّمة «من رمز QR» مأخوذة من رمز الفاتورة الإلكترونية وهي الأدق.</p>
+              </div>
+            </div>
+            <div class="ocr-result-meta" id="ocr-result-meta"></div>
+
+            <div class="alert alert-warning mb-2" id="ocr-low-conf" role="note" hidden>
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18h.01"/></svg>
+              <span>دقة القراءة منخفضة لهذا المستند. راجع النص والحقول بعناية، أو أعد التصوير بإضاءة أفضل ودقة أعلى، أو جرّب خيار «أبيض وأسود».</span>
+            </div>
+
+            <div class="ocr-tabs" data-tabs>
+              <div class="tab-list" role="tablist" aria-label="أقسام النتيجة">
+                <button class="tab" type="button" role="tab" id="ocr-tab-fields" aria-controls="ocr-panel-fields" aria-selected="true">البيانات المستخرجة</button>
+                <button class="tab" type="button" role="tab" id="ocr-tab-items" aria-controls="ocr-panel-items" aria-selected="false">البنود <span class="num" id="ocr-items-count"></span></button>
+                <button class="tab" type="button" role="tab" id="ocr-tab-text" aria-controls="ocr-panel-text" aria-selected="false">النص المستخرج</button>
+              </div>
+
+              <div class="tab-panel" id="ocr-panel-fields" role="tabpanel" aria-labelledby="ocr-tab-fields" tabindex="0">
+                <div class="form-row ocr-doc-row">
+                  <div class="form-group">
+                    <label class="form-label" for="ocr-result-type">نوع هذا المستند</label>
+                    <select class="form-control" id="ocr-result-type"></select>
+                  </div>
+                  <div class="form-group ocr-reextract">
+                    <button type="button" class="btn btn-ghost btn-sm" id="ocr-reextract">إعادة استخراج البيانات من النص</button>
+                    <span class="form-hint">بعد تصحيح النص أو تغيير النوع. يستبدل تعديلاتك على الحقول.</span>
+                  </div>
+                </div>
+                <div class="ocr-checks" id="ocr-checks" aria-live="polite"></div>
+                <div class="ocr-fields" id="ocr-fields"></div>
+              </div>
+
+              <div class="tab-panel" id="ocr-panel-items" role="tabpanel" aria-labelledby="ocr-tab-items" tabindex="0" hidden>
+                <p class="text-sm text-muted">نتعرّف على البند عندما تتحقق المعادلة «الكمية × سعر الوحدة = المبلغ». أضف أو عدّل البنود التي لم تُقرأ.</p>
+                <div class="table-wrap ocr-items-wrap">
+                  <table class="table ocr-items">
+                    <caption class="sr-only">بنود المستند القابلة للتعديل</caption>
+                    <thead>
+                      <tr><th scope="col">#</th><th scope="col">الوصف</th><th scope="col">رمز HS</th><th scope="col">الكمية</th><th scope="col">سعر الوحدة</th><th scope="col">المبلغ</th><th scope="col"><span class="sr-only">حذف</span></th></tr>
+                    </thead>
+                    <tbody id="ocr-items-body"></tbody>
+                  </table>
+                </div>
+                <div class="ocr-items-foot">
+                  <button type="button" class="btn btn-ghost btn-sm" id="ocr-add-item">
+                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                    إضافة بند
+                  </button>
+                  <span class="text-sm" id="ocr-items-sum" aria-live="polite"></span>
+                </div>
+              </div>
+
+              <div class="tab-panel" id="ocr-panel-text" role="tabpanel" aria-labelledby="ocr-tab-text" tabindex="0" hidden>
+                <div class="form-group">
+                  <label class="form-label" for="ocr-text">النص كما قُرئ (قابل للتعديل)</label>
+                  <textarea class="form-control ocr-text" id="ocr-text" dir="auto" rows="16" spellcheck="false"></textarea>
+                </div>
+              </div>
+            </div>
+
+            <!-- export / hand-off -->
+            <div class="ocr-export" role="group" aria-label="نسخ وتنزيل النتيجة">
+              <button type="button" class="btn btn-secondary btn-sm" id="ocr-copy-text">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>
+                نسخ النص
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" id="ocr-copy-data">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16"/></svg>
+                نسخ البيانات (للصق في Excel)
+              </button>
+              <button type="button" class="btn btn-ghost btn-sm" data-download="txt">تنزيل TXT</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-download="csv">تنزيل CSV</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-download="json">تنزيل JSON</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-download="xlsx">تنزيل Excel</button>
+            </div>
+
+            <!-- save -->
+            <div class="ocr-save" id="ocr-save">
+              <h3 class="ocr-save-title">حفظ النتيجة</h3>
+              <p class="text-sm text-muted mb-2" id="ocr-save-where">تُحفظ النتيجة في «السجل» على هذا الجهاز فقط (التخزين المحلي للمتصفح)، ولا تُرسل إلى أي جهة.</p>
+              <div class="form ocr-save-form">
+                <div class="ocr-staff-only" id="ocr-tx-group" hidden>
+                  <div class="form-group">
+                    <label class="form-label" for="ocr-tx-q">ربط بمعاملة <span class="opt">(اختياري)</span></label>
+                    <div class="ocr-tx-search">
+                      <input class="form-control" id="ocr-tx-q" type="search" dir="ltr" autocomplete="off" placeholder="الرقم المرجعي أو رقم البوليصة أو البيان" aria-describedby="ocr-tx-hint">
+                      <button type="button" class="btn btn-secondary" id="ocr-tx-search">بحث</button>
+                    </div>
+                    <span class="form-hint" id="ocr-tx-hint">لا يمكن تغيير المعاملة بعد ربطها.</span>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="ocr-tx">المعاملة</label>
+                    <select class="form-control" id="ocr-tx"><option value="">بدون ربط</option></select>
+                  </div>
+                  <label class="check"><input type="checkbox" id="ocr-attach" checked> إرفاق الملف الأصلي بمستندات المعاملة</label>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label" for="ocr-review-status">حالة المراجعة</label>
+                    <select class="form-control" id="ocr-review-status">
+                      <option value="unreviewed">لم تتم المراجعة</option>
+                      <option value="reviewed">تمت المراجعة</option>
+                      <option value="rejected">مرفوض (قراءة غير صالحة)</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="ocr-review-note">ملاحظة <span class="opt">(اختياري)</span></label>
+                    <input class="form-control" id="ocr-review-note" type="text" maxlength="1000" autocomplete="off">
+                  </div>
+                </div>
+              </div>
+              <div class="alert mt-2" id="ocr-save-msg" role="status" tabindex="-1" hidden>
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 16v-4M12 8h.01"/></svg>
+                <span id="ocr-save-msg-text"></span>
+              </div>
+              <div class="ocr-actions">
+                <button type="button" class="btn btn-secondary" id="ocr-to-request">
+                  استخدام في طلب تخليص
+                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
+                </button>
+                <button type="button" class="btn btn-primary btn-lg" id="ocr-save-btn">
+                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+                  <span id="ocr-save-label">حفظ في السجل</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== History ===== -->
+          <div class="ocr-block" id="ocr-history-block">
+            <div class="ocr-block-head">
+              <span class="ocr-num" aria-hidden="true">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              </span>
+              <div>
+                <h2>السجل</h2>
+                <p id="ocr-history-sub">المستندات المقروءة المحفوظة. افتح أي سجل لمراجعته أو نسخه أو تنزيله.</p>
+              </div>
+            </div>
+            <div class="ocr-history-tools">
+              <label class="sr-only" for="ocr-history-q">بحث في السجل</label>
+              <input class="form-control" id="ocr-history-q" type="search" autocomplete="off" placeholder="ابحث باسم الملف أو رقم الفاتورة أو البوليصة">
+              <button type="button" class="btn btn-ghost btn-sm" id="ocr-history-refresh">تحديث</button>
+            </div>
+            <ul class="ocr-history" id="ocr-history" aria-label="السجل"></ul>
+            <p class="text-sm text-muted" id="ocr-history-empty">لا توجد سجلات محفوظة بعد.</p>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-sm" aria-labelledby="tips-title">
+      <div class="container">
+        <div class="section-head text-center">
+          <span class="eyebrow">لقراءة أدق</span>
+          <h2 id="tips-title">نصائح التصوير والمسح الضوئي</h2>
+        </div>
+        <div class="grid grid-3">
+          <div class="card">
+            <span class="icon-box icon-box-soft mb-2"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></span>
+            <h3 class="ocr-tip-title">إضاءة متساوية</h3>
+            <p class="text-muted text-sm mb-0">تجنّب الظلال والانعكاس. صوّر من الأعلى مباشرة واجعل المستند يملأ الإطار.</p>
+          </div>
+          <div class="card">
+            <span class="icon-box icon-box-soft mb-2"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="8" y="8" width="8" height="8" rx="1"/></svg></span>
+            <h3 class="ocr-tip-title">رمز QR واضح</h3>
+            <p class="text-muted text-sm mb-0">في الفواتير الإلكترونية السعودية نقرأ اسم البائع ورقمه الضريبي والإجمالي والضريبة من رمز QR مباشرة.</p>
+          </div>
+          <div class="card">
+            <span class="icon-box icon-box-soft mb-2"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 15l2 2 4-4"/></svg></span>
+            <h3 class="ocr-tip-title">PDF أصلي؟ أفضل</h3>
+            <p class="text-muted text-sm mb-0">إن كان ملف PDF يحتوي نصًا (غير ممسوح)، نقرأ نصه مباشرة دون تعرّف ضوئي فتكون النتيجة دقيقة تمامًا.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <!-- ============ FOOTER (shared) ============ -->
+  <footer class="site-footer">
+    <svg class="footer-wave" viewBox="0 0 1440 80" preserveAspectRatio="none" aria-hidden="true">
+      <path class="fw-fill" d="M0,0 L1440,0 L1440,30 C1200,75 960,10 720,40 C480,70 240,15 0,45 Z"/>
+    </svg>
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="footer-logo" href="index.html" aria-label="مرسى - الصفحة الرئيسية">
+            <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="107" height="74">
+          </a>
+          <p>مرسى منصة سعودية لخدمات التخليص الجمركي والشحن أونلاين، تساعد المستوردين والمصدّرين في المملكة على تخليص شحناتهم بسرعة وشفافية.</p>
+          <div class="social">
+            <a href="contact.html" aria-label="فيسبوك"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h-2.5A3.5 3.5 0 0 0 9 6.5V9H7v3.5h2V21h3.5v-8.5H15l.5-3.5h-3V7a1 1 0 0 1 1-1H15z"/></svg></a>
+            <a href="contact.html" aria-label="لينكدإن"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 10v7M8 7v.01M12 17v-4a2 2 0 0 1 4 0v4M12 10v7"/></svg></a>
+            <a href="https://wa.me/966554821937" target="_blank" rel="noopener" aria-label="واتساب"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/><path d="M9 9.5c.3 1.8 2 3.8 4 4.5l1-1 2 .8"/></svg></a>
+          </div>
+        </div>
+        <div class="footer-col">
+          <h3>روابط سريعة</h3>
+          <ul class="footer-links">
+            <li><a href="index.html">الرئيسية</a></li>
+            <li><a href="services.html">خدماتنا</a></li>
+            <li><a href="about.html">من نحن</a></li>
+            <li><a href="about.html#faq">الأسئلة الشائعة</a></li>
+            <li><a href="contact.html">تواصل معنا</a></li>
+            <li><a href="login.html#client">دخول العملاء</a></li>
+            <li><a href="login.html#staff">دخول الموظفين</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h3>أدوات المنصة</h3>
+          <ul class="footer-links">
+            <li><a href="request.html">اطلب تخليص</a></li>
+            <li><a href="calculator.html">حاسبة الرسوم الجمركية</a></li>
+            <li><a href="tracking.html">تتبع الشحنة</a></li>
+            <li><a href="bulk-upload.html">الرفع الجماعي (Excel / CSV)</a></li>
+            <li><a href="ocr.html">قراءة المستندات (OCR)</a></li>
+            <li><a href="services.html#aci">البيان المسبق ومنصة فسح</a></li>
+            <li><a href="services.html#hs">تصنيف HS Code</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h3>تواصل معنا</h3>
+          <ul class="footer-contact">
+            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg><span>طريق الملك عبدالعزيز، حي الحمراء – جدة</span></li>
+            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><a href="tel:+966126143270" dir="ltr">+966 12 614 3270</a></li>
+            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><a href="mailto:info@marsa-sa.com" dir="ltr">info@marsa-sa.com</a></li>
+            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/><path d="M9 9.5c.3 1.8 2 3.8 4 4.5l1-1 2 .8"/></svg><a href="https://wa.me/966554821937" target="_blank" rel="noopener" dir="ltr">+966 55 482 1937</a></li>
+            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>الأحد – الخميس: 8 ص – 5 م</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="container footer-privacy">
+      <p><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg><span data-privacy-text><strong>الخصوصية في نسخة العرض:</strong> ما تُدخله في النماذج والحاسبة يبقى في التخزين المحلي (localStorage) لهذا المتصفح فقط، دون تشفير ودون إرسال إلى أي خادم، فلا تُدخل بيانات حقيقية حساسة. يُحمَّل خط الموقع من خدمة Google Fonts، لذا يتصل متصفحك بخوادم Google عند فتح الصفحات.</span></p>
+      <button class="btn btn-sm btn-outline-white" type="button" data-clear-local>مسح بياناتي من هذا الجهاز</button>
+    </div>
+    <div class="container footer-bottom">
+      <span>© <span id="year">2026</span> مرسى MARSA. جميع الحقوق محفوظة.</span>
+      <span>منصة خاصة لخدمات التخليص الجمركي — غير تابعة لأي جهة حكومية.</span>
+    </div>
+  </footer>
+  <button class="to-top" type="button" aria-label="العودة لأعلى الصفحة">
+    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+  </button>
+  <!-- ============ /FOOTER ============ -->
+  <script src="assets/js/config.js" defer></script>
+  <script src="assets/js/main.js" defer></script>
+  <script src="assets/js/supa.js" defer></script>
+  <script src="assets/js/xlsx-lite.js" defer></script>
+  <script src="assets/js/ocr-parse.js" defer></script>
+  <script src="assets/js/ocr.js" defer></script>
+</body>
+</html>

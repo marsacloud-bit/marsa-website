@@ -58,6 +58,8 @@ const B_CT = 'bbbb0000-0000-4000-8000-000000000301';
 const B_DOC_INT = 'bbbb0000-0000-4000-8000-000000000501';
 const B_DOC_CLI = 'bbbb0000-0000-4000-8000-000000000502';
 const B_BATCH = 'bbbb0000-0000-4000-8000-000000000601';
+const B_EXT = 'bbbb0000-0000-4000-8000-000000000701';
+const EXT_A = 'a0e00000-0000-4000-8000-000000000001';  // org A OCR result, unlinked, saved by staffA
 
 const DOC_A_INT = 'a0c00000-0000-4000-8000-000000000001';  // TX1 internal
 const DOC_A_CLI = 'a0c00000-0000-4000-8000-000000000002';  // TX1 client-visible
@@ -176,6 +178,9 @@ async function fixtures() {
       VALUES ('${B_BATCH}', '${B}', 'b.xlsx', '${FP1}', '${U.staffB}');
     INSERT INTO public.import_rows (batch_id, sheet_name, row_no, raw) VALUES ('${B_BATCH}', 'Sheet1', 2, '{"b":1}');
     INSERT INTO public.transaction_events (org_id, transaction_id, event_type, note) VALUES ('${B}', '${B_TX}', 'note', 'حدث ب');
+    INSERT INTO public.document_extractions (id, org_id, transaction_id, doc_type, source_name, source_sha256, engine, languages, raw_text, extracted_fields, created_by)
+      VALUES ('${B_EXT}', '${B}', '${B_TX}', 'commercial_invoice', 'b-inv.jpg', '${hex('e')}', 'tesseract.js@5.1.1', 'ara+eng',
+              'فاتورة ب', '{"invoice_number":"B-1"}', '${U.staffB}');
 
     -- a closed-intake tenant and a tenant used for the org-wide rate guard
     INSERT INTO public.organizations (id, slug, name_ar, public_intake_enabled) VALUES
@@ -204,6 +209,9 @@ async function fixtures() {
     // org A import staging row (so the isolation sweep covers import_batches / import_rows)
     const b = (await q(`INSERT INTO public.import_batches (org_id, file_name, file_fingerprint) VALUES ($1, 'fixture.xlsx', $2) RETURNING id`, [A, FP5]))[0];
     await q(`INSERT INTO public.import_rows (batch_id, sheet_name, row_no, raw) VALUES ($1, 'Sheet1', 2, '{"a":1}')`, [b.id]);
+    // org A OCR result (so the isolation sweep covers document_extractions)
+    await q(`INSERT INTO public.document_extractions (id, org_id, doc_type, source_name, source_sha256, engine, languages, raw_text, extracted_fields)
+             VALUES ($1, $2, 'commercial_invoice', 'a-inv.jpg', $3, 'tesseract.js@5.1.1', 'ara+eng', 'فاتورة أ', '{"invoice_number":"A-1"}')`, [EXT_A, A, hex('d')]);
   });
 }
 
@@ -225,7 +233,8 @@ const TENANT_TABLES = [
   ['containers',         `SELECT id::text id FROM public.containers WHERE org_id = $1 LIMIT 1`,         'id::text',  'org_id = org_id'],
   ['transaction_events', `SELECT id::text id FROM public.transaction_events WHERE org_id = $1 LIMIT 1`, 'id::text',  'note = note'],
   ['contact_messages',   `SELECT id::text id FROM public.contact_messages WHERE org_id = $1 LIMIT 1`,   'id::text',  'org_id = org_id'],
-  ['audit_log',          `SELECT id::text id FROM public.audit_log WHERE org_id = $1 LIMIT 1`,          'id::text',  'table_name = table_name']
+  ['audit_log',          `SELECT id::text id FROM public.audit_log WHERE org_id = $1 LIMIT 1`,          'id::text',  'table_name = table_name'],
+  ['document_extractions', `SELECT id::text id FROM public.document_extractions WHERE org_id = $1 LIMIT 1`, 'id::text', 'review_note = review_note']
 ];
 const ALL_PUBLIC_TABLES = TENANT_TABLES.map(t => t[0]).concat(['status_labels']);
 
@@ -882,6 +891,102 @@ async function main() {
       const o = (await as('staffA', `SELECT count(*)::int n FROM storage.objects`))[0].n;
       return (d === 0 && o === 0) || 'documents=' + d + ' objects=' + o;
     } finally { await q(`UPDATE public.memberships SET is_active = true WHERE user_id = $1`, [U.staffA]); }
+  });
+
+  /* ---------------------------------------------------------------- OCR results */
+  section('document_extractions (OCR results): staff only, machine output immutable');
+  const EXT_INS = `INSERT INTO public.document_extractions (org_id, transaction_id, doc_type, source_name, source_sha256, source_mime, source_size, source_pages,
+      engine, languages, mean_confidence, raw_text, extracted_fields, qr_payload, line_items, created_by)
+    VALUES ($1, $2, 'commercial_invoice', 'invoice.jpg', $3, 'image/jpeg', 2048, 1, 'tesseract.js@5.1.1', 'ara+eng', 87.5,
+      'فاتورة ضريبية رقم INV-1001', '{"invoice_number":"INV-1001","supplier_vat":"300000000000003","total":"1150.00"}',
+      '{"seller_name":"مورد تجريبي","vat_number":"300000000000003","timestamp":"2026-10-30T10:00:00Z","total":"1150.00","vat_total":"150.00"}',
+      '[{"description":"بضاعة","hs_code":"847130","quantity":"2","unit_price":"500","amount":"1000"}]', $4)
+    RETURNING id, created_by, review_status, reviewed_by, transaction_id`;
+  let ex1, ex2;
+  await check('staffA saves an OCR result; created_by forced to auth.uid()', async () => {
+    ex1 = (await as('staffA', EXT_INS, [A, null, hex('5'), U.adminA]))[0];
+    return (ex1.created_by === U.staffA && ex1.review_status === 'unreviewed' && ex1.reviewed_by === null) || JSON.stringify(ex1);
+  }, 'tg_document_extractions_before (created_by)');
+  await check('staffA saves an OCR result linked to own-org transaction', async () => {
+    ex2 = (await as('staffA', EXT_INS, [A, TX1, hex('5'), null]))[0];   // same bytes, other scope (transaction) = allowed
+    return ex2.transaction_id === TX1;
+  });
+  await check('staffA reads own-org OCR results', async () => {
+    const r = await as('staffA', `SELECT id FROM public.document_extractions WHERE id = ANY ($1::uuid[])`, [[ex1.id, ex2.id, EXT_A]]);
+    return r.length === 3 || 'got ' + r.length;
+  });
+  await expectErr('same file saved twice (same org, no transaction) = duplicate 23505', () => as('staffA', EXT_INS, [A, null, hex('5'), null]),
+    /document_extractions_dedupe_uidx|duplicate key/);
+  await expectErr('same file saved twice on the same transaction = duplicate', () => as('staffA', EXT_INS, [A, TX1, hex('5'), null]),
+    /document_extractions_dedupe_uidx|duplicate key/);
+  await check('duplicate check is per tenant (org B has its own row for the same bytes)', async () => {
+    await q(`INSERT INTO public.document_extractions (org_id, source_name, source_sha256, engine, languages, raw_text, created_by)
+             VALUES ($1, 'x.jpg', $2, 'tesseract.js@5.1.1', 'ara', 'x', $3)`, [B, hex('5'), U.staffB]);
+    return true;
+  });
+  await check('staffB cannot see org-A OCR results', () => denied('staffB', `SELECT id FROM public.document_extractions WHERE org_id = $1`, [A]), 'document_extractions_select');
+  await expectErr('staffB cannot insert an OCR result into org A', () => as('staffB', EXT_INS, [A, null, hex('6'), null]), /row-level security/, 'document_extractions_insert');
+  await expectErr('staffB cannot link own-org OCR result to an org-A transaction', () => as('staffB', EXT_INS, [B, TX1, hex('6'), null]),
+    /row-level security|foreign key|violates/, 'document_extractions_tx_fk');
+  await expectErr('staffA cannot link an OCR result to an org-B transaction', () => as('staffA', EXT_INS, [A, B_TX, hex('6'), null]),
+    /row-level security|foreign key|violates/, 'document_extractions_tx_fk / insert policy');
+  await check('clientA cannot read OCR results (even of own transaction)', () => denied('clientA', `SELECT id FROM public.document_extractions`), 'document_extractions_select');
+  await expectErr('clientA cannot insert an OCR result', () => as('clientA', EXT_INS, [A, TX1, hex('7'), null]), /row-level security/, 'document_extractions_insert');
+  await expectErr('anon cannot read OCR results', () => as('anon', `SELECT 1 FROM public.document_extractions`), /permission denied/);
+  await expectErr('anon cannot insert an OCR result', () => as('anon', EXT_INS, [A, null, hex('7'), null]), /permission denied/);
+  for (const [col, val] of [['raw_text', `'نص مزور'`], ['extracted_fields', `'{"total":"1"}'`], ['source_sha256', `'${hex('9')}'`],
+                            ['created_by', `'${U.adminA}'`], ['qr_payload', `'{"total":"1"}'`], ['org_id', `'${B}'`],
+                            ['reviewed_by', `'${U.adminA}'`], ['engine', `'x'`]]) {
+    await expectErr(`OCR result: ${col} is immutable`, () => as('staffA', `UPDATE public.document_extractions SET ${col} = ${val} WHERE id = $1`, [ex1.id]),
+      new RegExp('MRS_IMMUTABLE.*' + col), 'tg_document_extractions_before guard list');
+  }
+  await check('review: reviewed_fields / line_items saved, reviewed_by + reviewed_at stamped by the server', async () => {
+    const r = (await as('staffA', `UPDATE public.document_extractions
+        SET reviewed_fields = '{"invoice_number":"INV-1001","total":"1150.00","currency":"SAR"}', review_status = 'reviewed',
+            line_items = '[{"description":"بضاعة مصححة","quantity":"2","amount":"1000"}]', review_note = 'تمت المراجعة'
+        WHERE id = $1 RETURNING reviewed_by, reviewed_at, review_status, extracted_fields ->> 'invoice_number' orig`, [ex1.id]))[0];
+    return (r.reviewed_by === U.staffA && r.reviewed_at && r.review_status === 'reviewed' && r.orig === 'INV-1001') || JSON.stringify(r);
+  });
+  await check('review by adminA re-stamps the reviewer', async () => {
+    const r = (await as('adminA', `UPDATE public.document_extractions SET review_note = 'مراجعة ثانية' WHERE id = $1 RETURNING reviewed_by`, [ex1.id]))[0];
+    return r.reviewed_by === U.adminA || JSON.stringify(r);
+  });
+  await expectErr('unknown field key rejected', () => as('staffA', `UPDATE public.document_extractions SET reviewed_fields = '{"evil":"x"}' WHERE id = $1`, [ex1.id]),
+    /document_extractions_reviewed_chk/);
+  await expectErr('line_items must be an array of objects', () => as('staffA', `UPDATE public.document_extractions SET line_items = '{"a":1}' WHERE id = $1`, [ex1.id]),
+    /document_extractions_items_chk/);
+  await expectErr('invalid review_status rejected', () => as('staffA', `UPDATE public.document_extractions SET review_status = 'approved' WHERE id = $1`, [ex1.id]),
+    /check constraint/);
+  await check('transaction_id can be set once (NULL → own-org transaction)', async () =>
+    (await as('staffA', `UPDATE public.document_extractions SET transaction_id = $2 WHERE id = $1 RETURNING id`, [EXT_A, TX3])).length === 1);
+  await expectErr('transaction_id cannot be changed once set', () => as('staffA', `UPDATE public.document_extractions SET transaction_id = $2 WHERE id = $1`, [EXT_A, TX1]),
+    /MRS_IMMUTABLE.*transaction_id/);
+  await expectErr('document_id must be a document of the same transaction', () => as('staffA', `UPDATE public.document_extractions SET document_id = $2 WHERE id = $1`, [ex2.id, DOC_A2_CLI]),
+    /MRS_INVALID.*document_id/);
+  await expectErr('document_id of another org rejected', () => as('staffA', `UPDATE public.document_extractions SET document_id = $2 WHERE id = $1`, [ex2.id, B_DOC_INT]),
+    /MRS_INVALID|foreign key|violates/);
+  await check('original document attached (document_id NULL → own transaction document)', async () =>
+    (await as('staffA', `UPDATE public.document_extractions SET document_id = $2 WHERE id = $1 RETURNING document_id`, [ex2.id, DOC_A_INT]))[0].document_id === DOC_A_INT);
+  await expectErr('document_id cannot be changed once set', () => as('staffA', `UPDATE public.document_extractions SET document_id = $2 WHERE id = $1`, [ex2.id, DOC_A_CLI]),
+    /MRS_IMMUTABLE.*document_id/);
+  await expectErr('staffA cannot DELETE an OCR result', () => as('staffA', `DELETE FROM public.document_extractions WHERE id = $1`, [ex1.id]), /permission denied/);
+  await expectErr('adminA cannot DELETE an OCR result', () => as('adminA', `DELETE FROM public.document_extractions WHERE id = $1`, [ex1.id]), /permission denied/);
+  await check('void: voided_by stamped; voided row frozen; same file can be saved again', async () => {
+    const v = (await as('staffA', `UPDATE public.document_extractions SET voided_at = now(), void_reason = 'قراءة خاطئة' WHERE id = $1 RETURNING voided_by`, [ex1.id]))[0];
+    if (v.voided_by !== U.staffA) return 'voided_by=' + v.voided_by;
+    try { await as('staffA', `UPDATE public.document_extractions SET review_note = 'x' WHERE id = $1`, [ex1.id]); return 'voided row edited'; }
+    catch (e) { if (!/MRS_IMMUTABLE.*voided_at/.test(errText(e))) return errText(e); }
+    const again = (await as('staffA', EXT_INS, [A, null, hex('5'), null]))[0];
+    return !!again.id;
+  });
+  await check('OCR results are audited with the actor', async () =>
+    (await q(`SELECT count(*)::int n FROM public.audit_log WHERE table_name = 'document_extractions' AND actor = $1`, [U.staffA]))[0].n >= 3);
+  await check('OCR audit rows carry no scanned content (audit_select has no branch check)', async () => {
+    const r = (await q(`SELECT count(*)::int n FROM public.audit_log WHERE table_name = 'document_extractions'
+      AND (coalesce(new_data, '{}') ?| ARRAY['raw_text','extracted_fields','reviewed_fields','line_items','qr_payload']
+        OR coalesce(old_data, '{}') ?| ARRAY['raw_text','extracted_fields','reviewed_fields','line_items','qr_payload'])`))[0];
+    const ch = (await q(`SELECT count(*)::int n FROM public.audit_log WHERE table_name = 'document_extractions' AND 'reviewed_fields' = ANY(changed_fields)`))[0];
+    return r.n === 0 ? (ch.n > 0 || 'changed_fields lost reviewed_fields') : r.n + ' rows with content';
   });
 
   return finish();

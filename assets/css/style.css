@@ -550,10 +550,13 @@ input.form-control[type="number"], input.form-control[type="tel"], input.form-co
 .nav-toggle .icon { width: 24px; height: 24px; }
 @media (max-width: 1100px) { .nav-link { padding: 8px 9px; } .nav-link::after { right: 9px; left: 9px; } }
 @media (max-width: 1024px) { .header-inner { gap: 12px; } .nav-link { padding: 8px 6px; } .nav-link::after { right: 6px; left: 6px; } }
-@media (max-width: 900px) {
-  :root { --header-h: 68px; }
+/* 8 nav links need ~1070px beside the brand + CTA → collapse into the drawer below that */
+@media (max-width: 1080px) {
   .main-nav { display: none; }
   .nav-toggle { display: grid; }
+}
+@media (max-width: 900px) {
+  :root { --header-h: 68px; }
   .brand img { height: 48px; }
 }
 @media (max-width: 480px) { .header-actions .btn-cta { display: none; } }

@@ -172,7 +172,7 @@
         else if (!e.shiftKey && document.activeElement === lastEl) { e.preventDefault(); firstEl.focus(); }
       }
     });
-    window.addEventListener('resize', function () { if (window.innerWidth > 900 && drawer.classList.contains('is-open')) close(); });
+    window.addEventListener('resize', function () { if (window.innerWidth > 1080 && drawer.classList.contains('is-open')) close(); });
   }
 
   /* ---- Header shadow + back-to-top ---- */

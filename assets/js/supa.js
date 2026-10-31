@@ -7,7 +7,8 @@
      supabase-js v2 (UMD, pinned 2.45.4) is injected from jsDelivr on demand.
    * Demo    otherwise: nothing is loaded from the network; the public calls
      fall back to the existing localStorage behaviour (marsa_requests,
-     marsa_messages) and every staff/portal call returns MRS_DEMO_MODE.
+     marsa_messages) and every staff/portal call returns MRS_DEMO_MODE
+     (except the OCR extractions, which fall back to marsa_extractions).
 
    EVERY method returns a Promise of { data, error } and never throws.
    error = { code: 'MRS_…' | pg code, field, message (Arabic), raw }.
@@ -48,6 +49,9 @@
       MRS_LOCAL_SAVE: 'تعذّر الحفظ على هذا الجهاز. فعّل التخزين المحلي ثم حاول مرة أخرى.',
       MRS_UPLOAD: 'تعذّر رفع الملف. حاول مرة أخرى.',
       MRS_FILE_TOO_LARGE: 'حجم الملف أكبر من 25 ميغابايت.',
+      MRS_EXTRACTION_DUPLICATE: 'هذا الملف محفوظ من قبل في المستندات المقروءة (للمعاملة نفسها). افتحه من «السجل» بدلًا من حفظه مرة أخرى.',
+      MRS_EXTRACTION_VOIDED: 'هذا السجل مُلغى ولا يمكن تعديله.',
+      MRS_EXTRACTION_ATTACHED: 'ربط السجل بمعاملة أو بمستند لا يمكن تغييره بعد تعيينه.',
       DUPLICATE: 'هذا السجل موجود من قبل (تكرار). إن كان ملفًا فقد رُفع سابقًا.',
       FK: 'مرجع غير صالح أو لا يخص مؤسستك.',
       CHECK: 'بعض القيم غير صحيحة.',
@@ -71,7 +75,11 @@
       note: 'الملاحظة', status: 'الحالة', branch: 'الفرع', client: 'العميل', role: 'الصلاحية',
       supersedes_id: 'النسخة السابقة', evidence_document_id: 'مستند الإثبات',
       empty_return_receipt_required: 'إيصال استلام الفارغ', operational_status: 'الحالة التشغيلية',
-      financial_status: 'الحالة المالية', raw: 'القيمة الأصلية', row_status: 'حالة الصف', same_status: 'الحالة'
+      financial_status: 'الحالة المالية', raw: 'القيمة الأصلية', row_status: 'حالة الصف', same_status: 'الحالة',
+      raw_text: 'النص المستخرج', extracted_fields: 'البيانات المستخرجة', reviewed_fields: 'البيانات بعد المراجعة',
+      line_items: 'البنود', review_status: 'حالة المراجعة', review_note: 'ملاحظة المراجعة', doc_type: 'نوع المستند',
+      source_name: 'اسم الملف', source_sha256: 'بصمة الملف', transaction_id: 'المعاملة', document_id: 'المستند الأصلي',
+      void_reason: 'سبب الإلغاء'
     },
     banner: {
       staging: 'بيئة تجريبية (Staging) — البيانات للاختبار فقط'
@@ -687,6 +695,210 @@
   function importCommit(batchId) { return rpc('import_commit', { p_batch_id: batchId }); }
 
   /* ------------------------------------------------------------------
+     Document extractions (OCR) — public.document_extractions
+     Staff only. extracted_fields / qr_payload / raw_text are the machine output
+     and immutable after insert; review changes go to reviewed_fields, line_items,
+     review_status, review_note, doc_type. No delete: void with a reason.
+     Demo (and signed-out / non-staff use of ocr.html): the same row shape is
+     kept in localStorage "marsa_extractions" via api.localExtractions.
+     ------------------------------------------------------------------ */
+  var EXT_LIST_COLS = 'id,org_id,transaction_id,document_id,doc_type,source_name,source_sha256,source_mime,source_size,source_pages,' +
+    'engine,languages,mean_confidence,extracted_fields,qr_payload,reviewed_fields,review_status,review_note,reviewed_by,reviewed_at,' +
+    'created_by,created_at,voided_at,void_reason';
+  var EXT_COLS = EXT_LIST_COLS + ',raw_text,line_items';
+  var EXT_INSERT = ['org_id', 'transaction_id', 'document_id', 'doc_type', 'source_name', 'source_sha256', 'source_mime', 'source_size',
+    'source_pages', 'engine', 'languages', 'mean_confidence', 'raw_text', 'extracted_fields', 'qr_payload', 'line_items'];
+  var EXT_REVIEW = ['reviewed_fields', 'line_items', 'review_status', 'review_note', 'doc_type', 'transaction_id', 'document_id'];
+  var EXT_LOCAL_KEY = 'marsa_extractions';
+  var EXT_LOCAL_MAX = 50;
+  function pickKeys(o, keys) {
+    var out = {};
+    keys.forEach(function (k) { if (o && o[k] !== undefined) out[k] = o[k]; });
+    return out;
+  }
+  // client-side shape checks (the database enforces the same rules)
+  function checkExtraction(row, insert) {
+    if (insert) {
+      if (!row.source_name) return 'source_name';
+      if (!/^[0-9a-f]{64}$/.test(String(row.source_sha256 || ''))) return 'source_sha256';
+      if (typeof row.raw_text !== 'string') return 'raw_text';
+    }
+    if (row.raw_text != null && String(row.raw_text).length > 200000) return 'raw_text';
+    if (row.line_items != null && !Array.isArray(row.line_items)) return 'line_items';
+    if (row.review_status != null && ['unreviewed', 'reviewed', 'rejected'].indexOf(row.review_status) === -1) return 'review_status';
+    if (row.review_note != null && String(row.review_note).length > 1000) return 'review_note';
+    return null;
+  }
+  function extErr(r) {
+    if (r && r.error && r.error.code === 'DUPLICATE') return { data: null, error: mkErr('MRS_EXTRACTION_DUPLICATE', null, r.error.raw) };
+    return r;
+  }
+
+  /* local store (demo mode + signed-out / non-staff use of ocr.html) */
+  function extLocalRead() {
+    try { var v = JSON.parse(localStorage.getItem(EXT_LOCAL_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+  }
+  function extLocalWrite(list) {
+    try { localStorage.setItem(EXT_LOCAL_KEY, JSON.stringify(list)); return true; } catch (e) { return false; }
+  }
+  var localExtractions = {
+    save: function (row) {
+      row = row || {};
+      var bad = checkExtraction(Object.assign({ raw_text: '' }, row), false);
+      if (bad) return Promise.resolve(fail('MRS_INVALID', bad));
+      var list = extLocalRead();
+      var txKey = row.transaction_id || null;
+      if (row.source_sha256 && list.some(function (x) { return !x.voided_at && x.source_sha256 === row.source_sha256 && (x.transaction_id || null) === txKey; })) {
+        return Promise.resolve(fail('MRS_EXTRACTION_DUPLICATE'));
+      }
+      var rec = Object.assign({ doc_type: 'other', extracted_fields: {}, qr_payload: null, reviewed_fields: null, line_items: [],
+        review_status: 'unreviewed', review_note: null, reviewed_at: null, voided_at: null, void_reason: null },
+        pickKeys(row, EXT_INSERT.concat(['reviewed_fields', 'review_status', 'review_note'])),
+        { id: uuid(), created_at: new Date().toISOString(), local: true });
+      list.unshift(rec);
+      while (list.length > EXT_LOCAL_MAX) list.pop();
+      if (!extLocalWrite(list)) return Promise.resolve(fail('MRS_LOCAL_SAVE'));
+      return Promise.resolve(ok(rec));
+    },
+    list: function (o) {
+      o = o || {};
+      var q = String(o.q || '').trim().toLowerCase();
+      var rows = extLocalRead().filter(function (x) {
+        if (x.voided_at && !o.includeVoided) return false;
+        if (!q) return true;
+        var f = Object.assign({}, x.extracted_fields || {}, x.reviewed_fields || {});
+        return [x.source_name, f.invoice_number, f.supplier_name, f.bl_number].some(function (v) { return String(v || '').toLowerCase().indexOf(q) !== -1; });
+      });
+      var offset = Math.max(parseInt(o.offset, 10) || 0, 0), limit = Math.min(Math.max(parseInt(o.limit, 10) || 50, 1), 500);
+      var page = rows.slice(offset, offset + limit).map(function (x) { var c = Object.assign({}, x); delete c.raw_text; return c; });
+      return Promise.resolve({ data: page, error: null, count: rows.length });
+    },
+    get: function (id) {
+      var hit = extLocalRead().filter(function (x) { return x.id === id; })[0];
+      return Promise.resolve(hit ? ok(hit) : fail('MRS_NOT_FOUND'));
+    },
+    review: function (id, patch) {
+      var p = pickKeys(patch || {}, EXT_REVIEW);
+      var bad = checkExtraction(p, false);
+      if (bad) return Promise.resolve(fail('MRS_INVALID', bad));
+      var list = extLocalRead(), hit = null;
+      list.forEach(function (x) { if (x.id === id) hit = x; });
+      if (!hit) return Promise.resolve(fail('MRS_NOT_FOUND'));
+      if (hit.voided_at) return Promise.resolve(fail('MRS_EXTRACTION_VOIDED'));
+      if ((p.transaction_id && hit.transaction_id && p.transaction_id !== hit.transaction_id) ||
+          (p.document_id && hit.document_id && p.document_id !== hit.document_id)) return Promise.resolve(fail('MRS_EXTRACTION_ATTACHED'));
+      Object.assign(hit, p);
+      if (p.review_status !== undefined || p.reviewed_fields !== undefined) hit.reviewed_at = new Date().toISOString();
+      if (!extLocalWrite(list)) return Promise.resolve(fail('MRS_LOCAL_SAVE'));
+      return Promise.resolve(ok(hit));
+    },
+    void: function (id, reason) {
+      var list = extLocalRead(), hit = null;
+      list.forEach(function (x) { if (x.id === id) hit = x; });
+      if (!hit) return Promise.resolve(fail('MRS_NOT_FOUND'));
+      if (hit.voided_at) return Promise.resolve(fail('MRS_EXTRACTION_VOIDED'));
+      hit.voided_at = new Date().toISOString();
+      hit.void_reason = String(reason || '').slice(0, 500);
+      return Promise.resolve(extLocalWrite(list) ? ok(hit) : fail('MRS_LOCAL_SAVE'));
+    },
+    // local only: the server has no delete (void instead)
+    remove: function (id) {
+      var list = extLocalRead(), n = list.length;
+      list = list.filter(function (x) { return x.id !== id; });
+      if (list.length === n) return Promise.resolve(fail('MRS_NOT_FOUND'));
+      return Promise.resolve(extLocalWrite(list) ? ok(true) : fail('MRS_LOCAL_SAVE'));
+    }
+  };
+
+  // row = { org_id?, transaction_id?, document_id?, doc_type, source_name, source_sha256, source_mime, source_size,
+  //         source_pages, engine, languages, mean_confidence, raw_text, extracted_fields, qr_payload, line_items }
+  // created_by / created_at are stamped by the server. Review fields go through reviewExtraction().
+  function saveExtraction(row) {
+    row = row || {};
+    if (!configured) return localExtractions.save(row);
+    var ins = pickKeys(row, EXT_INSERT);
+    var bad = checkExtraction(ins, true);
+    if (bad) return Promise.resolve(fail('MRS_INVALID', bad));
+    var oid = ins.org_id ? Promise.resolve(ok(ins.org_id))
+      : ins.transaction_id ? online(function (c) { return c.from('transactions').select('org_id').eq('id', ins.transaction_id).maybeSingle(); })
+          .then(function (r) { return r.error ? r : (r.data ? ok(r.data.org_id) : fail('MRS_NOT_FOUND')); })
+      : orgId();
+    return oid.then(function (r) {
+      if (r.error) return r;
+      ins.org_id = r.data;
+      return online(function (c) { return c.from('document_extractions').insert(ins).select(EXT_COLS).single(); }).then(extErr);
+    });
+  }
+  // o = { limit, offset, q, transactionId, status, includeVoided } — raw_text / line_items are not listed (use getExtraction)
+  function listExtractions(o) {
+    o = o || {};
+    if (!configured) return localExtractions.list(o);
+    return online(function (c) {
+      var q = c.from('document_extractions').select(EXT_LIST_COLS, { count: 'exact' }).order('created_at', { ascending: false });
+      if (!o.includeVoided) q = q.is('voided_at', null);
+      if (o.transactionId) q = q.eq('transaction_id', o.transactionId);
+      if (o.status) q = q.eq('review_status', o.status);
+      if (o.q) {
+        var s = likeSafe(o.q);
+        if (s) q = q.or('source_name.ilike.%' + s + '%,extracted_fields->>invoice_number.ilike.%' + s + '%,reviewed_fields->>invoice_number.ilike.%' + s +
+          '%,extracted_fields->>bl_number.ilike.%' + s + '%,extracted_fields->>supplier_name.ilike.%' + s + '%');
+      }
+      return range(q, o);
+    });
+  }
+  function getExtraction(id) {
+    if (!configured) return localExtractions.get(id);
+    return online(function (c) { return c.from('document_extractions').select(EXT_COLS).eq('id', id).maybeSingle(); })
+      .then(function (r) { return r.error || r.data ? r : fail('MRS_NOT_FOUND'); });
+  }
+  // patch = { reviewed_fields, line_items, review_status, review_note, doc_type, transaction_id (NULL→value), document_id (NULL→value) }
+  // reviewed_by / reviewed_at are stamped by the server
+  function reviewExtraction(id, patch) {
+    if (!configured) return localExtractions.review(id, patch);
+    var p = pickKeys(patch || {}, EXT_REVIEW);
+    var bad = checkExtraction(p, false);
+    if (bad) return Promise.resolve(fail('MRS_INVALID', bad));
+    if (!Object.keys(p).length) return getExtraction(id);
+    return online(function (c) { return c.from('document_extractions').update(p).eq('id', id).select(EXT_COLS).single(); }).then(extErr);
+  }
+  function voidExtraction(id, reason) {
+    var why = String(reason || '').trim();
+    if (!why) return Promise.resolve(fail('MRS_REQUIRED', 'void_reason'));
+    if (!configured) return localExtractions.void(id, why);
+    return online(function (c) {
+      return c.from('document_extractions').update({ voided_at: new Date().toISOString(), void_reason: why.slice(0, 500) })
+        .eq('id', id).select(EXT_COLS).single();
+    });
+  }
+  // Upload the original file to the transaction (documents + Storage), then link it to the
+  // extraction (transaction_id / document_id: NULL→value only). Same bytes already on that
+  // transaction → the existing document row is reused.
+  function attachExtractionDocument(id, o) {
+    o = o || {};
+    if (!configured) return demoOnly();
+    if (!o.file || !o.transactionId) return Promise.resolve(fail('MRS_REQUIRED', !o.file ? 'documents' : 'transaction_id'));
+    return uploadDocument({ file: o.file, transactionId: o.transactionId, kind: o.kind || 'other', source: 'staff_scan', sourceRef: 'ocr:' + id })
+      .then(function (r) {
+        if (r.error && r.error.code === 'DUPLICATE') {
+          return sha256Hex(o.file).then(function (hash) {
+            return online(function (c) {
+              return c.from('documents').select(DOC_COLS).eq('transaction_id', o.transactionId).eq('sha256', hash).is('voided_at', null).maybeSingle();
+            });
+          }).then(function (d) { return d.error || d.data ? d : fail('MRS_NOT_FOUND'); });
+        }
+        return r;   // { data: doc, error: MRS_UPLOAD } = metadata saved but the bytes were not
+      })
+      .then(function (r) {
+        if (!r.data) return r;
+        var doc = r.data, upErr = r.error;
+        return reviewExtraction(id, { transaction_id: o.transactionId, document_id: doc.id }).then(function (u) {
+          if (u.error) return u;
+          return { data: { extraction: u.data, document: doc }, error: upErr || null };
+        });
+      });
+  }
+
+  /* ------------------------------------------------------------------
      Contact messages (staff inbox)
      ------------------------------------------------------------------ */
   function listContactMessages(o) {
@@ -765,6 +977,10 @@
     createImportBatch: createImportBatch, addImportRows: addImportRows, listImportRows: listImportRows,
     updateImportRow: updateImportRow, findBatchByFingerprint: findBatchByFingerprint,
     cancelImportBatch: cancelImportBatch, importCommit: importCommit,
+    // document extractions (OCR)
+    saveExtraction: saveExtraction, listExtractions: listExtractions, getExtraction: getExtraction,
+    reviewExtraction: reviewExtraction, voidExtraction: voidExtraction, attachExtractionDocument: attachExtractionDocument,
+    localExtractions: localExtractions,
     // inbox / audit
     listContactMessages: listContactMessages, setContactStatus: setContactStatus, listAudit: listAudit,
     // utils

@@ -2,7 +2,8 @@
    مرسى | MARSA — request.html (multi-step clearance request)
    Plain IIFE, no modules, works on file://. Depends on window.Marsa (main.js).
    Saves submissions to localStorage "marsa_requests". Reads "marsa_calc_draft"
-   (written by the calculator page) to attach a duty estimate.
+   (written by the calculator page) to attach a duty estimate, and
+   sessionStorage "marsa_ocr_prefill" (ocr.html, ?from=ocr) to prefill fields.
    ===================================================================== */
 (function () {
   'use strict';
@@ -605,6 +606,8 @@
       }).join('');
       qs('#calc-card').hidden = false;
       if (filled.length) {
+        var calcStrong = qs('#calc-import-note strong');
+        if (calcStrong) calcStrong.textContent = 'استوردنا بيانات من حاسبة الرسوم.';   // applyOcr() may have changed it
         qs('#calc-import-text').textContent = 'تمت تعبئة: ' + filled.join('، ') + '. راجع الحقول وعدّلها عند الحاجة.';
         qs('#calc-import-note').hidden = false;
       }
@@ -615,6 +618,60 @@
       qs('#calc-import-note').hidden = true;
       toast('لن يتم إرفاق تقدير الحاسبة مع الطلب.', 'info');
     });
+
+    /* ---------------------------------------------------------------
+       OCR hand-off (ocr.html → sessionStorage "marsa_ocr_prefill", ?from=ocr)
+       One-shot; known fields only, each re-checked here; never overwrites
+       what the user typed.
+       --------------------------------------------------------------- */
+    function applyOcr() {
+      var fromOcr = false;
+      try { fromOcr = new URLSearchParams(window.location.search).get('from') === 'ocr'; } catch (e) { fromOcr = false; }
+      if (!fromOcr) return;
+      var raw = null;
+      try {
+        raw = JSON.parse(window.sessionStorage.getItem('marsa_ocr_prefill') || 'null');
+        window.sessionStorage.removeItem('marsa_ocr_prefill');
+      } catch (e) { raw = null; }
+      if (!raw || raw.v !== 1 || !raw.fields || typeof raw.fields !== 'object') return;
+      var f = raw.fields, filled = [];
+      var s = function (v, max) { return typeof v === 'string' ? toWestern(v).trim().slice(0, max) : ''; };
+      var setIf = function (name, v, label) {
+        var c = el(name);
+        if (c && v && !c.value) { c.value = v; filled.push(label); }
+      };
+      var value = parseFloat(s(f.value, 30).replace(/,/g, ''));
+      if (isFinite(value) && value > 0) setIf('value', String(Math.round(value * 100) / 100), 'القيمة');
+      var cur = s(f.currency, 3).toUpperCase();
+      if (cur && qsa('option', el('currency')).some(function (o) { return o.value === cur; })) el('currency').value = cur;
+      var hs = s(f.hsCode, 14);
+      if (/^\d{4}[\d.]{0,10}$/.test(hs)) setIf('hsCode', hs, 'البند الجمركي');
+      var dec = s(f.declarationNo, 20);
+      if (/^\d{4,20}$/.test(dec)) setIf('declarationNo', dec, 'رقم البيان');
+      var bl = s(f.blNumber, 40).toUpperCase();
+      if (/^[A-Z0-9][A-Z0-9\-\/]{3,39}$/.test(bl)) setIf('blNumber', bl, 'رقم البوليصة');
+      var cn = s(f.containerNumbers, 1200).toUpperCase();
+      if (/^[A-Z0-9,\s]+$/.test(cn)) setIf('containerNumbers', cn, 'أرقام الحاويات');
+      var goods = s(f.goods, 600);
+      if (goods && !el('goods').value) { el('goods').value = goods; qs('#goods-count').textContent = goods.length; filled.push('وصف البضاعة'); }
+      var tax = s(f.taxId, 15);
+      if (/^3\d{13}3$/.test(tax)) setIf('taxId', tax, 'الرقم الضريبي');
+      setIf('company', s(f.company, 120), 'اسم الشركة');
+      var country = s(f.country, 80);
+      if (country && !el('country').value) {
+        var opt = qsa('option', el('country')).filter(function (o) { return o.value && o.value === country; })[0];
+        if (opt) { el('country').value = opt.value; filled.push('بلد المنشأ'); }
+      }
+      if (!filled.length) return;
+      var note = qs('#calc-import-note');
+      if (note) {
+        var strong = qs('strong', note), both = !note.hidden;   // the calculator already filled fields
+        var msg = 'تمت تعبئة: ' + filled.join('، ') + '. راجع الحقول وعدّلها عند الحاجة.';
+        if (strong) strong.textContent = both ? 'استوردنا بيانات من حاسبة الرسوم ومن مستند مقروء (OCR).' : 'استوردنا بيانات من مستند مقروء (OCR).';
+        qs('#calc-import-text').textContent = both ? qs('#calc-import-text').textContent + ' ومن المستند المقروء: ' + msg : msg;
+        note.hidden = false;
+      }
+    }
 
     /* ---------------------------------------------------------------
        ?service= preselect
@@ -953,6 +1010,7 @@
        --------------------------------------------------------------- */
     applyServiceParam();
     applyCalc();
+    applyOcr();
     syncShipmentUI();
     // min date for ETA = today
     try {
