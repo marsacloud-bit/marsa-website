@@ -3,7 +3,13 @@
    Load on every page:  <script src="assets/js/main.js" defer></script>
    then page script:    <script src="assets/js/<page>.js" defer></script>
    Each feature runs only if its elements exist. Works on file://.
-   Public API: window.Marsa = { toast, genRef, saveLocal, readLocal, formatSAR, formatNum, qs, qsa, icon }
+   Public API: window.Marsa = { toast, genRef, saveLocal, readLocal, formatSAR, formatNum, qs, qsa, icon,
+                                 mode, isOnlineConfigured, strings }
+   Mode: "online" (STAGING) when window.MARSA_CONFIG (assets/js/config.js, loaded
+   before this file) has supabaseUrl + supabaseAnonKey; otherwise "demo"
+   (localStorage only). The chrome (demo banner, footer privacy line, clear-data
+   confirm, «بوابتي» link) follows the mode. The «بوابتي» link is shown only on
+   pages that also load supa.js (window.MarsaApi) and only for a signed-in user.
    ===================================================================== */
 (function () {
   'use strict';
@@ -84,9 +90,32 @@
   }
   function formatSAR(n) { return formatNum(n, 2) + ' ر.س'; }
 
+  /* ---- Mode + chrome strings (centralised for a later English version) ---- */
+  var STR = {
+    banner: {
+      demo: 'نسخة عرض تجريبية — البيانات والأرقام توضيحية ولا تُرسل أي بيانات إلى خادم.',
+      staging: 'بيئة تجريبية (Staging) — البيانات للاختبار فقط'
+    },
+    privacy: {
+      demo: '<strong>الخصوصية في نسخة العرض:</strong> ما تُدخله في النماذج والحاسبة يبقى في التخزين المحلي (localStorage) لهذا المتصفح فقط، دون تشفير ودون إرسال إلى أي خادم، فلا تُدخل بيانات حقيقية حساسة. يُحمَّل خط الموقع من خدمة Google Fonts، لذا يتصل متصفحك بخوادم Google عند فتح الصفحات.',
+      staging: '<strong>الخصوصية في البيئة التجريبية (Staging):</strong> هذه بيئة اختبار ببيانات تجريبية، فلا تُدخل بيانات حقيقية أو حساسة. طلبات التخليص ورسائل التواصل والرفع الجماعي وتسجيل الدخول والمستندات المرفوعة تُرسل عبر اتصال مشفّر (HTTPS) إلى قاعدة بيانات الموقع على خدمة Supabase، ويقتصر الاطلاع عليها على الموظفين المخوَّلين وصاحب الطلب وفق صلاحيات قاعدة البيانات. أما الحاسبة والمسودات وجلسة الدخول فتُحفظ في التخزين المحلي (localStorage) لهذا المتصفح. يُحمَّل الخط من Google Fonts ومكتبة الاتصال من jsDelivr، لذا يتصل متصفحك بخوادمهما.'
+    },
+    clear: {
+      demo: 'سيتم حذف كل ما حفظه موقع مرسى في هذا المتصفح (الطلبات والحسابات والرسائل والمسودات). لا يمكن التراجع عن ذلك. هل تريد المتابعة؟',
+      staging: 'سيتم حذف ما حفظه موقع مرسى في هذا المتصفح (الحسابات والمسودات وجلسة الدخول، فستُسجَّل خارج حسابك على هذا الجهاز). البيانات المرسلة إلى الخادم لا تُحذف بهذا الزر؛ لطلب حذفها تواصل معنا. هل تريد المتابعة؟'
+    },
+    portal: 'بوابتي'   // staff are sent to admin.html, clients to portal.html
+  };
+  var CFG = window.MARSA_CONFIG || {};
+  var MODE = (CFG.supabaseUrl && CFG.supabaseAnonKey) ? 'staging' : 'demo';
+
   window.Marsa = {
     toast: toast, genRef: genRef, saveLocal: saveLocal, readLocal: readLocal,
-    formatSAR: formatSAR, formatNum: formatNum, qs: qs, qsa: qsa, icon: svgIcon
+    formatSAR: formatSAR, formatNum: formatNum, qs: qs, qsa: qsa, icon: svgIcon,
+    mode: function () { return MODE; },
+    isOnlineConfigured: function () { return MODE === 'staging'; },
+    setMode: function (m) { MODE = m === 'staging' ? 'staging' : 'demo'; applyModeChrome(); },
+    strings: STR
   };
 
   /* ---- Active nav link (by filename, or <body data-page="services">) ---- */
@@ -299,7 +328,7 @@
   function initClearData() {
     qsa('[data-clear-local]').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        if (!window.confirm('سيتم حذف كل ما حفظه موقع مرسى في هذا المتصفح (الطلبات والحسابات والرسائل والمسودات). لا يمكن التراجع عن ذلك. هل تريد المتابعة؟')) return;
+        if (!window.confirm(STR.clear[MODE])) return;
         var removed = 0;
         try {
           var keys = [];
@@ -317,6 +346,55 @@
     });
   }
 
+  /* ---- Mode chrome: banner text + footer privacy line follow demo / staging ---- */
+  function applyModeChrome() {
+    document.documentElement.setAttribute('data-marsa-mode', MODE === 'staging' ? 'online' : 'demo');
+    qsa('[data-demo-banner-text]').forEach(function (p) { p.textContent = STR.banner[MODE]; });
+    qsa('[data-privacy-text]').forEach(function (el) { el.innerHTML = STR.privacy[MODE]; });
+    var close = qs('[data-demo-banner-close]');
+    if (close) close.setAttribute('aria-label', MODE === 'staging' ? 'إخفاء تنبيه البيئة التجريبية لهذه الجلسة' : 'إخفاء تنبيه نسخة العرض لهذه الجلسة');
+  }
+
+  /* ---- «بوابتي» link: shown only for a signed-in user (needs supa.js on the page) ---- */
+  function setAccountLink(show, href, label) {
+    qsa('[data-account-link]').forEach(function (a) {
+      if (href) a.setAttribute('href', href);
+      if (label) {
+        var last = a.lastChild;
+        if (last && last.nodeType === 3) last.nodeValue = label;
+      }
+      if (!a.closest('[data-account-item]')) a.hidden = !show;
+    });
+    qsa('[data-account-item]').forEach(function (li) { li.hidden = !show; });
+  }
+  var accountInitDone = false;
+  function initAccountLink() {
+    if (accountInitDone) return;
+    accountInitDone = true;
+    var api = window.MarsaApi;
+    if (!api || !api.isOnline || !api.isOnline()) { setAccountLink(false); return; }
+    function refresh() {
+      api.getSession().then(function (r) {
+        var signedIn = !!(r && !r.error && r.data);
+        if (!signedIn) { setAccountLink(false); return; }
+        setAccountLink(true, 'portal.html', STR.portal);
+        api.isStaff().then(function (s) {
+          if (s && !s.error && s.data === true) setAccountLink(true, 'admin.html', STR.portal);
+        }, function () {});
+      }, function () { setAccountLink(false); });
+    }
+    try {
+      refresh();
+      api.onAuth(function () { refresh(); });
+    } catch (e) { setAccountLink(false); }
+  }
+  // supa.js is a later deferred script: wait until every deferred script ran
+  function scheduleAccountLink() {
+    if (document.readyState === 'complete') { initAccountLink(); return; }
+    document.addEventListener('DOMContentLoaded', function () { setTimeout(initAccountLink, 0); });
+    window.addEventListener('load', initAccountLink);
+  }
+
   /* ---- Footer year ---- */
   function initYear() {
     qsa('[data-year], #year').forEach(function (el) { el.textContent = new Date().getFullYear(); });
@@ -330,10 +408,12 @@
     initAccordion();
     initTabs();
     initQuickTrack();
+    applyModeChrome();
     initDemoBanner();
     initClearData();
     initYear();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
+  scheduleAccountLink();
 })();

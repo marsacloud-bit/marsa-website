@@ -29,6 +29,13 @@
     var card = $('bu-card');
     if (!card || !X) return;
 
+    /* Mode: online (staging) via window.MarsaApi — staff only; otherwise local demo */
+    var API = window.MarsaApi || null;
+    var ONLINE = !!(API && API.isOnline && API.isOnline());
+    qsa('[data-show-mode]').forEach(function (n) {
+      n.hidden = n.getAttribute('data-show-mode') !== (ONLINE ? 'online' : 'demo');
+    });
+
     /* ---------------------------------------------------------------
        Constants (rates kept identical to calculator.html defaults)
        --------------------------------------------------------------- */
@@ -693,7 +700,8 @@
         var ext = extOf(file.name);
         var lm = file.lastModified || 0;
         if (state.files.some(function (f) { return f.status !== 'error' && f.name === file.name && f.size === file.size && f.lastModified === lm; })) { dupes.push(file.name); return; }
-        var entry = { id: 'f' + (++seq), name: file.name, size: file.size, lastModified: lm, status: 'loading', sheets: [], sheetIdx: 0 };
+        // the File object is kept (in memory only) so the online upload can fingerprint the original bytes
+        var entry = { id: 'f' + (++seq), name: file.name, size: file.size, lastModified: lm, status: 'loading', sheets: [], sheetIdx: 0, file: file };
         state.files.push(entry);
         if (ALLOWED.indexOf(ext) === -1) {
           entry.status = 'error';
@@ -1301,6 +1309,7 @@
     }
 
     $('btn-submit').addEventListener('click', function () {
+      if (ONLINE) { submitOnline(); return; }
       var ok = state.rows.filter(function (r) { return r.status !== 'error'; });
       if (!ok.length) { toast('لا توجد صفوف صالحة للحفظ. صحّح الأخطاء أولًا.', 'warning'); return; }
       var errs = state.rows.length - ok.length;
@@ -1361,11 +1370,304 @@
       toast('تم الحفظ محليًا على هذا الجهاز (نسخة عرض تجريبية) — لم يُرسل إلى أي جهة. ' + plural(b.records.length, 'طلب واحد', 'طلبان', 'طلبات', 'طلبًا') + ' — رقم الدفعة ' + b.meta.batchId, 'success');
     }
     $('refs-xlsx').addEventListener('click', function () {
-      if (state.lastBatch) downloadXlsx(refsRows(), 'الأرقام المرجعية', 'marsa-refs-' + state.lastBatch.meta.batchId + '.xlsx');
+      if (state.lastBatch) downloadXlsx(state.lastBatch.online ? onlineRefsRows() : refsRows(), 'الأرقام المرجعية', 'marsa-refs-' + state.lastBatch.meta.batchId + '.xlsx');
     });
     $('refs-csv').addEventListener('click', function () {
-      if (state.lastBatch) downloadCsv(refsRows(), 'marsa-refs-' + state.lastBatch.meta.batchId + '.csv');
+      if (state.lastBatch) downloadCsv(state.lastBatch.online ? onlineRefsRows() : refsRows(), 'marsa-refs-' + state.lastBatch.meta.batchId + '.csv');
     });
+    /* ---------------------------------------------------------------
+       ONLINE (staging): import_batches + import_rows → import_commit
+       One batch per file. Every row keeps its raw cells (as read), the
+       normalized payload (after edits) and its source id
+       (SHA-256 of the file bytes + sheet + row). Re-uploading the same file
+       is rejected by the UNIQUE(org_id, source_fingerprint, sheet_name, row_no)
+       constraint and reported here.
+       --------------------------------------------------------------- */
+    var OSTR = {
+      loginTitle: 'سجّل الدخول لرفع الدفعات أونلاين',
+      notStaffTitle: 'حسابك لا يملك صلاحية رفع الدفعات',
+      notStaffText: 'رفع الدفعات متاح لموظفي التخليص والمشرفين ومديري العمليات. يمكنك متابعة المعاينة والتحقق وتصدير النتائج.',
+      checking: 'جارٍ التحقق من تسجيل الدخول…',
+      uploading: 'جارٍ رفع الدفعة…',
+      noValid: 'لا توجد صفوف صالحة للرفع. صحّح الأخطاء أولًا.',
+      confirmErrs: 'سيُرفع {ok} وتُسجَّل {bad} بها أخطاء كصفوف متجاوزة (لا تُنشأ لها طلبات). هل تريد المتابعة؟',
+      tooMany: 'الملف «{f}» يحتوي على أكثر من {n} صف. قسّمه إلى ملفات أصغر.',
+      noFile: 'تعذّر الوصول إلى الملف «{f}». أعد اختياره.',
+      dupFile: 'الملف «{f}» رُفع من قبل{b}، لذلك لم يُرفع مرة أخرى (تكرار).',
+      dupFileBatch: ' ضمن الدفعة {r}',
+      fileFailed: 'الملف «{f}»: {m}',
+      nothing: 'لم يُرفع أي صف.',
+      title: 'تم رفع {n} وإنشاء طلباتها',
+      titleNone: 'اكتمل الرفع دون إنشاء طلبات جديدة',
+      sub: 'أرقام الدفعات: {b}. تم إنشاء {c}{s}{d}{e}.',
+      skipped: '، وتجاوز {n}',
+      dups: '، و{n} مكررة تحتاج قرارًا من الموظف',
+      errs: '، و{n} رفضها الخادم',
+      rowIssue: '{f} · ص {r}: {m}',
+      dupRow: 'مكرر مع الطلب {ref}',
+      skippedRow: 'متجاوز (به أخطاء في الملف)',
+      issuesTitle: 'صفوف لم تُنشأ لها طلبات',
+      done: 'تم رفع الدفعة. ',
+      refTh: 'الرقم المرجعي',
+      caption: 'الأرقام المرجعية للطلبات المنشأة'
+    };
+    var MAX_ONLINE_ROWS = 5000;
+    var OPS_WRITER_ROLES = ['clearance_staff', 'operations_manager', 'supervisor', 'admin'];
+    var auth = { checked: false, signedIn: false, staff: false };
+    var uploading = false;
+    function tpl(t, o) { return t.replace(/\{(\w+)\}/g, function (_, k) { return o[k] != null ? o[k] : ''; }); }
+
+    function renderAuthNote() {
+      var box = $('bu-auth-note');
+      if (!box || !ONLINE) return;
+      if (!auth.checked) { box.hidden = true; return; }
+      box.hidden = auth.staff;
+      if (!auth.signedIn) {
+        $('bu-auth-title').textContent = OSTR.loginTitle;
+      } else if (!auth.staff) {
+        $('bu-auth-title').textContent = OSTR.notStaffTitle;
+        $('bu-auth-text').textContent = OSTR.notStaffText;
+      }
+    }
+    function refreshAuth() {
+      if (!ONLINE) return Promise.resolve();
+      return API.getSession().then(function (r) {
+        auth.signedIn = !!(r && !r.error && r.data);
+        if (!auth.signedIn) { auth.staff = false; return; }
+        return API.hasRole(OPS_WRITER_ROLES).then(function (h) { auth.staff = !!(h && !h.error && h.data); });
+      }).then(function () { auth.checked = true; renderAuthNote(); }, function () { auth.checked = true; renderAuthNote(); });
+    }
+
+    function nonEmpty(o) {
+      var out = {};
+      Object.keys(o).forEach(function (k) {
+        var v = o[k];
+        if (v == null || v === '' || (Array.isArray(v) && !v.length)) return;
+        if (typeof v === 'number' && !isFinite(v)) return;
+        out[k] = v;
+      });
+      return out;
+    }
+    // normalized payload = flat submit_service_request keys (see migrations 0400)
+    function toNormalized(o) {
+      var exp = o.direction === 'export';
+      var svc = o.service;
+      var notes = 'طلب منشأ عبر الرفع الجماعي';
+      // the RPC service list has no "export" key: keep the request as clearance + direction export, and note the original choice
+      if (svc === 'export') { svc = 'clearance'; notes += ' — الخدمة المطلوبة: ' + SERVICES['export'].label; }
+      return nonEmpty({
+        fullName: o.fullName, company: o.company, clientType: o.clientType, phone: o.phone, email: o.email,
+        crNumber: o.crNumber, taxId: o.taxId,
+        direction: o.direction, service: svc, mode: o.mode, country: o.country, port: o.port, goods: o.goods,
+        hsCode: o.hsCode, value: o.value > 0 ? o.value : '', currency: o.currency,
+        weight: o.weightKg > 0 ? o.weightKg : '', count: o.count > 0 ? o.count : '',
+        containerType: o.mode === 'sea' ? o.containerType : '', containerNumbers: o.mode === 'sea' ? (o.containerNumbers || []) : [],
+        blNumber: o.blNumber, shippingLine: o.shippingLine, declarationNo: exp ? '' : o.declarationNo,
+        docsLater: true, notes: notes
+      });
+    }
+    // raw cells exactly as read from the file, keyed by the original column titles
+    function rawLabeled(row) {
+      var labels = {};
+      state.headers.forEach(function (h) { labels[h.key] = h.label; });
+      var out = {};
+      Object.keys(row.raw).forEach(function (k) { out[labels[k] || k] = row.raw[k]; });
+      return out;
+    }
+    function rowErrors(row) {
+      return Object.keys(row.err || {}).map(function (k) { return { field: k, message: row.err[k] }; });
+    }
+    function rowIssueText(ir) {
+      if (ir.row_status === 'duplicate') return tpl(OSTR.dupRow, { ref: ir.duplicate_of || '' });
+      if (ir.row_status === 'skipped') return OSTR.skippedRow;
+      var e = (ir.validation_errors || [])[0] || {};
+      if (e.message) return e.message;
+      return API.errorMessage({ message: e.code || 'MRS_INVALID', details: e.field || '' });
+    }
+
+    // insert rows with an explicit decision for error rows (MarsaApi.addImportRows has no "decision" field)
+    function insertRows(batchId, rows) {
+      return API.ready().then(function (r) {
+        if (r.error || !r.data) return { data: null, error: r.error || { code: 'MRS_CONFIG' } };
+        return r.data.from('import_rows').insert(rows.map(function (x) {
+          return {
+            batch_id: batchId, sheet_name: x.sheet, row_no: x.rowNo, raw: x.raw, normalized: x.normalized,
+            row_status: x.status, validation_errors: x.errors, decision: x.decision || null
+          };
+        })).then(function (res) {
+          if (res.error) {
+            var dup = res.error.code === '23505';
+            return { data: null, error: { code: dup ? 'DUPLICATE' : (res.error.code || 'UNKNOWN'), message: API.errorMessage(res.error), raw: res.error } };
+          }
+          return { data: true, error: null };
+        }, function (e) { return { data: null, error: { code: 'MRS_NETWORK', message: API.errorMessage(e), raw: e } }; });
+      });
+    }
+
+    function uploadFile(f, rows) {
+      var res = { file: f, batch: null, commit: null, issues: [], error: null, duplicate: false };
+      if (!f.file) { res.error = tpl(OSTR.noFile, { f: f.name }); return Promise.resolve(res); }
+      if (rows.length > MAX_ONLINE_ROWS) { res.error = tpl(OSTR.tooMany, { f: f.name, n: MAX_ONLINE_ROWS }); return Promise.resolve(res); }
+      // source id = file bytes + sheet + row. Only workbook sheet names (Excel/HTML tables) are part of the
+      // file content; for CSV/TSV/JSON the "sheet" label is derived from the file name, so it is left empty
+      // (renaming a file must not bypass duplicate detection).
+      var sheetName = (f.kind === 'Excel' || f.kind === 'HTML') && f.sheets[f.sheetIdx] ? String(f.sheets[f.sheetIdx].name || '').slice(0, 120) : '';
+      var fp;
+      return API.util.sha256Hex(f.file).then(function (hash) {
+        fp = hash;
+        return API.createImportBatch({ fingerprint: fp, fileName: f.name, fileSize: f.size, sheetNames: sheetName ? [sheetName] : [] });
+      }).then(function (b) {
+        if (b.error || !b.data) { res.error = tpl(OSTR.fileFailed, { f: f.name, m: b.error ? b.error.message : '' }); return res; }
+        res.batch = b.data;
+        var payload = rows.map(function (r) {
+          var bad = r.status === 'error';
+          return {
+            sheet: sheetName, rowNo: r.rowNum, raw: rawLabeled(r),
+            normalized: bad ? null : toNormalized(r.out),
+            status: bad ? 'error' : 'valid', errors: rowErrors(r), decision: bad ? 'skip' : null
+          };
+        });
+        return insertRows(b.data.id, payload).then(function (ins) {
+          if (ins.error) {
+            // nothing was inserted (single statement) → close the empty draft batch
+            return API.cancelImportBatch(b.data.id).then(function () {
+              if (ins.error.code !== 'DUPLICATE') { res.error = tpl(OSTR.fileFailed, { f: f.name, m: ins.error.message }); return res; }
+              res.duplicate = true;
+              return API.findBatchByFingerprint(fp).then(function (prev) {
+                var other = (prev && prev.data || []).filter(function (x) { return x.id !== b.data.id && x.status !== 'cancelled'; })[0]
+                  || (prev && prev.data || []).filter(function (x) { return x.id !== b.data.id; })[0];
+                res.error = tpl(OSTR.dupFile, { f: f.name, b: other && other.ref ? tpl(OSTR.dupFileBatch, { r: other.ref }) : '' });
+                return res;
+              });
+            });
+          }
+          return API.importCommit(b.data.id).then(function (c) {
+            if (c.error) { res.error = tpl(OSTR.fileFailed, { f: f.name, m: c.error.message }); return res; }
+            res.commit = c.data;
+            if (!c.data.duplicates && !c.data.errors && !c.data.skipped) return res;
+            return API.listImportRows(b.data.id).then(function (lr) {
+              (lr.data || []).forEach(function (ir) {
+                if (ir.row_status === 'committed') return;
+                res.issues.push(tpl(OSTR.rowIssue, { f: f.name, r: ir.row_no, m: rowIssueText(ir) }));
+              });
+              return res;
+            });
+          });
+        });
+      }, function () { res.error = tpl(OSTR.noFile, { f: f.name }); return res; });
+    }
+
+    function submitOnline() {
+      if (uploading) return;
+      if (!auth.checked) { toast(OSTR.checking, 'info'); refreshAuth(); return; }
+      if (!auth.staff) {
+        renderAuthNote();
+        var note = $('bu-auth-note');
+        if (note && note.scrollIntoView) note.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        toast($('bu-auth-title').textContent, 'warning');
+        return;
+      }
+      var good = state.rows.filter(function (r) { return r.status !== 'error'; });
+      if (!good.length) { toast(OSTR.noValid, 'warning'); return; }
+      var errs = state.rows.length - good.length;
+      if (errs && !window.confirm(tpl(OSTR.confirmErrs, {
+        ok: plural(good.length, 'صف واحد صالح', 'صفّان صالحان', 'صفوف صالحة', 'صفًا صالحًا'),
+        bad: plural(errs, 'صف واحد', 'صفّان', 'صفوف', 'صفًا')
+      }))) return;
+
+      var byFile = {};
+      state.rows.forEach(function (r) { (byFile[r.fileId] = byFile[r.fileId] || []).push(r); });
+      var files = state.files.filter(function (f) { return f.status === 'ok' && byFile[f.id]; });
+
+      uploading = true;
+      var btn = $('btn-submit'), html = btn.innerHTML;
+      btn.disabled = true; btn.setAttribute('aria-busy', 'true');
+      btn.innerHTML = '<svg class="icon spin" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg> ' + OSTR.uploading;
+      $('bu-save-error').hidden = true;
+
+      var results = [];
+      files.reduce(function (p, f) {
+        return p.then(function () { return uploadFile(f, byFile[f.id]).then(function (r) { results.push(r); }); });
+      }, Promise.resolve()).then(function () {
+        uploading = false;
+        btn.disabled = false; btn.removeAttribute('aria-busy'); btn.innerHTML = html;
+        var done = results.filter(function (r) { return r.commit; });
+        if (!done.length) {
+          showOnlineError(results.map(function (r) { return r.error; }).filter(Boolean).join(' — ') || OSTR.nothing);
+          return;
+        }
+        showOnlineSuccess(results);
+      });
+    }
+
+    function showOnlineError(msg) {
+      var m = $('bu-save-error-msg');
+      if (m) m.textContent = msg;
+      var box = $('bu-save-error');
+      box.hidden = false;
+      if (box.scrollIntoView) box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(function () { box.focus({ preventScroll: true }); }, 80);
+      toast(msg, 'error');
+    }
+
+    function showOnlineSuccess(results) {
+      var rowsByKey = {};
+      state.rows.forEach(function (r) { rowsByKey[r.fileId + '|' + r.rowNum] = r; });
+      var records = [], batches = [], issues = [], c = 0, sk = 0, du = 0, er = 0;
+      results.forEach(function (res) {
+        if (res.error) issues.push(res.error);
+        if (!res.commit) return;
+        batches.push(res.commit.batch_ref || (res.batch && res.batch.ref) || '');
+        c += res.commit.committed || 0; sk += res.commit.skipped || 0; du += res.commit.duplicates || 0; er += res.commit.errors || 0;
+        issues = issues.concat(res.issues);
+        (res.commit.items || []).forEach(function (it) {
+          var src = rowsByKey[res.file.id + '|' + it.row_no] || { out: {} };
+          records.push({
+            ref: it.ref, token: it.tracking_token || '', batchRef: res.commit.batch_ref || '',
+            client: src.out.company || src.out.fullName || '', fullName: src.out.fullName || '', company: src.out.company || '',
+            phone: src.out.phone || '', port: src.out.port || '', goods: src.out.goods || '',
+            value: src.out.value || '', currency: src.out.currency || '',
+            sourceFile: res.file.name + (it.sheet ? ' / ' + it.sheet : ''), sourceRow: it.row_no, sourceRowId: it.source_row_id || ''
+          });
+        });
+      });
+      state.lastBatch = { online: true, meta: { batchId: batches.join('_') || 'batch' }, records: records };
+
+      $('bu-workspace').hidden = true;
+      var s = $('bu-success');
+      s.hidden = false;
+      $('success-title').textContent = c ? tpl(OSTR.title, { n: plural(c, 'صف واحد', 'صفّين', 'صفوف', 'صفًا') }) : OSTR.titleNone;
+      $('success-sub').textContent = tpl(OSTR.sub, {
+        b: batches.join('، '),
+        c: plural(c, 'طلب واحد', 'طلبين', 'طلبات', 'طلبًا'),
+        s: sk ? tpl(OSTR.skipped, { n: plural(sk, 'صف واحد', 'صفّين', 'صفوف', 'صفًا') }) : '',
+        d: du ? tpl(OSTR.dups, { n: plural(du, 'صف واحد', 'صفّان', 'صفوف', 'صفًا') }) : '',
+        e: er ? tpl(OSTR.errs, { n: plural(er, 'صف واحد', 'صفّين', 'صفوف', 'صفًا') }) : ''
+      });
+      var ib = $('bu-online-issues');
+      if (ib) {
+        ib.hidden = !issues.length;
+        $('bu-online-issues-title').textContent = OSTR.issuesTitle;
+        $('bu-online-issues-list').innerHTML = issues.slice(0, 200).map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('');
+      }
+      var th = $('success-ref-th'); if (th) th.textContent = OSTR.refTh;
+      var cap = $('success-caption'); if (cap) cap.textContent = OSTR.caption;
+      $('success-refs').innerHTML = records.map(function (r) {
+        var href = 'tracking.html?id=' + encodeURIComponent(r.ref);   // reference only; never the token
+        return '<tr><td class="num fw-bold" dir="ltr">' + esc(r.ref) + '</td><td>' + esc(r.client) + '</td><td>' + esc(r.port) + '</td><td class="text-muted">' + esc(r.sourceFile) + ' · ص ' + esc(r.sourceRow) + '</td><td><a class="link-arrow" href="' + href + '">تتبع</a></td></tr>';
+      }).join('');
+      var top = card.getBoundingClientRect().top + window.pageYOffset - 100;
+      window.scrollTo({ top: top, behavior: 'smooth' });
+      setTimeout(function () { s.focus({ preventScroll: true }); }, 80);
+      toast(OSTR.done + $('success-sub').textContent, c ? 'success' : 'warning');
+    }
+    function onlineRefsRows() {
+      var b = state.lastBatch;
+      return [['الرقم المرجعي', 'رمز التتبع (يظهر مرة واحدة)', 'اسم العميل', 'الشركة', 'منفذ الوصول', 'وصف البضاعة', 'القيمة', 'العملة', 'الملف', 'رقم الصف', 'معرّف صف المصدر', 'رقم الدفعة']].concat(b.records.map(function (r) {
+        return [r.ref, r.token, r.fullName, r.company, r.port, r.goods, r.value, r.currency, r.sourceFile, r.sourceRow, r.sourceRowId, r.batchRef];
+      }));
+    }
+
     $('btn-new-batch').addEventListener('click', function () {
       $('bu-success').hidden = true;
       $('bu-save-error').hidden = true;
@@ -1382,6 +1684,10 @@
     state.type = checked ? checked.value : 'shipments';
     syncTypeUI();
     renderAll();
+    if (ONLINE) {
+      refreshAuth();
+      API.onAuth(function () { refreshAuth(); });
+    }
 
     // test hook (harmless): lets automated checks feed File objects
     window.MarsaBulk = { addFiles: addFiles, state: state, _parseNum: parseNum, _matchPort: matchPort, _normPhone: normPhone, _normCurrency: normCurrency };

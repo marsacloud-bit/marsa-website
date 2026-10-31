@@ -4,14 +4,20 @@ Copy these blocks VERBATIM into every page. Only change: `<title>`, meta descrip
 
 ## Active nav link
 `main.js` marks the active link automatically from the file name (adds `.is-active` + `aria-current="page"` to `.nav-link` and `.drawer-nav a`).
-To force it, set `<body data-page="services">` (value = file name without `.html`: index, services, calculator, tracking, request, about, contact, bulk-upload, login).
+To force it, set `<body data-page="services">` (value = file name without `.html`: index, services, calculator, tracking, request, about, contact, bulk-upload, login, portal, admin).
 `request.html` is not in the desktop `.nav-list` (the header CTA button "اطلب تخليص" links to it) but IS in the drawer and footer.
-`login.html` (one page, anchors `#client` / `#staff`, «قريبًا» cards, NO credential inputs) is linked from the topbar `.topbar-auth` (topbar is hidden at 700px and below), the drawer and the footer «روابط سريعة». The 7-link `.nav-list` is unchanged so it still fits from 901px.
+`login.html` (tabs «دخول العملاء» / «دخول الموظفين», anchors `#client` / `#staff`; in demo mode it shows a setup notice and NO credential inputs) is linked from the topbar `.topbar-auth` (topbar is hidden at 700px and below), the drawer and the footer «روابط سريعة». The 7-link `.nav-list` is unchanged so it still fits from 901px.
+`portal.html` (client portal) and `admin.html` (staff console) are not in the nav. The «بوابتي» link (`[data-account-link]` in `.topbar-auth`, and `li[data-account-item]` in the drawer) ships with `hidden`; `main.js` un-hides it only when `window.MarsaApi` is loaded, online, and `getSession()` returns a session. It points to `portal.html`, or `admin.html` when `MarsaApi.isStaff()` is true. Pages that do not load `supa.js` keep only the login links.
 
-## Demo banner, privacy line, clear-data button
-- `.site-demo-banner[data-demo-banner]` sits right after `</header>` (before the drawer, which must stay directly before `.drawer-backdrop`). Text: «نسخة عرض تجريبية — البيانات والأرقام توضيحية ولا تُرسل أي بيانات إلى خادم.» The close button `[data-demo-banner-close]` hides it for the session (`sessionStorage` key `marsa_demo_banner_dismissed`, wrapped in try/catch).
-- `.footer-privacy` (before `.footer-bottom`): data stays in this browser's localStorage, fonts load from Google Fonts, plus button `[data-clear-local]` «مسح بياناتي من هذا الجهاز»: `main.js` asks `confirm()`, removes every localStorage key starting with `marsa_`, then shows a toast.
-- Use the wording «نسخة عرض تجريبية» for all demo labels.
+## Mode, demo banner, privacy line, clear-data button
+- **Mode** comes from `assets/js/config.js` (`window.MARSA_CONFIG`), loaded on EVERY page before `main.js` (it is a tiny file and makes no network request). Empty `supabaseUrl`/`supabaseAnonKey` → **demo** (localStorage only). Both filled → **staging** (online, Supabase, test data). `supa.js`, when loaded, confirms the mode via `Marsa.setMode()` (a bad URL or a secret key falls back to demo). `<html data-marsa-mode="demo|online">` is set for CSS.
+- `.site-demo-banner[data-demo-banner]` sits right after `</header>` (before the drawer, which must stay directly before `.drawer-backdrop`). Its `<p data-demo-banner-text>` keeps the demo text in the HTML: «نسخة عرض تجريبية — البيانات والأرقام توضيحية ولا تُرسل أي بيانات إلى خادم.»; in staging `main.js` replaces it with «بيئة تجريبية (Staging) — البيانات للاختبار فقط». The close button `[data-demo-banner-close]` hides it for the session (`sessionStorage` key `marsa_demo_banner_dismissed`, wrapped in try/catch).
+- `.footer-privacy` (before `.footer-bottom`): `<span data-privacy-text>` holds the demo wording (localStorage only, Google Fonts); in staging `main.js` swaps in the staging wording (forms/login/uploads go over HTTPS to Supabase, access limited by DB permissions; calculator/drafts/session stay in localStorage; Google Fonts + jsDelivr). Both strings live in `Marsa.strings` (main.js) — edit them there, not in the pages.
+- Button `[data-clear-local]` «مسح بياناتي من هذا الجهاز»: `main.js` asks `confirm()` (staging text warns it signs you out on this device and does not delete server data), removes every localStorage key starting with `marsa_` (incl. the Supabase session key `marsa_auth`), then shows a toast.
+- Use the wording «نسخة عرض تجريبية» for demo labels and «بيئة تجريبية (Staging)» for online labels.
+
+## Script order
+`config.js → main.js → [supa.js] → [xlsx-lite.js] → PAGE.js`, all `defer`. `supa.js` loads supabase-js 2.45.4 from jsDelivr itself, only when config is filled. Light pages (index, services, calculator, about) load only `config.js` + `main.js` (+ their page script). Never add a service_role key anywhere.
 
 ## Page skeleton
 ```html
@@ -36,7 +42,10 @@ To force it, set `<body data-page="services">` (value = file name without `.html
     [PAGE-HERO] … sections …
   </main>
   [FOOTER BLOCK]
+  <script src="assets/js/config.js" defer></script>
   <script src="assets/js/main.js" defer></script>
+  <!-- online-capable pages only (forms, tracking, login, portal, admin, bulk): -->
+  <script src="assets/js/supa.js" defer></script>
   <script src="assets/js/PAGE.js" defer></script>
 </body>
 </html>
@@ -53,6 +62,7 @@ Change only the `<title>` (pattern: `اسم الصفحة | مرسى MARSA`) and 
         <nav class="topbar-auth" aria-label="الدخول إلى المنصة">
           <a href="login.html#client"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>دخول العملاء</a>
           <a href="login.html#staff"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/></svg>دخول الموظفين</a>
+          <a href="portal.html" data-account-link hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>بوابتي</a>
         </nav>
         <a href="tel:+966126143270"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><span dir="ltr">+966 12 614 3270</span></a>
         <a href="mailto:info@marsa-sa.com"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span dir="ltr">info@marsa-sa.com</span></a>
@@ -89,7 +99,7 @@ Change only the `<title>` (pattern: `اسم الصفحة | مرسى MARSA`) and 
   <div class="site-demo-banner" role="note" data-demo-banner>
     <div class="container">
       <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 16v-4M12 8h.01"/></svg>
-      <p>نسخة عرض تجريبية — البيانات والأرقام توضيحية ولا تُرسل أي بيانات إلى خادم.</p>
+      <p data-demo-banner-text>نسخة عرض تجريبية — البيانات والأرقام توضيحية ولا تُرسل أي بيانات إلى خادم.</p>
       <button class="site-demo-banner-close" type="button" aria-label="إخفاء تنبيه نسخة العرض لهذه الجلسة" data-demo-banner-close>
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
       </button>
@@ -114,6 +124,7 @@ Change only the `<title>` (pattern: `اسم الصفحة | مرسى MARSA`) and 
       <li><a href="contact.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/></svg>تواصل معنا</a></li>
       <li><a href="login.html#client"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>دخول العملاء</a></li>
       <li><a href="login.html#staff"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/></svg>دخول الموظفين</a></li>
+      <li data-account-item hidden><a href="portal.html" data-account-link><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>بوابتي</a></li>
     </ul>
     <div class="drawer-foot">
       <a class="btn btn-primary btn-block" href="request.html">اطلب تخليص الآن</a>
@@ -182,7 +193,7 @@ The footer wave is filled with `--bg` (#F4F8FB). If the LAST section before the 
       </div>
     </div>
     <div class="container footer-privacy">
-      <p><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg><span><strong>الخصوصية في نسخة العرض:</strong> ما تُدخله في النماذج والحاسبة يبقى في التخزين المحلي (localStorage) لهذا المتصفح فقط، دون تشفير ودون إرسال إلى أي خادم، فلا تُدخل بيانات حقيقية حساسة. يُحمَّل خط الموقع من خدمة Google Fonts، لذا يتصل متصفحك بخوادم Google عند فتح الصفحات.</span></p>
+      <p><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg><span data-privacy-text><strong>الخصوصية في نسخة العرض:</strong> ما تُدخله في النماذج والحاسبة يبقى في التخزين المحلي (localStorage) لهذا المتصفح فقط، دون تشفير ودون إرسال إلى أي خادم، فلا تُدخل بيانات حقيقية حساسة. يُحمَّل خط الموقع من خدمة Google Fonts، لذا يتصل متصفحك بخوادم Google عند فتح الصفحات.</span></p>
       <button class="btn btn-sm btn-outline-white" type="button" data-clear-local>مسح بياناتي من هذا الجهاز</button>
     </div>
     <div class="container footer-bottom">
@@ -239,6 +250,7 @@ The footer wave is filled with `--bg` (#F4F8FB). If the LAST section before the 
 - **Motion**: add `.reveal` (+ `data-delay="1..5"`) to animate on scroll. Counters: `<span data-count="1250" data-suffix="+" data-prefix="" data-decimals="0">0</span>`.
 
 ## JS (assets/js/main.js) — window.Marsa
+- `Marsa.mode()` → `'demo' | 'staging'`; `Marsa.isOnlineConfigured()`; `Marsa.strings` (banner / privacy / clear-data texts). Online data calls live in `window.MarsaApi` (supa.js, see docs/online/ARCHITECTURE.md §15).
 - `Marsa.toast(msg, "success"|"error"|"warning"|"info")`
 - `Marsa.genRef("MRS")` → `MRS-2026-K7Q2ZP`
 - `Marsa.saveLocal(key, obj)` appends `{...obj, savedAt}` to a JSON array in localStorage; `Marsa.readLocal(key)` returns the array. Keys used: `marsa_requests`, `marsa_calc_draft`, `marsa_calc`, `marsa_calculations`, `marsa_contacts`, `marsa_messages`, `marsa_doc_checklist`, `marsa_bulk_batches` (do not rename; keep the `marsa_` prefix so the footer clear-data button covers new keys).

@@ -1,0 +1,34 @@
+/* =====================================================================
+   مرسى | MARSA — login.html page styles (loaded after style.css)
+   ===================================================================== */
+.auth-wrap { max-width: 720px; }
+.auth-card { padding: clamp(20px, 4vw, 36px); }
+.auth-env { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 18px; }
+.auth-tabs { display: flex; width: 100%; }
+.auth-tabs .tab { flex: 1; text-align: center; }
+.auth-h { font-size: var(--fs-md); margin: 0 0 4px; }
+.auth-card .form { margin-top: 18px; }
+.auth-links { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; font-size: var(--fs-sm); color: var(--muted); }
+.auth-session { display: flex; align-items: center; gap: 14px; }
+.auth-card code { font-size: .85em; background: rgba(11, 58, 110, .06); padding: 1px 6px; border-radius: 6px; }
+
+/* text-style button (used for in-card navigation) */
+.link-btn { border: 0; background: none; padding: 0; color: var(--blue); font: inherit; font-weight: 700; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.link-btn:hover { color: var(--navy); }
+.link-btn:focus-visible { outline: none; box-shadow: var(--ring); border-radius: 4px; }
+
+/* password field with show/hide toggle (input is dir=ltr → toggle on the physical left) */
+.pw-field { position: relative; }
+.pw-field .form-control { padding-left: 48px; }
+.pw-toggle { position: absolute; left: 6px; top: 50%; transform: translateY(-50%); width: 38px; height: 38px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+.pw-toggle:hover, .pw-toggle[aria-pressed="true"] { color: var(--navy); background: rgba(11, 58, 110, .06); }
+.pw-toggle:focus-visible { outline: none; box-shadow: var(--ring); }
+.pw-toggle .icon { width: 20px; height: 20px; }
+
+[data-auth-msg]:focus { outline: none; }
+button[aria-busy="true"] { cursor: progress; opacity: .8; }
+
+@media (max-width: 560px) {
+  .auth-tabs .tab { padding: 9px 10px; }
+  .auth-links { flex-direction: column; align-items: flex-start; }
+}

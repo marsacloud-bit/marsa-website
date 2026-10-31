@@ -22,6 +22,26 @@
     var form = qs('#request-form');
     if (!form) return;
 
+    /* Mode: online (staging, window.MarsaApi → submit_service_request) or local demo */
+    var API = window.MarsaApi || null;
+    var ONLINE = !!(API && API.isOnline && API.isOnline());
+    qsa('[data-show-mode]').forEach(function (n) {
+      n.hidden = n.getAttribute('data-show-mode') !== (ONLINE ? 'online' : 'demo');
+    });
+    var STR = {
+      sending: 'جارٍ الإرسال…',
+      sentToast: 'استلمنا طلبك. الرقم المرجعي ',
+      savedToast: 'تم الحفظ محليًا على هذا الجهاز (نسخة عرض تجريبية) — لم يُرسل إلى أي جهة. الرقم المرجعي المحلي ',
+      statusOnline: 'جديد — بانتظار مراجعة الفريق',
+      docsOnline: 'تُرفع لاحقًا من بوابة العملاء',
+      sendFailed: 'لم يُرسل الطلب. بياناتك ما زالت في النموذج؛ صحّح المطلوب ثم حاول مرة أخرى.',
+      copiedRef: 'تم نسخ الرقم المرجعي ',
+      copiedRefLocal: 'تم نسخ الرقم المرجعي المحلي ',
+      copiedToken: 'تم نسخ رمز التتبع. احفظه في مكان آمن.',
+      copyManual: 'انسخ الرقم يدويًا: '
+    };
+    var submitting = false;
+
     var wizard = qs('#request-wizard');
     var success = qs('#request-success');
     var saveError = qs('#request-save-error');
@@ -789,50 +809,114 @@
         notes: val('notes'),
         calc: calcAttached ? calc : null
       };
+      record.terms = !!val('terms');
+
+      if (ONLINE) {
+        // Online (staging): the server creates the reference + one-time tracking token.
+        // No file bytes are sent from this public form — only the declared names/sizes.
+        if (submitting) return;
+        submitting = true;
+        var btnHtml = btnSubmit.innerHTML;
+        btnSubmit.disabled = true;
+        btnSubmit.setAttribute('aria-busy', 'true');
+        btnSubmit.innerHTML = '<svg class="icon spin" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg> ' + STR.sending;
+        if (saveError) saveError.hidden = true;
+        var done = function (res) {
+          submitting = false;
+          btnSubmit.disabled = false;
+          btnSubmit.removeAttribute('aria-busy');
+          btnSubmit.innerHTML = btnHtml;
+          if (res && !res.error && res.data && res.data.ref) {
+            record.ref = res.data.ref;
+            record.statusLabel = STR.statusOnline;
+            showSuccess(record, res.data.tracking_token || '');
+          } else {
+            showSaveError(res && res.error);
+          }
+        };
+        // the RPC has no "export" service key: send clearance (direction stays export) and keep the choice in the notes
+        var outRec = record;
+        if (record.shipment.service === 'export') {
+          outRec = JSON.parse(JSON.stringify(record));
+          outRec.shipment.service = 'clearance';
+          outRec.notes = ('الخدمة المطلوبة: ' + record.shipment.serviceLabel + (record.notes ? '\n' + record.notes : '')).slice(0, 2000);
+        }
+        API.submitServiceRequest(outRec).then(done, function () { done(null); });
+        return;
+      }
+
       var ok = M.saveLocal ? M.saveLocal('marsa_requests', record) : false;
       if (!ok) { showSaveError(); return; }
       if (saveError) saveError.hidden = true;
-      showSuccess(record);
+      showSuccess(record, '');
     });
 
-    // saving failed: keep the wizard and the entered data, show no reference and no success screen
-    function showSaveError() {
+    // saving/sending failed: keep the wizard and the entered data, show no reference and no success screen
+    function showSaveError(err) {
       success.hidden = true;
       wizard.hidden = false;
+      if (ONLINE) {
+        var msgEl = qs('#request-save-error-msg');
+        if (msgEl) msgEl.textContent = (err && err.message) || STR.sendFailed;
+        // server named a field: show it on the form and jump to its step
+        var f = err && err.field && form.elements[err.field];
+        var node = f && (f.length && !f.tagName ? f[0] : f);
+        var stepEl = node && node.closest ? node.closest('.form-step') : null;
+        if (stepEl) {
+          var n = parseInt(stepEl.getAttribute('data-step'), 10);
+          if (n && n !== current) goTo(n);
+          setError(node, err.message);
+        }
+      }
       if (saveError) {
         saveError.hidden = false;
         if (saveError.scrollIntoView) saveError.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
         setTimeout(function () { saveError.focus({ preventScroll: true }); }, 80);
       }
-      toast('تعذّر حفظ الطلب على هذا الجهاز — لم يُحفظ ولم يُرسل. فعّل التخزين المحلي ثم حاول مرة أخرى.', 'error');
+      toast(ONLINE ? STR.sendFailed : 'تعذّر حفظ الطلب على هذا الجهاز — لم يُحفظ ولم يُرسل. فعّل التخزين المحلي ثم حاول مرة أخرى.', 'error');
     }
 
-    function showSuccess(r) {
+    function showSuccess(r, token) {
       wizard.hidden = true;
       success.hidden = false;
       qs('#success-ref').textContent = r.ref;
+      // reference only in the URL — the tracking token is never put in a link
       qs('#success-track').href = 'tracking.html?id=' + encodeURIComponent(r.ref);
+      var tokWrap = qs('#success-token-wrap');
+      if (tokWrap) {
+        tokWrap.hidden = !token;
+        qs('#success-token').textContent = token || '';
+      }
       var docsCount = Object.keys(r.documents).reduce(function (n, k) { return n + r.documents[k].length; }, 0);
+      var docsText = docsCount ? docsCount + (docsCount === 1 ? ' ملف' : ' ملفات') : 'لم تُرفق بعد';
+      if (ONLINE && docsCount) docsText = docsCount + (docsCount === 1 ? ' ملف مُعلَن' : ' ملفات مُعلَنة') + ' — ' + STR.docsOnline;
       qs('#success-kv').innerHTML = [
         ['الخدمة', r.shipment.serviceLabel],
         ['المسار', r.shipment.country + ' ← ' + r.shipment.port],
-        ['المستندات المرفقة', docsCount ? docsCount + (docsCount === 1 ? ' ملف' : ' ملفات') : 'لم تُرفق بعد'],
+        [ONLINE ? 'المستندات' : 'المستندات المرفقة', docsText],
         ['أرقام الحاويات', r.shipment.containerNumbers.length ? r.shipment.containerNumbers.join('، ') : ''],
         ['الحالة', r.statusLabel]
       ].filter(function (x) { return x[1]; }).map(function (x) { return '<li><span class="k">' + x[0] + '</span><span class="v">' + esc(x[1]) + '</span></li>'; }).join('');
       var card = qs('#request-card');
       window.scrollTo({ top: card.getBoundingClientRect().top + window.pageYOffset - 100, behavior: reduceMotion ? 'auto' : 'smooth' });
       setTimeout(function () { success.focus({ preventScroll: true }); }, 80);
-      toast('تم الحفظ محليًا على هذا الجهاز (نسخة عرض تجريبية) — لم يُرسل إلى أي جهة. الرقم المرجعي المحلي ' + r.ref, 'success');
+      toast((ONLINE ? STR.sentToast : STR.savedToast) + r.ref, 'success');
     }
 
+    function copyText(text, okMsg) {
+      var done = function () { toast(okMsg, 'success'); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text) ? done() : toast(STR.copyManual + text, 'info'); });
+      } else if (fallbackCopy(text)) done();
+      else toast(STR.copyManual + text, 'info');
+    }
     qs('#btn-copy-ref').addEventListener('click', function () {
       var ref = qs('#success-ref').textContent;
-      var done = function () { toast('تم نسخ الرقم المرجعي المحلي ' + ref, 'success'); };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(ref).then(done, function () { fallbackCopy(ref) ? done() : toast('انسخ الرقم يدويًا: ' + ref, 'info'); });
-      } else if (fallbackCopy(ref)) done();
-      else toast('انسخ الرقم يدويًا: ' + ref, 'info');
+      copyText(ref, (ONLINE ? STR.copiedRef : STR.copiedRefLocal) + ref);
+    });
+    var btnCopyToken = qs('#btn-copy-token');
+    if (btnCopyToken) btnCopyToken.addEventListener('click', function () {
+      copyText(qs('#success-token').textContent, STR.copiedToken);
     });
     function fallbackCopy(text) {
       try {
@@ -853,6 +937,8 @@
       el('declarationNo').disabled = false;
       softCheckContainers();
       if (saveError) saveError.hidden = true;
+      var tw = qs('#success-token-wrap');
+      if (tw) { tw.hidden = true; qs('#success-token').textContent = ''; }   // drop the one-time token from the page
       success.hidden = true;
       wizard.hidden = false;
       applyServiceParam();

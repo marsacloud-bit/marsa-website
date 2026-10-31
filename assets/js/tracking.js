@@ -505,6 +505,145 @@
     '</div>';
   }
 
+  /* ---------- online (staging): public_track(ref, token) — minimal view only ---------- */
+  var API = window.MarsaApi || null;
+  var ONLINE = !!(API && API.isOnline && API.isOnline());
+  var OSTR = {
+    reqHead: 'حالة الطلب',
+    txHead: 'حالة المعاملة',
+    kindRequest: 'طلب تخليص',
+    kindTx: 'معاملة تخليص',
+    status: 'الحالة',
+    received: 'تاريخ الاستلام',
+    reviewed: 'تاريخ المراجعة',
+    notReviewed: 'لم تتم المراجعة بعد',
+    operation: 'نوع العملية',
+    mode: 'وسيلة الشحن',
+    changed: 'آخر تغيير في الحالة',
+    containers: 'إرجاع الحاويات الفارغة',
+    containersVal: '{r} من {t} موثّقة',
+    timeline: 'سجل المراحل',
+    noTimeline: 'لا توجد مراحل معروضة بعد.',
+    progress: 'تقدّم المراحل التشغيلية',
+    reviewNote: 'سيراجع فريق مرسى طلبك ويتواصل معك. لا يعني ظهور الطلب هنا قبوله أو بدء العمل عليه.',
+    privacyNote: 'يعرض التتبع العام الحالة والمراحل فقط. لا تُعرض هنا الأسماء أو أرقام التواصل أو قيم البضاعة أو المستندات.',
+    staging: 'بيئة تجريبية متصلة (Staging) — بيانات اختبار',
+    notFoundH: 'لم نعثر على بيانات مطابقة',
+    notFound1: 'تحقّق من رقم المرجع كاملًا (مثل <span class="num">REQ-2026-000123</span>).',
+    notFound2: 'تحقّق من رمز التتبع كما ظهر لك عند إرسال الطلب، دون مسافات.',
+    notFound3: 'إن فقدت رمز التتبع فتواصل مع فريق مرسى لإصدار رمز جديد بعد التحقق من هويتك.',
+    tokenRequired: 'أدخل رمز التتبع',
+    searching: 'جارٍ البحث…',
+    errToast: 'لم نعثر على بيانات مطابقة'
+  };
+  var DIR_LABEL = { import: 'استيراد', export: 'تصدير' };
+  var MODE_LABEL = { sea: 'شحن بحري', air: 'شحن جوي', land: 'شحن بري' };
+
+  function applyMode() {
+    $$('[data-show-mode]').forEach(function (el) {
+      el.hidden = el.getAttribute('data-show-mode') !== (ONLINE ? 'online' : 'demo');
+    });
+    if (ONLINE) {
+      var inp = $('#track-id');
+      if (inp) inp.setAttribute('placeholder', 'مثال: REQ-2026-000123');
+      var err = $('#track-error');
+      if (err) err.textContent = 'أدخل رقم المرجع كاملًا (مثل REQ-2026-000123).';
+    }
+  }
+
+  function kvLi(k, v, isNum) {
+    if (v == null || v === '') return '';
+    return '<li><span class="k">' + esc(k) + '</span><span class="v' + (isNum ? ' num' : '') + '">' + esc(v) + '</span></li>';
+  }
+  function dt(iso) { if (!iso) return ''; var f = fmtDate(iso); return f.full + ' · ' + f.time; }
+
+  function renderOnline(d) {
+    var tx = d.transaction || null, rq = d.request || null;
+    var ref = (tx && tx.ref) || (rq && rq.ref) || d.ref;
+    var mode = (tx && tx.mode) || (rq && rq.mode) || '';
+    var modeIcon = mode === 'air' ? IC.plane : (mode === 'land' ? IC.truck : IC.ship);
+    var label = tx ? (tx.status_label_ar || tx.operational_status) : (rq ? (rq.status_label_ar || rq.status) : '');
+    var rows = '';
+    if (rq) {
+      rows += kvLi(OSTR.received, dt(rq.created_at));
+      rows += kvLi(OSTR.reviewed, rq.reviewed_at ? dt(rq.reviewed_at) : OSTR.notReviewed);
+      rows += kvLi(OSTR.operation, DIR_LABEL[rq.direction] || '');
+    }
+    if (tx) {
+      if (rq && rq.ref && tx.ref && rq.ref !== tx.ref) rows += kvLi('رقم المعاملة', tx.ref, true);
+      if (!rq) rows += kvLi(OSTR.operation, DIR_LABEL[tx.operation] || '');
+      rows += kvLi(OSTR.changed, dt(tx.status_changed_at));
+      if (tx.containers && tx.containers.total > 0) {
+        rows += kvLi(OSTR.containers, OSTR.containersVal.replace('{r}', String(tx.containers.returned || 0)).replace('{t}', String(tx.containers.total)));
+      }
+    }
+    rows += kvLi(OSTR.mode, MODE_LABEL[mode] || '');
+
+    var progress = '';
+    if (tx && tx.stage_index != null && tx.stage_total) {
+      var pct = Math.max(0, Math.min(100, Math.round((Number(tx.stage_index) / Number(tx.stage_total)) * 100)));
+      progress = '<div class="ts-progress">' +
+        '<div class="progress-meta"><span>' + esc(OSTR.progress) + '</span><span class="num">' + pct + '%</span></div>' +
+        '<div class="progress" role="progressbar" aria-label="' + esc(OSTR.progress) + '" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '"><div class="progress-bar" data-pct="' + pct + '"></div></div>' +
+      '</div>';
+    }
+
+    var summary = '<article class="card card-flush shadow" aria-labelledby="ts-title">' +
+      '<div class="card-header ts-head">' +
+        '<div class="ts-ref">' +
+          '<span class="icon-box icon-box-sm">' + svg(modeIcon) + '</span>' +
+          '<div><span class="ts-sub">' + esc(tx ? OSTR.kindTx : OSTR.kindRequest) + ' — رقم المرجع</span><h2 id="ts-title" class="num" tabindex="-1" dir="ltr">' + esc(ref) + '</h2></div>' +
+        '</div>' +
+        '<div class="ts-actions"><span class="badge badge-teal"><span class="dot"></span>' + esc(label) + '</span>' +
+          '<button class="btn btn-ghost btn-sm" type="button" data-act="copy" data-ref="' + esc(ref) + '">' + svg(IC.copy) + 'نسخ الرقم</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="card-body">' +
+        (!tx ? '<div class="alert mb-3">' + svg(IC.alert) + '<span>' + esc(OSTR.reviewNote) + '</span></div>' : '') +
+        '<ul class="kv ts-local-kv">' + kvLi(OSTR.status, label) + rows + '</ul>' +
+        progress +
+        '<p class="demo-note mt-3 mb-0">' + svg('<path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 16v-4M12 8h.01"/>') +
+          '<span>' + esc(OSTR.privacyNote) + '</span></p>' +
+      '</div>' +
+      '<div class="card-footer text-xs text-muted">' + esc(OSTR.staging) + '</div>' +
+    '</article>';
+
+    var timeline = '';
+    if (tx) {
+      var tl = Array.isArray(tx.timeline) ? tx.timeline.slice().reverse() : [];
+      var lis = tl.map(function (e, i) {
+        return '<li class="' + (i === 0 ? 'is-current' : 'is-done') + '">' +
+          '<span class="tl-dot"></span>' +
+          '<span class="tl-title">' + esc(e.label_ar || e.status) + '</span>' +
+          '<span class="tl-meta">' + esc(dt(e.at)) + '</span>' +
+        '</li>';
+      }).join('');
+      timeline = '<section class="card" aria-labelledby="events-h">' +
+        '<h2 id="events-h" class="mb-3" style="font-size:var(--fs-lg)">' + esc(OSTR.timeline) + '</h2>' +
+        (lis ? '<ol class="timeline">' + lis + '</ol>' : '<p class="text-sm text-muted mb-0">' + esc(OSTR.noTimeline) + '</p>') +
+      '</section>';
+    }
+    return summary +
+      '<div class="sidebar-layout">' +
+        '<div>' + timeline + '</div>' +
+        '<aside class="stack" aria-label="المساعدة">' + renderContact() + '</aside>' +
+      '</div>';
+  }
+
+  function renderOnlineNotFound(err) {
+    var li = function (t) { return '<li>' + svg(IC.check) + '<span>' + t + '</span></li>'; };
+    var generic = !err || err.code === 'MRS_NOT_FOUND';
+    return '<div class="card shadow track-empty" role="alert">' +
+      '<div class="empty-icon">' + svg(IC.search) + '</div>' +
+      '<h2 tabindex="-1" id="empty-h">' + esc(generic ? OSTR.notFoundH : (err.message || OSTR.notFoundH)) + '</h2>' +
+      '<ul>' + li(OSTR.notFound1) + li(OSTR.notFound2) + li(OSTR.notFound3) + '</ul>' +
+      '<div class="btn-group">' +
+        '<a class="btn btn-primary" href="request.html">ابدأ طلب تخليص جديد</a>' +
+        '<a class="btn btn-ghost" href="contact.html">تواصل مع فريق المتابعة</a>' +
+      '</div>' +
+    '</div>';
+  }
+
   /* ---------- controller ---------- */
   var form = $('#track-form');
   var input = $('#track-id');
@@ -512,7 +651,11 @@
   var submitBtn = $('#track-submit');
   if (!form || !input || !result) return;
   var group = input.closest('.form-group');
+  var tokenInput = $('#track-token');
+  var tokenGroup = $('#track-token-group');
   var timer = null;
+  var seq = 0;
+  applyMode();
 
   function setUrl(q) {
     try {
@@ -533,7 +676,9 @@
     if (group) group.classList.remove('has-error');
     input.removeAttribute('aria-invalid');
     input.value = q;
-    setUrl(q);
+    setUrl(q);   // reference only — the tracking token never goes into the URL
+
+    if (ONLINE) { searchOnline(q, opts); return; }
 
     clearTimeout(timer);
     result.setAttribute('aria-busy', 'true');
@@ -560,7 +705,50 @@
     }, reduceMotion ? 80 : 520);
   }
 
+  function finishRender(html, found, opts) {
+    result.innerHTML = html;
+    result.removeAttribute('aria-busy');
+    if (submitBtn) submitBtn.disabled = false;
+    var bar = $('.progress-bar[data-pct]', result);
+    if (bar) requestAnimationFrame(function () { requestAnimationFrame(function () { bar.style.width = bar.getAttribute('data-pct') + '%'; }); });
+    var heading = $('#ts-title, #empty-h', result);
+    if (!opts.silent && heading) {
+      heading.focus({ preventScroll: true });
+      var top = result.getBoundingClientRect().top + window.pageYOffset - 100;
+      window.scrollTo({ top: top, behavior: reduceMotion ? 'auto' : 'smooth' });
+    }
+    if (!found && M.toast && !opts.silent) M.toast(OSTR.errToast, 'warning');
+  }
+
+  function searchOnline(q, opts) {
+    var tok = tokenInput ? String(tokenInput.value || '').replace(/\s+/g, '').toLowerCase() : '';
+    if (!/^[0-9a-f]{64}$/.test(tok)) {
+      if (tokenGroup) tokenGroup.classList.add('has-error');
+      if (tokenInput) { tokenInput.setAttribute('aria-invalid', 'true'); tokenInput.focus(); }
+      return;
+    }
+    if (tokenGroup) tokenGroup.classList.remove('has-error');
+    if (tokenInput) tokenInput.removeAttribute('aria-invalid');
+    var mine = ++seq;
+    result.setAttribute('aria-busy', 'true');
+    result.innerHTML = '<div class="card track-loading">' + svg(IC.spinner).replace('class="icon"', 'class="icon spin"') + '<span>' + esc(OSTR.searching) + '</span></div>';
+    if (submitBtn) submitBtn.disabled = true;
+    API.publicTrack(q, tok).then(function (res) {
+      if (mine !== seq) return;
+      if (res && !res.error && res.data) finishRender(renderOnline(res.data), true, opts);
+      else finishRender(renderOnlineNotFound(res && res.error), false, opts);
+    }, function () {
+      if (mine !== seq) return;
+      finishRender(renderOnlineNotFound(null), false, opts);
+    });
+  }
+
   form.addEventListener('submit', function (e) { e.preventDefault(); search(input.value); });
+  if (tokenInput) tokenInput.addEventListener('input', function () {
+    if (tokenGroup && tokenGroup.classList.contains('has-error')) {
+      tokenGroup.classList.remove('has-error'); tokenInput.removeAttribute('aria-invalid');
+    }
+  });
   input.addEventListener('input', function () {
     if (group && group.classList.contains('has-error') && input.value.trim().length >= 4) {
       group.classList.remove('has-error'); input.removeAttribute('aria-invalid');
@@ -569,7 +757,7 @@
 
   // delegated clicks: sample chips (search card + not-found), copy, print
   document.addEventListener('click', function (e) {
-    var chip = e.target.closest('[data-sample]');
+    var chip = ONLINE ? null : e.target.closest('[data-sample]');
     if (chip) { input.value = chip.getAttribute('data-sample'); search(input.value); return; }
     var act = e.target.closest('[data-act]');
     if (!act) return;
@@ -590,7 +778,7 @@
   });
 
   // chips for requests saved on this device
-  var locals = localShipments();
+  var locals = ONLINE ? [] : localShipments();   // local/demo records only in demo mode
   var localWrap = $('#local-requests');
   var localChips = $('#local-chips');
   if (locals.length && localWrap && localChips) {
@@ -607,5 +795,9 @@
     var m = /[?&]id=([^&]+)/.exec(location.search);
     id = m ? decodeURIComponent(m[1].replace(/\+/g, ' ')) : '';
   }
-  if (id) { input.value = id; search(id, { silent: false }); }
+  if (id && ONLINE) {
+    // online: prefill the reference only; the visitor types the token (never read from the URL)
+    input.value = String(id).trim().toUpperCase().slice(0, 40);
+    if (tokenInput) tokenInput.focus();
+  } else if (id) { input.value = id; search(id, { silent: false }); }
 })();

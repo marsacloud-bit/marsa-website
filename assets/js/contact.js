@@ -14,6 +14,24 @@
 
   var CHANNELS = { phone: 'مكالمة هاتفية', whatsapp: 'واتساب', email: 'البريد الإلكتروني' };
 
+  /* ---------- mode (online staging via window.MarsaApi, else local demo) ---------- */
+  var API = window.MarsaApi || null;
+  function isOnline() { return !!(API && API.isOnline && API.isOnline()); }
+  function applyMode() {
+    var online = isOnline();
+    $$('[data-show-mode]').forEach(function (el) {
+      el.hidden = el.getAttribute('data-show-mode') !== (online ? 'online' : 'demo');
+    });
+  }
+  var STR = {
+    saving: 'جارٍ الحفظ…',
+    sending: 'جارٍ الإرسال…',
+    savedDemo: 'نسخة عرض تجريبية: حُفظت الرسالة على جهازك فقط ولم تُرسل. الرقم المرجعي: ',
+    sentOnline: 'وصلتنا رسالتك. الرقم المرجعي: ',
+    saveFailedLocal: 'تعذّر حفظ الرسالة على هذا المتصفح. حاول مرة أخرى أو اتصل بنا مباشرة.',
+    sendFailed: 'لم تُرسل الرسالة. بياناتك ما زالت في النموذج.'
+  };
+
   /* ---------- helpers ---------- */
   function toWesternDigits(str) {
     return String(str || '')
@@ -118,7 +136,9 @@
       submitBtn.disabled = true;
       submitBtn.setAttribute('aria-busy', 'true');
       var original = submitBtn.innerHTML;
-      submitBtn.innerHTML = '<svg class="icon spin" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg> جارٍ الحفظ…';
+      submitBtn.innerHTML = '<svg class="icon spin" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg> ' + (isOnline() ? STR.sending : STR.saving);
+      var sendErr = $('#cf-send-error');
+      if (sendErr) sendErr.hidden = true;
 
       var subjectEl = field('subject');
       var preferred = (form.querySelector('input[name="preferred"]:checked') || {}).value || 'phone';
@@ -134,27 +154,62 @@
         reference: field('reference').value.trim(),
         message: msg.value.trim(),
         preferred: preferred,
+        consent: !!field('consent').checked,
         status: 'new'
       };
 
-      setTimeout(function () {
-        var ok = save(entry);
+      function restoreBtn() {
         submitBtn.disabled = false;
         submitBtn.removeAttribute('aria-busy');
         submitBtn.innerHTML = original;
-        if (!ok) {
-          toast('تعذّر حفظ الرسالة على هذا المتصفح. حاول مرة أخرى أو اتصل بنا مباشرة.', 'error');
-          return;
-        }
+      }
+      function showSuccess(finalRef, online) {
         $('#success-name').textContent = entry.name.split(/\s+/)[0];
         $('#success-channel').textContent = CHANNELS[preferred] || CHANNELS.phone;
-        $('#success-ref').textContent = ref;
+        var chOnline = $('#success-channel-online');
+        if (chOnline) chOnline.textContent = CHANNELS[preferred] || CHANNELS.phone;
+        $('#success-ref').textContent = finalRef;
         wrap.hidden = true;
         success.hidden = false;
         success.focus();
         var card = success.closest('.card');
         if (card && card.getBoundingClientRect().top < 0) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        toast('نسخة عرض تجريبية: حُفظت الرسالة على جهازك فقط ولم تُرسل. الرقم المرجعي: \u2066' + ref + '\u2069', 'success');
+        toast((online ? STR.sentOnline : STR.savedDemo) + '\u2066' + finalRef + '\u2069', 'success');
+      }
+      function showSendError(err) {
+        var box = $('#cf-send-error'), msgEl = $('#cf-send-error-msg');
+        var text = (err && err.message) || STR.sendFailed;
+        if (msgEl) msgEl.textContent = text;
+        if (box) { box.hidden = false; box.focus(); }
+        toast(STR.sendFailed, 'error');
+        // point at the offending field when the server names one
+        var f = err && err.field && form.elements[err.field];
+        if (f && f.closest) {
+          var g = f.closest('.form-group');
+          if (g) { g.classList.add('has-error'); g.classList.remove('has-success'); }
+          f.setAttribute('aria-invalid', 'true');
+        }
+      }
+
+      // Online (staging): submit_contact_message RPC. A reference is shown only when error is null.
+      if (isOnline()) {
+        API.submitContactMessage(entry).then(function (res) {
+          restoreBtn();
+          if (res && !res.error && res.data && res.data.ref) showSuccess(res.data.ref, true);
+          else showSendError(res && res.error);
+        }, function () { restoreBtn(); showSendError(null); });
+        return;
+      }
+
+      // Demo: local only (localStorage), unchanged behaviour
+      setTimeout(function () {
+        var ok = save(entry);
+        restoreBtn();
+        if (!ok) {
+          toast(STR.saveFailedLocal, 'error');
+          return;
+        }
+        showSuccess(ref, false);
       }, 650);
     });
 
@@ -165,6 +220,8 @@
       updateCount();
       success.hidden = true;
       wrap.hidden = false;
+      var sendErr = $('#cf-send-error');
+      if (sendErr) sendErr.hidden = true;
       field('name').focus();
     });
 
@@ -247,7 +304,7 @@
     badge.hidden = false;
   }
 
-  function init() { initForm(); initBranches(); initOpenStatus(); }
+  function init() { applyMode(); initForm(); initBranches(); initOpenStatus(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 })();
