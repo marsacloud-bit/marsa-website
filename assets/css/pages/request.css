@@ -1,0 +1,79 @@
+/* =====================================================================
+   مرسى | MARSA — request.html (page-specific styles)
+   Loaded after assets/css/style.css
+   ===================================================================== */
+.req-card { padding: clamp(20px, 4vw, 40px); }
+.req-progress { margin: -12px 0 28px; }
+
+/* step heading */
+.step-head { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 24px; }
+.step-head h2 { font-size: var(--fs-xl); margin: 0 0 4px; outline: none; }
+.step-head p { margin: 0; color: var(--muted); font-size: var(--fs-sm); }
+
+/* radio/check groups inside forms: legend sized like a normal label */
+.fieldset legend.form-label { font-size: var(--fs-sm); font-weight: 700; margin-bottom: 8px; }
+.has-error .radio-card .rc-body { border-color: var(--danger); }
+
+/* currency select living in the input-group addon slot */
+.input-group select.addon { appearance: none; -webkit-appearance: none; cursor: pointer; color: var(--navy-dark); font-family: inherit; direction: ltr; padding: 0 12px; }
+.input-group select.addon:focus { outline: none; box-shadow: var(--ring); border-color: var(--teal); }
+.input-group .form-control { min-width: 0; flex: 1; }
+
+/* documents grid */
+.doc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.doc-grid .doc-wide { grid-column: 1 / -1; }
+.doc-grid .dropzone { padding: 22px 16px; }
+.doc-grid .form-group.has-files .dropzone { border-style: solid; border-color: rgba(20, 163, 168, .45); }
+.doc-grid .form-label .text-xs { font-weight: 600; }
+@media (max-width: 640px) { .doc-grid { grid-template-columns: 1fr; } }
+
+/* review */
+.review-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.review-block { border: 1px solid var(--border); border-radius: var(--r); padding: 16px 18px; background: #FAFCFE; min-width: 0; }
+.review-block.is-wide { grid-column: 1 / -1; }
+.review-block-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.review-block-head h3 { font-size: var(--fs-md); margin: 0; }
+.review-edit { border: 0; background: transparent; color: var(--blue); font-weight: 700; font-size: var(--fs-xs); padding: 4px 8px; border-radius: 8px; font-family: inherit; cursor: pointer; }
+.review-edit:hover { background: rgba(22, 115, 184, .08); }
+.review-block .kv li { padding: 7px 0; }
+.review-block .kv .v { overflow-wrap: anywhere; max-width: 62%; }
+.review-docs { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: var(--fs-sm); }
+.review-docs li { display: flex; gap: 8px; align-items: center; }
+.review-docs .icon { width: 18px; height: 18px; color: var(--teal); }
+.review-docs li.is-missing .icon { color: var(--warning); }
+@media (max-width: 640px) { .review-grid { grid-template-columns: 1fr; } }
+
+.req-spacer { flex: 1; }
+
+/* success */
+.ref-code .ref-copy { border: 0; background: transparent; color: var(--teal); padding: 4px; border-radius: 8px; display: grid; place-items: center; cursor: pointer; }
+.ref-code .ref-copy:hover { background: rgba(20, 163, 168, .1); }
+.ref-code .ref-copy .icon { width: 18px; height: 18px; }
+.success-kv { max-width: 440px; text-align: right; margin-bottom: 22px; }
+.success-actions { justify-content: center; }
+.success-note { max-width: 520px; margin-inline: auto; text-align: right; }
+
+/* sidebar */
+.req-aside .aside-title { font-size: var(--fs-md); margin: 0 0 12px; }
+.req-aside .calc-card { border-color: rgba(20, 163, 168, .35); }
+.req-aside .calc-card .aside-title { margin: 0; }
+.help-card { background: var(--grad-dark); color: #DCE8F4; border: 0; }
+.help-card .aside-title { color: #fff; }
+.help-card p { color: #B9CCE0; }
+@media (max-width: 1024px) { .req-aside.sticky { position: static; } }
+
+
+/* bulk-upload callout at top of the wizard */
+.bulk-callout { align-items: center; }
+.bulk-callout .icon { flex-shrink: 0; margin-top: 0; color: var(--blue); }
+.bulk-callout p { line-height: 1.8; }
+.bulk-callout .link-arrow { color: var(--teal); white-space: nowrap; }
+
+/* soft (non-blocking) field warning, e.g. container number shape */
+.form-warn { display: block; font-size: var(--fs-xs); color: #8A5E04; background: var(--warning-bg); border-radius: 8px; padding: 6px 10px; margin-top: 6px; }
+.form-warn[hidden] { display: none; }
+
+/* save-failed state: shown instead of the success screen */
+.req-save-error { text-align: right; }
+.req-save-error .icon { flex-shrink: 0; color: var(--danger); }
+.req-save-error strong { display: block; margin-bottom: 4px; }

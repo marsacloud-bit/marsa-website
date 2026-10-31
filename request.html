@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" class="no-js">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>اطلب تخليص | مرسى MARSA</title>
+  <meta name="description" content="قدّم طلب تخليص جمركي أونلاين مع مرسى في السعودية في 4 خطوات: بياناتك، بيانات الشحنة ورقم البيان الجمركي عبر منصة فسح وHS Code، رفع الفاتورة التجارية وبوليصة الشحن وشهادة المطابقة (سابر)، ثم المراجعة والتأكيد.">
+  <meta name="theme-color" content="#0B3A6E">
+  <link rel="icon" type="image/png" href="assets/img/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/style.css">
+  <link rel="stylesheet" href="assets/css/pages/request.css">
+</head>
+<body data-page="request">
+  <a class="skip-link" href="#main">تخطَّ إلى المحتوى</a>
+  <!-- ============ HEADER (shared) ============ -->
+  <div class="topbar">
+    <div class="container">
+      <span>منصة سعودية للتخليص الجمركي والشحن أونلاين</span>
+      <div class="topbar-links">
+        <nav class="topbar-auth" aria-label="الدخول إلى المنصة">
+          <a href="login.html#client"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>دخول العملاء</a>
+          <a href="login.html#staff"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/></svg>دخول الموظفين</a>
+        </nav>
+        <a href="tel:+966126143270"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><span dir="ltr">+966 12 614 3270</span></a>
+        <a href="mailto:info@marsa-sa.com"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span dir="ltr">info@marsa-sa.com</span></a>
+      </div>
+    </div>
+  </div>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="مرسى - الصفحة الرئيسية">
+        <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="84" height="58">
+      </a>
+      <nav class="main-nav" aria-label="القائمة الرئيسية">
+        <ul class="nav-list">
+          <li><a class="nav-link" href="index.html">الرئيسية</a></li>
+          <li><a class="nav-link" href="services.html">خدماتنا</a></li>
+          <li><a class="nav-link" href="calculator.html">حاسبة الرسوم</a></li>
+          <li><a class="nav-link" href="tracking.html">تتبع الشحنة</a></li>
+          <li><a class="nav-link" href="bulk-upload.html">الرفع الجماعي</a></li>
+          <li><a class="nav-link" href="about.html">من نحن</a></li>
+          <li><a class="nav-link" href="contact.html">تواصل معنا</a></li>
+        </ul>
+      </nav>
+      <div class="header-actions">
+        <a class="btn btn-primary btn-cta" href="request.html">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/></svg>
+          اطلب تخليص
+        </a>
+        <button class="nav-toggle" type="button" aria-label="فتح القائمة" aria-expanded="false" aria-controls="mobile-drawer">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+  <div class="site-demo-banner" role="note" data-demo-banner>
+    <div class="container">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 16v-4M12 8h.01"/></svg>
+      <p>نسخة عرض تجريبية — البيانات والأرقام توضيحية ولا تُرسل أي بيانات إلى خادم.</p>
+      <button class="site-demo-banner-close" type="button" aria-label="إخفاء تنبيه نسخة العرض لهذه الجلسة" data-demo-banner-close>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <aside class="drawer" id="mobile-drawer" aria-label="القائمة الجانبية" aria-hidden="true">
+    <div class="drawer-head">
+      <img src="assets/img/logo-header.png" alt="مرسى MARSA" width="72" height="50">
+      <button class="drawer-close" type="button" aria-label="إغلاق القائمة">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <ul class="drawer-nav">
+      <li><a href="index.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/></svg>الرئيسية</a></li>
+      <li><a href="services.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>خدماتنا</a></li>
+      <li><a href="calculator.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15v3M8 18h4"/></svg>حاسبة الرسوم الجمركية</a></li>
+      <li><a href="tracking.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>تتبع الشحنة</a></li>
+      <li><a href="request.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/></svg>اطلب تخليص</a></li>
+      <li><a href="bulk-upload.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5M12 3v12"/></svg>الرفع الجماعي للبيانات</a></li>
+      <li><a href="about.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2"/><path d="M12 7v14M5 13H3a9 9 0 0 0 18 0h-2M8 11h8"/></svg>من نحن</a></li>
+      <li><a href="contact.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/></svg>تواصل معنا</a></li>
+      <li><a href="login.html#client"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>دخول العملاء</a></li>
+      <li><a href="login.html#staff"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/></svg>دخول الموظفين</a></li>
+    </ul>
+    <div class="drawer-foot">
+      <a class="btn btn-primary btn-block" href="request.html">اطلب تخليص الآن</a>
+      <a href="tel:+966126143270"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><span dir="ltr">+966 12 614 3270</span></a>
+      <a href="mailto:info@marsa-sa.com"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span dir="ltr">info@marsa-sa.com</span></a>
+    </div>
+  </aside>
+  <div class="drawer-backdrop" aria-hidden="true"></div>
+  <!-- ============ /HEADER ============ -->
+  <main id="main">
+    <section class="page-hero" aria-labelledby="page-title">
+      <div class="container">
+        <nav class="breadcrumb" aria-label="مسار التنقل">
+          <ol>
+            <li><a href="index.html">الرئيسية</a></li>
+            <li aria-current="page">اطلب تخليص</li>
+          </ol>
+        </nav>
+        <h1 id="page-title">اطلب تخليص شحنتك أونلاين</h1>
+        <p class="lead">أربع خطوات بسيطة: بياناتك، بيانات الشحنة، المستندات، ثم المراجعة والتأكيد. هذه نسخة عرض تجريبية: يُحفظ الطلب على جهازك فقط ولا يُرسل إلى أي جهة.</p>
+      </div>
+      <svg class="page-hero-wave" viewBox="0 0 1440 120" preserveAspectRatio="none" aria-hidden="true">
+        <path class="w-back" d="M0,40 C180,90 360,10 560,40 C760,70 900,20 1100,35 C1260,48 1360,70 1440,50 L1440,120 L0,120 Z"/>
+        <path class="w-mid" d="M0,70 C220,30 420,100 640,70 C860,40 1040,95 1240,70 C1330,60 1400,55 1440,60 L1440,120 L0,120 Z"/>
+        <path class="w-front" d="M0,90 C240,60 460,115 720,90 C980,65 1200,110 1440,85 L1440,120 L0,120 Z"/>
+      </svg>
+    </section>
+
+    <section class="section overlap-up" aria-label="نموذج طلب التخليص">
+      <div class="container">
+        <div class="sidebar-layout">
+
+          <!-- ===== Main form card ===== -->
+          <div class="card shadow-lg req-card" id="request-card">
+            <div id="request-wizard">
+              <div class="alert bulk-callout mb-3" role="note">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5M12 3v12"/></svg>
+                <p class="mb-0">لديك أكثر من شحنة؟ ارفعها دفعة واحدة من ملف Excel أو CSV. <a class="link-arrow" href="bulk-upload.html">الرفع الجماعي للبيانات <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></a></p>
+              </div>
+              <ol class="stepper" aria-label="مراحل الطلب">
+                <li class="step is-active" aria-current="step"><span class="step-label">بيانات العميل</span></li>
+                <li class="step"><span class="step-label">بيانات الشحنة</span></li>
+                <li class="step"><span class="step-label">المستندات</span></li>
+                <li class="step"><span class="step-label">مراجعة وتأكيد</span></li>
+              </ol>
+              <div class="req-progress">
+                <div class="progress-meta"><span id="progress-label">الخطوة 1 من 4: بيانات العميل</span><span class="num" id="progress-pct">25%</span></div>
+                <div class="progress" role="progressbar" aria-label="تقدم الطلب" aria-valuemin="0" aria-valuemax="100" aria-valuenow="25"><div class="progress-bar" id="progress-bar" style="width:25%"></div></div>
+              </div>
+
+              <form id="request-form" class="req-form" novalidate>
+
+                <!-- ============ STEP 1: client ============ -->
+                <div class="form-step is-active" data-step="1" id="step-1">
+                  <div class="step-head">
+                    <span class="icon-box icon-box-sm icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span>
+                    <div>
+                      <h2 tabindex="-1">بيانات العميل</h2>
+                      <p>بيانات صاحب الشحنة أو الشخص المسؤول عن المتابعة. نستخدمها للتواصل معك وإعداد مستندات التخليص.</p>
+                    </div>
+                  </div>
+                  <div class="form">
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label class="form-label" for="f-name">الاسم بالكامل <span class="req" aria-hidden="true">*</span></label>
+                        <div class="input-icon">
+                          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+                          <input class="form-control" id="f-name" name="fullName" type="text" autocomplete="name" placeholder="مثال: عبدالله محمد العتيبي" required>
+                        </div>
+                        <span class="form-error" id="f-name-err"></span>
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label" for="f-company">اسم الشركة / النشاط <span class="req" aria-hidden="true">*</span></label>
+                        <div class="input-icon">
+                          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V7l7-4 7 4v14"/><path d="M9 21v-4h6v4M9 10h.01M15 10h.01M9 14h.01M15 14h.01"/></svg>
+                          <input class="form-control" id="f-company" name="company" type="text" autocomplete="organization" placeholder="مثال: مؤسسة البحر الأحمر للتجارة" required>
+                        </div>
+                        <span class="form-hint">إذا كنت تستورد بصفة شخصية فاكتب «فرد».</span>
+                        <span class="form-error" id="f-company-err"></span>
+                      </div>
+                    </div>
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label class="form-label" for="f-phone">رقم الجوال <span class="req" aria-hidden="true">*</span></label>
+                        <div class="input-icon">
+                          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
+                          <input class="form-control" id="f-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" dir="ltr" placeholder="05xxxxxxxx" required>
+                        </div>
+                        <span class="form-hint">رقم جوال سعودي يبدأ بـ 05 (أو ‎+966 5)، ويُفضّل أن يكون مفعّلًا عليه واتساب.</span>
+                        <span class="form-error" id="f-phone-err"></span>
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label" for="f-email">البريد الإلكتروني <span class="req" aria-hidden="true">*</span></label>
+                        <div class="input-icon">
+                          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
+                          <input class="form-control" id="f-email" name="email" type="email" autocomplete="email" dir="ltr" placeholder="name@company.com" required>
+                        </div>
+                        <span class="form-error" id="f-email-err"></span>
+                      </div>
+                    </div>
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label class="form-label" for="f-tax">الرقم الضريبي (ضريبة القيمة المضافة) <span class="opt">(اختياري)</span></label>
+                        <input class="form-control num" id="f-tax" name="taxId" type="text" inputmode="numeric" dir="ltr" placeholder="3xxxxxxxxxxxxx3" maxlength="15">
+                        <span class="form-hint">15 رقمًا يبدأ وينتهي بالرقم 3 كما في شهادة التسجيل في ضريبة القيمة المضافة.</span>
+                        <span class="form-error" id="f-tax-err"></span>
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label" for="f-importer">رقم السجل التجاري <span class="opt">(مطلوب للشركات)</span></label>
+                        <input class="form-control num" id="f-importer" name="crNumber" type="text" inputmode="numeric" dir="ltr" placeholder="مثال: 4030123456" maxlength="10">
+                        <span class="form-hint">10 أرقام كما في السجل التجاري — نستخدمه مع رمز المستورد للتسجيل في منصة فسح.</span>
+                        <span class="form-error" id="f-importer-err"></span>
+                      </div>
+                    </div>
+                    <fieldset class="fieldset form-group" id="g-client-type">
+                      <legend class="form-label">نوع العميل <span class="opt">(اختياري)</span></legend>
+                      <div class="flex flex-wrap gap-3">
+                        <label class="radio"><input type="radio" name="clientType" value="individual"> فرد</label>
+                        <label class="radio"><input type="radio" name="clientType" value="business"> منشأة</label>
+                      </div>
+                      <span class="form-hint">إذا اخترت «فرد» فلا يلزم إدخال السجل التجاري.</span>
+                    </fieldset>
+                    <fieldset class="fieldset form-group">
+                      <legend class="form-label">طريقة التواصل المفضّلة</legend>
+                      <div class="flex flex-wrap gap-3">
+                        <label class="radio"><input type="radio" name="contactPref" value="whatsapp" checked> واتساب</label>
+                        <label class="radio"><input type="radio" name="contactPref" value="phone"> مكالمة هاتفية</label>
+                        <label class="radio"><input type="radio" name="contactPref" value="email"> البريد الإلكتروني</label>
+                      </div>
+                    </fieldset>
+                  </div>
+                </div>
+
+                <!-- ============ STEP 2: shipment ============ -->
+                <div class="form-step" data-step="2" id="step-2">
+                  <div class="step-head">
+                    <span class="icon-box icon-box-sm icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg></span>
+                    <div>
+                      <h2 tabindex="-1">بيانات الشحنة</h2>
+                      <p>كلما كانت البيانات أدق، كان عرض السعر وتقدير الرسوم أقرب إلى الواقع.</p>
+                    </div>
+                  </div>
+
+                  <div class="alert alert-success mb-3" id="calc-import-note" hidden>
+                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15v3M8 18h4"/></svg>
+                    <div><strong>استوردنا بيانات من حاسبة الرسوم.</strong> <span id="calc-import-text">راجع الحقول المعبّأة وعدّلها عند الحاجة.</span></div>
+                  </div>
+
+                  <div class="form">
+                    <fieldset class="fieldset form-group" id="g-direction">
+                      <legend class="form-label">نوع العملية <span class="req" aria-hidden="true">*</span></legend>
+                      <div class="radio-cards">
+                        <label class="radio-card">
+                          <input type="radio" name="direction" value="import" checked>
+                          <span class="rc-body">
+                            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+                            <span class="rc-title">استيراد</span>
+                            <span class="rc-sub">شحنة واردة إلى المملكة</span>
+                          </span>
+                        </label>
+                        <label class="radio-card">
+                          <input type="radio" name="direction" value="export">
+                          <span class="rc-body">
+                            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M7 8l5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+                            <span class="rc-title">تصدير</span>
+                            <span class="rc-sub">شحنة صادرة من المملكة</span>
+                          </span>
+                        </label>
+                      </div>
+                    </fieldset>
+
+                    <div class="form-group">
+                      <label class="form-label" for="f-service">الخدمة المطلوبة <span class="req" aria-hidden="true">*</span></label>
+                      <select class="form-control" id="f-service" name="service" required>
+                        <option value="">اختر الخدمة</option>
+                        <option value="clearance">تخليص جمركي متكامل</option>
+                        <option value="aci">البيان المسبق ومنصة فسح</option>
+                        <option value="hs">تصنيف البضائع وتحديد البند الجمركي HS Code</option>
+                        <option value="inspection">متابعة المعاينة والفحص والإفراج</option>
+                        <option value="door">تخليص وتوصيل حتى باب المخزن</option>
+                        <option value="freight">شحن دولي بحري وجوي مع التخليص</option>
+                        <option value="export">تخليص صادرات وشهادات المنشأ</option>
+                        <option value="consult">استشارة جمركية واستيرادية</option>
+                      </select>
+                      <span class="form-error" id="f-service-err"></span>
+                    </div>
+
+                    <fieldset class="fieldset form-group" id="g-mode">
+                      <legend class="form-label">وسيلة الشحن <span class="req" aria-hidden="true">*</span></legend>
+                      <div class="radio-cards">
+                        <label class="radio-card">
+                          <input type="radio" name="mode" value="sea" checked>
+                          <span class="rc-body">
+                            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17c1.5 1.3 3 1.3 4.5 0s3-1.3 4.5 0 3 1.3 4.5 0 3-1.3 4.5 0"/><path d="M5 14 4 10h16l-2 4"/><path d="M8 10V6h6v4M11 6V3"/></svg>
+                            <span class="rc-title">بحري</span>
+                            <span class="rc-sub">حاويات أو بضائع مجمّعة</span>
+                          </span>
+                        </label>
+                        <label class="radio-card">
+                          <input type="radio" name="mode" value="air">
+                          <span class="rc-body">
+                            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>
+                            <span class="rc-title">جوي</span>
+                            <span class="rc-sub">عبر مطارات الرياض وجدة</span>
+                          </span>
+                        </label>
+                        <label class="radio-card">
+                          <input type="radio" name="mode" value="land">
+                          <span class="rc-body">
+                            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h11v10H3zM14 9h4l3 3v4h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg>
+                            <span class="rc-title">بري</span>
+                            <span class="rc-sub">عبر منفذ البطحاء البري</span>
+                          </span>
+                        </label>
+                      </div>
+                    </fieldset>
+
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label class="form-label" for="f-country" id="f-country-label">بلد المنشأ / الشحن <span class="req" aria-hidden="true">*</span></label>
+                        <select class="form-control" id="f-country" name="country" required>
+                          <option value="">اختر الدولة</option>
+                          <option>الصين</option>
+                          <option>تركيا</option>
+                          <option>الإمارات العربية المتحدة</option>
+                          <option>سلطنة عُمان</option>
+                          <option>الكويت</option>
+                          <option>الهند</option>
+                          <option>ألمانيا</option>
+                          <option>إيطاليا</option>
+                          <option>إسبانيا</option>
+                          <option>فرنسا</option>
+                          <option>المملكة المتحدة</option>
+                          <option>الولايات المتحدة الأمريكية</option>
+                          <option>كوريا الجنوبية</option>
+                          <option>اليابان</option>
+                          <option>فيتنام</option>
+                          <option>ماليزيا</option>
+                          <option>الأردن</option>
+                          <option>البحرين</option>
+                          <option>قطر</option>
+                          <option>باكستان</option>
+                          <option>إندونيسيا</option>
+                          <option>تايلاند</option>
+                          <option>هولندا</option>
+                          <option>البرازيل</option>
+                          <option>دولة أخرى</option>
+                        </select>
+                        <span class="form-error" id="f-country-err"></span>
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label" for="f-port" id="f-port-label">ميناء / منفذ الوصول <span class="req" aria-hidden="true">*</span></label>
+                        <select class="form-control" id="f-port" name="port" required>
+                          <option value="">اختر الميناء</option>
+                        </select>
+                        <span class="form-hint" id="f-port-hint">الموانئ المتاحة تتغير حسب وسيلة الشحن.</span>
+                        <span class="form-error" id="f-port-err"></span>
+                      </div>
+                    </div>
+
+                    <div class="form-group">
+                      <label class="form-label" for="f-goods">وصف البضاعة <span class="req" aria-hidden="true">*</span></label>
+                      <textarea class="form-control" id="f-goods" name="goods" maxlength="600" placeholder="مثال: قطع غيار سيارات (فلاتر زيت وأقمشة فرامل) — جديدة، 120 كرتونة" required></textarea>
+                      <span class="form-hint"><span class="num" dir="ltr"><span id="goods-count">0</span>/600</span> — اذكر نوع البضاعة، حالتها (جديدة/مستعملة)، والاستخدام.</span>
+                      <span class="form-error" id="f-goods-err"></span>
+                    </div>
+
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label class="form-label" for="f-hs">البند الجمركي HS Code <span class="opt">(اختياري)</span></label>
+                        <input class="form-control num" id="f-hs" name="hsCode" type="text" inputmode="numeric" dir="ltr" placeholder="8708.30" maxlength="14">
+                        <span class="form-hint">من 4 إلى 12 رقمًا. لست متأكدًا؟ اتركه فارغًا وسيحدده خبراء التصنيف لدينا.</span>
+                        <span class="form-error" id="f-hs-err"></span>
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label" for="f-declaration-no">رقم البيان الجمركي <span class="opt">(اختياري)</span></label>
+                        <input class="form-control num" id="f-declaration-no" name="declarationNo" type="text" inputmode="numeric" dir="ltr" placeholder="مثال: 2026123456" maxlength="20">
+                        <span class="form-hint">رقم البيان الجمركي المسبق الصادر عبر منصة فسح، إن وُجد.</span>
+                        <span class="form-error" id="f-declaration-no-err"></span>
+                      </div>
+                    </div>
+                    <label class="check" id="aci-help-wrap">
+                      <input type="checkbox" name="needAci" id="f-need-aci">
+                      <span>ليس لدي رقم بيان جمركي — أريد من مرسى تقديم البيان الجمركي المسبق عبر منصة فسح نيابةً عني.</span>
+                    </label>
+
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label class="form-label" for="f-value">قيمة البضاعة (الفاتورة) <span class="req" aria-hidden="true">*</span></label>
+                        <div class="input-group">
+                          <input class="form-control num" id="f-value" name="value" type="number" min="0" step="0.01" inputmode="decimal" placeholder="25000" required>
+                          <select class="addon req-currency" id="f-currency" name="currency" aria-label="العملة">
+                            <option value="USD">USD</option>
+                            <option value="EUR">EUR</option>
+                            <option value="CNY">CNY</option>
+                            <option value="AED">AED</option>
+                            <option value="SAR">SAR</option>
+                          </select>
+                        </div>
+                        <span class="form-error" id="f-value-err"></span>
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label" for="f-weight">الوزن الإجمالي <span class="req" aria-hidden="true">*</span></label>
+                        <div class="input-group">
+                          <input class="form-control num" id="f-weight" name="weight" type="number" min="0" step="0.1" inputmode="decimal" placeholder="1800" required>
+                          <span class="addon">كجم</span>
+                        </div>
+                        <span class="form-error" id="f-weight-err"></span>
+                      </div>
+                    </div>
+
+                    <div id="sea-fields">
+                      <fieldset class="fieldset form-group" id="g-container">
+                        <legend class="form-label">نوع الحاوية <span class="req" aria-hidden="true">*</span></legend>
+                        <div class="radio-cards">
+                          <label class="radio-card">
+                            <input type="radio" name="containerType" value="20ft" checked>
+                            <span class="rc-body">
+                              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="7" width="14" height="10" rx="1"/><path d="M9 7v10M12 7v10M15 7v10"/></svg>
+                              <span class="rc-title">حاوية 20 قدم</span>
+                              <span class="rc-sub">FCL 20'</span>
+                            </span>
+                          </label>
+                          <label class="radio-card">
+                            <input type="radio" name="containerType" value="40ft">
+                            <span class="rc-body">
+                              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="7" width="20" height="10" rx="1"/><path d="M6 7v10M10 7v10M14 7v10M18 7v10"/></svg>
+                              <span class="rc-title">حاوية 40 قدم</span>
+                              <span class="rc-sub">FCL 40' / HC</span>
+                            </span>
+                          </label>
+                          <label class="radio-card">
+                            <input type="radio" name="containerType" value="LCL">
+                            <span class="rc-body">
+                              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="11" width="8" height="8" rx="1"/><rect x="13" y="11" width="8" height="8" rx="1"/><rect x="8" y="3" width="8" height="8" rx="1"/></svg>
+                              <span class="rc-title">بضائع مجمّعة</span>
+                              <span class="rc-sub">LCL — جزء من حاوية</span>
+                            </span>
+                          </label>
+                        </div>
+                      </fieldset>
+                      <div class="form-group">
+                        <label class="form-label" for="f-container-numbers">أرقام الحاويات <span class="opt">(اختياري)</span></label>
+                        <textarea class="form-control num" id="f-container-numbers" name="containerNumbers" dir="ltr" rows="2" maxlength="1200" placeholder="MSCU1234565, TGHU7304186"></textarea>
+                        <span class="form-hint">رقم الحاوية وفق ISO 6346: أربعة أحرف ثم سبعة أرقام (مثل MSCU1234565). افصل بين الأرقام بفاصلة أو سطر جديد.</span>
+                        <span class="form-warn" id="f-container-numbers-warn" role="status" hidden></span>
+                        <span class="form-error" id="f-container-numbers-err"></span>
+                      </div>
+                    </div>
+                    <div class="form-row">
+                      <div class="form-group" id="g-count">
+                        <label class="form-label" for="f-count" id="f-count-label">عدد الحاويات <span class="req" aria-hidden="true">*</span></label>
+                        <input class="form-control num" id="f-count" name="count" type="number" min="1" max="500" step="1" inputmode="numeric" value="1" required>
+                        <span class="form-hint" id="f-count-hint">عدد الحاويات بنفس النوع في الشحنة.</span>
+                        <span class="form-error" id="f-count-err"></span>
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label" for="f-eta">تاريخ الوصول المتوقع <span class="opt">(اختياري)</span></label>
+                        <input class="form-control" id="f-eta" name="eta" type="date">
+                        <span class="form-error" id="f-eta-err"></span>
+                      </div>
+                    </div>
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label class="form-label" for="f-bl-number" id="f-bl-number-label">رقم البوليصة <span class="opt">(اختياري)</span></label>
+                        <input class="form-control num" id="f-bl-number" name="blNumber" type="text" dir="ltr" autocomplete="off" placeholder="مثال: MEDU1234567" maxlength="40">
+                        <span class="form-hint">رقم بوليصة الشحن (B/L) أو الشحن الجوي (AWB) أو مستند النقل البري، إن وُجد.</span>
+                        <span class="form-error" id="f-bl-number-err"></span>
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label" for="f-shipping-line" id="f-shipping-line-label">الخط الملاحي <span class="opt">(اختياري)</span></label>
+                        <input class="form-control" id="f-shipping-line" name="shippingLine" type="text" autocomplete="off" placeholder="مثال: اسم الخط الملاحي أو شركة الطيران أو الناقل" maxlength="80">
+                        <span class="form-error" id="f-shipping-line-err"></span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- ============ STEP 3: documents ============ -->
+                <div class="form-step" data-step="3" id="step-3">
+                  <div class="step-head">
+                    <span class="icon-box icon-box-sm icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M20 16v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3"/></svg></span>
+                    <div>
+                      <h2 tabindex="-1">المستندات</h2>
+                      <p>اسحب الملفات وأفلتها في المكان المناسب أو اضغط للاختيار. الصيغ المقبولة: PDF، JPG، PNG، Word، Excel — بحد أقصى 10 ميجابايت للملف.</p>
+                    </div>
+                  </div>
+
+                  <div class="demo-note mb-3">
+                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+                    <span>ملفاتك لا تُرفع لأي خادم: في هذه النسخة التجريبية المحلية يتم تسجيل أسماء الملفات وأحجامها فقط على جهازك.</span>
+                  </div>
+
+                  <div class="doc-grid">
+                    <div class="form-group" data-doc="invoice" data-required="true">
+                      <label class="form-label" for="doc-invoice">الفاتورة التجارية <span class="text-xs text-muted" dir="ltr">Commercial Invoice</span> <span class="req" aria-hidden="true">*</span></label>
+                      <div class="dropzone">
+                        <input type="file" id="doc-invoice" multiple accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" aria-describedby="doc-invoice-sub">
+                        <span class="icon-box icon-box-sm"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></span>
+                        <p class="dropzone-title">اسحب الفاتورة هنا أو اضغط للاختيار</p>
+                        <p class="dropzone-sub" id="doc-invoice-sub">موضّح بها القيمة وبلد المنشأ وشروط التسليم</p>
+                      </div>
+                      <ul class="file-list" aria-live="polite"></ul>
+                      <span class="form-error"></span>
+                    </div>
+
+                    <div class="form-group" data-doc="bl" data-required="true">
+                      <label class="form-label" for="doc-bl"><span id="bl-label-text">بوليصة الشحن</span> <span class="text-xs text-muted" dir="ltr" id="bl-label-en">B/L</span> <span class="req" aria-hidden="true">*</span></label>
+                      <div class="dropzone">
+                        <input type="file" id="doc-bl" multiple accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" aria-describedby="doc-bl-sub">
+                        <span class="icon-box icon-box-sm"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17c1.5 1.3 3 1.3 4.5 0s3-1.3 4.5 0 3 1.3 4.5 0 3-1.3 4.5 0"/><path d="M5 14 4 10h16l-2 4"/><path d="M8 10V6h6v4"/></svg></span>
+                        <p class="dropzone-title">اسحب البوليصة هنا أو اضغط للاختيار</p>
+                        <p class="dropzone-sub" id="doc-bl-sub">بوليصة الشحن البحري B/L أو الجوي AWB أو مستند النقل البري</p>
+                      </div>
+                      <ul class="file-list" aria-live="polite"></ul>
+                      <span class="form-error"></span>
+                    </div>
+
+                    <div class="form-group" data-doc="packing">
+                      <label class="form-label" for="doc-packing">قائمة التعبئة <span class="text-xs text-muted" dir="ltr">Packing List</span></label>
+                      <div class="dropzone">
+                        <input type="file" id="doc-packing" multiple accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" aria-describedby="doc-packing-sub">
+                        <span class="icon-box icon-box-sm"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg></span>
+                        <p class="dropzone-title">اسحب قائمة التعبئة هنا</p>
+                        <p class="dropzone-sub" id="doc-packing-sub">الأوزان القائمة والصافية وعدد الطرود</p>
+                      </div>
+                      <ul class="file-list" aria-live="polite"></ul>
+                      <span class="form-error"></span>
+                    </div>
+
+                    <div class="form-group" data-doc="origin">
+                      <label class="form-label" for="doc-origin">شهادة المنشأ <span class="text-xs text-muted" dir="ltr">Certificate of Origin</span></label>
+                      <div class="dropzone">
+                        <input type="file" id="doc-origin" multiple accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" aria-describedby="doc-origin-sub">
+                        <span class="icon-box icon-box-sm"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9" r="5"/><path d="m9 13.5-1.5 7.5 4.5-2.5 4.5 2.5-1.5-7.5"/></svg></span>
+                        <p class="dropzone-title">اسحب شهادة المنشأ هنا</p>
+                        <p class="dropzone-sub" id="doc-origin-sub">مثل شهادة منشأ دول مجلس التعاون أو منطقة التجارة الحرة العربية الكبرى للاستفادة من الإعفاءات</p>
+                      </div>
+                      <ul class="file-list" aria-live="polite"></ul>
+                      <span class="form-error"></span>
+                    </div>
+
+                    <div class="form-group doc-wide" data-doc="saber">
+                      <label class="form-label" for="doc-saber">شهادة المطابقة (سابر) <span class="text-xs text-muted" dir="ltr">SABER</span> <span class="opt">(عند الحاجة)</span></label>
+                      <div class="dropzone">
+                        <input type="file" id="doc-saber" multiple accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" aria-describedby="doc-saber-sub">
+                        <span class="icon-box icon-box-sm"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></span>
+                        <p class="dropzone-title">اسحب شهادة المطابقة هنا أو اضغط للاختيار</p>
+                        <p class="dropzone-sub" id="doc-saber-sub">شهادة مطابقة المنتج وشهادة الإرسالية الصادرة عبر منصة سابر التابعة للهيئة السعودية للمواصفات والمقاييس والجودة (SASO) للمنتجات الخاضعة للوائح الفنية</p>
+                      </div>
+                      <ul class="file-list" aria-live="polite"></ul>
+                      <span class="form-error"></span>
+                    </div>
+
+                    <div class="form-group doc-wide" data-doc="other">
+                      <label class="form-label" for="doc-other">مستندات أخرى <span class="opt">(اختياري)</span></label>
+                      <div class="dropzone">
+                        <input type="file" id="doc-other" multiple accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" aria-describedby="doc-other-sub">
+                        <span class="icon-box icon-box-sm"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.5 12.6 21a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg></span>
+                        <p class="dropzone-title">موافقات استيرادية، تصاريح، أو أي مستند إضافي</p>
+                        <p class="dropzone-sub" id="doc-other-sub">مثل موافقة الهيئة العامة للغذاء والدواء (SFDA) أو التفويض الجمركي</p>
+                      </div>
+                      <ul class="file-list" aria-live="polite"></ul>
+                      <span class="form-error"></span>
+                    </div>
+                  </div>
+
+                  <label class="check mt-3">
+                    <input type="checkbox" name="docsLater" id="f-docs-later">
+                    <span>المستندات غير جاهزة الآن — سأرسلها لاحقًا عبر البريد أو واتساب بعد التواصل معي.</span>
+                  </label>
+                </div>
+
+                <!-- ============ STEP 4: review ============ -->
+                <div class="form-step" data-step="4" id="step-4">
+                  <div class="step-head">
+                    <span class="icon-box icon-box-sm icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg></span>
+                    <div>
+                      <h2 tabindex="-1">مراجعة وتأكيد</h2>
+                      <p>راجع بيانات طلبك قبل الحفظ. يمكنك الرجوع إلى أي خطوة وتعديلها. في نسخة العرض التجريبية يُحفظ الطلب على هذا الجهاز فقط ولا يُرسل.</p>
+                    </div>
+                  </div>
+
+                  <div class="review-grid" id="review"></div>
+
+                  <div class="form mt-3">
+                    <div class="form-group">
+                      <label class="form-label" for="f-notes">ملاحظات إضافية <span class="opt">(اختياري)</span></label>
+                      <textarea class="form-control" id="f-notes" name="notes" maxlength="500" placeholder="أي تفاصيل تهمّنا: مواعيد مطلوبة، اشتراطات خاصة بالبضاعة، أو أسئلة لفريق التخليص."></textarea>
+                    </div>
+                    <div class="form-group" id="g-terms">
+                      <label class="check">
+                        <input type="checkbox" name="terms" id="f-terms">
+                        <span>أقر بصحة البيانات المدخلة، وأوافق على <a href="about.html#faq">شروط الخدمة</a> وعلى تواصل فريق مرسى معي بخصوص هذا الطلب. وأعلم أن مرسى منصة خاصة لخدمات التخليص وغير تابعة لأي جهة حكومية، وأن الرسوم النهائية تحددها هيئة الزكاة والضريبة والجمارك.</span>
+                      </label>
+                      <span class="form-error" id="f-terms-err"></span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="form-nav">
+                  <button type="button" class="btn btn-ghost" id="btn-prev" hidden>
+                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                    السابق
+                  </button>
+                  <span class="req-spacer" aria-hidden="true"></span>
+                  <button type="button" class="btn btn-primary" id="btn-next">
+                    التالي
+                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
+                  </button>
+                  <button type="submit" class="btn btn-primary" id="btn-submit" hidden>
+                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></svg>
+                    حفظ الطلب (نسخة عرض تجريبية)
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <!-- ===== Success state ===== -->
+            <div class="form-success" id="request-success" hidden tabindex="-1" aria-live="polite">
+              <div class="success-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></div>
+              <h3>تم حفظ الطلب محليًا</h3>
+              <p class="text-muted mb-0">تم الحفظ محليًا على هذا الجهاز (نسخة عرض تجريبية) — لم يُرسل إلى أي جهة. يمكنك استخدام الرقم المرجعي المحلي التالي لعرض الطلب في صفحة التتبع على هذا المتصفح فقط.</p>
+              <div class="ref-code"><span id="success-ref">MRS-2026-XXXXXX</span>
+                <button type="button" class="ref-copy" id="btn-copy-ref" aria-label="نسخ الرقم المرجعي المحلي">
+                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>
+                </button>
+              </div>
+              <ul class="kv success-kv mx-auto" id="success-kv"></ul>
+              <div class="btn-group success-actions">
+                <a class="btn btn-primary" id="success-track" href="tracking.html">
+                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                  عرض الطلب في التتبع
+                </a>
+                <button type="button" class="btn btn-ghost" id="btn-new-request">طلب تخليص جديد</button>
+                <a class="btn btn-ghost" href="index.html">العودة للرئيسية</a>
+              </div>
+              <div class="demo-note mt-3 success-note">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 16v-4M12 8h.01"/></svg>
+                <span>نسخة عرض تجريبية: حُفظ الطلب في متصفحك فقط (localStorage) ولم يُرسل إلى أي خادم أو جهة، ولن يتواصل معك أحد بشأنه.</span>
+              </div>
+            </div>
+
+            <!-- ===== Save-failed state (no reference is shown) ===== -->
+            <div class="alert alert-danger req-save-error mt-3" id="request-save-error" role="alert" tabindex="-1" hidden>
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="m15 9-6 6M9 9l6 6"/></svg>
+              <div>
+                <strong>تعذّر حفظ الطلب على هذا الجهاز.</strong>
+                <p class="mb-0">لم يُحفظ الطلب ولم يُنشأ له رقم مرجعي، ولم يُرسل إلى أي جهة (نسخة عرض تجريبية). قد يكون التخزين المحلي معطّلًا أو ممتلئًا أو أنك تستخدم نافذة تصفح خاصة. بياناتك ما زالت في النموذج؛ فعّل التخزين ثم اضغط «حفظ الطلب» مرة أخرى.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== Sidebar ===== -->
+          <aside class="req-aside sticky" aria-label="معلومات مساعدة">
+            <div class="card calc-card mb-3" id="calc-card" hidden>
+              <div class="flex items-center gap-2 mb-2">
+                <span class="icon-box icon-box-sm"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15v3M8 18h4"/></svg></span>
+                <div>
+                  <h3 class="mb-0 aside-title">تقدير الرسوم من الحاسبة</h3>
+                  <span class="text-xs text-muted">مرفق تلقائيًا مع طلبك</span>
+                </div>
+              </div>
+              <ul class="kv" id="calc-kv"></ul>
+              <div class="flex flex-wrap gap-1 mt-2">
+                <a class="btn btn-ghost btn-sm" href="calculator.html">إعادة الحساب</a>
+                <button type="button" class="btn btn-ghost btn-sm" id="btn-calc-detach">عدم إرفاقه</button>
+              </div>
+            </div>
+
+            <div class="card mb-3">
+              <h3 class="aside-title">جهّز قبل أن تبدأ</h3>
+              <ul class="check-list text-sm">
+                <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>الفاتورة التجارية وبوليصة الشحن (B/L أو AWB)</span></li>
+                <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>قائمة التعبئة بالأوزان وعدد الطرود</span></li>
+                <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>شهادة المنشأ إذا كانت البضاعة مستفيدة من اتفاقية تجارية</span></li>
+                <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>شهادة المطابقة عبر منصة سابر (SABER) للمنتجات الخاضعة للوائح الفنية</span></li>
+                <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>رقم البيان الجمركي المسبق عبر منصة فسح — أو نقدّمه لك</span></li>
+                <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>السجل التجاري، شهادة التسجيل في ضريبة القيمة المضافة، ورمز المستورد في فسح</span></li>
+              </ul>
+              <hr class="divider">
+              <ul class="kv">
+                <li><span class="k">مدة تعبئة الطلب</span><span class="v">5 دقائق تقريبًا</span></li>
+                <li><span class="k">الرد بعرض السعر</span><span class="v">غير متاح في نسخة العرض التجريبية</span></li>
+                <li><span class="k">ضريبة القيمة المضافة</span><span class="v num">15%</span></li>
+              </ul>
+              <a class="link-arrow mt-2" href="calculator.html">احسب الرسوم التقديرية أولًا
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
+              </a>
+            </div>
+
+            <div class="card help-card">
+              <span class="icon-box icon-box-sm icon-box-white mb-2"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 14v-2a9 9 0 0 1 18 0v2"/><path d="M21 15a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2zM3 15a2 2 0 0 0 2 2h1v-6H5a2 2 0 0 0-2 2z"/><path d="M18 17a4 4 0 0 1-4 4h-2"/></svg></span>
+              <h3 class="aside-title">هل تحتاج إلى مساعدة في الطلب؟</h3>
+              <p class="text-sm">فريق الدعم متاح الأحد – الخميس: 8 ص – 5 م.</p>
+              <a class="btn btn-white btn-block btn-sm" href="tel:+966126143270"><span dir="ltr">+966 12 614 3270</span></a>
+              <a class="btn btn-outline-white btn-block btn-sm mt-1" href="https://wa.me/966554821937" target="_blank" rel="noopener">واتساب <span dir="ltr">+966 55 482 1937</span></a>
+              <a class="btn btn-outline-white btn-block btn-sm mt-1" href="contact.html">راسلنا</a>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-white" aria-labelledby="next-title">
+      <div class="container">
+        <div class="section-head text-center reveal">
+          <span class="eyebrow">في الخدمة الفعلية</span>
+          <h2 id="next-title">ماذا يحدث بعد تقديم الطلب؟</h2>
+          <p class="lead">هكذا تسير المعاملة عند تشغيل الخدمة الفعلية. أما نسخة العرض التجريبية الحالية فلا تُرسل الطلبات إلى أي جهة.</p>
+        </div>
+        <div class="steps">
+          <div class="step-card reveal">
+            <span class="step-num" aria-hidden="true">01</span>
+            <span class="icon-box icon-box-lg"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><circle cx="11" cy="14" r="2.5"/><path d="m13 16 2 2"/></svg></span>
+            <h3>مراجعة المستندات</h3>
+            <p>نراجع الفاتورة والبوليصة وشهادة المطابقة، ونتأكد من تطابق البيانات مع البيان الجمركي المسبق في منصة فسح.</p>
+          </div>
+          <div class="step-card reveal" data-delay="1">
+            <span class="step-num" aria-hidden="true">02</span>
+            <span class="icon-box icon-box-lg"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7"/><circle cx="18" cy="16" r="3"/></svg></span>
+            <h3>تصنيف وتقدير الرسوم</h3>
+            <p>نحدد البند الجمركي HS Code ونرسل لك عرض سعر بالرسوم التقديرية وضريبة القيمة المضافة 15% وأتعابنا بالريال السعودي.</p>
+          </div>
+          <div class="step-card reveal" data-delay="2">
+            <span class="step-num" aria-hidden="true">03</span>
+            <span class="icon-box icon-box-lg"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></span>
+            <h3>الإجراءات والمعاينة</h3>
+            <p>نقدّم البيان الجمركي عبر منصة فسح ونتابع المعاينة والفحص مع الجهات المختصة نيابةً عنك.</p>
+          </div>
+          <div class="step-card reveal" data-delay="3">
+            <span class="step-num" aria-hidden="true">04</span>
+            <span class="icon-box icon-box-lg"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h11v10H3zM14 9h4l3 3v4h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg></span>
+            <h3>الإفراج والتسليم</h3>
+            <p>بعد سداد الرسوم يصدر إذن الفسح، ويمكنك متابعة كل خطوة برقمك المرجعي.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <!-- ============ FOOTER (shared) ============ -->
+  <footer class="site-footer footer-after-white">
+    <svg class="footer-wave" viewBox="0 0 1440 80" preserveAspectRatio="none" aria-hidden="true">
+      <path class="fw-fill" d="M0,0 L1440,0 L1440,30 C1200,75 960,10 720,40 C480,70 240,15 0,45 Z"/>
+    </svg>
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="footer-logo" href="index.html" aria-label="مرسى - الصفحة الرئيسية">
+            <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="107" height="74">
+          </a>
+          <p>مرسى منصة سعودية لخدمات التخليص الجمركي والشحن أونلاين، تساعد المستوردين والمصدّرين في المملكة على تخليص شحناتهم بسرعة وشفافية.</p>
+          <div class="social">
+            <a href="contact.html" aria-label="فيسبوك"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h-2.5A3.5 3.5 0 0 0 9 6.5V9H7v3.5h2V21h3.5v-8.5H15l.5-3.5h-3V7a1 1 0 0 1 1-1H15z"/></svg></a>
+            <a href="contact.html" aria-label="لينكدإن"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 10v7M8 7v.01M12 17v-4a2 2 0 0 1 4 0v4M12 10v7"/></svg></a>
+            <a href="https://wa.me/966554821937" target="_blank" rel="noopener" aria-label="واتساب"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/><path d="M9 9.5c.3 1.8 2 3.8 4 4.5l1-1 2 .8"/></svg></a>
+          </div>
+        </div>
+        <div class="footer-col">
+          <h3>روابط سريعة</h3>
+          <ul class="footer-links">
+            <li><a href="index.html">الرئيسية</a></li>
+            <li><a href="services.html">خدماتنا</a></li>
+            <li><a href="about.html">من نحن</a></li>
+            <li><a href="about.html#faq">الأسئلة الشائعة</a></li>
+            <li><a href="contact.html">تواصل معنا</a></li>
+            <li><a href="login.html#client">دخول العملاء</a></li>
+            <li><a href="login.html#staff">دخول الموظفين</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h3>أدوات المنصة</h3>
+          <ul class="footer-links">
+            <li><a href="request.html">اطلب تخليص</a></li>
+            <li><a href="calculator.html">حاسبة الرسوم الجمركية</a></li>
+            <li><a href="tracking.html">تتبع الشحنة</a></li>
+            <li><a href="bulk-upload.html">الرفع الجماعي (Excel / CSV)</a></li>
+            <li><a href="services.html#aci">البيان المسبق ومنصة فسح</a></li>
+            <li><a href="services.html#hs">تصنيف HS Code</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h3>تواصل معنا</h3>
+          <ul class="footer-contact">
+            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg><span>طريق الملك عبدالعزيز، حي الحمراء – جدة</span></li>
+            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><a href="tel:+966126143270" dir="ltr">+966 12 614 3270</a></li>
+            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><a href="mailto:info@marsa-sa.com" dir="ltr">info@marsa-sa.com</a></li>
+            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/><path d="M9 9.5c.3 1.8 2 3.8 4 4.5l1-1 2 .8"/></svg><a href="https://wa.me/966554821937" target="_blank" rel="noopener" dir="ltr">+966 55 482 1937</a></li>
+            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>الأحد – الخميس: 8 ص – 5 م</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="container footer-privacy">
+      <p><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg><span><strong>الخصوصية في نسخة العرض:</strong> ما تُدخله في النماذج والحاسبة يبقى في التخزين المحلي (localStorage) لهذا المتصفح فقط، دون تشفير ودون إرسال إلى أي خادم، فلا تُدخل بيانات حقيقية حساسة. يُحمَّل خط الموقع من خدمة Google Fonts، لذا يتصل متصفحك بخوادم Google عند فتح الصفحات.</span></p>
+      <button class="btn btn-sm btn-outline-white" type="button" data-clear-local>مسح بياناتي من هذا الجهاز</button>
+    </div>
+    <div class="container footer-bottom">
+      <span>© <span id="year">2026</span> مرسى MARSA. جميع الحقوق محفوظة.</span>
+      <span>منصة خاصة لخدمات التخليص الجمركي — غير تابعة لأي جهة حكومية.</span>
+    </div>
+  </footer>
+  <button class="to-top" type="button" aria-label="العودة لأعلى الصفحة">
+    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+  </button>
+  <!-- ============ /FOOTER ============ -->
+  <script src="assets/js/main.js" defer></script>
+  <script src="assets/js/request.js" defer></script>
+</body>
+</html>

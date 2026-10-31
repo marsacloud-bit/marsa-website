@@ -1,0 +1,89 @@
+/* =====================================================================
+   مرسى | MARSA — contact.html page styles (loaded after style.css)
+   ===================================================================== */
+
+.contact-channels { padding-bottom: clamp(36px, 5vw, 56px); }
+
+/* ---- Contact channel cards ---- */
+.contact-cards {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 18px;
+}
+.contact-card { display: flex; flex-direction: column; align-items: flex-start; padding: 24px 22px; box-shadow: var(--shadow); }
+.contact-card h3 { font-size: var(--fs-md); margin: 16px 0 4px; }
+.contact-card p { color: var(--muted); font-size: var(--fs-xs); margin: 0 0 12px; flex: 1; }
+.contact-value { font-weight: 800; color: var(--navy); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+a.contact-value:hover { color: var(--teal); }
+.open-status { font-weight: 700; }
+.open-status.is-closed { background: var(--warning-bg); color: #9A6905; }
+@media (max-width: 1100px) { .contact-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .contact-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---- Form card ---- */
+.contact-layout { grid-template-columns: minmax(0, 1fr) 380px; }
+@media (max-width: 1024px) { .contact-layout { grid-template-columns: 1fr; } }
+.contact-form-card { padding: clamp(22px, 4vw, 40px); }
+.contact-form-card .section-head h2 { font-size: var(--fs-xl); }
+.message-meta { gap: 12px; min-height: 20px; }
+.message-meta .form-hint { margin-inline-start: auto; }
+.message-meta .form-hint.is-near { color: var(--warning); font-weight: 700; }
+.contact-form-card .demo-note { max-width: 360px; }
+.success-note { max-width: 460px; text-align: start; }
+.form-success h3 { margin-bottom: 8px; }
+.form-success:focus { outline: none; box-shadow: none; }
+
+/* ---- Map placeholder ---- */
+.map-card { box-shadow: var(--shadow); }
+.map-canvas { position: relative; aspect-ratio: 4 / 3; background: var(--grad-sea); overflow: hidden; }
+.map-svg { width: 100%; height: 100%; }
+.map-title { font-size: var(--fs-base); margin: 0; }
+.map-pin { cursor: pointer; transition: opacity .3s; }
+.map-pin circle:last-child { transition: r .3s, fill .3s; }
+.map-pin.is-active circle:last-child { fill: var(--teal); r: 9; }
+.map-pin .pin-pulse { transform-box: fill-box; transform-origin: center; opacity: 0; }
+.map-pin.is-active .pin-pulse { opacity: .3; animation: pinPulse 2s var(--ease) infinite; }
+.map-ship { animation: shipSail 14s ease-in-out infinite alternate; }
+.map-route { animation: routeDash 2.4s linear infinite; }
+@keyframes pinPulse { 0% { transform: scale(.6); opacity: .45; } 100% { transform: scale(1.9); opacity: 0; } }
+@keyframes shipSail { from { transform: translate(75px, 230px); } to { transform: translate(28px, 150px); } }
+@keyframes routeDash { to { stroke-dashoffset: -24; } }
+
+/* ---- Aside ---- */
+.aside-title { font-size: var(--fs-md); margin-bottom: 4px; }
+.faq-links { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.faq-links a {
+  display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 12px;
+  color: var(--navy-dark); font-weight: 600; font-size: var(--fs-sm); line-height: 1.6;
+  transition: background .2s, color .2s;
+}
+.faq-links a:hover { background: rgba(20, 163, 168, .07); color: var(--teal); }
+.faq-links .icon { color: var(--teal); width: 20px; height: 20px; margin-top: 2px; }
+
+/* ---- Branch cards ---- */
+.branch-card { display: flex; flex-direction: column; gap: 10px; cursor: pointer; background: var(--bg); box-shadow: none; }
+.branch-card h3 { margin: 6px 0 0; font-size: var(--fs-lg); }
+.branch-desc { color: var(--muted); font-size: var(--fs-sm); margin: 0; flex: 1; }
+.branch-meta { list-style: none; margin: 0; padding: 12px 0 0; border-top: 1px dashed var(--border-strong); display: grid; gap: 6px; font-size: var(--fs-sm); }
+.branch-meta li { display: flex; align-items: center; gap: 8px; }
+.branch-meta .icon { width: 18px; height: 18px; color: var(--teal); }
+.branch-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.branch-tags .chip { font-size: var(--fs-xs); padding: 3px 10px; }
+.branch-card.is-selected { background: #fff; border-color: var(--teal); box-shadow: 0 0 0 1px var(--teal), var(--shadow); }
+
+@media (prefers-reduced-motion: reduce) {
+  .map-ship, .map-route, .map-pin.is-active .pin-pulse { animation: none; }
+}
+.branch-btn { align-self: flex-start; margin-top: 4px; }
+.branch-btn[aria-pressed="true"] { border-color: var(--teal); color: var(--teal); background: rgba(20, 163, 168, .06); }
+
+/* compact channel cards on phones: icon beside text */
+@media (max-width: 560px) {
+  .contact-cards { grid-template-columns: 1fr; gap: 12px; }
+  .contact-card { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 14px; align-items: start; padding: 16px 18px; }
+  .contact-card .icon-box { grid-row: span 4; width: 46px; height: 46px; border-radius: 14px; }
+  .contact-card .icon-box .icon { width: 22px; height: 22px; }
+  .contact-card h3 { margin: 0; }
+  .contact-card p { margin-bottom: 6px; }
+  .contact-card .open-status { justify-self: start; }
+}
+.map-card .badge { white-space: nowrap; flex-shrink: 0; }
