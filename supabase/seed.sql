@@ -1,4 +1,11 @@
 -- =====================================================================
+DO $guard$
+BEGIN
+  -- stops immediately if the Arabic text was pasted with the wrong encoding
+  IF 'جديد' <> U&'\062C\062F\064A\062F' THEN
+    RAISE EXCEPTION 'ENCODING ERROR: Arabic text was pasted incorrectly (not UTF-8). Nothing was changed.';
+  END IF;
+END $guard$;
 -- Marsa — STAGING SEED. Fictional test data only. NO real personal data.
 -- Safe to re-run (fixed UUIDs + ON CONFLICT DO NOTHING).
 --

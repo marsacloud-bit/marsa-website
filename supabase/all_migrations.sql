@@ -1,4 +1,11 @@
 -- Marsa staging: all migrations in order (generated from supabase/migrations). Paste into Supabase SQL Editor and Run.
+DO $guard$
+BEGIN
+  -- stops immediately if the Arabic text was pasted with the wrong encoding
+  IF 'جديد' <> U&'\062C\062F\064A\062F' THEN
+    RAISE EXCEPTION 'ENCODING ERROR: Arabic text was pasted incorrectly (not UTF-8). Nothing was changed.';
+  END IF;
+END $guard$;
 
 -- ===== migrations/20261031000100_core_tenancy.sql =====
 -- =====================================================================

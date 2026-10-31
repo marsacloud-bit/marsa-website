@@ -17,8 +17,8 @@
    Load order on every page:  config.js → main.js → supa.js → <page>.js
    ========================================================================== */
 window.MARSA_CONFIG = {
-  supabaseUrl: '',
-  supabaseAnonKey: '',
+  supabaseUrl: 'https://cgzhidyxfpksfckwmauq.supabase.co',
+  supabaseAnonKey: 'sb_publishable_LDvCFb0-OLizS2e62cWsHg_xNSf9U5j',
   orgSlug: 'blue-sea',
   environment: 'staging'
 };
