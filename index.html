@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl" class="no-js">
+<html lang="ar" dir="rtl" class="no-js" data-i18n-page>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,6 +10,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <!-- i18n: set lang/dir before first paint (same rule as assets/js/i18n.js; it stays authoritative) -->
+  <script>(function(){try{if(localStorage.getItem('marsa_lang')==='en'){var h=document.documentElement;h.setAttribute('lang','en');h.setAttribute('dir','ltr');}}catch(e){}})();</script>
   <link rel="stylesheet" href="assets/css/style.css">
 </head>
 <body data-page="index">
@@ -32,27 +34,28 @@
   </div>
   <header class="site-header">
     <div class="container header-inner">
-      <a class="brand" href="index.html" aria-label="مرسى - الصفحة الرئيسية">
-        <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="84" height="58">
+      <a class="brand" href="index.html" aria-label="مرسى - الصفحة الرئيسية" data-i18n-attr="aria-label:nav.homeAria">
+        <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="84" height="58" data-i18n-attr="alt:nav.logoAlt">
       </a>
-      <nav class="main-nav" aria-label="القائمة الرئيسية">
+      <nav class="main-nav" aria-label="القائمة الرئيسية" data-i18n-attr="aria-label:nav.mainMenu">
         <ul class="nav-list">
-          <li><a class="nav-link" href="index.html">الرئيسية</a></li>
-          <li><a class="nav-link" href="services.html">خدماتنا</a></li>
-          <li><a class="nav-link" href="calculator.html">حاسبة الرسوم</a></li>
-          <li><a class="nav-link" href="tracking.html">تتبع الشحنة</a></li>
-          <li><a class="nav-link" href="bulk-upload.html">الرفع الجماعي</a></li>
-          <li><a class="nav-link" href="ocr.html">قراءة المستندات</a></li>
-          <li><a class="nav-link" href="about.html">من نحن</a></li>
-          <li><a class="nav-link" href="contact.html">تواصل معنا</a></li>
+          <li><a class="nav-link" href="index.html" data-i18n="nav.home">الرئيسية</a></li>
+          <li><a class="nav-link" href="services.html" data-i18n="nav.services">خدماتنا</a></li>
+          <li><a class="nav-link" href="calculator.html" data-i18n="nav.calculator">حاسبة الرسوم</a></li>
+          <li><a class="nav-link" href="tracking.html" data-i18n="nav.tracking">تتبع الشحنة</a></li>
+          <li><a class="nav-link" href="bulk-upload.html" data-i18n="nav.bulk">الرفع الجماعي</a></li>
+          <li><a class="nav-link" href="ocr.html" data-i18n="nav.ocr">قراءة المستندات</a></li>
+          <li><a class="nav-link" href="about.html" data-i18n="nav.about">من نحن</a></li>
+          <li><a class="nav-link" href="contact.html" data-i18n="nav.contact">تواصل معنا</a></li>
+          <li data-platform-only hidden><a class="nav-link" href="platform.html" data-platform-only hidden data-i18n="nav.platform">لوحة المنصة</a></li>
         </ul>
       </nav>
       <div class="header-actions">
-        <a class="btn btn-primary btn-cta" href="request.html">
+        <a class="btn btn-primary btn-cta" href="request.html" data-i18n="nav.request">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/></svg>
           اطلب تخليص
         </a>
-        <button class="nav-toggle" type="button" aria-label="فتح القائمة" aria-expanded="false" aria-controls="mobile-drawer">
+        <button class="nav-toggle" type="button" aria-label="فتح القائمة" data-i18n-attr="aria-label:nav.openMenu" aria-expanded="false" aria-controls="mobile-drawer">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
         </button>
       </div>
@@ -105,68 +108,68 @@
       <div class="container">
         <div class="hero-grid">
           <div class="hero-copy">
-            <span class="eyebrow reveal">
+            <span class="eyebrow reveal" data-i18n="index.hero1">
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>
               تخليص جمركي رقمي من أول مستند حتى باب مستودعك
             </span>
-            <h1 id="hero-title" class="reveal" data-delay="1">شحنتك تصل إلى <span class="text-gradient">مرسى الأمان</span> أسرع ودون تعقيد</h1>
-            <p class="lead reveal" data-delay="2">مرسى منصة سعودية تنظّم تخليص شحناتك الواردة والصادرة أونلاين بالتعاون مع مخلّصين جمركيين مرخّصين: تجهيز البيان الجمركي المسبق عبر منصة فسح، وتصنيف البنود وفق HS Code، وتقدير الرسوم مقدمًا، ومتابعة حالة المعاملة.</p>
+            <h1 id="hero-title" class="reveal" data-delay="1" data-i18n-html="index.heroTitle">شحنتك تصل إلى <span class="text-gradient">مرسى الأمان</span> أسرع ودون تعقيد</h1>
+            <p class="lead reveal" data-delay="2" data-i18n="index.hero3">مرسى منصة سعودية تنظّم تخليص شحناتك الواردة والصادرة أونلاين بالتعاون مع مخلّصين جمركيين مرخّصين: تجهيز البيان الجمركي المسبق عبر منصة فسح، وتصنيف البنود وفق HS Code، وتقدير الرسوم مقدمًا، ومتابعة حالة المعاملة.</p>
             <div class="btn-group reveal" data-delay="3">
-              <a class="btn btn-primary btn-lg" href="request.html">
+              <a class="btn btn-primary btn-lg" href="request.html" data-i18n="index.hero4">
                 ابدأ طلب التخليص
                 <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
               </a>
-              <a class="btn btn-outline-white btn-lg" href="calculator.html">
+              <a class="btn btn-outline-white btn-lg" href="calculator.html" data-i18n="index.hero5">
                 <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15v3M8 18h4"/></svg>
                 احسب رسومك الجمركية
               </a>
             </div>
             <ul class="hero-points reveal" data-delay="4">
-              <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>تخليص عبر مخلّصين جمركيين مرخّصين</li>
-              <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>تسعير واضح بالريال السعودي</li>
-              <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>متابعة حالة المعاملة عبر بوابة العميل (قريبًا)</li>
+              <li data-i18n="index.hero6"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>تخليص عبر مخلّصين جمركيين مرخّصين</li>
+              <li data-i18n="index.hero7"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>تسعير واضح بالريال السعودي</li>
+              <li data-i18n="index.hero8"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>متابعة حالة المعاملة عبر بوابة العميل (قريبًا)</li>
             </ul>
           </div>
 
           <div class="hero-visual reveal" data-delay="2">
-            <div class="shipment-card" aria-label="مثال لبطاقة متابعة شحنة">
+            <div class="shipment-card" aria-label="مثال لبطاقة متابعة شحنة" data-i18n-attr="aria-label:index.hero30">
               <div class="sc-head">
                 <div>
-                  <div class="sc-sub">رقم المرجع · مثال توضيحي</div>
+                  <div class="sc-sub" data-i18n="index.hero9">رقم المرجع · مثال توضيحي</div>
                   <div class="sc-id">MRS-2026-A7K3Q9</div>
                 </div>
-                <span class="badge badge-teal"><span class="dot dot-pulse"></span>جاري التخليص</span>
+                <span class="badge badge-teal" data-i18n="index.heroBadge"><span class="dot dot-pulse"></span>جاري التخليص</span>
               </div>
               <div class="sc-route">
-                <div class="port">شنغهاي<small dir="ltr">Shanghai, CN</small></div>
+                <div class="port" data-i18n="index.heroFrom">شنغهاي<small dir="ltr">Shanghai, CN</small></div>
                 <div class="line"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15h16l-2 4H6z"/><path d="M6 15v-4h12v4M9 11V8h6v3"/><path d="M12 5v3"/></svg></div>
-                <div class="port">جدة<small>ميناء جدة الإسلامي</small></div>
+                <div class="port" data-i18n="index.heroTo">جدة<small data-i18n="index.hero10">ميناء جدة الإسلامي</small></div>
               </div>
-              <div class="progress-meta"><span>نسبة الإنجاز (توضيحي)</span><span class="num">72%</span></div>
+              <div class="progress-meta"><span data-i18n="index.hero11">نسبة الإنجاز (توضيحي)</span><span class="num">72%</span></div>
               <div class="progress mb-3"><div class="progress-bar" data-width="72"></div></div>
               <ol class="timeline">
-                <li class="is-done"><span class="tl-dot"></span><span class="tl-title">تقديم البيان الجمركي المسبق وإصدار رقم البيان</span><span class="tl-meta">منصة فسح · 12 أكتوبر</span></li>
-                <li class="is-done"><span class="tl-dot"></span><span class="tl-title">وصول السفينة وتفريغ الحاوية</span><span class="tl-meta">حاوية 40 قدم · 26 أكتوبر</span></li>
-                <li class="is-current"><span class="tl-dot"></span><span class="tl-title">استكمال البيان الجمركي وسداد الرسوم</span><span class="tl-meta">قيد المراجعة الآن</span></li>
-                <li><span class="tl-dot"></span><span class="tl-title">المعاينة والإفراج والتسليم</span><span class="tl-meta">مدة استرشادية حسب الشحنة والجهات الرقابية</span></li>
+                <li class="is-done"><span class="tl-dot"></span><span class="tl-title" data-i18n="index.hero12">تقديم البيان الجمركي المسبق وإصدار رقم البيان</span><span class="tl-meta" data-i18n="index.hero13">منصة فسح · 12 أكتوبر</span></li>
+                <li class="is-done"><span class="tl-dot"></span><span class="tl-title" data-i18n="index.hero14">وصول السفينة وتفريغ الحاوية</span><span class="tl-meta" data-i18n="index.hero15">حاوية 40 قدم · 26 أكتوبر</span></li>
+                <li class="is-current"><span class="tl-dot"></span><span class="tl-title" data-i18n="index.hero16">استكمال البيان الجمركي وسداد الرسوم</span><span class="tl-meta" data-i18n="index.hero17">قيد المراجعة الآن</span></li>
+                <li><span class="tl-dot"></span><span class="tl-title" data-i18n="index.hero18">المعاينة والإفراج والتسليم</span><span class="tl-meta" data-i18n="index.hero19">مدة استرشادية حسب الشحنة والجهات الرقابية</span></li>
               </ol>
             </div>
             <div class="float-card float-card-1" aria-hidden="true">
               <span class="icon-box icon-box-sm"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></span>
-              <div><strong>المستندات مكتملة</strong>فاتورة · B/L · شهادة منشأ · سابر</div>
+              <div data-i18n="index.heroDocs"><strong data-i18n="index.hero20">المستندات مكتملة</strong>فاتورة · B/L · شهادة منشأ · سابر</div>
             </div>
             <div class="float-card float-card-2" aria-hidden="true">
               <span class="icon-box icon-box-sm icon-box-navy"><svg class="icon" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/></svg></span>
-              <div><strong class="num">48,620 ر.س</strong>إجمالي الرسوم التقديرية</div>
+              <div data-i18n="index.heroTotal"><strong class="num" data-i18n="index.hero21">48,620 ر.س</strong>إجمالي الرسوم التقديرية</div>
             </div>
           </div>
         </div>
 
         <div class="hero-stats">
-          <div class="hero-stat reveal"><div class="stat-value">تقدير مسبق</div><div class="stat-label">للرسوم بالريال السعودي قبل البدء</div></div>
-          <div class="hero-stat reveal" data-delay="1"><div class="stat-value">مراجعة مبكرة</div><div class="stat-label">للمستندات قبل وصول الشحنة</div></div>
-          <div class="hero-stat reveal" data-delay="2"><div class="stat-value">مسؤول متابعة</div><div class="stat-label">نقطة تواصل واحدة لكل طلب</div></div>
-          <div class="hero-stat reveal" data-delay="3"><div class="stat-value">8 منافذ</div><div class="stat-label">موانئ ومطارات ومنافذ برية رئيسية</div></div>
+          <div class="hero-stat reveal"><div class="stat-value" data-i18n="index.hero22">تقدير مسبق</div><div class="stat-label" data-i18n="index.hero23">للرسوم بالريال السعودي قبل البدء</div></div>
+          <div class="hero-stat reveal" data-delay="1"><div class="stat-value" data-i18n="index.hero24">مراجعة مبكرة</div><div class="stat-label" data-i18n="index.hero25">للمستندات قبل وصول الشحنة</div></div>
+          <div class="hero-stat reveal" data-delay="2"><div class="stat-value" data-i18n="index.hero26">مسؤول متابعة</div><div class="stat-label" data-i18n="index.hero27">نقطة تواصل واحدة لكل طلب</div></div>
+          <div class="hero-stat reveal" data-delay="3"><div class="stat-value" data-i18n="index.hero28">8 منافذ</div><div class="stat-label" data-i18n="index.hero29">موانئ ومطارات ومنافذ برية رئيسية</div></div>
         </div>
       </div>
       <svg class="hero-wave" viewBox="0 0 1440 120" preserveAspectRatio="none" aria-hidden="true">
@@ -183,24 +186,24 @@
           <div class="quick-track-title">
             <span class="icon-box"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg></span>
             <div>
-              <h2 id="qt-title">تتبّع شحنتك الآن</h2>
-              <p>برقم المرجع من مرسى أو رقم بوليصة الشحن B/L</p>
+              <h2 id="qt-title" data-i18n="index.qt1">تتبّع شحنتك الآن</h2>
+              <p data-i18n="index.qt2">برقم المرجع من مرسى أو رقم بوليصة الشحن B/L</p>
             </div>
           </div>
           <form class="quick-track-form" data-track-form action="tracking.html" novalidate>
             <div class="input-icon">
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-              <label class="sr-only" for="qt-id">رقم الشحنة أو المرجع</label>
-              <input class="form-control" id="qt-id" name="id" type="text" placeholder="مثال: MRS-2026-A7K3Q9" autocomplete="off" dir="auto">
+              <label class="sr-only" for="qt-id" data-i18n="index.qt3">رقم الشحنة أو المرجع</label>
+              <input class="form-control" id="qt-id" name="id" type="text" placeholder="مثال: MRS-2026-A7K3Q9" autocomplete="off" dir="auto" data-i18n-attr="placeholder:index.qt6">
             </div>
-            <button class="btn btn-secondary btn-lg" type="submit">
+            <button class="btn btn-secondary btn-lg" type="submit" data-i18n="index.qt4">
               تتبّع
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
             </button>
           </form>
           <p class="demo-note mt-2 mb-0">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
-            <span>نسخة عرض تجريبية: نتائج التتبع هنا بيانات تجريبية أو طلبات محفوظة على جهازك فقط.</span>
+            <span data-i18n="index.qt5">نسخة عرض تجريبية: نتائج التتبع هنا بيانات تجريبية أو طلبات محفوظة على جهازك فقط.</span>
           </p>
         </div>
       </div>
@@ -210,55 +213,55 @@
     <section class="section" id="services" aria-labelledby="services-title">
       <div class="container">
         <div class="section-head text-center reveal">
-          <span class="eyebrow">خدماتنا</span>
-          <h2 id="services-title">كل ما تحتاجه لتخليص شحنتك في مكان واحد</h2>
-          <p class="lead">من تجهيز البيان المسبق عبر منصة فسح حتى تسليم البضاعة إلى باب مستودعك، ينسّق فريق مرسى كل تفصيلة مع المخلّصين المرخّصين والشركاء.</p>
+          <span class="eyebrow" data-i18n="index.svc1">خدماتنا</span>
+          <h2 id="services-title" data-i18n="index.svc2">كل ما تحتاجه لتخليص شحنتك في مكان واحد</h2>
+          <p class="lead" data-i18n="index.svc3">من تجهيز البيان المسبق عبر منصة فسح حتى تسليم البضاعة إلى باب مستودعك، ينسّق فريق مرسى كل تفصيلة مع المخلّصين المرخّصين والشركاء.</p>
         </div>
         <div class="grid grid-3">
           <article class="card card-hover card-accent card-feature reveal">
             <span class="icon-box"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg></span>
-            <h3>تخليص جمركي للواردات</h3>
-            <p>إعداد البيان الجمركي، ومتابعة المعاينة والتقييم، وسداد الرسوم والإفراج عن شحنتك من الميناء أو المطار أو المنفذ البري.</p>
-            <a class="link-arrow" href="services.html#import">التفاصيل <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></a>
+            <h3 data-i18n="index.svc4">تخليص جمركي للواردات</h3>
+            <p data-i18n="index.svc5">إعداد البيان الجمركي، ومتابعة المعاينة والتقييم، وسداد الرسوم والإفراج عن شحنتك من الميناء أو المطار أو المنفذ البري.</p>
+            <a class="link-arrow" href="services.html#import" data-i18n="index.svc6">التفاصيل <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></a>
           </article>
           <article class="card card-hover card-accent card-feature reveal" data-delay="1">
             <span class="icon-box"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M20 16v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3"/></svg></span>
-            <h3>تخليص الصادرات</h3>
-            <p>تجهيز مستندات التصدير وشهادات المنشأ والتنسيق مع الخط الملاحي لشحن بضاعتك في موعدها.</p>
-            <a class="link-arrow" href="services.html#export">التفاصيل <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></a>
+            <h3 data-i18n="index.svc7">تخليص الصادرات</h3>
+            <p data-i18n="index.svc8">تجهيز مستندات التصدير وشهادات المنشأ والتنسيق مع الخط الملاحي لشحن بضاعتك في موعدها.</p>
+            <a class="link-arrow" href="services.html#export" data-i18n="index.svc9">التفاصيل <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></a>
           </article>
           <article class="card card-hover card-accent card-feature reveal" data-delay="2">
             <span class="icon-box"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18M8 21h8M12 18v3"/><path d="m9 13 2 2 4-4"/></svg></span>
-            <h3>البيان المسبق ومنصة فسح</h3>
-            <p>تقديم البيان الجمركي المسبق عبر منصة فسح واستخراج رقم البيان الجمركي، مع متابعة شهادات المطابقة عبر منصة سابر، دون أخطاء تؤخّرك.</p>
-            <a class="link-arrow" href="services.html#aci">التفاصيل <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></a>
+            <h3 data-i18n="index.svc10">البيان المسبق ومنصة فسح</h3>
+            <p data-i18n="index.svc11">تقديم البيان الجمركي المسبق عبر منصة فسح واستخراج رقم البيان الجمركي، مع متابعة شهادات المطابقة عبر منصة سابر، دون أخطاء تؤخّرك.</p>
+            <a class="link-arrow" href="services.html#aci" data-i18n="index.svc12">التفاصيل <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></a>
           </article>
           <article class="card card-hover card-accent card-feature reveal">
             <span class="icon-box"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2M9 20h6M12 4v16"/></svg></span>
-            <h3>تصنيف HS Code واستشارات</h3>
-            <p>تحديد رمز النظام المنسق الصحيح لبضاعتك وفئة التعريفة والاشتراطات الرقابية المطلوبة قبل أن تشحن.</p>
-            <a class="link-arrow" href="services.html#hs">التفاصيل <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></a>
+            <h3 data-i18n="index.svc13">تصنيف HS Code واستشارات</h3>
+            <p data-i18n="index.svc14">تحديد رمز النظام المنسق الصحيح لبضاعتك وفئة التعريفة والاشتراطات الرقابية المطلوبة قبل أن تشحن.</p>
+            <a class="link-arrow" href="services.html#hs" data-i18n="index.svc15">التفاصيل <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></a>
           </article>
           <article class="card card-hover card-accent card-feature reveal" data-delay="1">
             <span class="icon-box"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg></span>
-            <h3>شحن دولي بحري وجوي <span class="badge">عبر شركاء</span></h3>
-            <p>تنسيق حجز حاويات كاملة FCL أو مجمّعة LCL وشحن جوي عبر شركاء شحن، من موانئ العالم إلى المملكة.</p>
-            <a class="link-arrow" href="services.html#freight">التفاصيل <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></a>
+            <h3 data-i18n="index.svcFreight">شحن دولي بحري وجوي <span class="badge" data-i18n="index.svc16">عبر شركاء</span></h3>
+            <p data-i18n="index.svc17">تنسيق حجز حاويات كاملة FCL أو مجمّعة LCL وشحن جوي عبر شركاء شحن، من موانئ العالم إلى المملكة.</p>
+            <a class="link-arrow" href="services.html#freight" data-i18n="index.svc18">التفاصيل <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></a>
           </article>
           <article class="card card-hover card-accent card-feature reveal" data-delay="2">
             <span class="icon-box"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h11v10H3zM14 9h4l3 3v4h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg></span>
-            <h3>نقل داخلي وتخزين</h3>
-            <p>تنسيق نقل بضاعتك من الميناء إلى مستودعك داخل المملكة، مع خيارات تخزين مؤقت عبر شركاء حتى الاستلام.</p>
-            <a class="link-arrow" href="services.html#inland">التفاصيل <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></a>
+            <h3 data-i18n="index.svc19">نقل داخلي وتخزين</h3>
+            <p data-i18n="index.svc20">تنسيق نقل بضاعتك من الميناء إلى مستودعك داخل المملكة، مع خيارات تخزين مؤقت عبر شركاء حتى الاستلام.</p>
+            <a class="link-arrow" href="services.html#inland" data-i18n="index.svc21">التفاصيل <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></a>
           </article>
         </div>
         <div class="card card-accent bulk-strip mt-4 reveal">
           <span class="icon-box"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5M12 3v12"/></svg></span>
           <div class="bulk-strip-copy">
-            <h3>لديك عشرات الشحنات؟ ارفعها دفعة واحدة</h3>
-            <p class="text-muted mb-0">ارفع بيانات شحناتك من ملف Excel أو CSV، أو من عدة ملفات معًا، وراجعها قبل إرسالها كطلبات تخليص.</p>
+            <h3 data-i18n="index.svc22">لديك عشرات الشحنات؟ ارفعها دفعة واحدة</h3>
+            <p class="text-muted mb-0" data-i18n="index.svc23">ارفع بيانات شحناتك من ملف Excel أو CSV، أو من عدة ملفات معًا، وراجعها قبل إرسالها كطلبات تخليص.</p>
           </div>
-          <a class="btn btn-secondary" href="bulk-upload.html">الرفع الجماعي <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></a>
+          <a class="btn btn-secondary" href="bulk-upload.html" data-i18n="index.svc24">الرفع الجماعي <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></a>
         </div>
       </div>
     </section>
@@ -267,38 +270,38 @@
     <section class="section section-white" id="how" aria-labelledby="how-title">
       <div class="container">
         <div class="section-head text-center reveal">
-          <span class="eyebrow">كيف نعمل</span>
-          <h2 id="how-title">4 خطوات فقط بين شحنتك والإفراج عنها</h2>
-          <p class="lead">تقدّم طلبك ومستنداتك أونلاين، ويتولى المخلّص الجمركي المرخّص الإجراءات لدى الجمارك.</p>
+          <span class="eyebrow" data-i18n="index.how1">كيف نعمل</span>
+          <h2 id="how-title" data-i18n="index.how2">4 خطوات فقط بين شحنتك والإفراج عنها</h2>
+          <p class="lead" data-i18n="index.how3">تقدّم طلبك ومستنداتك أونلاين، ويتولى المخلّص الجمركي المرخّص الإجراءات لدى الجمارك.</p>
         </div>
         <div class="steps">
           <div class="step-card reveal">
             <span class="step-num" aria-hidden="true">01</span>
             <span class="icon-box icon-box-lg"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></span>
-            <h3>قدّم طلبك أونلاين</h3>
-            <p>املأ بيانات الشحنة في دقائق وحدّد الميناء ونوع البضاعة.</p>
+            <h3 data-i18n="index.how4">قدّم طلبك أونلاين</h3>
+            <p data-i18n="index.how5">املأ بيانات الشحنة في دقائق وحدّد الميناء ونوع البضاعة.</p>
           </div>
           <div class="step-card reveal" data-delay="1">
             <span class="step-num" aria-hidden="true">02</span>
             <span class="icon-box icon-box-lg"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M20 16v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3"/></svg></span>
-            <h3>ارفع المستندات</h3>
-            <p>الفاتورة التجارية، بوليصة الشحن، قائمة التعبئة، شهادة المنشأ وشهادة المطابقة عند الحاجة.</p>
+            <h3 data-i18n="index.how6">ارفع المستندات</h3>
+            <p data-i18n="index.how7">الفاتورة التجارية، بوليصة الشحن، قائمة التعبئة، شهادة المنشأ وشهادة المطابقة عند الحاجة.</p>
           </div>
           <div class="step-card reveal" data-delay="2">
             <span class="step-num" aria-hidden="true">03</span>
             <span class="icon-box icon-box-lg"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/></svg></span>
-            <h3>استلم عرض السعر</h3>
-            <p>رسوم جمركية تقديرية وأتعاب واضحة بالريال السعودي قبل البدء.</p>
+            <h3 data-i18n="index.how8">استلم عرض السعر</h3>
+            <p data-i18n="index.how9">رسوم جمركية تقديرية وأتعاب واضحة بالريال السعودي قبل البدء.</p>
           </div>
           <div class="step-card reveal" data-delay="3">
             <span class="step-num" aria-hidden="true">04</span>
             <span class="icon-box icon-box-lg"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 11.1V12a10 10 0 1 1-5.9-9.1"/><path d="m22 4-10 10-3-3"/></svg></span>
-            <h3>تابع واستلم</h3>
-            <p>تابع حالة المعاملة عبر بوابة العميل (قريبًا) حتى الإفراج والتسليم إلى مستودعك.</p>
+            <h3 data-i18n="index.how10">تابع واستلم</h3>
+            <p data-i18n="index.how11">تابع حالة المعاملة عبر بوابة العميل (قريبًا) حتى الإفراج والتسليم إلى مستودعك.</p>
           </div>
         </div>
         <div class="text-center mt-5 reveal">
-          <a class="btn btn-primary btn-lg" href="request.html">ابدأ الخطوة الأولى الآن</a>
+          <a class="btn btn-primary btn-lg" href="request.html" data-i18n="index.how12">ابدأ الخطوة الأولى الآن</a>
         </div>
       </div>
     </section>
@@ -309,42 +312,42 @@
         <div class="split">
           <div>
             <div class="section-head reveal">
-              <span class="eyebrow">لماذا مرسى؟</span>
-              <h2 id="why-title">خبرة الميناء بسرعة التكنولوجيا</h2>
-              <p class="lead">جمعنا خبرة سنوات في التخليص الجمركي بموانئ المملكة ومنافذها مع منصة رقمية تختصر وقتك وتكاليفك.</p>
+              <span class="eyebrow" data-i18n="index.why1">لماذا مرسى؟</span>
+              <h2 id="why-title" data-i18n="index.why2">خبرة الميناء بسرعة التكنولوجيا</h2>
+              <p class="lead" data-i18n="index.why3">جمعنا خبرة سنوات في التخليص الجمركي بموانئ المملكة ومنافذها مع منصة رقمية تختصر وقتك وتكاليفك.</p>
             </div>
             <ul class="feature-list">
               <li class="feature-item reveal">
                 <span class="icon-box"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></span>
-                <div><h3>سرعة في الإفراج</h3><p>مراجعة مسبقة للمستندات قبل وصول الشحنة تقلل الغرامات وأيام الأرضيات والتخزين.</p></div>
+                <div><h3 data-i18n="index.why4">سرعة في الإفراج</h3><p data-i18n="index.why5">مراجعة مسبقة للمستندات قبل وصول الشحنة تقلل الغرامات وأيام الأرضيات والتخزين.</p></div>
               </li>
               <li class="feature-item reveal" data-delay="1">
                 <span class="icon-box"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></span>
-                <div><h3>دقة في التصنيف والتثمين</h3><p>تصنيف HS Code صحيح يحميك من فروقات الرسوم والمخالفات الجمركية.</p></div>
+                <div><h3 data-i18n="index.why6">دقة في التصنيف والتثمين</h3><p data-i18n="index.why7">تصنيف HS Code صحيح يحميك من فروقات الرسوم والمخالفات الجمركية.</p></div>
               </li>
               <li class="feature-item reveal" data-delay="2">
                 <span class="icon-box"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/></svg></span>
-                <div><h3>تسعير شفاف</h3><p>كل بند مكتوب بوضوح: الرسوم الجمركية، ضريبة القيمة المضافة 15%، وأتعاب الخدمة.</p></div>
+                <div><h3 data-i18n="index.why8">تسعير شفاف</h3><p data-i18n="index.why9">كل بند مكتوب بوضوح: الرسوم الجمركية، ضريبة القيمة المضافة 15%، وأتعاب الخدمة.</p></div>
               </li>
               <li class="feature-item reveal" data-delay="3">
                 <span class="icon-box"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/></svg></span>
-                <div><h3>مسؤول متابعة مخصص</h3><p>شخص واحد يتابع شحنتك ويرد عليك عبر الهاتف أو واتساب خلال ساعات العمل.</p></div>
+                <div><h3 data-i18n="index.why10">مسؤول متابعة مخصص</h3><p data-i18n="index.why11">شخص واحد يتابع شحنتك ويرد عليك عبر الهاتف أو واتساب خلال ساعات العمل.</p></div>
               </li>
             </ul>
           </div>
           <div class="reveal" data-delay="2">
             <div class="card-glass">
-              <h3 class="mb-2">المستندات الأساسية للتخليص</h3>
-              <p class="text-sm" style="color:#B9CCE0">جهّزها مبكرًا لكي تُنجَز شحنتك أسرع:</p>
+              <h3 class="mb-2" data-i18n="index.why12">المستندات الأساسية للتخليص</h3>
+              <p class="text-sm" style="color:#B9CCE0" data-i18n="index.why13">جهّزها مبكرًا لكي تُنجَز شحنتك أسرع:</p>
               <ul class="check-list">
-                <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span><strong style="color:#fff">الفاتورة التجارية</strong> — Commercial Invoice موضّح بها القيمة وبلد المنشأ</span></li>
-                <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span><strong style="color:#fff">بوليصة الشحن</strong> — B/L أو بوليصة الشحن الجوي AWB</span></li>
-                <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span><strong style="color:#fff">قائمة التعبئة</strong> — Packing List بالأوزان وعدد الطرود</span></li>
-                <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span><strong style="color:#fff">شهادة المنشأ</strong> — للاستفادة من الإعفاءات وفق الاتفاقيات التجارية</span></li>
-                <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span><strong style="color:#fff">شهادة المطابقة</strong> — عبر منصة سابر (SASO) للمنتجات الخاضعة للوائح الفنية</span></li>
-                <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span><strong style="color:#fff">بيانات المستورد</strong> — السجل التجاري، الرقم الضريبي، والتسجيل في منصة فسح</span></li>
+                <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span data-i18n="index.whyDoc1Note"><strong style="color:#fff" data-i18n="index.why14">الفاتورة التجارية</strong> — Commercial Invoice موضّح بها القيمة وبلد المنشأ</span></li>
+                <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span data-i18n="index.whyDoc2Note"><strong style="color:#fff" data-i18n="index.why15">بوليصة الشحن</strong> — B/L أو بوليصة الشحن الجوي AWB</span></li>
+                <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span data-i18n="index.whyDoc3Note"><strong style="color:#fff" data-i18n="index.why16">قائمة التعبئة</strong> — Packing List بالأوزان وعدد الطرود</span></li>
+                <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span data-i18n="index.whyDoc4Note"><strong style="color:#fff" data-i18n="index.why17">شهادة المنشأ</strong> — للاستفادة من الإعفاءات وفق الاتفاقيات التجارية</span></li>
+                <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span data-i18n="index.whyDoc5Note"><strong style="color:#fff" data-i18n="index.why18">شهادة المطابقة</strong> — عبر منصة سابر (SASO) للمنتجات الخاضعة للوائح الفنية</span></li>
+                <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span data-i18n="index.whyDoc6Note"><strong style="color:#fff" data-i18n="index.why19">بيانات المستورد</strong> — السجل التجاري، الرقم الضريبي، والتسجيل في منصة فسح</span></li>
               </ul>
-              <a class="btn btn-white mt-3" href="request.html">ارفع مستنداتك الآن</a>
+              <a class="btn btn-white mt-3" href="request.html" data-i18n="index.why20">ارفع مستنداتك الآن</a>
             </div>
           </div>
         </div>
@@ -356,52 +359,52 @@
       <div class="container">
         <div class="section-head-row">
           <div class="section-head reveal">
-            <span class="eyebrow">الموانئ والمنافذ</span>
-            <h2 id="ports-title">متواجدون في أهم منافذ المملكة</h2>
-            <p class="lead">نتابع شحنتك في المنافذ الرئيسية التالية عبر مخلّصين جمركيين مرخّصين وشركاء ميدانيين.</p>
+            <span class="eyebrow" data-i18n="index.ports1">الموانئ والمنافذ</span>
+            <h2 id="ports-title" data-i18n="index.ports2">متواجدون في أهم منافذ المملكة</h2>
+            <p class="lead" data-i18n="index.ports3">نتابع شحنتك في المنافذ الرئيسية التالية عبر مخلّصين جمركيين مرخّصين وشركاء ميدانيين.</p>
           </div>
-          <a class="btn btn-ghost reveal" href="contact.html">اسأل عن منفذ آخر</a>
+          <a class="btn btn-ghost reveal" href="contact.html" data-i18n="index.ports4">اسأل عن منفذ آخر</a>
         </div>
         <div class="grid grid-3">
           <div class="card card-hover port-card reveal">
             <span class="icon-box icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2"/><path d="M12 7v14M5 13H3a9 9 0 0 0 18 0h-2M8 11h8"/></svg></span>
-            <div><h3>ميناء جدة الإسلامي</h3><p>أكبر موانئ المملكة على البحر الأحمر</p></div>
-            <span class="port-code">بحري</span>
+            <div><h3 data-i18n="index.ports5">ميناء جدة الإسلامي</h3><p data-i18n="index.ports6">أكبر موانئ المملكة على البحر الأحمر</p></div>
+            <span class="port-code" data-i18n="index.ports7">بحري</span>
           </div>
           <div class="card card-hover port-card reveal" data-delay="1">
             <span class="icon-box icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2"/><path d="M12 7v14M5 13H3a9 9 0 0 0 18 0h-2M8 11h8"/></svg></span>
-            <div><h3>ميناء الملك عبدالعزيز بالدمام</h3><p>البوابة الرئيسية على الخليج العربي</p></div>
-            <span class="port-code">بحري</span>
+            <div><h3 data-i18n="index.ports8">ميناء الملك عبدالعزيز بالدمام</h3><p data-i18n="index.ports9">البوابة الرئيسية على الخليج العربي</p></div>
+            <span class="port-code" data-i18n="index.ports10">بحري</span>
           </div>
           <div class="card card-hover port-card reveal" data-delay="2">
             <span class="icon-box icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2"/><path d="M12 7v14M5 13H3a9 9 0 0 0 18 0h-2M8 11h8"/></svg></span>
-            <div><h3>ميناء الجبيل التجاري</h3><p>خدمة المدينة الصناعية والبضائع العامة</p></div>
-            <span class="port-code">بحري</span>
+            <div><h3 data-i18n="index.ports11">ميناء الجبيل التجاري</h3><p data-i18n="index.ports12">خدمة المدينة الصناعية والبضائع العامة</p></div>
+            <span class="port-code" data-i18n="index.ports13">بحري</span>
           </div>
           <div class="card card-hover port-card reveal">
             <span class="icon-box icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2"/><path d="M12 7v14M5 13H3a9 9 0 0 0 18 0h-2M8 11h8"/></svg></span>
-            <div><h3>ميناء الملك عبدالله برابغ</h3><p>محطة حاويات حديثة شمال جدة</p></div>
-            <span class="port-code">بحري</span>
+            <div><h3 data-i18n="index.ports14">ميناء الملك عبدالله برابغ</h3><p data-i18n="index.ports15">محطة حاويات حديثة شمال جدة</p></div>
+            <span class="port-code" data-i18n="index.ports16">بحري</span>
           </div>
           <div class="card card-hover port-card reveal" data-delay="1">
             <span class="icon-box icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h11v10H3zM14 9h4l3 3v4h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg></span>
-            <div><h3>الميناء الجاف بالرياض</h3><p>تخليص الحاويات القادمة بالقطار من الدمام</p></div>
-            <span class="port-code">بري</span>
+            <div><h3 data-i18n="index.ports17">الميناء الجاف بالرياض</h3><p data-i18n="index.ports18">تخليص الحاويات القادمة بالقطار من الدمام</p></div>
+            <span class="port-code" data-i18n="index.ports19">بري</span>
           </div>
           <div class="card card-hover port-card reveal" data-delay="2">
             <span class="icon-box icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg></span>
-            <div><h3>مطار الملك خالد الدولي</h3><p>مبنى الشحن الجوي بالرياض</p></div>
-            <span class="port-code">جوي</span>
+            <div><h3 data-i18n="index.ports20">مطار الملك خالد الدولي</h3><p data-i18n="index.ports21">مبنى الشحن الجوي بالرياض</p></div>
+            <span class="port-code" data-i18n="index.ports22">جوي</span>
           </div>
           <div class="card card-hover port-card reveal">
             <span class="icon-box icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg></span>
-            <div><h3>مطار الملك عبدالعزيز الدولي بجدة</h3><p>الشحن الجوي للمنطقة الغربية</p></div>
-            <span class="port-code">جوي</span>
+            <div><h3 data-i18n="index.ports23">مطار الملك عبدالعزيز الدولي بجدة</h3><p data-i18n="index.ports24">الشحن الجوي للمنطقة الغربية</p></div>
+            <span class="port-code" data-i18n="index.ports25">جوي</span>
           </div>
           <div class="card card-hover port-card reveal" data-delay="1">
             <span class="icon-box icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h11v10H3zM14 9h4l3 3v4h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg></span>
-            <div><h3>منفذ البطحاء البري</h3><p>الشحن البري مع دول الخليج</p></div>
-            <span class="port-code">بري</span>
+            <div><h3 data-i18n="index.ports26">منفذ البطحاء البري</h3><p data-i18n="index.ports27">الشحن البري مع دول الخليج</p></div>
+            <span class="port-code" data-i18n="index.ports28">بري</span>
           </div>
         </div>
       </div>
@@ -411,28 +414,28 @@
     <section class="section section-white" id="use-cases" aria-labelledby="cases-title">
       <div class="container">
         <div class="section-head text-center reveal">
-          <span class="eyebrow">أمثلة توضيحية لحالات استخدام</span>
-          <h2 id="cases-title">كيف يمكن أن تساعدك مرسى؟</h2>
-          <p class="lead">سيناريوهات توضيحية لا تمثّل عملاء حقيقيين ولا نتائج فعلية.</p>
+          <span class="eyebrow" data-i18n="index.cases1">أمثلة توضيحية لحالات استخدام</span>
+          <h2 id="cases-title" data-i18n="index.cases2">كيف يمكن أن تساعدك مرسى؟</h2>
+          <p class="lead" data-i18n="index.cases3">سيناريوهات توضيحية لا تمثّل عملاء حقيقيين ولا نتائج فعلية.</p>
         </div>
         <div class="grid grid-3">
           <article class="card card-feature reveal">
             <span class="icon-box icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></span>
-            <h3>مستورد قطع غيار</h3>
-            <p>يرفع الفاتورة وبوليصة الشحن قبل وصول الحاوية، فيراجعها الفريق ويُجهَّز البيان المسبق عبر منصة فسح من خلال المخلّص الجمركي المرخّص.</p>
+            <h3 data-i18n="index.cases4">مستورد قطع غيار</h3>
+            <p data-i18n="index.cases5">يرفع الفاتورة وبوليصة الشحن قبل وصول الحاوية، فيراجعها الفريق ويُجهَّز البيان المسبق عبر منصة فسح من خلال المخلّص الجمركي المرخّص.</p>
           </article>
           <article class="card card-feature reveal" data-delay="1">
             <span class="icon-box icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></span>
-            <h3>مسؤول مشتريات</h3>
-            <p>يستخدم حاسبة الرسوم للحصول على تقدير مبدئي للتكلفة بالريال قبل تأكيد الطلب مع المورّد، والمبلغ النهائي تحدده الجمارك بعد التقييم.</p>
+            <h3 data-i18n="index.cases6">مسؤول مشتريات</h3>
+            <p data-i18n="index.cases7">يستخدم حاسبة الرسوم للحصول على تقدير مبدئي للتكلفة بالريال قبل تأكيد الطلب مع المورّد، والمبلغ النهائي تحدده الجمارك بعد التقييم.</p>
           </article>
           <article class="card card-feature reveal" data-delay="2">
             <span class="icon-box icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></span>
-            <h3>منشأة تصدير</h3>
-            <p>تجهّز مستندات التصدير وشهادات المنشأ بالتنسيق مع الفريق، وتتابع حالة المعاملة عبر بوابة العميل (قريبًا).</p>
+            <h3 data-i18n="index.cases8">منشأة تصدير</h3>
+            <p data-i18n="index.cases9">تجهّز مستندات التصدير وشهادات المنشأ بالتنسيق مع الفريق، وتتابع حالة المعاملة عبر بوابة العميل (قريبًا).</p>
           </article>
         </div>
-        <p class="demo-note mt-3"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg><span>نسخة عرض تجريبية: هذه الأمثلة توضيحية فقط، ولا تتضمن أسماء أشخاص أو منشآت حقيقية.</span></p>
+        <p class="demo-note mt-3"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg><span data-i18n="index.cases10">نسخة عرض تجريبية: هذه الأمثلة توضيحية فقط، ولا تتضمن أسماء أشخاص أو منشآت حقيقية.</span></p>
       </div>
     </section>
 
@@ -442,12 +445,12 @@
         <div class="cta-band reveal">
           <svg class="cta-wave" viewBox="0 0 1200 120" preserveAspectRatio="none" aria-hidden="true"><path fill="#fff" d="M0,60 C200,110 400,10 600,60 C800,110 1000,10 1200,60 L1200,120 L0,120 Z"/></svg>
           <div>
-            <h2 id="cta-title">هل أنت جاهز لتخليص شحنتك القادمة؟</h2>
-            <p>جهّز طلبك في دقائق، واطّلع على تقدير مبدئي واضح للتكلفة قبل البدء.</p>
+            <h2 id="cta-title" data-i18n="index.cta1">هل أنت جاهز لتخليص شحنتك القادمة؟</h2>
+            <p data-i18n="index.cta2">جهّز طلبك في دقائق، واطّلع على تقدير مبدئي واضح للتكلفة قبل البدء.</p>
           </div>
           <div class="btn-group">
-            <a class="btn btn-white btn-lg" href="request.html">اطلب تخليص</a>
-            <a class="btn btn-outline-white btn-lg" href="contact.html">تواصل معنا</a>
+            <a class="btn btn-white btn-lg" href="request.html" data-i18n="index.cta3">اطلب تخليص</a>
+            <a class="btn btn-outline-white btn-lg" href="contact.html" data-i18n="index.cta4">تواصل معنا</a>
           </div>
         </div>
       </div>
@@ -463,59 +466,59 @@
     <div class="container">
       <div class="footer-grid">
         <div class="footer-brand">
-          <a class="footer-logo" href="index.html" aria-label="مرسى - الصفحة الرئيسية">
-            <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="107" height="74">
+          <a class="footer-logo" href="index.html" aria-label="مرسى - الصفحة الرئيسية" data-i18n-attr="aria-label:nav.homeAria">
+            <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="107" height="74" data-i18n-attr="alt:nav.logoAlt">
           </a>
-          <p>مرسى منصة سعودية لخدمات التخليص الجمركي والشحن أونلاين، تساعد المستوردين والمصدّرين في المملكة على تخليص شحناتهم بسرعة وشفافية.</p>
+          <p data-i18n="footer.about">مرسى منصة سعودية لخدمات التخليص الجمركي والشحن أونلاين، تساعد المستوردين والمصدّرين في المملكة على تخليص شحناتهم بسرعة وشفافية.</p>
           <div class="social">
-            <a href="contact.html" aria-label="فيسبوك"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h-2.5A3.5 3.5 0 0 0 9 6.5V9H7v3.5h2V21h3.5v-8.5H15l.5-3.5h-3V7a1 1 0 0 1 1-1H15z"/></svg></a>
-            <a href="contact.html" aria-label="لينكدإن"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 10v7M8 7v.01M12 17v-4a2 2 0 0 1 4 0v4M12 10v7"/></svg></a>
-            <a href="https://wa.me/966554821937" target="_blank" rel="noopener" aria-label="واتساب"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/><path d="M9 9.5c.3 1.8 2 3.8 4 4.5l1-1 2 .8"/></svg></a>
+            <a href="contact.html" aria-label="فيسبوك" data-i18n-attr="aria-label:footer.facebook"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h-2.5A3.5 3.5 0 0 0 9 6.5V9H7v3.5h2V21h3.5v-8.5H15l.5-3.5h-3V7a1 1 0 0 1 1-1H15z"/></svg></a>
+            <a href="contact.html" aria-label="لينكدإن" data-i18n-attr="aria-label:footer.linkedin"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 10v7M8 7v.01M12 17v-4a2 2 0 0 1 4 0v4M12 10v7"/></svg></a>
+            <a href="https://wa.me/966554821937" target="_blank" rel="noopener" aria-label="واتساب" data-i18n-attr="aria-label:footer.whatsapp"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/><path d="M9 9.5c.3 1.8 2 3.8 4 4.5l1-1 2 .8"/></svg></a>
           </div>
         </div>
         <div class="footer-col">
-          <h3>روابط سريعة</h3>
+          <h3 data-i18n="footer.quickLinks">روابط سريعة</h3>
           <ul class="footer-links">
-            <li><a href="index.html">الرئيسية</a></li>
-            <li><a href="services.html">خدماتنا</a></li>
-            <li><a href="about.html">من نحن</a></li>
-            <li><a href="about.html#faq">الأسئلة الشائعة</a></li>
-            <li><a href="contact.html">تواصل معنا</a></li>
-            <li><a href="login.html#client">دخول العملاء</a></li>
-            <li><a href="login.html#staff">دخول الموظفين</a></li>
+            <li><a href="index.html" data-i18n="nav.home">الرئيسية</a></li>
+            <li><a href="services.html" data-i18n="nav.services">خدماتنا</a></li>
+            <li><a href="about.html" data-i18n="nav.about">من نحن</a></li>
+            <li><a href="about.html#faq" data-i18n="footer.faq">الأسئلة الشائعة</a></li>
+            <li><a href="contact.html" data-i18n="nav.contact">تواصل معنا</a></li>
+            <li><a href="login.html#client" data-i18n="nav.clientLogin">دخول العملاء</a></li>
+            <li><a href="login.html#staff" data-i18n="nav.staffLogin">دخول الموظفين</a></li>
           </ul>
         </div>
         <div class="footer-col">
-          <h3>أدوات المنصة</h3>
+          <h3 data-i18n="footer.tools">أدوات المنصة</h3>
           <ul class="footer-links">
-            <li><a href="request.html">اطلب تخليص</a></li>
-            <li><a href="calculator.html">حاسبة الرسوم الجمركية</a></li>
-            <li><a href="tracking.html">تتبع الشحنة</a></li>
-            <li><a href="bulk-upload.html">الرفع الجماعي (Excel / CSV)</a></li>
-            <li><a href="ocr.html">قراءة المستندات (OCR)</a></li>
-            <li><a href="services.html#aci">البيان المسبق ومنصة فسح</a></li>
-            <li><a href="services.html#hs">تصنيف HS Code</a></li>
+            <li><a href="request.html" data-i18n="nav.request">اطلب تخليص</a></li>
+            <li><a href="calculator.html" data-i18n="nav.calculatorFull">حاسبة الرسوم الجمركية</a></li>
+            <li><a href="tracking.html" data-i18n="nav.tracking">تتبع الشحنة</a></li>
+            <li><a href="bulk-upload.html" data-i18n="footer.bulk">الرفع الجماعي (Excel / CSV)</a></li>
+            <li><a href="ocr.html" data-i18n="nav.ocrFull">قراءة المستندات (OCR)</a></li>
+            <li><a href="services.html#aci" data-i18n="footer.aci">البيان المسبق ومنصة فسح</a></li>
+            <li><a href="services.html#hs" data-i18n="footer.hs">تصنيف HS Code</a></li>
           </ul>
         </div>
         <div class="footer-col">
-          <h3>تواصل معنا</h3>
+          <h3 data-i18n="footer.contactTitle">تواصل معنا</h3>
           <ul class="footer-contact">
-            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg><span>طريق الملك عبدالعزيز، حي الحمراء – جدة</span></li>
+            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg><span data-i18n="footer.address">طريق الملك عبدالعزيز، حي الحمراء – جدة</span></li>
             <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><a href="tel:+966126143270" dir="ltr">+966 12 614 3270</a></li>
             <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><a href="mailto:info@marsa-sa.com" dir="ltr">info@marsa-sa.com</a></li>
             <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/><path d="M9 9.5c.3 1.8 2 3.8 4 4.5l1-1 2 .8"/></svg><a href="https://wa.me/966554821937" target="_blank" rel="noopener" dir="ltr">+966 55 482 1937</a></li>
-            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>الأحد – الخميس: 8 ص – 5 م</span></li>
+            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span data-i18n="footer.hours">الأحد – الخميس: 8 ص – 5 م</span></li>
           </ul>
         </div>
       </div>
     </div>
     <div class="container footer-privacy">
       <p><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg><span data-privacy-text><strong>الخصوصية في نسخة العرض:</strong> ما تُدخله في النماذج والحاسبة يبقى في التخزين المحلي (localStorage) لهذا المتصفح فقط، دون تشفير ودون إرسال إلى أي خادم، فلا تُدخل بيانات حقيقية حساسة. يُحمَّل خط الموقع من خدمة Google Fonts، لذا يتصل متصفحك بخوادم Google عند فتح الصفحات.</span></p>
-      <button class="btn btn-sm btn-outline-white" type="button" data-clear-local>مسح بياناتي من هذا الجهاز</button>
+      <button class="btn btn-sm btn-outline-white" type="button" data-clear-local data-i18n="footer.clearData">مسح بياناتي من هذا الجهاز</button>
     </div>
     <div class="container footer-bottom">
-      <span>© <span id="year">2026</span> مرسى MARSA. جميع الحقوق محفوظة.</span>
-      <span>منصة خاصة لخدمات التخليص الجمركي — غير تابعة لأي جهة حكومية.</span>
+      <span>© <span id="year">2026</span> <span data-i18n="footer.rights">مرسى MARSA. جميع الحقوق محفوظة.</span></span>
+      <span data-i18n="footer.disclaimer">منصة خاصة لخدمات التخليص الجمركي — غير تابعة لأي جهة حكومية.</span>
     </div>
   </footer>
   <button class="to-top" type="button" aria-label="العودة لأعلى الصفحة">
@@ -524,6 +527,8 @@
   <!-- ============ /FOOTER ============ -->
 
   <script src="assets/js/config.js" defer></script>
+  <script src="assets/js/i18n.js" defer></script>
+  <script src="assets/i18n/index.js" defer></script>
   <script src="assets/js/main.js" defer></script>
 </body>
 </html>

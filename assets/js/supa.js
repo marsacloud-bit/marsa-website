@@ -1,7 +1,8 @@
 /* ==========================================================================
    مرسى | MARSA — online data layer (Supabase, STAGING)  →  window.MarsaApi
    --------------------------------------------------------------------------
-   Load order:  config.js → main.js → supa.js → <page>.js   (plain <script defer>)
+   Load order:  config.js → i18n.js → main.js → supa.js → [assets/i18n/<page>.js] → <page>.js
+                (plain <script defer>)
 
    * Online  when window.MARSA_CONFIG has supabaseUrl + supabaseAnonKey:
      supabase-js v2 (UMD, pinned 2.45.4) is injected from jsDelivr on demand.
@@ -12,7 +13,10 @@
 
    EVERY method returns a Promise of { data, error } and never throws.
    error = { code: 'MRS_…' | pg code, field, message (Arabic), raw }.
-   User-facing strings live in MarsaApi.i18n.ar (centralised for later EN).
+   User-facing strings live in MarsaApi.i18n.ar; when MarsaI18n carries
+   'err.<CODE>' for the current language that text is preferred.
+   Idempotent calls (G2.13) retry with the same key and may end with
+   MRS_UNKNOWN_RESULT (see idemRpc); their result also carries idemKey.
    ========================================================================== */
 (function () {
   'use strict';
@@ -52,6 +56,13 @@
       MRS_EXTRACTION_DUPLICATE: 'هذا الملف محفوظ من قبل في المستندات المقروءة (للمعاملة نفسها). افتحه من «السجل» بدلًا من حفظه مرة أخرى.',
       MRS_EXTRACTION_VOIDED: 'هذا السجل مُلغى ولا يمكن تعديله.',
       MRS_EXTRACTION_ATTACHED: 'ربط السجل بمعاملة أو بمستند لا يمكن تغييره بعد تعيينه.',
+      MRS_EXPIRED: 'انتهت صلاحية هذا الرابط أو الدعوة. اطلب دعوة جديدة.',
+      MRS_EMAIL_MISMATCH: 'هذه الدعوة موجّهة إلى بريد إلكتروني آخر. سجّل الدخول بالبريد المدعو نفسه.',
+      MRS_EMAIL_UNCONFIRMED: 'يلزم تأكيد بريدك الإلكتروني أولًا من الرسالة المرسلة إليك، ثم أعد المحاولة.',
+      MRS_IDEMPOTENCY_CONFLICT: 'تعذّر تكرار العملية بالمفتاح نفسه لأن البيانات تغيّرت أو انتهت مهلته. حدّث الصفحة وتحقّق مما حُفظ قبل المحاولة من جديد.',
+      MRS_IN_PROGRESS: 'العملية نفسها ما زالت قيد التنفيذ. انتظر قليلًا ثم تحقّق من النتيجة.',
+      MRS_UNKNOWN_RESULT: 'لم نتمكن من تأكيد نتيجة العملية بسبب انقطاع الاتصال. إعادة المحاولة آمنة ولن تُنشئ نسخة مكرّرة.',
+      MRS_TIMEOUT: 'استغرق الخادم وقتًا أطول من المعتاد. حاول مرة أخرى.',
       DUPLICATE: 'هذا السجل موجود من قبل (تكرار). إن كان ملفًا فقد رُفع سابقًا.',
       FK: 'مرجع غير صالح أو لا يخص مؤسستك.',
       CHECK: 'بعض القيم غير صحيحة.',
@@ -79,7 +90,14 @@
       raw_text: 'النص المستخرج', extracted_fields: 'البيانات المستخرجة', reviewed_fields: 'البيانات بعد المراجعة',
       line_items: 'البنود', review_status: 'حالة المراجعة', review_note: 'ملاحظة المراجعة', doc_type: 'نوع المستند',
       source_name: 'اسم الملف', source_sha256: 'بصمة الملف', transaction_id: 'المعاملة', document_id: 'المستند الأصلي',
-      void_reason: 'سبب الإلغاء'
+      void_reason: 'سبب الإلغاء',
+      slug: 'المعرّف المختصر', name_ar: 'الاسم بالعربية', name_en: 'الاسم بالإنجليزية', ref_prefix: 'بادئة الأرقام المرجعية',
+      default_locale: 'اللغة الافتراضية', admin_email: 'بريد مدير المؤسسة', code: 'رمز الفرع', city: 'المدينة',
+      is_active: 'التفعيل', public_intake_enabled: 'استقبال الطلبات العامة', brand_color: 'لون الهوية',
+      contact_phone: 'هاتف التواصل', contact_email: 'بريد التواصل', address_ar: 'العنوان بالعربية',
+      address_en: 'العنوان بالإنجليزية', logo_path: 'الشعار', settings: 'الإعدادات', organization: 'المؤسسة',
+      branch_id: 'الفرع', client_id: 'العميل', invitation: 'الدعوة', token: 'رمز الدعوة', last_branch: 'آخر فرع مفعّل',
+      slug_taken: 'المعرّف المختصر (مستخدم لمؤسسة أخرى)', membership: 'العضوية', filters: 'عوامل التصفية', locale: 'اللغة', idempotencyKey: 'مفتاح العملية'
     },
     banner: {
       staging: 'بيئة تجريبية (Staging) — البيانات للاختبار فقط'
@@ -114,12 +132,23 @@
   /* ------------------------------------------------------------------
      Result / error helpers
      ------------------------------------------------------------------ */
+  // MarsaI18n (i18n.js) may carry 'err.<CODE>' / 'field.<f>' for the current language;
+  // t() returns the key itself when a string is missing.
+  function i18nStr(key) {
+    var I = window.MarsaI18n;
+    if (!I || typeof I.t !== 'function') return null;
+    try { var s = I.t(key); return (s && s !== key) ? String(s) : null; } catch (e) { return null; }
+  }
+  function fieldLabel(f) {
+    if (!f) return '';
+    return i18nStr('field.' + f) || AR.fields[f] || f;
+  }
   function fmt(tpl, f) {
-    var label = f ? (AR.fields[f] || f) : '';
-    return tpl.replace('{f}', label);
+    var label = fieldLabel(f);
+    return String(tpl).replace(/\{f\}|\{field\}/g, label);
   }
   function mkErr(code, field, raw) {
-    var tpl = AR.errors[code] || AR.errors.UNKNOWN;
+    var tpl = i18nStr('err.' + code) || AR.errors[code] || i18nStr('err.UNKNOWN') || AR.errors.UNKNOWN;
     return { code: code, field: field || null, message: fmt(tpl, field), raw: raw || null };
   }
   function normalizeError(e) {
@@ -189,6 +218,126 @@
   }
   function rpc(name, args, demoFn) {
     return online(function (c) { return c.rpc(name, args || {}); }, demoFn);
+  }
+
+  /* ------------------------------------------------------------------
+     Idempotent RPCs (G2.13)
+     The server stores (scope, key) → response. On a network error / timeout
+     / gateway 5xx the SAME key is re-sent up to 2× (the server replays the
+     stored response instead of doing the work twice). Still no definite
+     answer → MRS_UNKNOWN_RESULT: the page keeps the key and a later retry is
+     safe. Keys of calls that ended without a definite answer are remembered
+     in memory per (scope + payload) for 2 minutes, so that resubmitting the
+     very same data right away reuses them even when the caller did not pass
+     one; any definite answer on the same record ends them, and a replay of a
+     remembered key is flagged replayedEarlier (already applied earlier).
+     ------------------------------------------------------------------ */
+  var IDEM_RETRIES = 2;
+  var IDEM_TIMEOUT_MS = 25000;
+  var IDEM_BACKOFF_MS = [700, 1800];
+  // 'scope|fingerprint' → {key, at, row} — only while a result is unknown, and only for a
+  // short retry window: a later deliberate identical action must get a fresh key, or the
+  // server would replay the old result and nothing would happen.
+  var pendingKeys = {};
+  var PENDING_TTL_MS = 2 * 60 * 1000;
+  // a replay can never return a secret again → after an unknown result, a new click issues a new one
+  var NO_KEY_REUSE = { issue_tracking_token: true };
+  function newIdemKey() { return uuid(); }
+  function isUuid(s) { return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || '')); }
+  function fingerprint(scope, args) {
+    var copy = {};
+    Object.keys(args || {}).sort().forEach(function (k) {
+      var v = args[k];
+      if (k === 'p_idem_key') return;
+      if (v && typeof v === 'object' && !Array.isArray(v) && v.idempotencyKey !== undefined) {
+        v = Object.assign({}, v); delete v.idempotencyKey;
+      }
+      copy[k] = v;
+    });
+    try { return scope + '|' + JSON.stringify(copy); } catch (e) { return null; }
+  }
+  // result unknown (the server may have committed): network / timeout, or any 5xx without a
+  // PostgREST / Postgres error code (gateway 502-504, Cloudflare 520-523, a bare 500)
+  function isTransient(err, status) {
+    if (!err) return false;
+    if (err.code === 'MRS_NETWORK' || err.code === 'MRS_TIMEOUT' || err.code === 'MRS_IN_PROGRESS') return true;
+    var pg = err.raw && err.raw.code;
+    return !pg && (status === 0 || status >= 500);
+  }
+  // the record an idempotent call acts on (a definite answer for it ends every pending key on it)
+  function rowOf(name, args) {
+    var id = args && (args.p_transaction_id || args.p_request_id);
+    return id ? name + '#' + id : null;
+  }
+  function takePending(fp) {
+    var e = fp && pendingKeys[fp];
+    if (!e) return null;
+    if (Date.now() - e.at > PENDING_TTL_MS) { delete pendingKeys[fp]; return null; }
+    return e.key;
+  }
+  function clearPending(fp, row) {
+    if (fp) delete pendingKeys[fp];
+    if (!row) return;
+    Object.keys(pendingKeys).forEach(function (k) { if (pendingKeys[k].row === row) delete pendingKeys[k]; });
+  }
+  function delay(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  // one attempt with a timeout (AbortController when supported)
+  function rpcAttempt(c, name, args) {
+    var ac = typeof AbortController === 'function' ? new AbortController() : null;
+    var timedOut = false, timer;
+    var q = c.rpc(name, args);
+    if (ac && q && typeof q.abortSignal === 'function') q = q.abortSignal(ac.signal);
+    var timeout = new Promise(function (resolve) {
+      timer = setTimeout(function () { timedOut = true; if (ac) ac.abort(); resolve({ error: { message: 'MRS_TIMEOUT' }, status: 0 }); }, IDEM_TIMEOUT_MS);
+    });
+    return Promise.race([Promise.resolve(q), timeout]).then(function (res) {
+      clearTimeout(timer);
+      if (timedOut) return { data: null, error: mkErr('MRS_TIMEOUT'), status: 0 };
+      if (res && res.error) return { data: null, error: normalizeError(res.error), status: res.status };
+      return { data: res ? (res.data === undefined ? null : res.data) : null, error: null, status: res && res.status };
+    }, function (e) {
+      clearTimeout(timer);
+      return { data: null, error: timedOut ? mkErr('MRS_TIMEOUT') : normalizeError(e), status: 0 };
+    });
+  }
+  // build(key) → RPC args carrying that key (in payload.idempotencyKey or p_idem_key)
+  // A result with replayedEarlier:true means the key was remembered from an earlier unknown
+  // result and the server replayed it: the action was ALREADY applied then (not just now).
+  function idemRpc(name, key, build, demoFn) {
+    if (!configured) return demoFn ? Promise.resolve().then(demoFn) : demoOnly();
+    var base = build(null);
+    var fp = fingerprint(name, base), row = rowOf(name, base);
+    var implicit = false;
+    if (!isUuid(key)) {
+      var kept = NO_KEY_REUSE[name] ? null : takePending(fp);
+      implicit = !!kept;
+      key = kept || newIdemKey();
+    }
+    var args = build(key);
+    return ready().then(function (c) {
+      function attempt(n) {
+        return rpcAttempt(c, name, args).then(function (r) {
+          if (!r.error || !isTransient(r.error, r.status)) {
+            clearPending(fp, row);   // definite answer (success or a real error)
+            var out = { data: r.data, error: r.error, idemKey: key };
+            if (implicit && r.data && r.data.replayed) out.replayedEarlier = true;
+            return out;
+          }
+          if (n < IDEM_RETRIES) return delay(IDEM_BACKOFF_MS[n] || 2000).then(function () { return attempt(n + 1); });
+          if (fp) pendingKeys[fp] = { key: key, at: Date.now(), row: row };
+          return { data: null, error: mkErr('MRS_UNKNOWN_RESULT', null, r.error), idemKey: key };
+        });
+      }
+      return attempt(0);
+    }, function (e) {
+      // supabase-js did not load: nothing was sent, so this is a plain network error
+      return { data: null, error: normalizeError(e), idemKey: key };
+    });
+  }
+  function withKey(payload, key) {
+    var p = Object.assign({}, payload || {});
+    if (key) p.idempotencyKey = key; else delete p.idempotencyKey;
+    return p;
   }
 
   /* ------------------------------------------------------------------
@@ -319,7 +468,18 @@
       });
     });
   }
-  function signOut() { return online(function (c) { ctxCache = null; return c.auth.signOut(); }); }
+  // per-user state of this browser: never handed to the next person who signs in here
+  function clearUserState() {
+    ctxCache = null; applyPlatformChrome(false);
+    try { localStorage.removeItem('marsa_active_org'); } catch (e) { /* storage blocked */ }
+    try { sessionStorage.removeItem('marsa_invite'); sessionStorage.removeItem('marsa_invite_signup'); } catch (e) { /* storage blocked */ }
+  }
+  function signOut() { return online(function (c) { clearUserState(); return c.auth.signOut(); }); }
+  // revokes every refresh token of this user (all browsers / devices), then clears this one.
+  // Access tokens already issued elsewhere stay valid until they expire (≤ JWT expiry, 1 h default).
+  function signOutEverywhere() {
+    return online(function (c) { clearUserState(); return c.auth.signOut({ scope: 'global' }); });
+  }
   function resetPassword(email, redirectTo) {
     return online(function (c) {
       return c.auth.resetPasswordForEmail(String(email || '').trim(),
@@ -348,50 +508,172 @@
     }, function () {});
     return function () { unsub(); };
   }
+  var ctxPending = null;
   function myContext(force) {
     if (!configured) return demoOnly();
     if (ctxCache && !force) return Promise.resolve(ok(ctxCache));
-    return rpc('my_context').then(function (r) { if (!r.error) ctxCache = r.data; return r; });
+    if (ctxPending && !force) return ctxPending;   // share one in-flight call between callers
+    var p = rpc('my_context').then(function (r) {
+      if (ctxPending === p) ctxPending = null;
+      if (!r.error) { ctxCache = r.data; applyPlatformChrome(!!(r.data && r.data.is_platform_admin)); }
+      return r;
+    });
+    ctxPending = p;
+    return p;
   }
   function myMemberships() {
     return myContext().then(function (r) { return r.error ? r : ok(r.data.memberships || []); });
   }
-  var ROLE_RANK = ['client', 'clearance_staff', 'transport_staff', 'accountant', 'accounts_manager', 'operations_manager', 'supervisor', 'admin'];
-  // highest role in the configured org (or orgSlug), null when none
-  function myRole(orgSlug) {
-    var slug = orgSlug || ORG_SLUG;
-    return myMemberships().then(function (r) {
+  // [data-platform-only] (nav link to platform.html) — cosmetic only; the RPCs enforce access
+  function applyPlatformChrome(show) {
+    try {
+      Array.prototype.forEach.call(document.querySelectorAll('[data-platform-only]'), function (el) { el.hidden = !show; });
+    } catch (e) { /* no DOM yet */ }
+  }
+  var ROLE_RANK = ['client', 'clearance_staff', 'transport_staff', 'accountant', 'accounts_manager', 'branch_manager', 'operations_manager', 'supervisor', 'admin'];
+
+  /* ---- active organization (users with memberships in more than one org) ----
+     localStorage marsa_active_org holds a UUID; it is only honoured while
+     my_context() still lists an active membership in that org. Default:
+     the configured orgSlug, then the first org with a staff role, then the
+     first org at all. */
+  var ACTIVE_ORG_KEY = 'marsa_active_org';
+  function readActiveOrg() { try { return localStorage.getItem(ACTIVE_ORG_KEY) || null; } catch (e) { return null; } }
+  function writeActiveOrg(id) {
+    try { if (id) localStorage.setItem(ACTIVE_ORG_KEY, id); else localStorage.removeItem(ACTIVE_ORG_KEY); } catch (e) { /* storage blocked */ }
+  }
+  function ctxOrgIds(ctx) {
+    var ids = [];
+    ((ctx && ctx.memberships) || []).forEach(function (m) { if (m.org_id && ids.indexOf(m.org_id) === -1) ids.push(m.org_id); });
+    ((ctx && ctx.organizations) || []).forEach(function (o) { if (o.org_id && ids.indexOf(o.org_id) === -1) ids.push(o.org_id); });
+    return ids;
+  }
+  function pickActiveOrg(ctx) {
+    var ids = ctxOrgIds(ctx), mships = (ctx && ctx.memberships) || [];
+    var stored = readActiveOrg();
+    if (stored && ids.indexOf(stored) !== -1) return stored;
+    var bySlug = mships.filter(function (m) { return m.org_slug === ORG_SLUG; })[0];
+    if (bySlug) return bySlug.org_id;
+    var staff = mships.filter(function (m) { return m.role && m.role !== 'client'; })[0];
+    if (staff) return staff.org_id;
+    var clientOrg = ((ctx && ctx.clients) || [])[0];
+    return ids[0] || (clientOrg && clientOrg.org_id) || null;
+  }
+  function activeOrgId() {
+    if (!configured) return demoOnly();
+    return myContext().then(function (r) { return r.error ? r : ok(pickActiveOrg(r.data)); });
+  }
+  function setActiveOrg(id) {
+    if (!configured) return demoOnly();
+    return myContext().then(function (r) {
       if (r.error) return r;
-      var roles = r.data.filter(function (m) { return m.org_slug === slug; }).map(function (m) { return m.role; });
+      if (!id || ctxOrgIds(r.data).indexOf(id) === -1) return fail('MRS_FORBIDDEN', 'organization');
+      var changed = readActiveOrg() !== id;
+      writeActiveOrg(id);
+      if (changed) {
+        try { window.dispatchEvent(new CustomEvent('marsa:orgchange', { detail: { orgId: id } })); } catch (e) { /* old browser */ }
+      }
+      return ok(id);
+    });
+  }
+  // memberships of the requested org: by slug when given, otherwise the active org
+  function orgMemberships(orgSlug) {
+    return myContext().then(function (r) {
+      if (r.error) return r;
+      var all = r.data.memberships || [];
+      if (orgSlug) return ok(all.filter(function (m) { return m.org_slug === orgSlug; }));
+      var oid = pickActiveOrg(r.data);
+      return ok(all.filter(function (m) { return m.org_id === oid; }));
+    });
+  }
+  // highest role in the active org (or orgSlug), null when none
+  function myRole(orgSlug) {
+    return orgMemberships(orgSlug).then(function (r) {
+      if (r.error) return r;
+      var roles = r.data.map(function (m) { return m.role; });
       roles.sort(function (a, b) { return ROLE_RANK.indexOf(b) - ROLE_RANK.indexOf(a); });
       return ok(roles[0] || null);
     });
   }
   function hasRole(roles, orgSlug) {
-    var slug = orgSlug || ORG_SLUG, want = [].concat(roles);
-    return myMemberships().then(function (r) {
+    var want = [].concat(roles);
+    return orgMemberships(orgSlug).then(function (r) {
       if (r.error) return r;
-      return ok(r.data.some(function (m) { return m.org_slug === slug && want.indexOf(m.role) !== -1; }));
+      return ok(r.data.some(function (m) { return want.indexOf(m.role) !== -1; }));
     });
   }
   function isStaff(orgSlug) { return hasRole(ROLE_RANK.slice(1), orgSlug); }
+  function isPlatformAdmin() {
+    if (!configured) return Promise.resolve(ok(false));
+    return myContext().then(function (r) { return r.error ? r : ok(!!(r.data && r.data.is_platform_admin)); });
+  }
   function orgId(orgSlug) {
-    var slug = orgSlug || ORG_SLUG;
+    if (!orgSlug) {
+      return activeOrgId().then(function (r) { return r.error ? r : (r.data ? r : fail('MRS_FORBIDDEN', 'organization')); });
+    }
     return myMemberships().then(function (r) {
       if (r.error) return r;
-      var m = r.data.filter(function (x) { return x.org_slug === slug; })[0];
+      var m = r.data.filter(function (x) { return x.org_slug === orgSlug; })[0];
       return m ? ok(m.org_id) : fail('MRS_FORBIDDEN', 'organization');
+    });
+  }
+  function setMyLocale(l) {
+    var locale = l === 'en' ? 'en' : 'ar';
+    if (!configured) return Promise.resolve(ok(null));
+    return currentUser().then(function (u) {
+      if (u.error || !u.data) return ok(null);   // signed out: nothing to store server-side
+      return online(function (c) { return c.from('profiles').update({ locale: locale }).eq('id', u.data.id).select('id,locale').maybeSingle(); })
+        .then(function (r) {
+          if (!r.error && ctxCache && ctxCache.profile) ctxCache.profile.locale = locale;
+          return r;
+        });
     });
   }
 
   /* ------------------------------------------------------------------
      Public RPCs (anon allowed)
      ------------------------------------------------------------------ */
-  function submitServiceRequest(record) {
-    return rpc('submit_service_request', { payload: toRequestPayload(record) }, function () { return demoSubmitRequest(record); });
+  // idempotent: record.idempotencyKey (or opts.idemKey) is used when given, otherwise one is
+  // generated and kept for the automatic retries (and for a resubmit of the same data after
+  // MRS_UNKNOWN_RESULT). The result carries it as r.idemKey.
+  function submitServiceRequest(record, opts) {
+    var key = (opts && opts.idemKey) || (record && record.idempotencyKey);
+    var base = toRequestPayload(record);
+    return idemRpc('submit_service_request', key, function (k) { return { payload: withKey(base, k) }; },
+      function () { return demoSubmitRequest(record); });
   }
-  function submitContactMessage(entry) {
-    return rpc('submit_contact_message', { payload: toContactPayload(entry) }, function () { return demoSubmitContact(entry); });
+  function submitContactMessage(entry, opts) {
+    var key = (opts && opts.idemKey) || (entry && entry.idempotencyKey);
+    var base = toContactPayload(entry);
+    return idemRpc('submit_contact_message', key, function (k) { return { payload: withKey(base, k) }; },
+      function () { return demoSubmitContact(entry); });
+  }
+  function healthCheck() { return rpc('health_check'); }
+  // client error log (anon + authenticated); the server truncates, scrubs and rate-limits
+  function logClientError(p) {
+    if (!configured) return Promise.resolve(ok({ logged: false }));
+    p = p || {};
+    return rpc('log_client_error', { p_payload: {
+      page: String(p.page || location.pathname || '').slice(0, 200),
+      code: p.code ? String(p.code).slice(0, 60) : null,
+      message: String(p.message || '').slice(0, 500),
+      ua: String(p.ua || (navigator && navigator.userAgent) || '').slice(0, 200),
+      orgId: p.orgId || null              // 0300 reads payload.orgId (used only when the caller is a member)
+    } });
+  }
+  /* ---- invitations: public side (login.html?invite=…) ---- */
+  function invitationPreview(token) {
+    var t = String(token || '').trim();
+    if (!/^[0-9a-f]{64}$/i.test(t)) return configured ? Promise.resolve(fail('MRS_NOT_FOUND')) : demoOnly();
+    return rpc('invitation_preview', { p_token: t });
+  }
+  function acceptInvitation(token) {
+    var t = String(token || '').trim();
+    if (!/^[0-9a-f]{64}$/i.test(t)) return configured ? Promise.resolve(fail('MRS_NOT_FOUND')) : demoOnly();
+    return rpc('accept_invitation', { p_token: t }).then(function (r) {
+      ctxCache = null; ctxPending = null;   // new membership / client link
+      return r;
+    });
   }
   function publicTrack(ref, token) {
     return rpc('public_track', { p_ref: String(ref || '').trim(), p_token: String(token || '').trim() }, function () { return demoTrack(ref); });
@@ -410,8 +692,11 @@
   function getOrg(orgSlug) {
     return online(function (c) { return c.from('organizations').select('id,slug,name_ar,name_en,environment,default_locale').eq('slug', orgSlug || ORG_SLUG).maybeSingle(); });
   }
-  function listBranches() {
-    return online(function (c) { return c.from('branches').select('id,org_id,code,name_ar,name_en,city,is_active').order('code'); });
+  function listBranches(oid) {
+    return online(function (c) {
+      var q = c.from('branches').select('id,org_id,code,name_ar,name_en,city,is_active').order('code');
+      return oid ? q.eq('org_id', oid) : q;
+    });
   }
   function listMemberships(oid) {
     return online(function (c) {
@@ -421,14 +706,49 @@
   }
   // memberships are written ONLY through the admin RPCs (0650): they refuse self-changes and
   // removing the last active admin. Direct table writes are revoked server-side.
+  // admin_add_member is SQL-Editor only since G2 (0200 revokes EXECUTE from authenticated:
+  // account-existence oracle). Kept for API compatibility; staff are added with invite().
   function addMembership(m) {
     m = m || {};
     if (!m.email) return Promise.resolve(fail('MRS_REQUIRED', 'email'));
-    return rpc('admin_add_member', { p_org: m.orgId, p_email: m.email, p_role: m.role, p_branch: m.branchId || null });
+    return Promise.resolve(fail('MRS_FORBIDDEN', 'invite'));
   }
   function setMembershipActive(id, active) {
     return rpc('admin_set_member_active', { p_membership: id, p_active: !!active });
   }
+  function listMembers(oid) { return rpc('admin_list_members', { p_org: oid }); }
+  function updateOrg(oid, payload) { return rpc('admin_update_org', { p_org: oid, p_payload: payload || {} }); }
+  function createBranch(oid, payload) { return rpc('admin_create_branch', { p_org: oid, p_payload: payload || {} }); }
+  function updateBranch(id, payload) { return rpc('admin_update_branch', { p_branch: id, p_payload: payload || {} }); }
+  // payload = { email, role, branch_id?, client_id?, idempotencyKey? } → { invitation_id, email, role,
+  // expires_at, token, accept_path } — token is shown ONCE (on a replay: token null + token_shown true)
+  function invite(oid, payload) {
+    var key = payload && payload.idempotencyKey;
+    return idemRpc('admin_invite', key, function (k) { return { p_org: oid, p_payload: withKey(payload, k) }; });
+  }
+  function listInvitations(oid) { return rpc('admin_list_invitations', { p_org: oid }); }
+  function revokeInvitation(id) { return rpc('admin_revoke_invitation', { p_invitation: id }); }
+  function reissueInvitation(id) { return rpc('admin_reissue_invitation', { p_invitation: id }); }
+  // filters = { table_name, actor, from, to, row_id, limit (≤200), before_id }
+  function auditLog(oid, filters) { return rpc('admin_audit_log', { p_org: oid, p_filters: filters || {} }); }
+  // org admin: errors of one org; without an org id: platform admin view of all orgs
+  function recentErrors(oid) { return oid ? rpc('admin_recent_errors', { p_org: oid }) : rpc('platform_recent_errors'); }
+
+  /* ------------------------------------------------------------------
+     Platform admin (platform_admins; organizations only, no tenant data)
+     ------------------------------------------------------------------ */
+  function platformListOrgs() { return rpc('platform_list_orgs'); }
+  // payload = { slug, name_ar, name_en?, ref_prefix, default_locale?, branch:{code, name_ar, name_en?, city?},
+  //             admin_email, idempotencyKey? } → { org_id, slug, branch_id, invitation_id, token, accept_path }
+  function platformCreateOrg(payload) {
+    var key = payload && payload.idempotencyKey;
+    return idemRpc('platform_create_org', key, function (k) { return { p_payload: withKey(payload, k) }; });
+  }
+  function platformSetOrgActive(id, active) { return rpc('platform_set_org_active', { p_org: id, p_active: !!active }); }
+  // org without an active admin: new one-time link for its pending first-admin invitation
+  // → { org_id, invitation_id, email, expires_at, token, accept_path } (shown once, never stored)
+  function platformReissueAdminInvitation(orgId) { return rpc('platform_reissue_admin_invitation', { p_org: orgId }); }
+  function platformRecentErrors() { return rpc('platform_recent_errors'); }
 
   // Internal staff fields (transactions.notes, clients.notes/classification) are not selectable by
   // the API roles (0700 column grants). Staff get them through staff_internal_fields(); for clients
@@ -459,6 +779,7 @@
     o = o || {};
     return online(function (c) {
       var q = c.from('service_requests').select(REQ_COLS, { count: 'exact' }).order('created_at', { ascending: false });
+      if (o.orgId) q = q.eq('org_id', o.orgId);   // multi-org users: RLS returns every org they belong to
       if (o.status) q = q.eq('status', o.status);
       if (o.search) { var s = likeSafe(o.search); if (s) q = q.or('ref.ilike.%' + s + '%,full_name.ilike.%' + s + '%,company.ilike.%' + s + '%,bl_number.ilike.%' + s + '%'); }
       return range(q, o);
@@ -473,9 +794,12 @@
   function setRequestStatus(id, status, note) {
     return rpc('set_request_status', { p_request_id: id, p_status: status, p_note: note || null });
   }
+  // o = { branchId, clientId, idemKey } — idempotent (p_idem_key)
   function convertRequest(id, o) {
     o = o || {};
-    return rpc('convert_request_to_transaction', { p_request_id: id, p_branch_id: o.branchId || null, p_client_id: o.clientId || null });
+    return idemRpc('convert_request_to_transaction', o.idemKey, function (k) {
+      return { p_request_id: id, p_branch_id: o.branchId || null, p_client_id: o.clientId || null, p_idem_key: k };
+    });
   }
 
   /* ------------------------------------------------------------------
@@ -487,6 +811,7 @@
     o = o || {};
     return online(function (c) {
       var q = c.from('clients').select(CLIENT_COLS, { count: 'exact' }).order('name_ar');
+      if (o.orgId) q = q.eq('org_id', o.orgId);
       if (o.active !== false) q = q.eq('is_active', true);
       if (o.search) { var s = likeSafe(o.search); if (s) q = q.or('name_ar.ilike.%' + s + '%,name_en.ilike.%' + s + '%,cr_number.ilike.%' + s + '%,vat_number.ilike.%' + s + '%'); }
       return range(q, o);
@@ -512,6 +837,7 @@
     return online(function (c) {
       var q = c.from('transactions').select(TX_COLS + ',clients(name_ar),branches(code,name_ar)', { count: 'exact' })
         .order('created_at', { ascending: false });
+      if (o.orgId) q = q.eq('org_id', o.orgId);
       if (o.status) q = q.eq('operational_status', o.status);
       if (o.financialStatus) q = q.eq('financial_status', o.financialStatus);
       if (o.branchId) q = q.eq('branch_id', o.branchId);
@@ -531,13 +857,21 @@
   function updateTransaction(id, patch) {
     return online(function (c) { return c.from('transactions').update(patch).eq('id', id).select(TX_COLS).single(); }).then(function (r) { return withInternal('transactions', r); });
   }
-  function setTransactionStatus(id, status, note) {
-    return rpc('set_transaction_status', { p_transaction_id: id, p_status: status, p_note: note || null });
+  // idemKey (optional 4th arg) → p_idem_key; generated when absent and kept for the retries
+  function setTransactionStatus(id, status, note, idemKey) {
+    return idemRpc('set_transaction_status', idemKey, function (k) {
+      return { p_transaction_id: id, p_status: status, p_note: note || null, p_idem_key: k };
+    });
   }
-  function setFinancialStatus(id, status, note) {
-    return rpc('set_financial_status', { p_transaction_id: id, p_status: status, p_note: note || null });
+  function setFinancialStatus(id, status, note, idemKey) {
+    return idemRpc('set_financial_status', idemKey, function (k) {
+      return { p_transaction_id: id, p_status: status, p_note: note || null, p_idem_key: k };
+    });
   }
-  function issueTrackingToken(id) { return rpc('issue_tracking_token', { p_transaction_id: id }); }
+  // the token is shown once; on a replay the server returns tracking_token null + token_shown true
+  function issueTrackingToken(id, idemKey) {
+    return idemRpc('issue_tracking_token', idemKey, function (k) { return { p_transaction_id: id, p_idem_key: k }; });
+  }
   function listEvents(txId) {
     return online(function (c) {
       return c.from('transaction_events').select('id,event_type,from_status,to_status,note,payload,visible_to_client,actor,created_at')
@@ -580,6 +914,7 @@
     o = o || {};
     return online(function (c) {
       var q = c.from('documents').select(DOC_COLS).order('uploaded_at', { ascending: false });
+      if (o.orgId) q = q.eq('org_id', o.orgId);
       if (o.transactionId) q = q.eq('transaction_id', o.transactionId);
       if (o.requestId) q = q.eq('request_id', o.requestId);
       if (!o.includeVoided) q = q.is('voided_at', null);
@@ -835,6 +1170,7 @@
     if (!configured) return localExtractions.list(o);
     return online(function (c) {
       var q = c.from('document_extractions').select(EXT_LIST_COLS, { count: 'exact' }).order('created_at', { ascending: false });
+      if (o.orgId) q = q.eq('org_id', o.orgId);
       if (!o.includeVoided) q = q.is('voided_at', null);
       if (o.transactionId) q = q.eq('transaction_id', o.transactionId);
       if (o.status) q = q.eq('review_status', o.status);
@@ -905,6 +1241,7 @@
     o = o || {};
     return online(function (c) {
       var q = c.from('contact_messages').select('*', { count: 'exact' }).order('created_at', { ascending: false });
+      if (o.orgId) q = q.eq('org_id', o.orgId);
       if (o.status) q = q.eq('status', o.status);
       return range(q, o);
     });
@@ -916,6 +1253,7 @@
     o = o || {};
     return online(function (c) {
       var q = c.from('audit_log').select('*').order('at', { ascending: false });
+      if (o.orgId) q = q.eq('org_id', o.orgId);
       if (o.table) q = q.eq('table_name', o.table);
       if (o.rowId) q = q.eq('row_id', o.rowId);
       return range(q, o);
@@ -937,10 +1275,39 @@
   else applyModeToPage();
 
   /* ------------------------------------------------------------------
+     Client error reporting (online only): uncaught errors and unhandled
+     rejections → log_client_error. Deduped per message, at most 5 per page
+     load. Only location.pathname is sent (never ?query / #hash: they can
+     carry invite / recovery / tracking tokens).
+     ------------------------------------------------------------------ */
+  var ERR_MAX = 5, errSent = 0, errSeen = {};
+  function reportError(code, message) {
+    if (!configured || errSent >= ERR_MAX) return;
+    var msg = String(message || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+    if (!msg || /^script error\.?$/i.test(msg)) return;   // opaque cross-origin error: nothing useful
+    if (errSeen[msg]) return;
+    errSeen[msg] = true; errSent++;
+    var cachedOrg = ctxCache ? pickActiveOrg(ctxCache) : null;
+    try { logClientError({ code: code, message: msg, page: location.pathname, orgId: cachedOrg }).then(function () {}, function () {}); }
+    catch (e) { /* never let reporting throw */ }
+  }
+  if (configured && window.addEventListener) {
+    window.addEventListener('error', function (ev) {
+      if (!ev || (ev.target && ev.target !== window)) return;   // resource load errors (img/script) are not JS errors
+      var where = ev.filename ? ' @' + String(ev.filename).replace(/[?#].*$/, '').split('/').pop() + ':' + (ev.lineno || 0) : '';
+      reportError('JS_ERROR', (ev.message || (ev.error && ev.error.message) || 'error') + where);
+    });
+    window.addEventListener('unhandledrejection', function (ev) {
+      var r = ev && ev.reason;
+      reportError('UNHANDLED_REJECTION', r && (r.message || r.code) ? (r.code ? r.code + ': ' : '') + (r.message || '') : String(r));
+    });
+  }
+
+  /* ------------------------------------------------------------------
      Public API
      ------------------------------------------------------------------ */
   var api = {
-    version: '0.1.0-staging',
+    version: '0.2.0-staging',
     environment: cfg.environment || 'staging',
     orgSlug: ORG_SLUG,
     i18n: { ar: AR },
@@ -950,15 +1317,27 @@
     ready: function () { return ready().then(function (c) { return ok(c); }, function (e) { return { data: null, error: normalizeError(e) }; }); },
     errorMessage: function (err) { return normalizeError(err).message; },
     // auth
-    signIn: signIn, signUp: signUp, signOut: signOut, resetPassword: resetPassword, updatePassword: updatePassword,
+    signIn: signIn, signUp: signUp, signOut: signOut, signOutEverywhere: signOutEverywhere,
+    resetPassword: resetPassword, updatePassword: updatePassword,
     onAuth: onAuth, currentUser: currentUser, getSession: getSession,
     myContext: myContext, myMemberships: myMemberships, myRole: myRole, hasRole: hasRole, isStaff: isStaff, orgId: orgId,
+    isPlatformAdmin: isPlatformAdmin, activeOrgId: activeOrgId, setActiveOrg: setActiveOrg, setMyLocale: setMyLocale,
     // public
     submitServiceRequest: submitServiceRequest, submitContactMessage: submitContactMessage, publicTrack: publicTrack,
-    statusLabels: statusLabels,
+    statusLabels: statusLabels, healthCheck: healthCheck, logClientError: logClientError,
+    invitationPreview: invitationPreview, acceptInvitation: acceptInvitation,
+    // idempotency
+    newIdemKey: newIdemKey,
     // org admin
     getOrg: getOrg, listBranches: listBranches, listMemberships: listMemberships, addMembership: addMembership,
-    setMembershipActive: setMembershipActive,
+    setMembershipActive: setMembershipActive, listMembers: listMembers,
+    updateOrg: updateOrg, createBranch: createBranch, updateBranch: updateBranch,
+    invite: invite, listInvitations: listInvitations, revokeInvitation: revokeInvitation, reissueInvitation: reissueInvitation,
+    auditLog: auditLog, recentErrors: recentErrors,
+    // platform admin
+    platformListOrgs: platformListOrgs, platformCreateOrg: platformCreateOrg, platformSetOrgActive: platformSetOrgActive,
+    platformReissueAdminInvitation: platformReissueAdminInvitation,
+    platformRecentErrors: platformRecentErrors,
     // requests
     listRequests: listRequests, getRequest: getRequest, updateRequest: updateRequest,
     setRequestStatus: setRequestStatus, convertRequest: convertRequest,

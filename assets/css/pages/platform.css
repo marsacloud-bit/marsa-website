@@ -1,0 +1,70 @@
+/* =====================================================================
+   مرسى | MARSA — platform.html platform-admin console (loaded after style.css)
+   STAGING. Uses the design tokens from style.css only; logical properties
+   so the page works in RTL (ar) and LTR (en).
+   ===================================================================== */
+
+/* ---- hero / section ---- */
+.pf-hero h1 { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.pf-env-badge { font-size: var(--fs-xs); vertical-align: middle; }
+.pf-section { padding-top: 28px; }
+
+/* ---- gate (auth / role guard) ---- */
+.pf-gate { max-width: 640px; margin-inline: auto; text-align: center; }
+.pf-gate[hidden], .pf-gate [hidden] { display: none; }
+.pf-gate h2 { font-size: var(--fs-lg); margin: 6px 0 8px; }
+.pf-gate p { margin-inline: auto; max-width: 52ch; }
+.pf-gate-actions { justify-content: center; margin-top: 8px; }
+
+/* ---- app shell ---- */
+.pf-app { display: grid; gap: 20px; min-width: 0; }
+.pf-app[hidden] { display: none; }
+.pf-app > * { min-width: 0; }
+.pf-topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; padding: 16px 20px; }
+.pf-me { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.pf-me strong { display: block; color: var(--navy-dark); }
+.pf-me .text-xs { display: block; overflow-wrap: anywhere; }
+.pf-topbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+[data-pf-msg]:focus { outline: none; }
+
+/* ---- cards ---- */
+.pf-card { display: grid; gap: 14px; min-width: 0; }
+.pf-card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
+.pf-card-head h2 { font-size: var(--fs-lg); margin: 0; }
+.pf-card > p { margin: 0; }
+
+/* ---- health key/values ---- */
+.pf-kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px 18px; margin: 0; }
+.pf-kv > div { min-width: 0; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--r); background: #F7FAFD; }
+.pf-kv dt { font-size: var(--fs-xs); color: var(--muted); font-weight: 700; }
+.pf-kv dd { margin: 2px 0 0; font-weight: 800; color: var(--navy-dark); overflow-wrap: anywhere; }
+.pf-ok { color: var(--success, #1E7F4F); }
+.pf-bad { color: var(--danger, #C8323C); }
+
+/* ---- create form ---- */
+.pf-form { display: grid; gap: 16px; }
+.pf-fieldset { border: 1px solid var(--border); border-radius: var(--r); padding: 14px 16px 4px; margin: 0; min-width: 0; }
+.pf-fieldset legend { padding-inline: 6px; font-weight: 800; color: var(--navy-dark); font-size: var(--fs-sm); }
+
+/* ---- one-time invite link ---- */
+.pf-invite { display: grid; gap: 12px; padding: 16px; border: 2px dashed var(--teal, #0E8C8C); border-radius: var(--r); background: #F4FBFB; }
+.pf-invite[hidden] { display: none; }
+.pf-invite .alert { margin: 0; }
+.pf-copy { display: flex; gap: 8px; align-items: stretch; }
+.pf-copy .form-control { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--fs-xs); }
+.pf-invite > .btn { justify-self: start; }
+
+/* ---- tables ---- */
+.pf-table td { vertical-align: top; text-align: start; }
+.pf-table th { text-align: start; }
+.pf-table td, .pf-table th { padding: 12px 14px; }
+.pf-table .pf-sub { display: block; font-size: var(--fs-xs); color: var(--muted); font-weight: 400; }
+.pf-table .pf-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.pf-table .pf-msg-cell { max-width: 420px; overflow-wrap: anywhere; font-size: var(--fs-xs); }
+.pf-empty { text-align: center !important; color: var(--muted); padding: 24px 16px !important; }
+.pf-row-off { background: #FBF6F6; }
+
+@media (max-width: 640px) {
+  .pf-copy { flex-direction: column; }
+  .pf-topbar-actions { width: 100%; }
+}

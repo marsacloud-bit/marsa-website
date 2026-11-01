@@ -10,6 +10,10 @@
    (localStorage only). The chrome (demo banner, footer privacy line, clear-data
    confirm, «بوابتي» link) follows the mode. The «بوابتي» link is shown only on
    pages that also load supa.js (window.MarsaApi) and only for a signed-in user.
+   Language (G2.11): strings come from window.MarsaI18n (assets/js/i18n.js, loaded
+   before this file). main.js tags the shared chrome outside <header>/<footer>
+   (topbar, drawer, skip link, back-to-top) with data-i18n keys, injects the
+   [data-lang-toggle] button into .header-actions and re-applies on 'marsa:langchange'.
    ===================================================================== */
 (function () {
   'use strict';
@@ -18,6 +22,14 @@
   var qs = function (sel, ctx) { return (ctx || document).querySelector(sel); };
   var qsa = function (sel, ctx) { return Array.prototype.slice.call((ctx || document).querySelectorAll(sel)); };
   var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var I18N = window.MarsaI18n || null;
+  // translate with an Arabic fallback when i18n.js is missing (or the key is unknown)
+  function tr(key, fallback, vars) {
+    if (!I18N) return fallback;
+    var v = I18N.t(key, vars);
+    return v === key ? fallback : v;
+  }
+  function isRtl() { return (document.documentElement.getAttribute('dir') || 'rtl') !== 'ltr'; }
 
   /* ---- small icon set for JS-generated UI ---- */
   var ICONS = {
@@ -88,9 +100,11 @@
     var num = Number(n) || 0;
     return num.toLocaleString('en-US', { minimumFractionDigits: digits || 0, maximumFractionDigits: digits == null ? 2 : digits });
   }
-  function formatSAR(n) { return formatNum(n, 2) + ' ر.س'; }
+  function formatSAR(n) {
+    return I18N && I18N.lang() === 'en' ? 'SAR ' + formatNum(n, 2) : formatNum(n, 2) + ' ر.س';
+  }
 
-  /* ---- Mode + chrome strings (centralised for a later English version) ---- */
+  /* ---- Mode + chrome strings: Arabic defaults, refreshed from MarsaI18n by refreshStrings() ---- */
   var STR = {
     banner: {
       demo: 'نسخة عرض تجريبية — البيانات والأرقام توضيحية ولا تُرسل أي بيانات إلى خادم.',
@@ -106,6 +120,17 @@
     },
     portal: 'بوابتي'   // staff are sent to admin.html, clients to portal.html
   };
+  var STR_AR = JSON.parse(JSON.stringify(STR));
+  function refreshStrings() {
+    STR.banner.demo = tr('banner.demo', STR_AR.banner.demo);
+    STR.banner.staging = tr('banner.staging', STR_AR.banner.staging);
+    STR.privacy.demo = tr('footer.privacyDemo', STR_AR.privacy.demo);
+    STR.privacy.staging = tr('footer.privacyStaging', STR_AR.privacy.staging);
+    STR.clear.demo = tr('common.clearConfirmDemo', STR_AR.clear.demo);
+    STR.clear.staging = tr('common.clearConfirmStaging', STR_AR.clear.staging);
+    STR.portal = tr('nav.portal', STR_AR.portal);
+  }
+  refreshStrings();
   var CFG = window.MARSA_CONFIG || {};
   var MODE = (CFG.supabaseUrl && CFG.supabaseAnonKey) ? 'staging' : 'demo';
 
@@ -277,10 +302,11 @@
       tabs.forEach(function (t, i) {
         t.addEventListener('click', function () { select(t); });
         t.addEventListener('keydown', function (e) {
-          // RTL: ArrowLeft = next, ArrowRight = previous
+          // RTL: ArrowLeft = next, ArrowRight = previous (mirrored in LTR)
           var idx = null;
-          if (e.key === 'ArrowLeft') idx = (i + 1) % tabs.length;
-          if (e.key === 'ArrowRight') idx = (i - 1 + tabs.length) % tabs.length;
+          var nextKey = isRtl() ? 'ArrowLeft' : 'ArrowRight', prevKey = isRtl() ? 'ArrowRight' : 'ArrowLeft';
+          if (e.key === nextKey) idx = (i + 1) % tabs.length;
+          if (e.key === prevKey) idx = (i - 1 + tabs.length) % tabs.length;
           if (e.key === 'Home') idx = 0;
           if (e.key === 'End') idx = tabs.length - 1;
           if (idx !== null) { e.preventDefault(); select(tabs[idx], true); }
@@ -300,7 +326,7 @@
         var val = input ? input.value.trim().toUpperCase() : '';
         if (!val || val.length < 4) {
           if (input) { input.setAttribute('aria-invalid', 'true'); input.focus(); }
-          toast('من فضلك أدخل رقم شحنة أو رقم مرجعي صحيح', 'warning');
+          toast(tr('common.trackInvalid', 'من فضلك أدخل رقم شحنة أو رقم مرجعي صحيح'), 'warning');
           return;
         }
         if (input) input.removeAttribute('aria-invalid');
@@ -338,10 +364,11 @@
           }
           keys.forEach(function (k) { localStorage.removeItem(k); removed++; });
         } catch (e) {
-          toast('تعذّر الوصول إلى التخزين المحلي في هذا المتصفح، فلم يُحذف شيء.', 'error');
+          toast(tr('common.storageFail', 'تعذّر الوصول إلى التخزين المحلي في هذا المتصفح، فلم يُحذف شيء.'), 'error');
           return;
         }
-        toast(removed ? 'تم مسح بياناتك المحفوظة من هذا الجهاز. أعد تحميل الصفحة لتحديث ما يظهر فيها.' : 'لا توجد بيانات محفوظة لموقع مرسى على هذا الجهاز.', removed ? 'success' : 'info');
+        toast(removed ? tr('common.clearDone', 'تم مسح بياناتك المحفوظة من هذا الجهاز. أعد تحميل الصفحة لتحديث ما يظهر فيها.')
+                      : tr('common.clearNone', 'لا توجد بيانات محفوظة لموقع مرسى على هذا الجهاز.'), removed ? 'success' : 'info');
       });
     });
   }
@@ -352,7 +379,104 @@
     qsa('[data-demo-banner-text]').forEach(function (p) { p.textContent = STR.banner[MODE]; });
     qsa('[data-privacy-text]').forEach(function (el) { el.innerHTML = STR.privacy[MODE]; });
     var close = qs('[data-demo-banner-close]');
-    if (close) close.setAttribute('aria-label', MODE === 'staging' ? 'إخفاء تنبيه البيئة التجريبية لهذه الجلسة' : 'إخفاء تنبيه نسخة العرض لهذه الجلسة');
+    if (close) close.setAttribute('aria-label', MODE === 'staging'
+      ? tr('banner.closeStaging', 'إخفاء تنبيه البيئة التجريبية لهذه الجلسة')
+      : tr('banner.closeDemo', 'إخفاء تنبيه نسخة العرض لهذه الجلسة'));
+  }
+
+  /* ---- Shared chrome outside <header>/<footer>: tag with data-i18n keys (pages keep Arabic markup) ---- */
+  var HREF_KEYS = {        // href → [main-nav / topbar key, drawer key]
+    'index.html': ['nav.home', 'nav.home'], 'services.html': ['nav.services', 'nav.services'],
+    'calculator.html': ['nav.calculator', 'nav.calculatorFull'], 'tracking.html': ['nav.tracking', 'nav.tracking'],
+    'request.html': ['nav.request', 'nav.request'], 'bulk-upload.html': ['nav.bulk', 'nav.bulkFull'],
+    'ocr.html': ['nav.ocr', 'nav.ocrFull'], 'about.html': ['nav.about', 'nav.about'],
+    'contact.html': ['nav.contact', 'nav.contact'], 'login.html#client': ['nav.clientLogin', 'nav.clientLogin'],
+    'login.html#staff': ['nav.staffLogin', 'nav.staffLogin'], 'portal.html': ['nav.portal', 'nav.portal'],
+    'platform.html': ['nav.platform', 'nav.platform']
+  };
+  function tag(el, key) { if (el && !el.hasAttribute('data-i18n')) el.setAttribute('data-i18n', key); }
+  function tagAttr(el, spec) { if (el && !el.hasAttribute('data-i18n-attr')) el.setAttribute('data-i18n-attr', spec); }
+  function tagChrome() {
+    tag(qs('.skip-link'), 'nav.skip');
+    tag(qs('.topbar .container > span'), 'nav.tagline');
+    tagAttr(qs('.topbar-auth'), 'aria-label:nav.authNav');
+    qsa('.topbar-auth a').forEach(function (a) { var k = HREF_KEYS[a.getAttribute('href')]; if (k) tag(a, k[0]); });
+    var drawer = qs('#mobile-drawer');
+    if (drawer) {
+      tagAttr(drawer, 'aria-label:nav.drawer');
+      tagAttr(qs('.drawer-close', drawer), 'aria-label:nav.closeMenu');
+      tagAttr(qs('.drawer-head img', drawer), 'alt:nav.logoAltShort');
+      qsa('.drawer-nav a', drawer).forEach(function (a) { var k = HREF_KEYS[a.getAttribute('href')]; if (k) tag(a, k[1]); });
+      var cta = qs('.drawer-foot .btn', drawer);
+      if (cta && cta.getAttribute('href') === 'request.html') tag(cta, 'nav.requestNow');
+      // platform admins: supa.js unhides [data-platform-only]
+      var list = qs('.drawer-nav', drawer);
+      if (list && !qs('[data-platform-only]', list)) {
+        var li = document.createElement('li');
+        li.setAttribute('data-platform-only', ''); li.hidden = true;
+        li.innerHTML = '<a href="platform.html" data-platform-only hidden data-i18n="nav.platform">لوحة المنصة</a>';
+        var acct = qs('[data-account-item]', list);
+        list.insertBefore(li, acct ? acct.nextSibling : null);
+      }
+    }
+    tagAttr(qs('.to-top'), 'aria-label:common.toTop');
+  }
+
+  /* ---- Language toggle: [data-lang-toggle] injected into the shared header ---- */
+  function syncToggle() {
+    qsa('[data-lang-toggle]').forEach(function (b) {
+      var en = I18N && I18N.lang() === 'en';
+      b.textContent = en ? 'العربية' : 'English';
+      b.setAttribute('lang', en ? 'ar' : 'en');
+      b.setAttribute('aria-label', en ? 'Switch to Arabic' : 'التبديل إلى اللغة الإنجليزية');
+    });
+  }
+  function saveLocale(l) {   // signed-in users: profiles.locale (best effort, errors ignored)
+    var api = window.MarsaApi;
+    if (!api || typeof api.setMyLocale !== 'function' || !api.getSession) return;
+    try {
+      api.getSession().then(function (r) {
+        if (r && !r.error && r.data) return api.setMyLocale(l);
+      }).then(null, function () {});
+    } catch (e) { /* ignore */ }
+  }
+  function initLangToggle() {
+    if (!I18N) return;
+    // Pages without their own dictionary (assets/i18n/<page>.js, <html data-i18n-page>) are
+    // Arabic-only for now: no toggle, and a saved English choice is not applied here (Arabic
+    // content under an LTR layout). The choice stays saved for the translated pages.
+    if ((typeof I18N.hasPageDict === 'function' && !I18N.hasPageDict())
+        || !document.documentElement.hasAttribute('data-i18n-page')) {
+      if (I18N.lang() !== 'ar') I18N.setLang('ar', { persist: false });
+      return;
+    }
+    // two placements, CSS shows one: topbar (desktop) and header actions (phones, topbar hidden)
+    if (!qs('[data-lang-toggle]')) {
+      var mk = function () {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn-lang';
+        b.setAttribute('data-lang-toggle', '');
+        return b;
+      };
+      var top = qs('.topbar .topbar-links');
+      if (top) top.appendChild(mk());
+      var host = qs('.site-header .header-actions');
+      if (host) host.insertBefore(mk(), qs('.nav-toggle', host));
+    }
+    syncToggle();
+    qsa('[data-lang-toggle]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var l = I18N.lang() === 'en' ? 'ar' : 'en';
+        I18N.setLang(l);
+        saveLocale(l);
+      });
+    });
+    window.addEventListener('marsa:langchange', function () {
+      refreshStrings();
+      applyModeChrome();
+      syncToggle();
+    });
   }
 
   /* ---- «بوابتي» link: shown only for a signed-in user (needs supa.js on the page) ---- */
@@ -401,6 +525,9 @@
   }
 
   function init() {
+    tagChrome();
+    if (I18N) I18N.apply(document);
+    initLangToggle();
     initActiveLink();
     initDrawer();
     initScroll();

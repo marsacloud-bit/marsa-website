@@ -46,6 +46,7 @@
     tokenBad: 'رمز التتبع 64 خانة (أرقام وحروف a–f) كما ظهر لك عند إرسال الطلب.',
     linkSent: 'أرسلنا طلب الربط إلى فريق مرسى. بعد التحقق من ملكيتك للطلب سيظهر في بوابتك. لم نُرسل رمز التتبع ضمن الطلب.',
     signOutDone: 'تم تسجيل الخروج.',
+    signOutAllDone: 'تم تسجيل الخروج هنا وإلغاء جلسات الأجهزة الأخرى؛ قد يبقى جهاز آخر متصلًا حتى تنتهي جلسته الحالية (ساعة على الأكثر).',
     staffNote: 'حسابك لديه صلاحيات موظف. لوحة الموظفين متاحة من صفحة الإدارة.',
     notLinked: 'حسابك غير مرتبط بملف عميل بعد. يمكنك متابعة طلباتك التي أرسلتها وأنت مسجّل الدخول، وطلب ربط طلب سابق من تبويب «ربط طلب».',
     eventTypes: {
@@ -217,6 +218,17 @@
     b.addEventListener('click', function () {
       b.disabled = true;
       api.signOut().then(function () { toast(T.signOutDone, 'info'); location.replace('login.html#client'); });
+    });
+  });
+  // revokes the sessions on every device (Supabase scope 'global'), then leaves the portal
+  $$('[data-sign-out-all]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      b.disabled = true;
+      api.signOutEverywhere().then(function (r) {
+        b.disabled = false;
+        if (r.error) { toast(r.error.message, 'error'); return; }
+        toast(T.signOutAllDone, 'info'); location.replace('login.html#client');
+      });
     });
   });
 

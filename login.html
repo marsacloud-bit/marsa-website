@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl" class="no-js">
+<html lang="ar" dir="rtl" class="no-js" data-i18n-page>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,6 +10,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <!-- i18n: set lang/dir before first paint (same rule as assets/js/i18n.js; it stays authoritative) -->
+  <script>(function(){try{if(localStorage.getItem('marsa_lang')==='en'){var h=document.documentElement;h.setAttribute('lang','en');h.setAttribute('dir','ltr');}}catch(e){}})();</script>
   <link rel="stylesheet" href="assets/css/style.css">
   <link rel="stylesheet" href="assets/css/pages/login.css">
 </head>
@@ -33,27 +35,28 @@
   </div>
   <header class="site-header">
     <div class="container header-inner">
-      <a class="brand" href="index.html" aria-label="مرسى - الصفحة الرئيسية">
-        <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="84" height="58">
+      <a class="brand" href="index.html" aria-label="مرسى - الصفحة الرئيسية" data-i18n-attr="aria-label:nav.homeAria">
+        <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="84" height="58" data-i18n-attr="alt:nav.logoAlt">
       </a>
-      <nav class="main-nav" aria-label="القائمة الرئيسية">
+      <nav class="main-nav" aria-label="القائمة الرئيسية" data-i18n-attr="aria-label:nav.mainMenu">
         <ul class="nav-list">
-          <li><a class="nav-link" href="index.html">الرئيسية</a></li>
-          <li><a class="nav-link" href="services.html">خدماتنا</a></li>
-          <li><a class="nav-link" href="calculator.html">حاسبة الرسوم</a></li>
-          <li><a class="nav-link" href="tracking.html">تتبع الشحنة</a></li>
-          <li><a class="nav-link" href="bulk-upload.html">الرفع الجماعي</a></li>
-          <li><a class="nav-link" href="ocr.html">قراءة المستندات</a></li>
-          <li><a class="nav-link" href="about.html">من نحن</a></li>
-          <li><a class="nav-link" href="contact.html">تواصل معنا</a></li>
+          <li><a class="nav-link" href="index.html" data-i18n="nav.home">الرئيسية</a></li>
+          <li><a class="nav-link" href="services.html" data-i18n="nav.services">خدماتنا</a></li>
+          <li><a class="nav-link" href="calculator.html" data-i18n="nav.calculator">حاسبة الرسوم</a></li>
+          <li><a class="nav-link" href="tracking.html" data-i18n="nav.tracking">تتبع الشحنة</a></li>
+          <li><a class="nav-link" href="bulk-upload.html" data-i18n="nav.bulk">الرفع الجماعي</a></li>
+          <li><a class="nav-link" href="ocr.html" data-i18n="nav.ocr">قراءة المستندات</a></li>
+          <li><a class="nav-link" href="about.html" data-i18n="nav.about">من نحن</a></li>
+          <li><a class="nav-link" href="contact.html" data-i18n="nav.contact">تواصل معنا</a></li>
+          <li data-platform-only hidden><a class="nav-link" href="platform.html" data-platform-only hidden data-i18n="nav.platform">لوحة المنصة</a></li>
         </ul>
       </nav>
       <div class="header-actions">
-        <a class="btn btn-primary btn-cta" href="request.html">
+        <a class="btn btn-primary btn-cta" href="request.html" data-i18n="nav.request">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/></svg>
           اطلب تخليص
         </a>
-        <button class="nav-toggle" type="button" aria-label="فتح القائمة" aria-expanded="false" aria-controls="mobile-drawer">
+        <button class="nav-toggle" type="button" aria-label="فتح القائمة" data-i18n-attr="aria-label:nav.openMenu" aria-expanded="false" aria-controls="mobile-drawer">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
         </button>
       </div>
@@ -104,14 +107,14 @@
     <!-- PAGE HERO -->
     <section class="page-hero" aria-labelledby="page-title">
       <div class="container">
-        <nav class="breadcrumb" aria-label="مسار التنقل">
+        <nav class="breadcrumb" aria-label="مسار التنقل" data-i18n-attr="aria-label:login.breadcrumbAria">
           <ol>
-            <li><a href="index.html">الرئيسية</a></li>
-            <li aria-current="page">الدخول إلى المنصة</li>
+            <li><a href="index.html" data-i18n="login.home">الرئيسية</a></li>
+            <li aria-current="page" data-i18n="login.pageTitle">الدخول إلى المنصة</li>
           </ol>
         </nav>
-        <h1 id="page-title">الدخول إلى المنصة</h1>
-        <p class="lead">سجّل الدخول إلى بوابة العملاء لمتابعة طلباتك ومعاملاتك ومستنداتك، أو إلى بوابة الموظفين لإدارة العمليات بحسب صلاحياتك.</p>
+        <h1 id="page-title" data-i18n="login.pageTitle">الدخول إلى المنصة</h1>
+        <p class="lead" data-i18n="login.lead">سجّل الدخول إلى بوابة العملاء لمتابعة طلباتك ومعاملاتك ومستنداتك، أو إلى بوابة الموظفين لإدارة العمليات بحسب صلاحياتك.</p>
       </div>
       <svg class="page-hero-wave" viewBox="0 0 1440 120" preserveAspectRatio="none" aria-hidden="true">
         <path class="w-back" d="M0,40 C180,90 360,10 560,40 C760,70 900,20 1100,35 C1260,48 1360,70 1440,50 L1440,120 L0,120 Z"/>
@@ -123,9 +126,9 @@
     <section class="section overlap-up" aria-labelledby="auth-title">
       <div class="container auth-wrap">
         <div class="card shadow-lg auth-card">
-          <h2 id="auth-title" class="sr-only">نماذج الدخول</h2>
+          <h2 id="auth-title" class="sr-only" data-i18n="login.formsTitle">نماذج الدخول</h2>
 
-          <p class="auth-env" data-online-only hidden><span class="badge badge-warning">بيئة تجريبية (Staging)</span> <span class="text-xs text-muted">بيانات اختبار فقط — لا تستخدم كلمة مرور تستخدمها في خدمة أخرى.</span></p>
+          <p class="auth-env" data-online-only hidden><span class="badge badge-warning" data-i18n="login.envBadge">بيئة تجريبية (Staging)</span> <span class="text-xs text-muted" data-i18n="login.envNote">بيانات اختبار فقط — لا تستخدم كلمة مرور تستخدمها في خدمة أخرى.</span></p>
 
           <div class="alert mb-3" role="status" aria-live="polite" tabindex="-1" data-auth-msg hidden>
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 16v-4M12 8h.01"/></svg>
@@ -136,27 +139,136 @@
           <div data-auth-view="demo">
             <div class="alert alert-warning">
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>
-              <span><strong>الدخول غير متاح في نسخة العرض التجريبية.</strong> تسجيل الدخول يعمل فقط بعد ربط الموقع بالبيئة المتصلة (Supabase) في ملف <code dir="ltr">assets/js/config.js</code>. لذلك لا تعرض هذه الصفحة الآن أي حقول لإدخال بيانات الدخول، فلا تُدخل بيانات دخول باسم مرسى في أي مكان آخر من هذه النسخة.</span>
+              <span data-i18n-html="login.demoNotice"><strong>الدخول غير متاح في نسخة العرض التجريبية.</strong> تسجيل الدخول يعمل فقط بعد ربط الموقع بالبيئة المتصلة (Supabase) في ملف <code dir="ltr">assets/js/config.js</code>. لذلك لا تعرض هذه الصفحة الآن أي حقول لإدخال بيانات الدخول، فلا تُدخل بيانات دخول باسم مرسى في أي مكان آخر من هذه النسخة.</span>
             </div>
-            <p class="alert alert-danger mt-2" data-demo-misconfig hidden>إعدادات الاتصال في ملف config.js غير صحيحة، لذلك بقي الموقع في وضع نسخة العرض.</p>
+            <p class="alert alert-danger mt-2" data-demo-misconfig hidden data-i18n="login.demoMisconfig">إعدادات الاتصال في ملف config.js غير صحيحة، لذلك بقي الموقع في وضع نسخة العرض.</p>
             <div class="grid grid-2 mt-3">
               <article class="card card-muted" aria-labelledby="demo-client-title">
                 <span class="icon-box icon-box-sm"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span>
-                <h3 id="demo-client-title" class="mt-2">دخول العملاء</h3>
-                <p class="text-muted text-sm">بوابة العميل تعرض طلباتك ومعاملاتك ومراحلها وحاوياتها ومستنداتها. يمكنك الآن تجربة النماذج التوضيحية:</p>
+                <h3 id="demo-client-title" class="mt-2" data-i18n="login.clientTitle">دخول العملاء</h3>
+                <p class="text-muted text-sm" data-i18n="login.demoClientText">بوابة العميل تعرض طلباتك ومعاملاتك ومراحلها وحاوياتها ومستنداتها. يمكنك الآن تجربة النماذج التوضيحية:</p>
                 <div class="btn-group">
-                  <a class="btn btn-secondary btn-sm" href="request.html">اطلب تخليص</a>
-                  <a class="btn btn-ghost btn-sm" href="tracking.html">تتبع الشحنة</a>
+                  <a class="btn btn-secondary btn-sm" href="request.html" data-i18n="login.demoRequest">اطلب تخليص</a>
+                  <a class="btn btn-ghost btn-sm" href="tracking.html" data-i18n="login.demoTrack">تتبع الشحنة</a>
                 </div>
               </article>
               <article class="card card-muted" aria-labelledby="demo-staff-title">
                 <span class="icon-box icon-box-sm icon-box-navy"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/></svg></span>
-                <h3 id="demo-staff-title" class="mt-2">دخول الموظفين</h3>
-                <p class="text-muted text-sm">بوابة الموظفين لمراجعة الطلبات وإدارة المعاملات والمستندات بصلاحيات بحسب الدور والفرع، وتعمل في البيئة المتصلة فقط.</p>
+                <h3 id="demo-staff-title" class="mt-2" data-i18n="login.staffTitle">دخول الموظفين</h3>
+                <p class="text-muted text-sm" data-i18n="login.demoStaffText">بوابة الموظفين لمراجعة الطلبات وإدارة المعاملات والمستندات بصلاحيات بحسب الدور والفرع، وتعمل في البيئة المتصلة فقط.</p>
                 <div class="btn-group">
-                  <a class="btn btn-ghost btn-sm" href="contact.html">تواصل معنا</a>
+                  <a class="btn btn-ghost btn-sm" href="contact.html" data-i18n="login.demoContact">تواصل معنا</a>
                 </div>
               </article>
+            </div>
+          </div>
+
+          <!-- ===== INVITATION (login.html?invite=<token>) ===== -->
+          <div data-auth-view="invite" hidden>
+            <h3 class="auth-h" data-i18n="login.inviteTitle">دعوة للانضمام إلى مؤسسة</h3>
+            <p class="text-muted text-sm" data-invite-loading data-i18n="login.inviteChecking">جارٍ التحقق من الدعوة…</p>
+
+            <div class="invite-card" data-invite-card hidden>
+              <dl class="invite-meta">
+                <div><dt data-i18n="login.inviteOrg">المؤسسة</dt><dd data-invite-org></dd></div>
+                <div><dt data-i18n="login.inviteRole">الصلاحية</dt><dd data-invite-role></dd></div>
+                <div data-invite-branch-row hidden><dt data-i18n="login.inviteBranch">الفرع</dt><dd data-invite-branch></dd></div>
+                <div><dt data-i18n="login.inviteEmail">البريد الإلكتروني المدعو</dt><dd><span dir="ltr" data-invite-email></span></dd></div>
+                <div><dt data-i18n="login.inviteExpires">صالحة حتى</dt><dd data-invite-expires></dd></div>
+              </dl>
+              <p class="text-xs text-muted mb-0" data-i18n="login.inviteHint">يجب أن تدخل بالبريد الإلكتروني نفسه الذي وصلت إليه الدعوة. لا تشارك رابط الدعوة مع أحد.</p>
+            </div>
+
+            <!-- signed in: accept -->
+            <div data-invite-sub="accept" hidden>
+              <div class="auth-session mt-3">
+                <span class="icon-box icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span>
+                <div>
+                  <p class="mb-0 text-muted text-sm" data-i18n="login.sessionAs">أنت مسجّل الدخول بالحساب</p>
+                  <p class="mb-0 fw-bold"><span dir="ltr" data-invite-session-email></span></p>
+                </div>
+              </div>
+              <div class="btn-group mt-3">
+                <button class="btn btn-primary" type="button" data-invite-accept data-i18n="login.inviteAccept">قبول الدعوة</button>
+                <button class="btn btn-ghost" type="button" data-invite-switch data-i18n="login.inviteSwitch">الدخول بحساب آخر</button>
+              </div>
+            </div>
+
+            <!-- signed out: sign in with the invited e-mail -->
+            <div data-invite-sub="signin" hidden>
+              <p class="text-muted text-sm mt-3" data-i18n="login.inviteSigninLead">لديك حساب بهذا البريد؟ سجّل الدخول وسنقبل الدعوة تلقائيًا.</p>
+              <form class="form" id="invite-signin-form" data-auth-form novalidate>
+                <div class="form-group">
+                  <label class="form-label" for="iv-email"><span data-i18n="login.lblEmail">البريد الإلكتروني</span> <span class="req">*</span></label>
+                  <input class="form-control" id="iv-email" name="email" type="email" dir="ltr" autocomplete="username" inputmode="email" maxlength="160" required>
+                  <span class="form-error" data-i18n="login.errEmail">أدخل بريدًا إلكترونيًا صحيحًا.</span>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="iv-password"><span data-i18n="login.lblPassword">كلمة المرور</span> <span class="req">*</span></label>
+                  <div class="pw-field">
+                    <input class="form-control" id="iv-password" name="password" type="password" dir="ltr" autocomplete="current-password" maxlength="72" required>
+                    <button class="pw-toggle" type="button" data-toggle-password aria-controls="iv-password" aria-pressed="false" aria-label="إظهار كلمة المرور"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                  </div>
+                  <span class="form-error" data-i18n="login.errRequired">هذا الحقل مطلوب.</span>
+                </div>
+                <button class="btn btn-primary btn-block" type="submit" data-i18n="login.inviteSigninBtn">تسجيل الدخول وقبول الدعوة</button>
+                <div class="auth-links">
+                  <button class="link-btn" type="button" data-go-forgot data-email-from="iv-email" data-i18n="login.forgotLink">نسيت كلمة المرور؟</button>
+                  <span><span data-i18n="login.inviteNoAccount">ليس لديك حساب بهذا البريد؟</span> <button class="link-btn" type="button" data-invite-go="signup" data-i18n="login.inviteCreate">أنشئ حسابًا</button></span>
+                </div>
+              </form>
+            </div>
+
+            <!-- signed out: create an account with the invited e-mail -->
+            <div data-invite-sub="signup" hidden>
+              <p class="text-muted text-sm mt-3" data-i18n="login.inviteSignupLead">أنشئ حسابًا بالبريد المدعو. بعد تأكيد البريد تُقبل الدعوة عند أول دخول.</p>
+              <form class="form" id="invite-signup-form" data-auth-form novalidate>
+                <div class="form-group">
+                  <label class="form-label" for="ivs-name"><span data-i18n="login.fullName">الاسم الكامل</span> <span class="req">*</span></label>
+                  <input class="form-control" id="ivs-name" name="fullName" type="text" autocomplete="name" maxlength="120" required>
+                  <span class="form-error" data-i18n="login.errName">أدخل الاسم الكامل.</span>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label" for="ivs-email"><span data-i18n="login.lblEmail">البريد الإلكتروني</span> <span class="req">*</span></label>
+                    <input class="form-control" id="ivs-email" name="email" type="email" dir="ltr" autocomplete="email" inputmode="email" maxlength="160" required>
+                    <span class="form-error" data-i18n="login.errEmail">أدخل بريدًا إلكترونيًا صحيحًا.</span>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="ivs-phone" data-i18n="login.phoneOptional">رقم الجوال (اختياري)</label>
+                    <input class="form-control" id="ivs-phone" name="phone" type="tel" dir="ltr" autocomplete="tel" inputmode="tel" maxlength="20" placeholder="05XXXXXXXX">
+                    <span class="form-error" data-i18n="login.errPhone">أدخل رقم جوال سعودي صحيحًا.</span>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label" for="ivs-password"><span data-i18n="login.lblPassword">كلمة المرور</span> <span class="req">*</span></label>
+                    <div class="pw-field">
+                      <input class="form-control" id="ivs-password" name="password" type="password" dir="ltr" autocomplete="new-password" minlength="8" maxlength="72" aria-describedby="ivs-password-hint" required>
+                      <button class="pw-toggle" type="button" data-toggle-password aria-controls="ivs-password" aria-pressed="false" aria-label="إظهار كلمة المرور"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                    </div>
+                    <span class="form-hint" id="ivs-password-hint" data-i18n="login.passwordHint">8 أحرف على الأقل تجمع حروفًا وأرقامًا.</span>
+                    <span class="form-error" data-i18n="login.errWeak">كلمة المرور ضعيفة.</span>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="ivs-password2"><span data-i18n="login.password2">تأكيد كلمة المرور</span> <span class="req">*</span></label>
+                    <input class="form-control" id="ivs-password2" name="password2" type="password" dir="ltr" autocomplete="new-password" maxlength="72" required>
+                    <span class="form-error" data-i18n="login.errMatch">كلمتا المرور غير متطابقتين.</span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="check"><input type="checkbox" id="ivs-ack" required> <span data-i18n="login.ack">أدرك أن هذه بيئة تجريبية ببيانات اختبار، وأنني لن أُدخل بيانات حقيقية أو حساسة.</span></label>
+                  <span class="form-error" data-i18n="login.errAck">يلزم الإقرار للمتابعة.</span>
+                </div>
+                <button class="btn btn-primary btn-block" type="submit" data-i18n="login.signupBtn">إنشاء الحساب</button>
+                <div class="auth-links">
+                  <span><span data-i18n="login.haveAccount">لديك حساب؟</span> <button class="link-btn" type="button" data-invite-go="signin" data-i18n="login.signinLink">سجّل الدخول</button></span>
+                </div>
+              </form>
+            </div>
+
+            <div class="auth-links mt-3">
+              <button class="link-btn" type="button" data-invite-dismiss data-i18n="login.inviteDismiss">تجاهل الدعوة والعودة إلى الدخول العادي</button>
             </div>
           </div>
 
@@ -165,95 +277,96 @@
             <div class="auth-session">
               <span class="icon-box icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span>
               <div>
-                <p class="mb-0 text-muted text-sm">أنت مسجّل الدخول بالحساب</p>
+                <p class="mb-0 text-muted text-sm" data-i18n="login.sessionAs">أنت مسجّل الدخول بالحساب</p>
                 <p class="mb-0 fw-bold"><span dir="ltr" data-session-email></span></p>
               </div>
             </div>
             <div class="btn-group mt-3">
-              <button class="btn btn-primary" type="button" data-continue>متابعة إلى بوابتي</button>
-              <button class="btn btn-ghost" type="button" data-sign-out>تسجيل الخروج</button>
+              <button class="btn btn-primary" type="button" data-continue data-i18n="login.continue">متابعة إلى بوابتي</button>
+              <button class="btn btn-ghost" type="button" data-sign-out data-i18n="login.signOut">تسجيل الخروج</button>
+              <button class="btn btn-ghost" type="button" data-sign-out-all data-i18n="login.signOutAll">تسجيل الخروج من كل الأجهزة</button>
             </div>
           </div>
 
           <!-- ===== TABS: client / staff ===== -->
           <div class="tabs" data-tabs data-auth-view="tabs" hidden>
-            <div class="tab-list auth-tabs" role="tablist" aria-label="نوع الدخول">
-              <button class="tab" type="button" role="tab" id="tab-client" aria-selected="true" aria-controls="client" data-tab-hash="client">دخول العملاء</button>
-              <button class="tab" type="button" role="tab" id="tab-staff" aria-selected="false" aria-controls="staff" data-tab-hash="staff">دخول الموظفين</button>
+            <div class="tab-list auth-tabs" role="tablist" aria-label="نوع الدخول" data-i18n-attr="aria-label:login.tabsAria">
+              <button class="tab" type="button" role="tab" id="tab-client" aria-selected="true" aria-controls="client" data-tab-hash="client" data-i18n="login.clientTitle">دخول العملاء</button>
+              <button class="tab" type="button" role="tab" id="tab-staff" aria-selected="false" aria-controls="staff" data-tab-hash="staff" data-i18n="login.staffTitle">دخول الموظفين</button>
             </div>
 
             <!-- client panel -->
             <div class="tab-panel" role="tabpanel" id="client" aria-labelledby="tab-client">
               <div data-client-sub="signin">
-                <h3 class="auth-h">دخول العملاء</h3>
-                <p class="text-muted text-sm">تابع طلباتك ومعاملاتك وارفع مستنداتك من بوابة العميل.</p>
+                <h3 class="auth-h" data-i18n="login.clientTitle">دخول العملاء</h3>
+                <p class="text-muted text-sm" data-i18n="login.clientLead">تابع طلباتك ومعاملاتك وارفع مستنداتك من بوابة العميل.</p>
                 <form class="form" id="client-signin-form" data-auth-form novalidate>
                   <div class="form-group">
-                    <label class="form-label" for="ci-email">البريد الإلكتروني <span class="req">*</span></label>
+                    <label class="form-label" for="ci-email"><span data-i18n="login.lblEmail">البريد الإلكتروني</span> <span class="req">*</span></label>
                     <input class="form-control" id="ci-email" name="email" type="email" dir="ltr" autocomplete="username" inputmode="email" maxlength="160" required>
-                    <span class="form-error">أدخل بريدًا إلكترونيًا صحيحًا.</span>
+                    <span class="form-error" data-i18n="login.errEmail">أدخل بريدًا إلكترونيًا صحيحًا.</span>
                   </div>
                   <div class="form-group">
-                    <label class="form-label" for="ci-password">كلمة المرور <span class="req">*</span></label>
+                    <label class="form-label" for="ci-password"><span data-i18n="login.lblPassword">كلمة المرور</span> <span class="req">*</span></label>
                     <div class="pw-field">
                       <input class="form-control" id="ci-password" name="password" type="password" dir="ltr" autocomplete="current-password" maxlength="72" required>
                       <button class="pw-toggle" type="button" data-toggle-password aria-controls="ci-password" aria-pressed="false" aria-label="إظهار كلمة المرور"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
                     </div>
-                    <span class="form-error">هذا الحقل مطلوب.</span>
+                    <span class="form-error" data-i18n="login.errRequired">هذا الحقل مطلوب.</span>
                   </div>
-                  <button class="btn btn-primary btn-block" type="submit">تسجيل الدخول</button>
+                  <button class="btn btn-primary btn-block" type="submit" data-i18n="login.signinBtn">تسجيل الدخول</button>
                   <div class="auth-links">
-                    <button class="link-btn" type="button" data-go-forgot data-email-from="ci-email">نسيت كلمة المرور؟</button>
-                    <span>ليس لديك حساب؟ <button class="link-btn" type="button" data-go-signup>أنشئ حساب عميل</button></span>
+                    <button class="link-btn" type="button" data-go-forgot data-email-from="ci-email" data-i18n="login.forgotLink">نسيت كلمة المرور؟</button>
+                    <span><span data-i18n="login.noAccount">ليس لديك حساب؟</span> <button class="link-btn" type="button" data-go-signup data-i18n="login.createClient">أنشئ حساب عميل</button></span>
                   </div>
                 </form>
               </div>
 
               <div data-client-sub="signup" hidden>
-                <h3 class="auth-h">إنشاء حساب عميل</h3>
-                <p class="text-muted text-sm">بعد إنشاء الحساب تظهر في بوابتك الطلبات التي ترسلها وأنت مسجّل الدخول. ربط ملف منشأتك وبقية المعاملات يتم بعد تحقق فريق مرسى.</p>
+                <h3 class="auth-h" data-i18n="login.signupTitle">إنشاء حساب عميل</h3>
+                <p class="text-muted text-sm" data-i18n="login.signupLead">بعد إنشاء الحساب تظهر في بوابتك الطلبات التي ترسلها وأنت مسجّل الدخول. ربط ملف منشأتك وبقية المعاملات يتم بعد تحقق فريق مرسى.</p>
                 <form class="form" id="client-signup-form" data-auth-form novalidate>
                   <div class="form-group">
-                    <label class="form-label" for="su-name">الاسم الكامل <span class="req">*</span></label>
+                    <label class="form-label" for="su-name"><span data-i18n="login.fullName">الاسم الكامل</span> <span class="req">*</span></label>
                     <input class="form-control" id="su-name" name="fullName" type="text" autocomplete="name" maxlength="120" required>
-                    <span class="form-error">أدخل الاسم الكامل.</span>
+                    <span class="form-error" data-i18n="login.errName">أدخل الاسم الكامل.</span>
                   </div>
                   <div class="form-row">
                     <div class="form-group">
-                      <label class="form-label" for="su-phone">رقم الجوال <span class="req">*</span></label>
+                      <label class="form-label" for="su-phone"><span data-i18n="login.lblPhone">رقم الجوال</span> <span class="req">*</span></label>
                       <input class="form-control" id="su-phone" name="phone" type="tel" dir="ltr" autocomplete="tel" inputmode="tel" maxlength="20" placeholder="05XXXXXXXX" required>
-                      <span class="form-error">أدخل رقم جوال سعودي صحيحًا.</span>
+                      <span class="form-error" data-i18n="login.errPhone">أدخل رقم جوال سعودي صحيحًا.</span>
                     </div>
                     <div class="form-group">
-                      <label class="form-label" for="su-email">البريد الإلكتروني <span class="req">*</span></label>
+                      <label class="form-label" for="su-email"><span data-i18n="login.lblEmail">البريد الإلكتروني</span> <span class="req">*</span></label>
                       <input class="form-control" id="su-email" name="email" type="email" dir="ltr" autocomplete="email" inputmode="email" maxlength="160" required>
-                      <span class="form-error">أدخل بريدًا إلكترونيًا صحيحًا.</span>
+                      <span class="form-error" data-i18n="login.errEmail">أدخل بريدًا إلكترونيًا صحيحًا.</span>
                     </div>
                   </div>
                   <div class="form-row">
                     <div class="form-group">
-                      <label class="form-label" for="su-password">كلمة المرور <span class="req">*</span></label>
+                      <label class="form-label" for="su-password"><span data-i18n="login.lblPassword">كلمة المرور</span> <span class="req">*</span></label>
                       <div class="pw-field">
                         <input class="form-control" id="su-password" name="password" type="password" dir="ltr" autocomplete="new-password" minlength="8" maxlength="72" aria-describedby="su-password-hint" required>
                         <button class="pw-toggle" type="button" data-toggle-password aria-controls="su-password" aria-pressed="false" aria-label="إظهار كلمة المرور"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
                       </div>
-                      <span class="form-hint" id="su-password-hint">8 أحرف على الأقل تجمع حروفًا وأرقامًا.</span>
-                      <span class="form-error">كلمة المرور ضعيفة.</span>
+                      <span class="form-hint" id="su-password-hint" data-i18n="login.passwordHint">8 أحرف على الأقل تجمع حروفًا وأرقامًا.</span>
+                      <span class="form-error" data-i18n="login.errWeak">كلمة المرور ضعيفة.</span>
                     </div>
                     <div class="form-group">
-                      <label class="form-label" for="su-password2">تأكيد كلمة المرور <span class="req">*</span></label>
+                      <label class="form-label" for="su-password2"><span data-i18n="login.password2">تأكيد كلمة المرور</span> <span class="req">*</span></label>
                       <input class="form-control" id="su-password2" name="password2" type="password" dir="ltr" autocomplete="new-password" maxlength="72" required>
-                      <span class="form-error">كلمتا المرور غير متطابقتين.</span>
+                      <span class="form-error" data-i18n="login.errMatch">كلمتا المرور غير متطابقتين.</span>
                     </div>
                   </div>
                   <div class="form-group">
-                    <label class="check"><input type="checkbox" id="su-ack" required> أدرك أن هذه بيئة تجريبية ببيانات اختبار، وأنني لن أُدخل بيانات حقيقية أو حساسة.</label>
-                    <span class="form-error">يلزم الإقرار للمتابعة.</span>
+                    <label class="check"><input type="checkbox" id="su-ack" required> <span data-i18n="login.ack">أدرك أن هذه بيئة تجريبية ببيانات اختبار، وأنني لن أُدخل بيانات حقيقية أو حساسة.</span></label>
+                    <span class="form-error" data-i18n="login.errAck">يلزم الإقرار للمتابعة.</span>
                   </div>
-                  <p class="demo-note"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span>سنرسل إلى بريدك رسالة لتأكيده. لن تتمكن من الدخول قبل فتح رابط التأكيد.</span></p>
-                  <button class="btn btn-primary btn-block" type="submit">إنشاء الحساب</button>
+                  <p class="demo-note"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span data-i18n="login.confirmNote">سنرسل إلى بريدك رسالة لتأكيده. لن تتمكن من الدخول قبل فتح رابط التأكيد.</span></p>
+                  <button class="btn btn-primary btn-block" type="submit" data-i18n="login.signupBtn">إنشاء الحساب</button>
                   <div class="auth-links">
-                    <span>لديك حساب؟ <button class="link-btn" type="button" data-go-signin>سجّل الدخول</button></span>
+                    <span><span data-i18n="login.haveAccount">لديك حساب؟</span> <button class="link-btn" type="button" data-go-signin data-i18n="login.signinLink">سجّل الدخول</button></span>
                   </div>
                 </form>
               </div>
@@ -261,25 +374,25 @@
 
             <!-- staff panel -->
             <div class="tab-panel" role="tabpanel" id="staff" aria-labelledby="tab-staff" hidden>
-              <h3 class="auth-h">دخول الموظفين</h3>
-              <p class="text-muted text-sm">حسابات الموظفين يُنشئها مدير النظام، والصلاحيات تحددها عضويتك في المؤسسة والفرع. لا يوجد تسجيل ذاتي للموظفين.</p>
+              <h3 class="auth-h" data-i18n="login.staffTitle">دخول الموظفين</h3>
+              <p class="text-muted text-sm" data-i18n="login.staffLead">حسابات الموظفين تُنشأ بدعوة من مدير المؤسسة أو الفرع، والصلاحيات تحددها عضويتك في المؤسسة والفرع. لا يوجد تسجيل ذاتي للموظفين.</p>
               <form class="form" id="staff-signin-form" data-auth-form novalidate>
                 <div class="form-group">
-                  <label class="form-label" for="st-email">البريد الإلكتروني للعمل <span class="req">*</span></label>
+                  <label class="form-label" for="st-email"><span data-i18n="login.workEmail">البريد الإلكتروني للعمل</span> <span class="req">*</span></label>
                   <input class="form-control" id="st-email" name="email" type="email" dir="ltr" autocomplete="username" inputmode="email" maxlength="160" required>
-                  <span class="form-error">أدخل بريدًا إلكترونيًا صحيحًا.</span>
+                  <span class="form-error" data-i18n="login.errEmail">أدخل بريدًا إلكترونيًا صحيحًا.</span>
                 </div>
                 <div class="form-group">
-                  <label class="form-label" for="st-password">كلمة المرور <span class="req">*</span></label>
+                  <label class="form-label" for="st-password"><span data-i18n="login.lblPassword">كلمة المرور</span> <span class="req">*</span></label>
                   <div class="pw-field">
                     <input class="form-control" id="st-password" name="password" type="password" dir="ltr" autocomplete="current-password" maxlength="72" required>
                     <button class="pw-toggle" type="button" data-toggle-password aria-controls="st-password" aria-pressed="false" aria-label="إظهار كلمة المرور"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
                   </div>
-                  <span class="form-error">هذا الحقل مطلوب.</span>
+                  <span class="form-error" data-i18n="login.errRequired">هذا الحقل مطلوب.</span>
                 </div>
-                <button class="btn btn-primary btn-block" type="submit">دخول الموظفين</button>
+                <button class="btn btn-primary btn-block" type="submit" data-i18n="login.staffBtn">دخول الموظفين</button>
                 <div class="auth-links">
-                  <button class="link-btn" type="button" data-go-forgot data-email-from="st-email">نسيت كلمة المرور؟</button>
+                  <button class="link-btn" type="button" data-go-forgot data-email-from="st-email" data-i18n="login.forgotLink">نسيت كلمة المرور؟</button>
                 </div>
               </form>
             </div>
@@ -287,41 +400,41 @@
 
           <!-- ===== FORGOT PASSWORD ===== -->
           <div data-auth-view="forgot" hidden>
-            <h3 class="auth-h">استعادة كلمة المرور</h3>
-            <p class="text-muted text-sm">أدخل بريدك الإلكتروني وسنرسل إليك رابطًا لتعيين كلمة مرور جديدة.</p>
+            <h3 class="auth-h" data-i18n="login.forgotTitle">استعادة كلمة المرور</h3>
+            <p class="text-muted text-sm" data-i18n="login.forgotLead">أدخل بريدك الإلكتروني وسنرسل إليك رابطًا لتعيين كلمة مرور جديدة.</p>
             <form class="form" id="forgot-form" data-auth-form novalidate>
               <div class="form-group">
-                <label class="form-label" for="fp-email">البريد الإلكتروني <span class="req">*</span></label>
+                <label class="form-label" for="fp-email"><span data-i18n="login.lblEmail">البريد الإلكتروني</span> <span class="req">*</span></label>
                 <input class="form-control" id="fp-email" name="email" type="email" dir="ltr" autocomplete="email" inputmode="email" maxlength="160" required>
-                <span class="form-error">أدخل بريدًا إلكترونيًا صحيحًا.</span>
+                <span class="form-error" data-i18n="login.errEmail">أدخل بريدًا إلكترونيًا صحيحًا.</span>
               </div>
-              <button class="btn btn-primary btn-block" type="submit">إرسال رابط الاستعادة</button>
+              <button class="btn btn-primary btn-block" type="submit" data-i18n="login.forgotBtn">إرسال رابط الاستعادة</button>
               <div class="auth-links">
-                <button class="link-btn" type="button" data-go-tabs>العودة إلى تسجيل الدخول</button>
+                <button class="link-btn" type="button" data-go-tabs data-i18n="login.backToSignin">العودة إلى تسجيل الدخول</button>
               </div>
             </form>
           </div>
 
           <!-- ===== RESET (after recovery link, type=recovery) ===== -->
           <div data-auth-view="reset" hidden>
-            <h3 class="auth-h">تعيين كلمة مرور جديدة</h3>
-            <p class="text-muted text-sm">اختر كلمة مرور جديدة لحسابك.</p>
+            <h3 class="auth-h" data-i18n="login.resetTitle">تعيين كلمة مرور جديدة</h3>
+            <p class="text-muted text-sm" data-i18n="login.resetLead">اختر كلمة مرور جديدة لحسابك.</p>
             <form class="form" id="reset-form" data-auth-form novalidate>
               <div class="form-group">
-                <label class="form-label" for="rp-password">كلمة المرور الجديدة <span class="req">*</span></label>
+                <label class="form-label" for="rp-password"><span data-i18n="login.newPassword">كلمة المرور الجديدة</span> <span class="req">*</span></label>
                 <div class="pw-field">
                   <input class="form-control" id="rp-password" name="password" type="password" dir="ltr" autocomplete="new-password" minlength="8" maxlength="72" aria-describedby="rp-password-hint" required>
                   <button class="pw-toggle" type="button" data-toggle-password aria-controls="rp-password" aria-pressed="false" aria-label="إظهار كلمة المرور"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
                 </div>
-                <span class="form-hint" id="rp-password-hint">8 أحرف على الأقل تجمع حروفًا وأرقامًا.</span>
-                <span class="form-error">كلمة المرور ضعيفة.</span>
+                <span class="form-hint" id="rp-password-hint" data-i18n="login.passwordHint">8 أحرف على الأقل تجمع حروفًا وأرقامًا.</span>
+                <span class="form-error" data-i18n="login.errWeak">كلمة المرور ضعيفة.</span>
               </div>
               <div class="form-group">
-                <label class="form-label" for="rp-password2">تأكيد كلمة المرور <span class="req">*</span></label>
+                <label class="form-label" for="rp-password2"><span data-i18n="login.password2">تأكيد كلمة المرور</span> <span class="req">*</span></label>
                 <input class="form-control" id="rp-password2" name="password2" type="password" dir="ltr" autocomplete="new-password" maxlength="72" required>
-                <span class="form-error">كلمتا المرور غير متطابقتين.</span>
+                <span class="form-error" data-i18n="login.errMatch">كلمتا المرور غير متطابقتين.</span>
               </div>
-              <button class="btn btn-primary btn-block" type="submit">حفظ كلمة المرور</button>
+              <button class="btn btn-primary btn-block" type="submit" data-i18n="login.resetBtn">حفظ كلمة المرور</button>
             </form>
           </div>
 
@@ -341,59 +454,59 @@
     <div class="container">
       <div class="footer-grid">
         <div class="footer-brand">
-          <a class="footer-logo" href="index.html" aria-label="مرسى - الصفحة الرئيسية">
-            <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="107" height="74">
+          <a class="footer-logo" href="index.html" aria-label="مرسى - الصفحة الرئيسية" data-i18n-attr="aria-label:nav.homeAria">
+            <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="107" height="74" data-i18n-attr="alt:nav.logoAlt">
           </a>
-          <p>مرسى منصة سعودية لخدمات التخليص الجمركي والشحن أونلاين، تساعد المستوردين والمصدّرين في المملكة على تخليص شحناتهم بسرعة وشفافية.</p>
+          <p data-i18n="footer.about">مرسى منصة سعودية لخدمات التخليص الجمركي والشحن أونلاين، تساعد المستوردين والمصدّرين في المملكة على تخليص شحناتهم بسرعة وشفافية.</p>
           <div class="social">
-            <a href="contact.html" aria-label="فيسبوك"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h-2.5A3.5 3.5 0 0 0 9 6.5V9H7v3.5h2V21h3.5v-8.5H15l.5-3.5h-3V7a1 1 0 0 1 1-1H15z"/></svg></a>
-            <a href="contact.html" aria-label="لينكدإن"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 10v7M8 7v.01M12 17v-4a2 2 0 0 1 4 0v4M12 10v7"/></svg></a>
-            <a href="https://wa.me/966554821937" target="_blank" rel="noopener" aria-label="واتساب"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/><path d="M9 9.5c.3 1.8 2 3.8 4 4.5l1-1 2 .8"/></svg></a>
+            <a href="contact.html" aria-label="فيسبوك" data-i18n-attr="aria-label:footer.facebook"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h-2.5A3.5 3.5 0 0 0 9 6.5V9H7v3.5h2V21h3.5v-8.5H15l.5-3.5h-3V7a1 1 0 0 1 1-1H15z"/></svg></a>
+            <a href="contact.html" aria-label="لينكدإن" data-i18n-attr="aria-label:footer.linkedin"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 10v7M8 7v.01M12 17v-4a2 2 0 0 1 4 0v4M12 10v7"/></svg></a>
+            <a href="https://wa.me/966554821937" target="_blank" rel="noopener" aria-label="واتساب" data-i18n-attr="aria-label:footer.whatsapp"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/><path d="M9 9.5c.3 1.8 2 3.8 4 4.5l1-1 2 .8"/></svg></a>
           </div>
         </div>
         <div class="footer-col">
-          <h3>روابط سريعة</h3>
+          <h3 data-i18n="footer.quickLinks">روابط سريعة</h3>
           <ul class="footer-links">
-            <li><a href="index.html">الرئيسية</a></li>
-            <li><a href="services.html">خدماتنا</a></li>
-            <li><a href="about.html">من نحن</a></li>
-            <li><a href="about.html#faq">الأسئلة الشائعة</a></li>
-            <li><a href="contact.html">تواصل معنا</a></li>
-            <li><a href="login.html#client">دخول العملاء</a></li>
-            <li><a href="login.html#staff">دخول الموظفين</a></li>
+            <li><a href="index.html" data-i18n="nav.home">الرئيسية</a></li>
+            <li><a href="services.html" data-i18n="nav.services">خدماتنا</a></li>
+            <li><a href="about.html" data-i18n="nav.about">من نحن</a></li>
+            <li><a href="about.html#faq" data-i18n="footer.faq">الأسئلة الشائعة</a></li>
+            <li><a href="contact.html" data-i18n="nav.contact">تواصل معنا</a></li>
+            <li><a href="login.html#client" data-i18n="nav.clientLogin">دخول العملاء</a></li>
+            <li><a href="login.html#staff" data-i18n="nav.staffLogin">دخول الموظفين</a></li>
           </ul>
         </div>
         <div class="footer-col">
-          <h3>أدوات المنصة</h3>
+          <h3 data-i18n="footer.tools">أدوات المنصة</h3>
           <ul class="footer-links">
-            <li><a href="request.html">اطلب تخليص</a></li>
-            <li><a href="calculator.html">حاسبة الرسوم الجمركية</a></li>
-            <li><a href="tracking.html">تتبع الشحنة</a></li>
-            <li><a href="bulk-upload.html">الرفع الجماعي (Excel / CSV)</a></li>
-            <li><a href="ocr.html">قراءة المستندات (OCR)</a></li>
-            <li><a href="services.html#aci">البيان المسبق ومنصة فسح</a></li>
-            <li><a href="services.html#hs">تصنيف HS Code</a></li>
+            <li><a href="request.html" data-i18n="nav.request">اطلب تخليص</a></li>
+            <li><a href="calculator.html" data-i18n="nav.calculatorFull">حاسبة الرسوم الجمركية</a></li>
+            <li><a href="tracking.html" data-i18n="nav.tracking">تتبع الشحنة</a></li>
+            <li><a href="bulk-upload.html" data-i18n="footer.bulk">الرفع الجماعي (Excel / CSV)</a></li>
+            <li><a href="ocr.html" data-i18n="nav.ocrFull">قراءة المستندات (OCR)</a></li>
+            <li><a href="services.html#aci" data-i18n="footer.aci">البيان المسبق ومنصة فسح</a></li>
+            <li><a href="services.html#hs" data-i18n="footer.hs">تصنيف HS Code</a></li>
           </ul>
         </div>
         <div class="footer-col">
-          <h3>تواصل معنا</h3>
+          <h3 data-i18n="footer.contactTitle">تواصل معنا</h3>
           <ul class="footer-contact">
-            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg><span>طريق الملك عبدالعزيز، حي الحمراء – جدة</span></li>
+            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg><span data-i18n="footer.address">طريق الملك عبدالعزيز، حي الحمراء – جدة</span></li>
             <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><a href="tel:+966126143270" dir="ltr">+966 12 614 3270</a></li>
             <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><a href="mailto:info@marsa-sa.com" dir="ltr">info@marsa-sa.com</a></li>
             <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/><path d="M9 9.5c.3 1.8 2 3.8 4 4.5l1-1 2 .8"/></svg><a href="https://wa.me/966554821937" target="_blank" rel="noopener" dir="ltr">+966 55 482 1937</a></li>
-            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>الأحد – الخميس: 8 ص – 5 م</span></li>
+            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span data-i18n="footer.hours">الأحد – الخميس: 8 ص – 5 م</span></li>
           </ul>
         </div>
       </div>
     </div>
     <div class="container footer-privacy">
       <p><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg><span data-privacy-text><strong>الخصوصية في نسخة العرض:</strong> ما تُدخله في النماذج والحاسبة يبقى في التخزين المحلي (localStorage) لهذا المتصفح فقط، دون تشفير ودون إرسال إلى أي خادم، فلا تُدخل بيانات حقيقية حساسة. يُحمَّل خط الموقع من خدمة Google Fonts، لذا يتصل متصفحك بخوادم Google عند فتح الصفحات.</span></p>
-      <button class="btn btn-sm btn-outline-white" type="button" data-clear-local>مسح بياناتي من هذا الجهاز</button>
+      <button class="btn btn-sm btn-outline-white" type="button" data-clear-local data-i18n="footer.clearData">مسح بياناتي من هذا الجهاز</button>
     </div>
     <div class="container footer-bottom">
-      <span>© <span id="year">2026</span> مرسى MARSA. جميع الحقوق محفوظة.</span>
-      <span>منصة خاصة لخدمات التخليص الجمركي — غير تابعة لأي جهة حكومية.</span>
+      <span>© <span id="year">2026</span> <span data-i18n="footer.rights">مرسى MARSA. جميع الحقوق محفوظة.</span></span>
+      <span data-i18n="footer.disclaimer">منصة خاصة لخدمات التخليص الجمركي — غير تابعة لأي جهة حكومية.</span>
     </div>
   </footer>
   <button class="to-top" type="button" aria-label="العودة لأعلى الصفحة">
@@ -402,6 +515,8 @@
   <!-- ============ /FOOTER ============ -->
 
   <script src="assets/js/config.js" defer></script>
+  <script src="assets/js/i18n.js" defer></script>
+  <script src="assets/i18n/login.js" defer></script>
   <script src="assets/js/main.js" defer></script>
   <script src="assets/js/supa.js" defer></script>
   <script src="assets/js/auth.js" defer></script>

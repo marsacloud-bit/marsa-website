@@ -148,3 +148,10 @@
 .bu-save-error .icon { flex-shrink: 0; color: var(--danger); }
 .bu-save-error strong { display: block; margin-bottom: 4px; }
 .bu-success-note { max-width: 560px; margin: 0 auto 18px; text-align: right; }
+
+/* ---- LTR (English, html[dir="ltr"] set by i18n.js): mirror the physically placed rules above ---- */
+html[dir="ltr"] .bu-types .rc-body,
+html[dir="ltr"] .bu-refs-wrap,
+html[dir="ltr"] .bu-save-error,
+html[dir="ltr"] .bu-success-note { text-align: left; }
+html[dir="ltr"] .bu-cell.is-num { text-align: right; }

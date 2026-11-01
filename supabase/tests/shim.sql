@@ -19,8 +19,10 @@ CREATE TABLE IF NOT EXISTS auth.users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   email text UNIQUE,
   raw_user_meta_data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  email_confirmed_at timestamptz,          -- NULL until the user confirms the address (Supabase Auth)
   created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_confirmed_at timestamptz;
 CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql STABLE AS $$
   SELECT coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb
 $$;

@@ -77,3 +77,8 @@
 .req-save-error { text-align: right; }
 .req-save-error .icon { flex-shrink: 0; color: var(--danger); }
 .req-save-error strong { display: block; margin-bottom: 4px; }
+
+/* ---- LTR (English, html[dir="ltr"] set by i18n.js): mirror the physically placed rules above ---- */
+html[dir="ltr"] .success-kv,
+html[dir="ltr"] .success-note,
+html[dir="ltr"] .req-save-error { text-align: left; }

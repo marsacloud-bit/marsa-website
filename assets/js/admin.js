@@ -1,13 +1,18 @@
 /* ==========================================================================
    مرسى | MARSA — admin.html staff console (STAGING)
    --------------------------------------------------------------------------
-   Load order: config.js → main.js → supa.js → admin.js (plain <script defer>).
+   Load order: config.js → i18n.js → main.js → supa.js → assets/i18n/admin.js
+   → admin.js (plain <script defer>).
    * Online only. In demo mode (empty config) the page shows a notice and
      never touches localStorage data.
-   * Role guard: any active staff membership in MARSA_CONFIG.orgSlug. The UI
-     only hides what a role cannot do; the database (RLS + guarded RPCs) is
-     the real gate, and every error from it is shown as returned.
+   * Role guard: any active staff membership in the active org (G2: the
+     org switcher picks it when the user is staff in more than one org;
+     default MARSA_CONFIG.orgSlug). The UI only hides what a role cannot do;
+     the database (RLS + guarded RPCs) is the real gate, and every error
+     from it is shown as returned.
    * All user-supplied values are HTML-escaped before rendering (esc()).
+     The G2 console views (org, branches, members & invitations, audit,
+     client errors) build DOM nodes and set data with textContent only.
    * Local helpers that MarsaApi does not provide yet (see "LOCAL API GAPS")
      use MarsaApi.client after MarsaApi.ready() and the same {data,error} shape.
    ========================================================================== */
@@ -29,7 +34,8 @@
   var T = {
     views: {
       dashboard: 'نظرة عامة', requests: 'الطلبات الواردة', transactions: 'المعاملات', clients: 'العملاء',
-      messages: 'رسائل التواصل', imports: 'الرفع الجماعي', members: 'المستخدمون والصلاحيات'
+      messages: 'رسائل التواصل', imports: 'الرفع الجماعي', members: 'الأعضاء والدعوات',
+      org: 'المؤسسة', branches: 'الفروع', audit: 'سجل التدقيق', errors: 'أخطاء الواجهة'
     },
     gate: {
       demoTitle: 'لوحة الموظفين تعمل في النسخة المتصلة فقط',
@@ -62,7 +68,7 @@
     classification_status: { unreviewed: 'لم يُراجع', confirmed: 'تصنيف مؤكد', reclassified: 'أعيد تصنيفه', ambiguous: 'غامض — يحتاج مراجعة' },
     contact_status: { new: 'جديدة', in_progress: 'قيد المعالجة', closed: 'مغلقة' },
     import_row_status: { pending: 'بانتظار التحقق', valid: 'صالح', error: 'به أخطاء', duplicate: 'مكرر محتمل — قرار بشري', committed: 'تحوّل إلى طلب', skipped: 'تم تجاهله' },
-    role: { client: 'عميل', clearance_staff: 'موظف تخليص', transport_staff: 'موظف نقل', accountant: 'محاسب', accounts_manager: 'مدير حسابات', operations_manager: 'مدير عمليات', supervisor: 'مشرف', admin: 'مدير نظام' },
+    role: { client: 'عميل', clearance_staff: 'موظف تخليص', transport_staff: 'موظف نقل', accountant: 'محاسب', accounts_manager: 'مدير حسابات', operations_manager: 'مدير عمليات', branch_manager: 'مدير فرع', supervisor: 'مشرف', admin: 'مدير نظام' },
     // local-only dictionaries (not in status_labels yet)
     direction: { import: 'استيراد', export: 'تصدير' },
     mode: { sea: 'بحري', air: 'جوي', land: 'بري' },
@@ -85,16 +91,20 @@
   /* ------------------------------------------------------------------
      Role model (mirrors app.*_roles() and set_transaction_status; UI only)
      ------------------------------------------------------------------ */
+  // G2: branch_manager is allowed wherever operations_manager is (limited to its
+  // branch server-side by has_branch_role).
   var R = {
-    staff: ['clearance_staff', 'transport_staff', 'accountant', 'accounts_manager', 'operations_manager', 'supervisor', 'admin'],
-    opsWriter: ['clearance_staff', 'operations_manager', 'supervisor', 'admin'],
-    transportWriter: ['clearance_staff', 'transport_staff', 'operations_manager', 'supervisor', 'admin'],
+    staff: ['clearance_staff', 'transport_staff', 'accountant', 'accounts_manager', 'operations_manager', 'branch_manager', 'supervisor', 'admin'],
+    opsWriter: ['clearance_staff', 'operations_manager', 'branch_manager', 'supervisor', 'admin'],
+    transportWriter: ['clearance_staff', 'transport_staff', 'operations_manager', 'branch_manager', 'supervisor', 'admin'],
     finance: ['accountant', 'accounts_manager', 'admin'],
-    contact: ['clearance_staff', 'operations_manager', 'supervisor', 'admin'],
-    clientLink: ['operations_manager', 'supervisor', 'admin'],
-    membersRead: ['admin', 'supervisor'],
-    membersWrite: ['admin'],
-    backward: ['operations_manager', 'supervisor', 'admin']
+    contact: ['clearance_staff', 'operations_manager', 'branch_manager', 'supervisor', 'admin'],
+    clientLink: ['operations_manager', 'branch_manager', 'supervisor', 'admin'],
+    membersRead: ['admin', 'branch_manager', 'supervisor'],
+    membersWrite: ['admin', 'branch_manager'],
+    orgAdmin: ['admin'],
+    auditRead: ['admin', 'supervisor'],
+    backward: ['operations_manager', 'branch_manager', 'supervisor', 'admin']
   };
   var STATUS_ROLES = {
     new: R.opsWriter, in_progress: R.opsWriter, customs_declaration: R.opsWriter,
@@ -102,10 +112,10 @@
     operationally_complete: R.opsWriter, under_billing: R.finance, billed: R.finance,
     closed: ['accounts_manager', 'supervisor', 'admin']
   };
-  var ROLE_RANK = ['client', 'clearance_staff', 'transport_staff', 'accountant', 'accounts_manager', 'operations_manager', 'supervisor', 'admin'];
+  var ROLE_RANK = ['client', 'clearance_staff', 'transport_staff', 'accountant', 'accounts_manager', 'operations_manager', 'branch_manager', 'supervisor', 'admin'];
 
   var S = {
-    ctx: null, orgId: null, memberships: [], roles: [], branches: [], profiles: {},
+    ctx: null, orgId: null, orgs: [], memberships: [], roles: [], branches: [], profiles: {},
     filters: {
       requests: { status: 'new', search: '', offset: 0 },
       transactions: { status: '', branchId: '', search: '', offset: 0 },
@@ -114,6 +124,7 @@
       imports: { status: '', offset: 0 }
     },
     showVoided: false,
+    g2: { audit: { table: '', actor: '', from: '', to: '', rowId: '' }, allInvites: false },
     renderSeq: 0
   };
   var PAGE = 25;
@@ -244,21 +255,23 @@
       }, function (e) { return { data: null, error: { message: api.errorMessage(e), raw: e } }; });
     });
   }
+  // G2: scoped to the active org (RLS alone would mix every org the user belongs to)
+  function inOrg(q) { return S.orgId ? q.eq('org_id', S.orgId) : q; }
   var L = {
     count: function (table, build) {
-      return local(function (c) { var q = c.from(table).select('id', { count: 'exact', head: true }); return build ? build(q) : q; })
+      return local(function (c) { var q = inOrg(c.from(table).select('id', { count: 'exact', head: true })); return build ? build(q) : q; })
         .then(function (r) { return r.error ? r : { data: r.count || 0, error: null }; });
     },
     containersDue: function (days) {
       return local(function (c) {
-        return c.from('containers').select('id,container_no,return_deadline,return_status,transaction_id,transactions(ref)')
+        return inOrg(c.from('containers').select('id,container_no,return_deadline,return_status,transaction_id,transactions(ref)'))
           .in('return_status', ['pending', 'evidence_submitted', 'disputed']).not('return_deadline', 'is', null)
           .lte('return_deadline', todayISO(days)).order('return_deadline').limit(10);
       });
     },
     listImportBatches: function (o) {
       return local(function (c) {
-        var q = c.from('import_batches').select('id,ref,client_id,file_name,file_size,sheet_names,status,total_rows,committed_rows,skipped_rows,created_by,created_at,committed_at,clients(name_ar)', { count: 'exact' })
+        var q = inOrg(c.from('import_batches').select('id,ref,client_id,file_name,file_size,sheet_names,status,total_rows,committed_rows,skipped_rows,created_by,created_at,committed_at,clients(name_ar)', { count: 'exact' }))
           .order('created_at', { ascending: false });
         if (o.status) q = q.eq('status', o.status);
         return q.range(o.offset || 0, (o.offset || 0) + PAGE - 1);
@@ -280,12 +293,16 @@
         .then(function (r) { (r.data || []).forEach(function (p) { S.profiles[p.id] = p.full_name || ''; }); return r; });
     },
     // admin RPCs from supabase/migrations/20261031000650_admin_rpcs.sql
-    adminListMembers: function (orgId) { return local(function (c) { return c.rpc('admin_list_members', { p_org: orgId }); }); },
-    adminAddMember: function (o) {
-      return local(function (c) { return c.rpc('admin_add_member', { p_org: o.orgId, p_email: o.email, p_role: o.role, p_branch: o.branchId || null }); });
+    // (admin_add_member is SQL-Editor only since G2; the UI invites instead.)
+    adminListMembers: function (orgId) {
+      if (typeof api.listMembers === 'function') return api.listMembers(orgId);   // G2 supa.js wrapper
+      return local(function (c) { return c.rpc('admin_list_members', { p_org: orgId }); });
     },
-    adminSetMemberActive: function (id, active) {
-      return local(function (c) { return c.rpc('admin_set_member_active', { p_membership: id, p_active: !!active }); });
+    getOrgRow: function (orgId) {
+      return local(function (c) {
+        return c.from('organizations').select('id,slug,name_ar,name_en,ref_prefix,environment,public_intake_enabled,default_locale,settings,is_active')
+          .eq('id', orgId).maybeSingle();
+      });
     }
   };
   function who(id) {
@@ -394,6 +411,16 @@
   function signOut() {
     api.signOut().then(function () { location.href = 'login.html#staff'; });
   }
+  // revokes the refresh tokens of every device (other devices end within their access-token lifetime)
+  function signOutAll() {
+    var b = document.getElementById('adm-signout-all');
+    if (b) b.disabled = true;
+    api.signOutEverywhere().then(function (r) {
+      if (b) b.disabled = false;
+      if (r && r.error) return toast(errText(r.error), 'error');
+      location.href = 'login.html#staff';
+    });
+  }
 
   function boot() {
     if (!api || !api.isOnline || !api.isOnline()) { showGate('demo'); return; }
@@ -404,18 +431,46 @@
       return api.myContext(true).then(function (c) {
         if (c.error) return showGate(c.error.code === 'MRS_AUTH_REQUIRED' ? 'signin' : 'error', errText(c.error));
         S.ctx = c.data || {};
-        var slug = api.orgSlug;
-        S.memberships = (S.ctx.memberships || []).filter(function (m) { return m.org_slug === slug && R.staff.indexOf(m.role) !== -1; });
-        if (!S.memberships.length) return showGate('forbidden');
-        S.orgId = S.memberships[0].org_id;
-        S.roles = S.memberships.map(function (m) { return m.role; }).filter(function (r, i, a) { return a.indexOf(r) === i; });
-        S.roles.sort(function (a, b) { return ROLE_RANK.indexOf(b) - ROLE_RANK.indexOf(a); });
-        return Promise.all([api.listBranches(), loadLabels()]).then(function (res) {
-          S.branches = (res[0].data || []).filter(function (b) { return b.org_id === S.orgId; });
-          startApp();
+        S.orgs = staffOrgs(S.ctx);
+        if (!S.orgs.length) return showGate('forbidden');
+        return readActiveOrg().then(function (want) {
+          // active org: the stored choice when it is a staff org, else the configured slug, else the first
+          var pick = S.orgs.filter(function (o) { return o.org_id === want; })[0] ||
+            S.orgs.filter(function (o) { return o.slug === api.orgSlug; })[0] || S.orgs[0];
+          S.orgId = pick.org_id;
+          S.memberships = (S.ctx.memberships || []).filter(function (m) { return m.org_id === S.orgId && R.staff.indexOf(m.role) !== -1; });
+          S.roles = S.memberships.map(function (m) { return m.role; }).filter(function (r, i, a) { return a.indexOf(r) === i; });
+          S.roles.sort(function (a, b) { return ROLE_RANK.indexOf(b) - ROLE_RANK.indexOf(a); });
+          return Promise.all([api.listBranches(S.orgId), loadLabels()]).then(function (res) {
+            S.branches = (res[0].data || []).filter(function (b) { return b.org_id === S.orgId; });
+            startApp();
+          });
         });
       });
     });
+  }
+  // distinct orgs where the user holds an active staff role (my_context memberships)
+  function staffOrgs(ctx) {
+    var map = {}, list = [];
+    (ctx.memberships || []).forEach(function (m) {
+      if (R.staff.indexOf(m.role) === -1 || !m.org_id) return;
+      if (!map[m.org_id]) { map[m.org_id] = { org_id: m.org_id, slug: m.org_slug, name_ar: m.org_name_ar, name_en: m.org_name_en }; list.push(map[m.org_id]); }
+    });
+    // G2 my_context().organizations may carry fresher names; memberships stay the source of roles
+    (Array.isArray(ctx.organizations) ? ctx.organizations : []).forEach(function (o) {
+      var x = o && map[o.org_id];
+      if (x) { x.name_ar = o.name_ar || x.name_ar; x.name_en = o.name_en || x.name_en; }
+    });
+    return list;
+  }
+  function readActiveOrg() {
+    if (api && typeof api.activeOrgId === 'function') {
+      return Promise.resolve().then(function () { return api.activeOrgId(); }).then(function (v) {
+        if (v && typeof v === 'object') v = v.data;             // tolerate a {data,error} result
+        return typeof v === 'string' ? v : null;
+      }, function () { return null; });
+    }
+    try { return Promise.resolve(localStorage.getItem('marsa_active_org')); } catch (e) { return Promise.resolve(null); }
   }
   function loadLabels() {
     var domains = ['operational_status', 'financial_status', 'request_status', 'container_return_status', 'document_kind', 'classification_status', 'contact_status', 'import_row_status', 'role'];
@@ -437,7 +492,11 @@
     { id: 'clients', allow: R.staff },
     { id: 'messages', allow: R.contact },
     { id: 'imports', allow: R.opsWriter },
-    { id: 'members', allow: R.membersRead }
+    { id: 'org', allow: R.orgAdmin },
+    { id: 'branches', allow: R.orgAdmin },
+    { id: 'members', allow: R.membersRead },
+    { id: 'audit', allow: R.auditRead },
+    { id: 'errors', allow: R.orgAdmin }
   ];
   function allowedViews() { return VIEWS.filter(function (v) { return canAny(v.allow); }); }
 
@@ -449,12 +508,19 @@
       var b = m.branch_id ? (m.branch_name_ar || (S.branches.filter(function (x) { return x.id === m.branch_id; })[0] || {}).name_ar || 'فرع محدد') : 'كل الفروع';
       return lbl('role', m.role) + ' — ' + b;
     }).filter(function (x, i, a) { return a.indexOf(x) === i; }).join('، ');
-    nav.innerHTML = allowedViews().map(function (v) {
-      return '<li><a class="adm-nav-link" href="#' + v.id + '" data-view="' + v.id + '">' + esc(T.views[v.id]) + '</a></li>';
-    }).join('');
+    buildNav();
+    fillOrgSwitch();
+    if (window.MarsaI18n && typeof window.MarsaI18n.apply === 'function') { try { window.MarsaI18n.apply(app); } catch (e) { /* static Arabic stays */ } }
     route();
   }
+  function buildNav() {
+    nav.innerHTML = allowedViews().map(function (v) {
+      return '<li><a class="adm-nav-link" href="#' + v.id + '" data-view="' + v.id + '">' + esc(viewLabel(v.id)) + '</a></li>';
+    }).join('');
+  }
   document.getElementById('adm-signout').addEventListener('click', signOut);
+  var soAll = document.getElementById('adm-signout-all');
+  if (soAll) soAll.addEventListener('click', signOutAll);
   document.getElementById('adm-refresh').addEventListener('click', function () { route(true); });
   window.addEventListener('hashchange', function () { if (!app.hidden) route(false); });
   if (api && api.onAuth) {
@@ -483,11 +549,13 @@
     var fn = {
       dashboard: renderDashboard, requests: renderRequests, request: renderRequest, transactions: renderTransactions,
       tx: renderTx, clients: renderClients, client: renderClient, messages: renderMessages, imports: renderImports,
-      import: renderImport, members: renderMembers
+      import: renderImport, members: renderMembers,
+      org: renderOrg, branches: renderBranches, audit: renderAudit, errors: renderErrors
     }[name];
     Promise.resolve(fn(id)).then(function (html) {
       if (seq !== S.renderSeq) return;            // a newer navigation won
-      view.innerHTML = html;
+      if (html && html.nodeType) { view.textContent = ''; view.appendChild(html); }   // G2 views return DOM nodes
+      else view.innerHTML = html;
     }, function (e) {
       if (seq !== S.renderSeq) return;
       view.innerHTML = alertBox('danger', errText(e));
@@ -523,8 +591,8 @@
       jobs.push(p.then(function (r) { t.value = r.error ? '!' : (r.count != null ? r.count : r.data); t.err = r.error; }));
     }
     if (canAny(R.opsWriter)) {
-      tile('req_new', 'طلبات جديدة', '#requests', api.listRequests({ status: 'new', limit: 1 }));
-      tile('req_review', 'طلبات قيد المراجعة', '#requests', api.listRequests({ status: 'under_review', limit: 1 }));
+      tile('req_new', 'طلبات جديدة', '#requests', api.listRequests({ orgId: S.orgId, status: 'new', limit: 1 }));
+      tile('req_review', 'طلبات قيد المراجعة', '#requests', api.listRequests({ orgId: S.orgId, status: 'under_review', limit: 1 }));
     }
     tile('tx_open', 'معاملات مفتوحة', '#transactions', L.count('transactions', function (q) { return q.neq('operational_status', 'closed'); }));
     tile('ctr_overdue', 'حاويات تجاوزت موعد الإرجاع', '#transactions', L.count('containers', function (q) {
@@ -532,10 +600,10 @@
     }), 'danger');
     tile('ctr_evidence', 'أدلة إرجاع بانتظار التحقق', '#transactions', L.count('containers', function (q) { return q.eq('return_status', 'evidence_submitted'); }), 'warning');
     tile('doc_unrev', 'مستندات لم تُصنّف', '#transactions', L.count('documents', function (q) { return q.eq('classification_status', 'unreviewed').is('voided_at', null); }), 'warning');
-    if (canAny(R.contact)) tile('msg_new', 'رسائل تواصل جديدة', '#messages', api.listContactMessages({ status: 'new', limit: 1 }));
+    if (canAny(R.contact)) tile('msg_new', 'رسائل تواصل جديدة', '#messages', api.listContactMessages({ orgId: S.orgId, status: 'new', limit: 1 }));
     if (canAny(R.opsWriter)) tile('imp_draft', 'دفعات رفع جماعي مسودة', '#imports', L.count('import_batches', function (q) { return q.eq('status', 'draft'); }));
 
-    var recent = canAny(R.opsWriter) ? api.listRequests({ limit: 5 }) : Promise.resolve({ data: [] });
+    var recent = canAny(R.opsWriter) ? api.listRequests({ orgId: S.orgId, limit: 5 }) : Promise.resolve({ data: [] });
     var due = L.containersDue(3);
     return Promise.all(jobs.concat([recent, due])).then(function () {
       return Promise.all([recent, due]);
@@ -566,7 +634,7 @@
      ------------------------------------------------------------------ */
   function renderRequests() {
     var f = S.filters.requests;
-    return api.listRequests({ status: f.status || null, search: f.search, limit: PAGE, offset: f.offset }).then(function (r) {
+    return api.listRequests({ orgId: S.orgId, status: f.status || null, search: f.search, limit: PAGE, offset: f.offset }).then(function (r) {
       var html = head(T.views.requests, 'الطلبات المرسلة من نموذج «اطلب تخليص» ومن الرفع الجماعي. راجع الطلب ثم حوّله إلى معاملة أو ارفضه مع ذكر السبب.');
       html += '<form class="adm-filters card" data-form="filter" data-key="requests">' +
         '<div class="form-group"><label class="form-label" for="flt-req-status">الحالة</label><select class="form-control" id="flt-req-status" name="status">' + opts('request_status', f.status, true) + '</select></div>' +
@@ -678,7 +746,7 @@
           var sel = body.querySelector('[name=client]');
           var input = body.querySelector('#adf-csearch');
           function load() {
-            api.listClients({ search: input.value, limit: 20 }).then(function (cr) {
+            api.listClients({ orgId: S.orgId, search: input.value, limit: 20 }).then(function (cr) {
               var first = '<option value="">تلقائي: مطابقة بالسجل التجاري / الرقم الضريبي، أو إنشاء ملف عميل جديد</option>';
               if (cr.error) { sel.innerHTML = first; return; }
               sel.innerHTML = first + (cr.data || []).map(function (c) {
@@ -714,7 +782,7 @@
   }
   function renderTransactions() {
     var f = S.filters.transactions;
-    return api.listTransactions({ status: f.status || null, branchId: f.branchId || null, search: f.search, limit: PAGE, offset: f.offset }).then(function (r) {
+    return api.listTransactions({ orgId: S.orgId, status: f.status || null, branchId: f.branchId || null, search: f.search, limit: PAGE, offset: f.offset }).then(function (r) {
       var html = head(T.views.transactions, 'المعاملة هي محور العمل: الحالة التشغيلية منفصلة عن الحالة المالية، وكل تغيير يُسجَّل في سجل أحداث لا يُعدّل.');
       html += '<form class="adm-filters card" data-form="filter" data-key="transactions">' +
         '<div class="form-group"><label class="form-label" for="flt-tx-status">الحالة التشغيلية</label><select class="form-control" id="flt-tx-status" name="status">' + opts('operational_status', f.status, true) + '</select></div>' +
@@ -943,18 +1011,32 @@
     openDialog({
       title: 'إصدار رمز تتبع', submit: 'إصدار الرمز',
       body: alertBox('warning', 'يُعرض الرمز مرة واحدة فقط ويُحفظ في قاعدة البيانات كبصمة. إصدار رمز جديد يُبطل الرمز السابق فورًا. سلّمه للعميل مع رقم المعاملة.'),
-      onSubmit: function () {
-        return api.issueTrackingToken(id).then(function (r) {
-          if (r.error) return errText(r.error);
-          var d = r.data || {};
-          openDialog({
-            title: 'رمز التتبع للمعاملة ' + (d.ref || ''), noSubmit: true,
-            body: '<p class="text-sm">انسخ الرمز الآن؛ لن يظهر مرة أخرى.</p><div class="adm-token" dir="ltr"><span class="num">' + esc(d.ref) + '</span><code>' + esc(d.tracking_token) + '</code></div>'
-          });
-          rerender();
-          return false;
+      onSubmit: function () { return txTokenIssue(id); }
+    });
+  }
+  // key: undefined on the first try (supa.js keeps one key across its own retries);
+  // a fresh key for "issue a new one" so the stored replay is never returned again
+  function txTokenIssue(id, key) {
+    return api.issueTrackingToken(id, key).then(function (r) {
+      if (r.error) return errText(r.error);
+      var d = r.data || {};
+      if (!d.tracking_token) {
+        // idempotent replay (the first response was lost): the server never stores the token,
+        // and the one issued then already replaced the previous token
+        openDialog({
+          title: 'رمز التتبع للمعاملة ' + (d.ref || ''), submit: 'إصدار رمز جديد',
+          body: alertBox('warning', 'صدر رمز تتبع لهذه المعاملة في ردّ سابق لم يصل، ولا يمكن عرضه مرة أخرى. أصدر رمزًا جديدًا لتسلّمه للعميل؛ الرمز الجديد يُبطل السابق فورًا.'),
+          onSubmit: function () { return txTokenIssue(id, api.newIdemKey()); }
         });
+        rerender();
+        return false;
       }
+      openDialog({
+        title: 'رمز التتبع للمعاملة ' + (d.ref || ''), noSubmit: true,
+        body: '<p class="text-sm">انسخ الرمز الآن؛ لن يظهر مرة أخرى.</p><div class="adm-token" dir="ltr"><span class="num">' + esc(d.ref) + '</span><code>' + esc(d.tracking_token) + '</code></div>'
+      });
+      rerender();
+      return false;
     });
   }
 
@@ -1112,7 +1194,7 @@
   function renderClients() {
     var f = S.filters.clients;
     var canW = canAny(R.opsWriter);
-    return api.listClients({ search: f.search, active: f.inactive ? false : true, limit: PAGE, offset: f.offset }).then(function (r) {
+    return api.listClients({ orgId: S.orgId, search: f.search, active: f.inactive ? false : true, limit: PAGE, offset: f.offset }).then(function (r) {
       var html = head(T.views.clients, 'ملف العميل سجل رئيسي مستقل يُستخدم في كل معاملاته، فلا تُعاد كتابة بياناته في كل معاملة.',
         canW ? '<button class="btn btn-sm btn-primary" type="button" data-act="client-new">' + icon('plus') + 'عميل جديد</button>' : '');
       html += '<form class="adm-filters card" data-form="filter" data-key="clients">' +
@@ -1131,7 +1213,7 @@
   }
   var CLIENT_CACHE = {};
   function renderClient(id) {
-    return Promise.all([api.getClient(id), api.listTransactions({ clientId: id, limit: 50 })]).then(function (res) {
+    return Promise.all([api.getClient(id), api.listTransactions({ orgId: S.orgId, clientId: id, limit: 50 })]).then(function (res) {
       var r = res[0], c = r.data;
       if (r.error) return head('عميل', '', '', '#clients') + alertBox('danger', errText(r.error));
       if (!c) return head('عميل', '', '', '#clients') + alertBox('warning', 'العميل غير موجود أو لا تملك صلاحية عرضه.');
@@ -1224,7 +1306,7 @@
   var MSG_CACHE = {};
   function renderMessages() {
     var f = S.filters.messages;
-    return api.listContactMessages({ status: f.status || null, limit: PAGE, offset: f.offset }).then(function (r) {
+    return api.listContactMessages({ orgId: S.orgId, status: f.status || null, limit: PAGE, offset: f.offset }).then(function (r) {
       var html = head(T.views.messages, 'رسائل نموذج «تواصل معنا». بيانات شخصية: اطّلع عليها لغرض الرد فقط.');
       html += '<form class="adm-filters card" data-form="filter" data-key="messages">' +
         '<div class="form-group"><label class="form-label" for="flt-msg-status">الحالة</label><select class="form-control" id="flt-msg-status" name="status">' + opts('contact_status', f.status, true) + '</select></div>' +
@@ -1354,70 +1436,745 @@
     });
   }
 
-  /* ------------------------------------------------------------------
-     Members (admin: emails + add; supervisor: read-only names)
-     ------------------------------------------------------------------ */
-  function renderMembers() {
-    var isAdmin = canAny(R.membersWrite);
-    var p = isAdmin ? L.adminListMembers(S.orgId) : api.listMemberships(S.orgId).then(function (r) {
-      if (r.error) return r;
-      return { data: (r.data || []).map(function (m) {
-        var b = S.branches.filter(function (x) { return x.id === m.branch_id; })[0];
-        return { id: m.id, user_id: m.user_id, full_name: m.profiles && m.profiles.full_name, phone: m.profiles && m.profiles.phone, role: m.role, branch_id: m.branch_id, branch_name_ar: b && b.name_ar, is_active: m.is_active, created_at: m.created_at };
-      }), error: null };
+  /* ==================================================================
+     G2 console: org settings, branches, members & invitations, audit
+     log, client errors, active-org switcher.
+     Every server/user value goes in through textContent / attributes on
+     nodes built with el(); innerHTML is used only for icon() constants.
+     MarsaApi G2 functions are called through call() so a missing one
+     shows a clear error instead of throwing.
+     ================================================================== */
+  function t(k, vars) {
+    var I = window.MarsaI18n, key = 'admin.' + k;
+    if (!I || typeof I.t !== 'function') return k;
+    var s = I.t(key, vars);
+    return s === key ? k : s;
+  }
+  function viewLabel(id) { var k = 'view_' + id, s = t(k); return s === k ? (T.views[id] || id) : s; }
+  function isEn() { var I = window.MarsaI18n; return !!(I && typeof I.lang === 'function' && I.lang() === 'en'); }
+  function roleLabel(code) { var k = 'role_' + code, s = t(k); return isEn() && s !== k ? s : lbl('role', code); }
+  function orgName(o) { return (isEn() && o.name_en) || o.name_ar || o.slug || String(o.org_id).slice(0, 8); }
+  function branchName(id) {
+    var b = S.branches.filter(function (x) { return x.id === id; })[0];
+    return b ? ((isEn() && b.name_en) || b.name_ar) : null;
+  }
+
+  // --- DOM helpers ---------------------------------------------------
+  var BOOL_PROPS = { hidden: 1, disabled: 1, checked: 1, required: 1, readOnly: 1, selected: 1, multiple: 1 };
+  function append(n, kids) {
+    (Array.isArray(kids) ? kids : [kids]).forEach(function (c) {
+      if (c == null || c === false) return;
+      if (Array.isArray(c)) return append(n, c);
+      n.appendChild(typeof c === 'object' ? c : document.createTextNode(String(c)));
     });
-    return p.then(function (r) {
-      var html = head(T.views.members, isAdmin ? 'أضف موظفًا بالبريد الإلكتروني لحساب سجّل مسبقًا. لتغيير الصلاحية أضف الصلاحية الجديدة ثم أوقف القديمة، فيبقى السجل واضحًا.' : 'عرض فقط. إدارة الصلاحيات لمدير النظام.',
-        isAdmin ? '<button class="btn btn-sm btn-primary" type="button" data-act="member-add">' + icon('plus') + 'إضافة صلاحية</button>' : '');
-      if (r.error) return html + alertBox('danger', errText(r.error));
-      var list = r.data || [];
-      html += table(['المستخدم', isAdmin ? 'البريد الإلكتروني' : 'الجوال', 'الصلاحية', 'الفرع', 'الحالة', 'منذ', ''], list.map(function (m) {
-        var me = m.is_me || (S.ctx && m.user_id === S.ctx.user_id);
-        var act = '';
-        if (isAdmin && !me) {
-          act = '<button class="btn btn-sm btn-ghost' + (m.is_active ? ' adm-text-danger' : '') + '" type="button" data-act="member-toggle" data-id="' + esc(m.id) + '" data-to="' + (m.is_active ? '0' : '1') + '">' + (m.is_active ? 'إيقاف' : 'تفعيل') + '</button>';
-        }
-        return '<tr' + (m.is_active ? '' : ' class="adm-voided"') + '><td><strong>' + esc(m.full_name || 'بدون اسم') + '</strong>' + (me ? ' <span class="badge badge-teal">أنت</span>' : '') + '</td><td>' +
-          (isAdmin ? ltr(m.email) : ltr(m.phone)) + '</td><td>' + esc(m.role_label_ar || lbl('role', m.role)) + '</td><td>' + esc(m.branch_name_ar || 'كل الفروع') + '</td><td>' +
-          (m.is_active ? '<span class="badge badge-success">نشطة</span>' : '<span class="badge badge-danger">موقوفة</span>') + '</td><td>' + fmtDate(m.created_at) + '</td><td>' + act + '</td></tr>';
+    return n;
+  }
+  function el(tag, attrs, kids) {
+    var n = document.createElement(tag), value;
+    Object.keys(attrs || {}).forEach(function (k) {
+      var v = attrs[k];
+      if (v == null || v === false) return;
+      if (k === 'class') n.className = v;
+      else if (k === 'text') n.textContent = String(v);
+      else if (k === 'value') value = v;
+      else if (k.slice(0, 2) === 'on' && typeof v === 'function') n.addEventListener(k.slice(2), v);
+      else if (BOOL_PROPS[k]) n[k] = true;
+      else n.setAttribute(k, v === true ? '' : String(v));
+    });
+    append(n, kids);
+    if (value !== undefined) n.value = String(value);   // after <option>s exist
+    return n;
+  }
+  function frag(kids) { return append(document.createDocumentFragment(), kids); }
+  function svgIcon(name) { var tpl = document.createElement('template'); tpl.innerHTML = icon(name); return tpl.content.firstChild; }  // constant markup
+  function dBtn(label, cls, onClick, attrs) {
+    var a = Object.assign({ class: 'btn btn-sm ' + (cls || 'btn-ghost'), type: 'button' }, attrs || {});
+    var b = el('button', a, label);
+    if (onClick) b.addEventListener('click', function (e) { e.preventDefault(); onClick(b, e); });
+    return b;
+  }
+  function dHead(title, sub, actions) {
+    return el('div', { class: 'adm-head' }, [
+      el('div', { class: 'adm-head-title' }, el('div', null, [el('h2', { text: title }), sub ? el('p', { class: 'text-sm text-muted', text: sub }) : null])),
+      actions && actions.length ? el('div', { class: 'btn-group adm-head-actions' }, actions) : null
+    ]);
+  }
+  function dCard(title, body, actions) {
+    return el('div', { class: 'card card-flush adm-card' }, [
+      el('div', { class: 'card-header' }, [el('h3', { text: title }), actions && actions.length ? el('div', { class: 'btn-group' }, actions) : null]),
+      el('div', { class: 'card-body' }, body)
+    ]);
+  }
+  function dAlert(type, text) {
+    return el('div', { class: 'alert alert-' + type, role: type === 'danger' ? 'alert' : 'status' }, [svgIcon('info'), el('div', { text: text })]);
+  }
+  function dBadge(tone, text) { return el('span', { class: 'badge badge-' + tone, text: text }); }
+  function dLtr(v) { return v ? el('bdi', { dir: 'ltr', class: 'num', text: v }) : T.common.none; }
+  function dKv(rows) {
+    return el('ul', { class: 'kv' }, rows.filter(Boolean).map(function (r) {
+      var v = r[1];
+      return el('li', null, [el('span', { class: 'k', text: r[0] }), el('span', { class: 'v' }, v == null || v === '' ? T.common.none : v)]);
+    }));
+  }
+  function dTable(headers, rows, emptyText) {
+    var body = el('tbody', null, rows.length ? rows : el('tr', null, el('td', { colspan: headers.length, class: 'adm-empty', text: emptyText || T.common.empty })));
+    return el('div', { class: 'table-wrap' }, el('table', { class: 'table table-striped adm-table' }, [
+      el('thead', null, el('tr', null, headers.map(function (h) { return el('th', { scope: 'col', text: h }); }))), body
+    ]));
+  }
+  function dField(o) {
+    // o: {name, label, type, value, req, hint, options:[[value,label]], full, ltr, readOnly, max, placeholder, rows, autocomplete}
+    var id = 'adg-' + o.name, ctl;
+    if (o.type === 'checkbox') {
+      return el('div', { class: 'form-group' + (o.full ? ' adm-full' : '') }, [
+        el('label', { class: 'check' }, [el('input', { type: 'checkbox', id: id, name: o.name, checked: !!o.value }), ' ', o.label]),
+        o.hint ? el('span', { class: 'form-hint', text: o.hint }) : null
+      ]);
+    }
+    var common = { class: 'form-control', id: id, name: o.name, required: !!o.req, dir: o.ltr ? 'ltr' : null, placeholder: o.placeholder || null };
+    if (o.type === 'select') {
+      ctl = el('select', common, (o.options || []).map(function (p) { return el('option', { value: p[0], text: p[1] }); }));
+      ctl.value = o.value == null ? '' : String(o.value);
+    } else if (o.type === 'textarea') {
+      ctl = el('textarea', Object.assign(common, { rows: o.rows || 2, maxlength: o.max || null }));
+      ctl.value = o.value == null ? '' : String(o.value);
+    } else {
+      ctl = el('input', Object.assign(common, {
+        type: o.type || 'text', maxlength: o.max || null, readOnly: !!o.readOnly, autocomplete: o.autocomplete || null,
+        value: o.value == null ? '' : o.value
       }));
-      return html;
+    }
+    return el('div', { class: 'form-group' + (o.full ? ' adm-full' : '') }, [
+      el('label', { class: 'form-label', for: id }, [o.label, o.req ? el('span', { class: 'req', 'aria-hidden': 'true', text: ' *' }) : null]),
+      ctl, o.hint ? el('span', { class: 'form-hint', text: o.hint }) : null
+    ]);
+  }
+  function dGrid(kids) { return el('div', { class: 'adm-form-grid' }, kids); }
+  function fmtWhen(v, withTime) {
+    if (!v) return T.common.none;
+    var d = new Date(v); if (isNaN(d)) return String(v);
+    var I = window.MarsaI18n;
+    if (I && typeof I.fmtDate === 'function') { try { return I.fmtDate(d, { time: !!withTime }); } catch (e) { /* fall through */ } }
+    try {
+      return d.toLocaleString(isEn() ? 'en-GB' : DATE_LOCALE, withTime ? { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' } : { year: 'numeric', month: 'short', day: 'numeric' });
+    } catch (e) { return d.toISOString().replace('T', ' ').slice(0, withTime ? 16 : 10); }
+  }
+
+  // --- API plumbing --------------------------------------------------
+  function call(name) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    if (!api || typeof api[name] !== 'function') return Promise.resolve({ data: null, error: { code: 'MRS_UNAVAILABLE', message: t('api_missing', { fn: name }) } });
+    return Promise.resolve().then(function () { return api[name].apply(api, args); }).then(function (r) {
+      return r && typeof r === 'object' && ('data' in r || 'error' in r) ? r : { data: r == null ? null : r, error: null };
+    }, function (e) { return { data: null, error: { message: errText(e) } }; });
+  }
+  function rowsOf(d) { return Array.isArray(d) ? d : (d && (d.rows || d.items || d.data)) || []; }
+  function errCode(e) {
+    if (!e) return null;
+    if (e.code && /^MRS_/.test(e.code)) return e.code;
+    var m = e.raw && e.raw.message;
+    return /^MRS_[A-Z_]+$/.test(m || '') ? m : (e.code || null);
+  }
+  function errField(e) { return e ? (e.field || (e.raw && (e.raw.details || e.raw.detail)) || null) : null; }
+  function isForbidden(e) { var c = errCode(e); return c === 'MRS_FORBIDDEN' || c === 'RLS' || c === 'MRS_RLS' || c === '42501'; }
+  function apiErr(e) {
+    var c = errCode(e);
+    if (c === 'MRS_UNKNOWN_RESULT') return t('unknown_result');
+    if (c === 'MRS_IN_PROGRESS') return t('in_progress');
+    if (c === 'MRS_IDEMPOTENCY_CONFLICT') return t('idem_conflict');
+    if (c === 'MRS_UNAVAILABLE') return e.message;
+    if (isForbidden(e)) return t('forbidden');
+    return errText(e);
+  }
+  // Idempotency: one key per scope, kept while the payload is unchanged and the
+  // last answer was not definite (MRS_UNKNOWN_RESULT / MRS_IN_PROGRESS), so a
+  // retry after a lost response replays instead of creating a duplicate.
+  var IDEM = {};
+  function newKey() {
+    if (api && typeof api.newIdemKey === 'function') return api.newIdemKey();
+    if (api && api.util && api.util.uuid) return api.util.uuid();
+    return window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : null;
+  }
+  function idemKey(scope, payload) {
+    var sig = JSON.stringify(payload), c = IDEM[scope];
+    if (!c || c.sig !== sig) c = IDEM[scope] = { sig: sig, key: newKey() };
+    return c.key;
+  }
+  function idemSettle(scope, err) {
+    var c = errCode(err);
+    if (c !== 'MRS_UNKNOWN_RESULT' && c !== 'MRS_IN_PROGRESS') delete IDEM[scope];
+  }
+
+  // --- roles ---------------------------------------------------------
+  var BM_MANAGED = ['clearance_staff', 'transport_staff', 'accountant'];
+  var INVITE_ROLES_ADMIN = ['admin', 'supervisor', 'operations_manager', 'branch_manager', 'accounts_manager', 'accountant', 'clearance_staff', 'transport_staff', 'client'];
+  function isOrgAdmin() { return S.memberships.some(function (m) { return m.role === 'admin' && !m.branch_id; }); }
+  function managedBranches() {
+    return S.memberships.filter(function (m) { return m.role === 'branch_manager' && m.branch_id; }).map(function (m) { return m.branch_id; });
+  }
+  function inviteRoles() { return isOrgAdmin() ? INVITE_ROLES_ADMIN : (managedBranches().length ? BM_MANAGED.concat(['client']) : []); }
+  function isMe(m) { return !!(m.is_me || (S.ctx && m.user_id === S.ctx.user_id)); }
+  function canManageMember(m) {
+    if (isMe(m)) return false;
+    if (isOrgAdmin()) return true;
+    return BM_MANAGED.indexOf(m.role) !== -1 && managedBranches().indexOf(m.branch_id) !== -1;
+  }
+  function refreshBranches() {
+    return api.listBranches(S.orgId).then(function (r) {
+      if (!r.error) S.branches = (r.data || []).filter(function (b) { return b.org_id === S.orgId; });
+      return r;
     });
   }
-  function memberAdd() {
-    var staffRoles = R.staff;
-    openDialog({
-      title: 'إضافة صلاحية موظف',
-      body: alertBox('info', 'يجب أن يكون للموظف حساب مسجّل بهذا البريد. لا تُنشأ حسابات من هنا، ولا تُمنح صلاحية «عميل» من هذه الشاشة.') + grid(
-        field({ name: 'email', label: 'البريد الإلكتروني للحساب', type: 'email', req: true, ltr: true, attrs: ' maxlength="160" autocomplete="off"', full: true }) +
-        field({ name: 'role', label: 'الصلاحية', type: 'select', req: true, options: opts('role', 'clearance_staff', false, staffRoles) }) +
-        field({ name: 'branch', label: 'الفرع', type: 'select', options: '<option value="">كل الفروع</option>' + S.branches.filter(function (b) { return b.is_active; }).map(function (b) {
-          return '<option value="' + esc(b.id) + '">' + esc(b.name_ar) + '</option>';
-        }).join(''), hint: 'اختر فرعًا لحصر الصلاحية فيه (أقل صلاحية لازمة).' })
-      ),
-      onSubmit: function (form) {
-        var email = nn(fval(form, 'email'));
-        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return 'اكتب بريدًا إلكترونيًا صحيحًا.';
-        var role = fval(form, 'role');
-        if (role === 'admin' && !window.confirm('صلاحية «مدير نظام» تمنح إدارة كل المستخدمين والبيانات. هل أنت متأكد؟')) return false;
-        return L.adminAddMember({ orgId: S.orgId, email: email, role: role, branchId: fval(form, 'branch') || null }).then(function (r) {
-          if (r.error) {
-            if (r.error.raw && /^MRS_NOT_FOUND$/.test(r.error.raw.message || '')) return 'لا يوجد حساب مسجّل بهذا البريد. اطلب من الموظف إنشاء حساب أولًا.';
-            if (r.error.code === '23505') return 'هذه الصلاحية موجودة ونشطة لهذا المستخدم.';
-            return errText(r.error);
+
+  /* ------------------------------------------------------------------
+     المؤسسة — org identity & settings (admin_update_org whitelist)
+     ------------------------------------------------------------------ */
+  var HEX_RE = /^#[0-9a-fA-F]{6}$/;
+  var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  function renderOrg() {
+    return L.getOrgRow(S.orgId).then(function (r) {
+      var out = frag(dHead(t('org_title'), t('org_sub')));
+      if (r.error) return append(out, dAlert('danger', apiErr(r.error)));
+      var o = r.data;
+      if (!o) return append(out, dAlert('warning', t('org_not_found')));
+      var st = o.settings && typeof o.settings === 'object' ? o.settings : {};
+      out.appendChild(dCard(t('org_identity'), dKv([
+        [t('f_slug'), dLtr(o.slug)], [t('f_ref_prefix'), dLtr(o.ref_prefix)],
+        [t('f_environment'), dBadge('warning', o.environment === 'staging' ? t('env_staging') : String(o.environment || ''))],
+        [t('f_status'), o.is_active ? dBadge('success', t('active')) : dBadge('danger', t('suspended'))]
+      ])));
+
+      var swatch = el('span', { class: 'adm-swatch', 'aria-hidden': 'true' });
+      var msg = el('p', { class: 'form-error', role: 'alert', hidden: true });
+      var saveBtn = el('button', { class: 'btn btn-primary', type: 'submit', text: T.common.save });
+      var form = el('form', { class: 'adm-org-form', novalidate: true }, [
+        dGrid([
+          dField({ name: 'name_ar', label: t('f_name_ar'), value: o.name_ar, req: true, max: 160 }),
+          dField({ name: 'name_en', label: t('f_name_en'), value: o.name_en, ltr: true, max: 160 }),
+          dField({ name: 'default_locale', label: t('f_default_locale'), type: 'select', value: o.default_locale || 'ar', options: [['ar', t('locale_ar')], ['en', t('locale_en')]] }),
+          dField({ name: 'brand_color', label: t('f_brand_color'), value: st.brand_color, ltr: true, max: 7, placeholder: '#0B3A6E', hint: t('f_brand_color_hint') }),
+          dField({ name: 'contact_phone', label: t('f_contact_phone'), value: st.contact_phone, ltr: true, max: 30, type: 'tel' }),
+          dField({ name: 'contact_email', label: t('f_contact_email'), value: st.contact_email, ltr: true, max: 160, type: 'email' }),
+          dField({ name: 'address_ar', label: t('f_address_ar'), value: st.address_ar, type: 'textarea', max: 300 }),
+          dField({ name: 'address_en', label: t('f_address_en'), value: st.address_en, type: 'textarea', max: 300, ltr: true }),
+          dField({ name: 'logo_path', label: t('f_logo_path'), value: st.logo_path, ltr: true, max: 300, hint: t('f_logo_path_hint'), full: true }),
+          dField({ name: 'public_intake_enabled', label: t('f_public_intake'), type: 'checkbox', value: o.public_intake_enabled !== false, hint: t('f_public_intake_hint'), full: true })
+        ]),
+        msg, el('div', { class: 'btn-group' }, saveBtn)
+      ]);
+      var colorIn = form.elements.brand_color;
+      var paint = function () { swatch.style.backgroundColor = HEX_RE.test(colorIn.value.trim()) ? colorIn.value.trim() : 'transparent'; };
+      var colorGrp = colorIn.parentNode, colorHint = colorGrp.querySelector('.form-hint');
+      colorGrp.insertBefore(el('div', { class: 'adm-inline-row' }, [colorIn, swatch]), colorHint);
+      colorIn.addEventListener('input', paint); paint();
+
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        msg.hidden = true;
+        var v = function (n) { return nn(form.elements[n].value); };
+        var nameAr = v('name_ar'), color = v('brand_color'), mail = v('contact_email');
+        var bad = !nameAr || nameAr.length < 2 ? t('err_name_ar') : (color && !HEX_RE.test(color) ? t('err_brand_color') : (mail && !EMAIL_RE.test(mail) ? t('email_invalid') : null));
+        if (bad) { msg.textContent = bad; msg.hidden = false; return; }
+        var payload = {
+          name_ar: nameAr, name_en: v('name_en'), default_locale: form.elements.default_locale.value === 'en' ? 'en' : 'ar',
+          public_intake_enabled: !!form.elements.public_intake_enabled.checked,
+          settings: {
+            brand_color: color, contact_phone: v('contact_phone'), contact_email: mail ? mail.toLowerCase() : null,
+            address_ar: v('address_ar'), address_en: v('address_en'), logo_path: v('logo_path')
           }
-          toast('تمت إضافة الصلاحية.', 'success'); rerender(); return true;
+        };
+        saveBtn.disabled = true;
+        call('updateOrg', S.orgId, payload).then(function (res) {
+          saveBtn.disabled = false;
+          if (res.error) { msg.textContent = apiErr(res.error); msg.hidden = false; return; }
+          toast(T.common.saved, 'success'); rerender();
+        });
+      });
+      out.appendChild(dCard(t('org_settings'), [dAlert('info', t('org_settings_info')), form]));
+      return out;
+    });
+  }
+
+  /* ------------------------------------------------------------------
+     الفروع — list / add / edit / deactivate (code immutable after create)
+     ------------------------------------------------------------------ */
+  var BRANCH_CODE_RE = /^[A-Z0-9]{2,10}$/;
+  function renderBranches() {
+    return refreshBranches().then(function (r) {
+      var out = frag(dHead(t('branches_title'), t('branches_sub'), [dBtn([svgIcon('plus'), t('branch_add')], 'btn-primary', function () { branchDialog(null); })]));
+      if (r.error) return append(out, dAlert('danger', apiErr(r.error)));
+      var list = S.branches.slice();
+      var activeCount = list.filter(function (b) { return b.is_active; }).length;
+      out.appendChild(dTable([t('f_code'), t('f_name_ar'), t('f_name_en'), t('f_city'), t('f_status'), ''], list.map(function (b) {
+        var last = b.is_active && activeCount <= 1;
+        var toggle = dBtn(b.is_active ? t('deactivate') : t('activate'), 'btn-ghost' + (b.is_active ? ' adm-text-danger' : ''), function (btn) { branchToggle(b, !b.is_active, btn); },
+          { disabled: last, title: last ? t('last_branch') : null });
+        return el('tr', { class: b.is_active ? null : 'adm-voided' }, [
+          el('td', null, dLtr(b.code)), el('td', null, el('strong', { text: b.name_ar })), el('td', null, b.name_en ? el('bdi', { dir: 'ltr', text: b.name_en }) : T.common.none),
+          el('td', { text: b.city || T.common.none }),
+          el('td', null, b.is_active ? dBadge('success', t('active')) : dBadge('danger', t('inactive'))),
+          el('td', null, el('div', { class: 'adm-row-actions' }, [dBtn(T.common.edit, 'btn-ghost', function () { branchDialog(b); }), toggle]))
+        ]);
+      }), t('branches_empty')));
+      return out;
+    });
+  }
+  function branchDialog(b) {
+    openDialog({
+      title: b ? t('branch_edit') : t('branch_add'), submit: b ? T.common.save : t('create'), body: '',
+      onOpen: function (body) {
+        body.appendChild(dGrid([
+          dField({ name: 'code', label: t('f_code'), value: b ? b.code : '', req: !b, readOnly: !!b, ltr: true, max: 10, placeholder: 'JED', hint: b ? t('code_readonly') : t('code_hint') }),
+          dField({ name: 'city', label: t('f_city'), value: b ? b.city : '', max: 80 }),
+          dField({ name: 'name_ar', label: t('f_name_ar'), value: b ? b.name_ar : '', req: true, max: 120 }),
+          dField({ name: 'name_en', label: t('f_name_en'), value: b ? b.name_en : '', ltr: true, max: 120 })
+        ]));
+      },
+      onSubmit: function (form) {
+        var nameAr = nn(fval(form, 'name_ar'));
+        if (!nameAr || nameAr.length < 2) return t('err_name_ar');
+        var payload = { name_ar: nameAr, name_en: nn(fval(form, 'name_en')), city: nn(fval(form, 'city')) };
+        var p;
+        if (b) p = call('updateBranch', b.id, payload);
+        else {
+          var code = String(fval(form, 'code') || '').trim().toUpperCase();
+          if (!BRANCH_CODE_RE.test(code)) return t('err_code');
+          payload.code = code;
+          p = call('createBranch', S.orgId, payload);
+        }
+        return p.then(function (r) {
+          if (r.error) return errCode(r.error) === 'DUPLICATE' ? t('branch_dup') : apiErr(r.error);
+          toast(b ? T.common.saved : t('branch_created'), 'success');
+          return refreshBranches().then(function () { rerender(); return true; });
         });
       }
     });
   }
-  function memberToggle(id, to) {
-    if (!to && !window.confirm('إيقاف هذه الصلاحية يمنع المستخدم من الوصول بها فورًا. هل تريد المتابعة؟')) return;
-    L.adminSetMemberActive(id, to).then(function (r) {
-      if (r.error) return toast(r.error.raw && r.error.raw.message === 'MRS_FORBIDDEN' ? 'لا يمكن إيقاف صلاحيتك أنت أو آخر مدير نظام نشط.' : errText(r.error), 'error');
+  function branchToggle(b, to, btn) {
+    if (!to && !window.confirm(t('branch_deactivate_confirm'))) return;
+    btn.disabled = true;
+    call('updateBranch', b.id, { is_active: !!to }).then(function (r) {
+      btn.disabled = false;
+      if (r.error) return toast(errCode(r.error) === 'MRS_FORBIDDEN' && errField(r.error) === 'last_branch' ? t('last_branch') : apiErr(r.error), 'error');
+      toast(T.common.saved, 'success');
+      refreshBranches().then(rerender);
+    });
+  }
+
+  /* ------------------------------------------------------------------
+     الأعضاء والدعوات — org admin: all; branch_manager: own branch;
+     supervisor: read-only member names (as before G2)
+     ------------------------------------------------------------------ */
+  function renderMembers() {
+    var manage = isOrgAdmin() || managedBranches().length > 0;
+    if (!manage) {
+      return api.listMemberships(S.orgId).then(function (r) {
+        var out = frag(dHead(viewLabel('members'), t('members_sub_read')));
+        if (r.error) return append(out, dAlert(isForbidden(r.error) ? 'warning' : 'danger', apiErr(r.error)));
+        var list = (r.data || []).map(function (m) {
+          return { id: m.id, user_id: m.user_id, full_name: m.profiles && m.profiles.full_name, phone: m.profiles && m.profiles.phone, role: m.role, branch_id: m.branch_id, is_active: m.is_active, created_at: m.created_at };
+        });
+        return append(out, membersTable(list, false));
+      });
+    }
+    return Promise.all([L.adminListMembers(S.orgId), call('listInvitations', S.orgId)]).then(function (res) {
+      var out = frag(dHead(viewLabel('members'), isOrgAdmin() ? t('members_sub_admin') : t('members_sub_bm'),
+        [dBtn([svgIcon('plus'), t('invite_btn')], 'btn-primary', function () { inviteDialog(); })]));
+      var m = res[0], inv = res[1];
+      out.appendChild(dCard(t('members_card'), m.error ? dAlert(isForbidden(m.error) ? 'warning' : 'danger', apiErr(m.error)) : membersTable(rowsOf(m.data), true)));
+      var allToggle = el('label', { class: 'check adm-voided-toggle' }, [el('input', { type: 'checkbox', checked: S.g2.allInvites, onchange: function (e) { S.g2.allInvites = e.target.checked; rerender(); } }), ' ', t('invites_show_all')]);
+      out.appendChild(dCard(t('invites_card'), inv.error ? dAlert(isForbidden(inv.error) ? 'warning' : 'danger', apiErr(inv.error)) : invitesTable(rowsOf(inv.data)), [allToggle]));
+      return out;
+    });
+  }
+  function membersTable(list, manage) {
+    return dTable([t('col_user'), manage ? t('col_email') : t('col_phone'), t('col_role'), t('col_branch'), t('f_status'), t('col_since'), ''], list.map(function (m) {
+      var me = isMe(m), act = null;
+      if (manage && canManageMember(m)) {
+        act = dBtn(m.is_active ? t('deactivate') : t('activate'), 'btn-ghost' + (m.is_active ? ' adm-text-danger' : ''), function (btn) { memberToggle(m, !m.is_active, btn); });
+      }
+      return el('tr', { class: m.is_active ? null : 'adm-voided' }, [
+        el('td', null, [el('strong', { text: m.full_name || t('no_name') }), me ? [' ', dBadge('teal', t('you'))] : null]),
+        el('td', null, dLtr(manage ? m.email : m.phone)),
+        el('td', { text: (isEn() ? m.role_label_en : m.role_label_ar) || roleLabel(m.role) }),
+        el('td', { text: m.branch_id ? (m.branch_name_ar && !isEn() ? m.branch_name_ar : (branchName(m.branch_id) || m.branch_code || t('branch_specific'))) : t('all_branches') }),
+        el('td', null, m.is_active ? dBadge('success', t('active')) : dBadge('danger', t('suspended'))),
+        el('td', { text: fmtWhen(m.created_at) }),
+        el('td', null, act)
+      ]);
+    }), t('members_empty'));
+  }
+  function memberToggle(m, to, btn) {
+    if (!to && !window.confirm(t('member_deactivate_confirm'))) return;
+    btn.disabled = true;
+    api.setMembershipActive(m.id, to).then(function (r) {
+      btn.disabled = false;
+      if (r.error) return toast(errCode(r.error) === 'MRS_FORBIDDEN' ? t('member_forbidden') : apiErr(r.error), 'error');
       toast(T.common.saved, 'success'); rerender();
     });
   }
+
+  function inviteStatus(i) {
+    if (i.status) return i.status;
+    if (i.accepted_at) return 'accepted';
+    if (i.revoked_at) return 'revoked';
+    if (i.expires_at && new Date(i.expires_at) < new Date()) return 'expired';
+    return 'pending';
+  }
+  var INVITE_TONE = { pending: 'blue', expired: 'warning', accepted: 'success', revoked: 'danger' };
+  function invitesTable(list) {
+    var shown = list.filter(function (i) { var s = inviteStatus(i); return S.g2.allInvites || s === 'pending' || s === 'expired'; });
+    return dTable([t('col_email'), t('col_role'), t('col_branch'), t('f_status'), t('col_expires'), t('col_created'), ''], shown.map(function (i) {
+      var st = inviteStatus(i), acts = [];
+      if (st === 'pending' || st === 'expired') acts.push(dBtn(t('reissue'), 'btn-ghost', function (btn) { inviteReissue(i.id, btn); }));
+      if (st === 'pending') acts.push(dBtn(t('revoke'), 'btn-ghost adm-text-danger', function (btn) { inviteRevoke(i.id, btn); }));
+      var who2 = i.role === 'client' && (i.client_name_ar || i.client_name) ? [el('span', { class: 'adm-sub', text: i.client_name_ar || i.client_name })] : null;
+      return el('tr', { class: st === 'revoked' ? 'adm-voided' : null }, [
+        el('td', null, [dLtr(i.email), who2]),
+        el('td', { text: roleLabel(i.role) }),
+        el('td', { text: i.branch_id ? (i.branch_name_ar || branchName(i.branch_id) || t('branch_specific')) : t('all_branches') }),
+        el('td', null, dBadge(INVITE_TONE[st] || 'blue', t('inv_' + st))),
+        el('td', { text: fmtWhen(i.expires_at, true) }),
+        el('td', { text: fmtWhen(i.created_at) }),
+        el('td', null, el('div', { class: 'adm-row-actions' }, acts))
+      ]);
+    }), S.g2.allInvites ? t('invites_empty_all') : t('invites_empty'));
+  }
+
+  function inviteDialog() {
+    var roles = inviteRoles(), admin = isOrgAdmin(), own = managedBranches();
+    if (!roles.length) return toast(t('forbidden'), 'error');
+    var bOpts = admin ? [['', t('all_branches')]] : [];
+    S.branches.filter(function (b) { return b.is_active && (admin || own.indexOf(b.id) !== -1); }).forEach(function (b) { bOpts.push([b.id, b.name_ar + ' (' + b.code + ')']); });
+    openDialog({
+      title: t('invite_title'), submit: t('invite_submit'), body: '',
+      onOpen: function (body) {
+        var clientSel = el('select', { class: 'form-control', id: 'adg-client', name: 'client' }, el('option', { value: '', text: t('client_pick') }));
+        var clientQ = el('input', { class: 'form-control', type: 'search', id: 'adg-client-q', placeholder: t('client_search_ph'), maxlength: 60, 'aria-label': t('client_search_ph') });
+        var loadClients = function () {
+          api.listClients({ orgId: S.orgId, search: clientQ.value.trim().slice(0, 60), limit: 20 }).then(function (cr) {
+            var keep = clientSel.value;
+            clientSel.textContent = '';
+            clientSel.appendChild(el('option', { value: '', text: cr.error ? apiErr(cr.error) : t('client_pick') }));
+            (cr.data || []).forEach(function (c) { clientSel.appendChild(el('option', { value: c.id, text: c.name_ar + (c.cr_number ? ' — ' + c.cr_number : '') })); });
+            clientSel.value = keep;
+          });
+        };
+        clientQ.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); loadClients(); } });
+        var clientBox = el('div', { class: 'form-group adm-full', hidden: true }, [
+          el('label', { class: 'form-label', for: 'adg-client' }, [t('f_client'), el('span', { class: 'req', 'aria-hidden': 'true', text: ' *' })]),
+          el('div', { class: 'adm-inline-row' }, [clientQ, dBtn(T.common.search, 'btn-ghost', loadClients)]),
+          clientSel, el('span', { class: 'form-hint', text: t('client_hint') })
+        ]);
+        body.appendChild(dAlert('info', admin ? t('invite_info_admin') : t('invite_info_bm')));
+        body.appendChild(dGrid([
+          dField({ name: 'email', label: t('f_email'), type: 'email', req: true, ltr: true, max: 160, autocomplete: 'off', full: true }),
+          dField({ name: 'role', label: t('col_role'), type: 'select', req: true, value: 'clearance_staff', options: roles.map(function (r) { return [r, roleLabel(r)]; }) }),
+          dField({ name: 'branch', label: t('col_branch'), type: 'select', req: !admin, value: admin ? '' : (own[0] || ''), options: bOpts, hint: t('branch_hint') }),
+          clientBox
+        ]));
+        var form = body.closest('form'), roleSel = form.elements.role, branchSel = form.elements.branch;
+        var sync = function () {
+          var r = roleSel.value;
+          // admin and client-portal invitations carry no branch (the server refuses one)
+          var noBranch = r === 'admin' || r === 'client';
+          branchSel.disabled = noBranch;
+          if (noBranch) branchSel.value = '';
+          else if (!admin && !branchSel.value && branchSel.options.length) branchSel.selectedIndex = 0;
+          branchSel.required = !noBranch && (!admin || r === 'branch_manager');
+          clientBox.hidden = r !== 'client';
+          if (r === 'client' && clientSel.options.length <= 1) loadClients();
+        };
+        roleSel.addEventListener('change', sync); sync();
+      },
+      onSubmit: function (form) {
+        var email = String(fval(form, 'email') || '').trim().toLowerCase();
+        if (!email || email.length > 160 || !EMAIL_RE.test(email)) return t('email_invalid');
+        var role = fval(form, 'role');
+        if (roles.indexOf(role) === -1) return t('role_required');
+        var branch = (role === 'admin' || role === 'client') ? null : (fval(form, 'branch') || null);
+        if (role !== 'client' && (role === 'branch_manager' || !admin) && !branch) return t('branch_required');
+        var client = role === 'client' ? (fval(form, 'client') || null) : null;
+        if (role === 'client' && !client) return t('client_required');
+        if (role === 'admin' && !window.confirm(t('admin_confirm'))) return false;
+        var payload = { email: email, role: role };
+        if (branch) payload.branch_id = branch;
+        if (client) payload.client_id = client;
+        payload.idempotencyKey = idemKey('invite', payload);
+        return call('invite', S.orgId, payload).then(function (r) {
+          idemSettle('invite', r.error);
+          if (r.error) return errCode(r.error) === 'DUPLICATE' ? t('invite_dup') : apiErr(r.error);
+          showLink(r.data || {}, t('invite_done_title'));
+          rerender();
+          return false;   // keep the dialog open on the one-time link
+        });
+      }
+    });
+  }
+  // One-time accept link (token is never stored client-side; it disappears with the dialog).
+  function showLink(data, title) {
+    if (!dlg.open) openDialog({ title: title, body: '', noSubmit: true });
+    dlgTitle.textContent = title;
+    dlgHandler = null; dlgSubmit.hidden = true; dlgErr.hidden = true;
+    dlgBody.textContent = '';
+    var info = dKv([
+      data.email ? [t('f_email'), dLtr(data.email)] : null,
+      data.role ? [t('col_role'), roleLabel(data.role)] : null,
+      data.expires_at ? [t('col_expires'), fmtWhen(data.expires_at, true)] : null
+    ]);
+    if (!data.token) {
+      // idempotent replay: the secret was already shown once and is not stored server-side
+      append(dlgBody, [dAlert('warning', t('link_already_shown')), info,
+        data.invitation_id && UUID_RE.test(data.invitation_id) ? el('div', { class: 'btn-group' }, dBtn(t('reissue'), 'btn-primary', function (btn) { inviteReissue(data.invitation_id, btn, true); })) : null]);
+      return;
+    }
+    var url = new URL('login.html?invite=' + encodeURIComponent(String(data.token)), location.href).href;
+    var input = el('input', { class: 'form-control adm-link-input', type: 'text', readOnly: true, dir: 'ltr', value: url, 'aria-label': t('link_label'), onfocus: function (e) { e.target.select(); } });
+    append(dlgBody, [
+      dAlert('warning', t('link_once_warning')),
+      el('div', { class: 'adm-token' }, [el('strong', { text: t('link_label') }), input,
+        el('div', { class: 'btn-group' }, dBtn(t('copy'), 'btn-primary', function () { copyText(input); }))]),
+      info, el('p', { class: 'form-hint', text: t('link_hint') })
+    ]);
+  }
+  function copyText(input) {
+    var done = function () { toast(t('copied'), 'success'); };
+    var fallback = function () {
+      input.focus(); input.select();
+      try { if (document.execCommand('copy')) done(); else toast(t('copy_failed'), 'warning'); } catch (e) { toast(t('copy_failed'), 'warning'); }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(input.value).then(done, fallback);
+    else fallback();
+  }
+  function inviteRevoke(id, btn) {
+    if (!window.confirm(t('revoke_confirm'))) return;
+    btn.disabled = true;
+    call('revokeInvitation', id).then(function (r) {
+      btn.disabled = false;
+      if (r.error) return toast(apiErr(r.error), 'error');
+      toast(t('revoked_ok'), 'success'); rerender();
+    });
+  }
+  function inviteReissue(id, btn, inDialog) {
+    if (!window.confirm(t('reissue_confirm'))) return;
+    btn.disabled = true;
+    call('reissueInvitation', id).then(function (r) {
+      btn.disabled = false;
+      if (r.error) { if (inDialog) dialogError(apiErr(r.error)); else toast(apiErr(r.error), 'error'); return; }
+      showLink(r.data || {}, t('reissue_done_title'));
+      rerender();
+    });
+  }
+
+  /* ------------------------------------------------------------------
+     سجل التدقيق — admin_audit_log reader (admin + supervisor)
+     ------------------------------------------------------------------ */
+  var AUDIT_PAGE = 50;
+  var AUDIT_TABLES = ['organizations', 'branches', 'memberships', 'invitations', 'clients', 'client_users', 'service_requests', 'transactions',
+    'containers', 'documents', 'document_extractions', 'import_batches', 'contact_messages'];
+  function dayISO(v, end) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || ''); if (!m) return null;
+    var d = end ? new Date(+m[1], m[2] - 1, +m[3], 23, 59, 59, 999) : new Date(+m[1], m[2] - 1, +m[3], 0, 0, 0, 0);
+    return isNaN(d) ? null : d.toISOString();
+  }
+  function auditActors() {
+    var p = isOrgAdmin() ? L.adminListMembers(S.orgId).then(function (r) { return r.error ? [] : rowsOf(r.data); })
+      : api.listMemberships(S.orgId).then(function (r) { return r.error ? [] : (r.data || []).map(function (m) { return { user_id: m.user_id, full_name: m.profiles && m.profiles.full_name }; }); });
+    return p.then(function (list) {
+      var seen = {};
+      return list.filter(function (m) { if (!m.user_id || seen[m.user_id]) return false; seen[m.user_id] = 1; return true; });
+    });
+  }
+  function renderAudit() {
+    var f = S.g2.audit;
+    return auditActors().then(function (actors) {
+      var out = frag(dHead(viewLabel('audit'), t('audit_sub')));
+      var actorCtl = actors.length
+        ? el('select', { class: 'form-control', id: 'adg-a-actor', name: 'actor' }, [el('option', { value: '', text: T.common.all })].concat(actors.map(function (m) {
+          return el('option', { value: m.user_id, text: (m.full_name || t('no_name')) + (m.email ? ' — ' + m.email : '') });
+        })))
+        : el('input', { class: 'form-control', id: 'adg-a-actor', name: 'actor', dir: 'ltr', maxlength: 36, placeholder: 'UUID' });
+      actorCtl.value = f.actor || '';
+      var tableSel = el('select', { class: 'form-control', id: 'adg-a-table', name: 'table' }, [el('option', { value: '', text: T.common.all })].concat(AUDIT_TABLES.map(function (n) {
+        return el('option', { value: n, text: n });
+      })));
+      tableSel.value = f.table || '';
+      var grp = function (id, label, ctl, grow) { return el('div', { class: 'form-group' + (grow ? ' adm-grow' : '') }, [el('label', { class: 'form-label', for: id, text: label }), ctl]); };
+      var filt = el('form', { class: 'adm-filters card', novalidate: true }, [
+        grp('adg-a-table', t('col_table'), tableSel),
+        grp('adg-a-actor', t('col_actor'), actorCtl),
+        grp('adg-a-from', t('f_from'), el('input', { class: 'form-control', type: 'date', id: 'adg-a-from', name: 'from', value: f.from })),
+        grp('adg-a-to', t('f_to'), el('input', { class: 'form-control', type: 'date', id: 'adg-a-to', name: 'to', value: f.to })),
+        grp('adg-a-row', t('col_row'), el('input', { class: 'form-control', id: 'adg-a-row', name: 'rowId', dir: 'ltr', maxlength: 64, value: f.rowId }), true),
+        el('button', { class: 'btn btn-primary', type: 'submit', text: T.common.search }),
+        dBtn(t('reset'), 'btn-ghost', function () { S.g2.audit = { table: '', actor: '', from: '', to: '', rowId: '' }; rerender(); })
+      ]);
+      filt.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var a = String(filt.elements.actor.value || '').trim();
+        if (a && !UUID_RE.test(a)) return toast(t('err_actor'), 'warning');
+        S.g2.audit = { table: filt.elements.table.value, actor: a, from: filt.elements.from.value, to: filt.elements.to.value, rowId: String(filt.elements.rowId.value || '').trim().slice(0, 64) };
+        rerender();
+      });
+      out.appendChild(filt);
+
+      var tbody = el('tbody'), more = el('div', { class: 'adm-pager' });
+      var status = el('p', { class: 'adm-count text-xs text-muted' });
+      out.appendChild(el('div', { class: 'table-wrap' }, el('table', { class: 'table table-striped adm-table' }, [
+        el('thead', null, el('tr', null, [t('col_time'), t('col_table'), t('col_action'), t('col_row'), t('col_actor'), t('col_changed'), ''].map(function (h) { return el('th', { scope: 'col', text: h }); }))),
+        tbody
+      ])));
+      out.appendChild(append(more, status));
+      var total = 0, lastId = null;
+      var olderBtn = dBtn(t('older'), 'btn-ghost', function (btn) { load(btn); });
+      more.appendChild(olderBtn);
+
+      function load(btn) {
+        var p = { limit: AUDIT_PAGE };
+        if (f.table) p.table_name = f.table;
+        if (f.actor) p.actor = f.actor;
+        if (f.from) p.from = dayISO(f.from, false);
+        if (f.to) p.to = dayISO(f.to, true);
+        if (f.rowId) p.row_id = f.rowId;
+        if (lastId != null) p.before_id = lastId;
+        if (btn) btn.disabled = true;
+        return call('auditLog', S.orgId, p).then(function (r) {
+          if (btn) btn.disabled = false;
+          if (r.error) {
+            if (!total) { tbody.textContent = ''; olderBtn.hidden = true; }
+            toast(apiErr(r.error), 'error');
+            if (!total && more.parentNode) more.parentNode.insertBefore(dAlert(isForbidden(r.error) ? 'warning' : 'danger', apiErr(r.error)), more);
+            return;
+          }
+          var list = rowsOf(r.data);
+          if (!total && !list.length) tbody.appendChild(el('tr', null, el('td', { colspan: 7, class: 'adm-empty', text: T.common.empty })));
+          list.forEach(function (row) { tbody.appendChild(auditRow(row)); });
+          total += list.length;
+          if (list.length) lastId = list[list.length - 1].id;
+          olderBtn.hidden = list.length < AUDIT_PAGE;
+          status.textContent = t('audit_count', { n: total });
+        });
+      }
+      return load(null).then(function () { return out; });
+    });
+  }
+  function actionLabel(a) { var k = 'act_' + String(a || '').toLowerCase(), s = t(k); return s === k ? String(a || '') : s; }
+  var ACTION_TONE = { INSERT: 'success', UPDATE: 'blue', DELETE: 'danger' };
+  function auditActor(row) {
+    if (row.actor_email) return el('bdi', { dir: 'ltr', text: row.actor_email });
+    return who(row.actor);
+  }
+  function auditRow(row) {
+    var cf = Array.isArray(row.changed_fields) ? row.changed_fields : [];
+    var cfText = cf.length ? cf.slice(0, 5).join('، ') + (cf.length > 5 ? ' …(+' + (cf.length - 5) + ')' : '') : T.common.none;
+    return el('tr', null, [
+      el('td', { text: fmtWhen(row.at || row.created_at, true) }),
+      el('td', null, dLtr(row.table_name)),
+      el('td', null, dBadge(ACTION_TONE[row.action] || 'blue', actionLabel(row.action))),
+      el('td', null, row.row_id ? el('bdi', { dir: 'ltr', class: 'num adm-hash', title: String(row.row_id), text: String(row.row_id).slice(0, 8) }) : T.common.none),
+      el('td', null, [auditActor(row), row.actor_role ? el('span', { class: 'adm-sub', text: roleLabel(row.actor_role) }) : null]),
+      el('td', null, el('bdi', { dir: 'ltr', class: 'adm-audit-fields', text: cfText })),
+      el('td', null, dBtn(t('details'), 'btn-ghost', function () { auditDetails(row); }))
+    ]);
+  }
+  function valText(v) {
+    if (v === undefined) return T.common.none;
+    if (v === null) return 'null';
+    if (typeof v === 'object') { try { return JSON.stringify(v, null, 2); } catch (e) { return String(v); } }
+    return String(v);
+  }
+  function auditDetails(row) {
+    var oldD = row.old_data && typeof row.old_data === 'object' ? row.old_data : {};
+    var newD = row.new_data && typeof row.new_data === 'object' ? row.new_data : {};
+    var cf = Array.isArray(row.changed_fields) ? row.changed_fields : [];
+    var keys = cf.length ? cf : Object.keys(oldD).concat(Object.keys(newD)).filter(function (k, i, a) { return a.indexOf(k) === i; }).sort();
+    openDialog({
+      title: t('audit_detail_title'), body: '', noSubmit: true, wide: true,
+      onOpen: function (body) {
+        append(body, [
+          dKv([
+            [t('col_time'), fmtWhen(row.at || row.created_at, true)], [t('col_table'), dLtr(row.table_name)],
+            [t('col_action'), actionLabel(row.action)], [t('col_row'), dLtr(row.row_id ? String(row.row_id) : '')],
+            [t('col_actor'), auditActor(row)], row.actor_role ? [t('col_role'), roleLabel(row.actor_role)] : null,
+            [t('col_changed'), cf.length ? el('bdi', { dir: 'ltr', text: cf.join(', ') }) : T.common.none]
+          ]),
+          dTable([t('col_field'), t('col_before'), t('col_after')], keys.map(function (k) {
+            var changed = !cf.length || cf.indexOf(k) !== -1;
+            return el('tr', { class: changed ? 'adm-audit-changed' : null }, [
+              el('td', null, el('bdi', { dir: 'ltr', class: 'num', text: k })),
+              el('td', null, el('div', { class: 'adm-pre adm-audit-val', dir: 'auto', text: row.action === 'INSERT' ? T.common.none : valText(oldD[k]) })),
+              el('td', null, el('div', { class: 'adm-pre adm-audit-val', dir: 'auto', text: row.action === 'DELETE' ? T.common.none : valText(newD[k]) }))
+            ]);
+          }), t('audit_no_fields'))
+        ]);
+      }
+    });
+  }
+
+  /* ------------------------------------------------------------------
+     أخطاء الواجهة — admin_recent_errors (already scrubbed server-side)
+     ------------------------------------------------------------------ */
+  function renderErrors() {
+    return call('recentErrors', S.orgId).then(function (r) {
+      var out = frag(dHead(viewLabel('errors'), t('errors_sub')));
+      if (r.error) return append(out, dAlert(isForbidden(r.error) ? 'warning' : 'danger', apiErr(r.error)));
+      var list = rowsOf(r.data);
+      out.appendChild(dTable([t('col_time'), t('col_page'), t('col_code'), t('col_message'), t('col_user'), t('col_ua')], list.map(function (x) {
+        var ua = String(x.ua || '');
+        return el('tr', null, [
+          el('td', { text: fmtWhen(x.created_at, true) }),
+          el('td', null, dLtr(x.page)),
+          el('td', null, dLtr(x.code)),
+          el('td', null, el('div', { class: 'adm-pre', dir: 'auto', text: x.message || T.common.none })),
+          el('td', { text: x.user_id ? who(x.user_id) : t('visitor') }),
+          el('td', null, ua ? el('bdi', { dir: 'ltr', class: 'text-xs', title: ua, text: ua.length > 60 ? ua.slice(0, 60) + '…' : ua }) : T.common.none)
+        ]);
+      }), t('errors_empty')));
+      return out;
+    });
+  }
+
+  /* ------------------------------------------------------------------
+     Active-org switcher (only when staff in more than one org)
+     ------------------------------------------------------------------ */
+  var orgWrap = document.getElementById('adm-org-switch-wrap');
+  var orgSel = document.getElementById('adm-org-switch');
+  function fillOrgSwitch() {
+    if (!orgWrap || !orgSel) return;
+    orgSel.textContent = '';
+    S.orgs.forEach(function (o) { orgSel.appendChild(el('option', { value: o.org_id, text: orgName(o) })); });
+    orgSel.value = S.orgId || '';
+    orgWrap.hidden = S.orgs.length < 2;
+  }
+  function resetOrgState() {
+    S.profiles = {};
+    Object.keys(S.filters).forEach(function (k) { S.filters[k].offset = 0; if ('branchId' in S.filters[k]) S.filters[k].branchId = ''; });
+    S.g2 = { audit: { table: '', actor: '', from: '', to: '', rowId: '' }, allInvites: false };
+    Object.keys(TX_CACHE).forEach(function (k) { delete TX_CACHE[k]; });
+    Object.keys(MSG_CACHE).forEach(function (k) { delete MSG_CACHE[k]; });
+    IDEM = {};
+  }
+  function switchOrg(id) {
+    if (!id || id === S.orgId || !UUID_RE.test(id)) return;
+    orgSel.disabled = true;
+    var p = api && typeof api.setActiveOrg === 'function'
+      ? Promise.resolve().then(function () { return api.setActiveOrg(id); })
+      : Promise.resolve((function () { try { localStorage.setItem('marsa_active_org', id); } catch (e) { /* private mode */ } return null; })());
+    p.then(function (r) {
+      orgSel.disabled = false;
+      if (r && r.error) { orgSel.value = S.orgId; return toast(apiErr(r.error), 'error'); }
+      if (dlg && dlg.open) closeDialog();
+      resetOrgState();
+      // detail routes point at the previous org's rows → back to the overview (no extra hashchange render)
+      if (DETAIL[(location.hash || '').replace(/^#/, '').split('/')[0]]) { try { history.replaceState(null, '', '#dashboard'); } catch (e) { /* ignore */ } }
+      boot();
+    }, function (e) { orgSel.disabled = false; orgSel.value = S.orgId; toast(errText(e), 'error'); });
+  }
+  if (orgSel) orgSel.addEventListener('change', function () { switchOrg(orgSel.value); });
+  window.addEventListener('marsa:langchange', function () {
+    if (app.hidden) return;
+    buildNav(); fillOrgSwitch(); route(true);
+  });
 
   /* ------------------------------------------------------------------
      Event delegation
@@ -1450,8 +2207,6 @@
       case 'msg-view': msgView(id); break;
       case 'imp-commit': impCommit(id); break;
       case 'imp-cancel': impCancel(id); break;
-      case 'member-add': memberAdd(); break;
-      case 'member-toggle': memberToggle(id, el.getAttribute('data-to') === '1'); break;
     }
   });
   view.addEventListener('change', function (e) {
@@ -1489,6 +2244,8 @@
       api.setTransactionStatus(id, st, note).then(function (r) {
         done();
         if (r.error) return toast(errText(r.error), 'error');
+        // the remembered key of an earlier unknown result was replayed: that earlier change is what applied
+        if (r.replayedEarlier) { toast('هذا التغيير طُبّق في محاولة سابقة لم يصل ردّها. حدّثنا العرض — تحقّق من الحالة الحالية.', 'warning'); rerender(); return; }
         toast('تم تغيير الحالة إلى «' + lbl('operational_status', st) + '».', 'success'); rerender();
       });
     } else if (kind === 'tx-note') {

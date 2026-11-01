@@ -145,3 +145,6 @@
   .calc-print-inputs h3 { font-size: 1rem; margin-bottom: 8px; }
   .reveal { opacity: 1 !important; transform: none !important; }
 }
+
+/* ---- LTR (English, html[dir="ltr"] set by i18n.js): mirror the physically placed rules above ---- */
+html[dir="ltr"] .calc-stack { direction: ltr; }

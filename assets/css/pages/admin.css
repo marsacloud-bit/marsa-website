@@ -164,3 +164,23 @@
   .adm-filters .form-group, .adm-filters .btn { flex: 1 1 100%; }
   .adm-head-title { flex-direction: column; gap: 8px; }
 }
+
+/* ---- G2 console: org switcher, settings, invitations, audit ---- */
+.adm-org-switch { display: flex; align-items: center; gap: 8px; }
+.adm-org-switch[hidden] { display: none; }
+.adm-org-select { min-height: 36px; padding-block: 4px; padding-inline: 10px 30px; font-size: var(--fs-sm); max-width: 240px; }
+.adm-org-form { display: grid; gap: 14px; }
+.adm-org-form .form-error[hidden] { display: none; }
+.adm-org-form .btn-group { justify-content: flex-start; }
+.adm-swatch { flex: 0 0 auto; width: 44px; border-radius: var(--r-sm); border: 1px solid var(--border); background: transparent; }
+.adm-link-input { font-size: var(--fs-sm); text-align: start; }
+.adm-token .btn-group { justify-content: flex-start; }
+.adm-audit-fields { font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.adm-audit-val { margin: 0; max-height: 220px; overflow: auto; font-size: var(--fs-xs); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--bg); padding: 6px 8px; border-radius: 6px; min-width: 120px; }
+.adm-audit-changed td:first-child { box-shadow: inset 3px 0 0 var(--teal); }
+[dir="rtl"] .adm-audit-changed td:first-child { box-shadow: inset -3px 0 0 var(--teal); }
+.adm-pager [hidden] { display: none; }
+@media (max-width: 640px) {
+  .adm-org-switch { flex: 1 1 100%; }
+  .adm-org-select { max-width: none; flex: 1; }
+}

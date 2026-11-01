@@ -1,26 +1,36 @@
 /* ==========================================================================
    مرسى | MARSA — login.html (STAGING)
-   Client / staff sign-in, client sign-up, forgot + reset password, sign-out.
-   Load order: config.js → main.js → supa.js → auth.js  (plain <script defer>)
+   Client / staff sign-in, client sign-up, forgot + reset password, sign-out,
+   sign-out of all devices, and invitations (login.html?invite=<token>).
+   Load order: config.js → i18n.js → main.js → supa.js → assets/i18n/login.js → auth.js
+               (plain <script defer>)
 
    * Demo mode (config empty): the credential forms stay hidden; a notice
      explains that login needs the online setup. No network calls.
    * Online mode: Supabase Auth through window.MarsaApi. After sign-in the
-     user is routed by role from my_context(): staff → admin.html,
-     everyone else → portal.html. Roles are NEVER read from signup data.
+     user is routed by role from my_context(): staff → admin.html, platform
+     admins without a staff role → platform.html, everyone else → portal.html.
+     Roles are NEVER read from signup data.
    * Recovery: resetPassword() redirects back to login.html?mode=reset;
      supabase-js reads the token from the URL (type=recovery) and fires
      PASSWORD_RECOVERY; we then show the "new password" form.
+   * Invitation: the token is read once from ?invite=, moved to
+     sessionStorage (marsa_invite) and removed from the address bar
+     (history.replaceState). It is never logged and never sent anywhere but
+     invitation_preview / accept_invitation. Preview → (sign in | sign up
+     with the invited e-mail | accept when already signed in) → accept →
+     admin.html for staff roles, portal.html for client invitations.
    ========================================================================== */
 (function () {
   'use strict';
 
   var api = window.MarsaApi;
   var M = window.Marsa || {};
+  var I = window.MarsaI18n || null;
   function $(sel, root) { return (root || document).querySelector(sel); }
   function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
 
-  /* ---- strings (Arabic MSA; centralised for a later EN pass) ---- */
+  /* ---- strings: assets/i18n/login.js ('login.*', ar + en); Arabic fallback here ---- */
   var T = {
     required: 'هذا الحقل مطلوب.',
     email: 'أدخل بريدًا إلكترونيًا صحيحًا.',
@@ -32,6 +42,7 @@
     working: 'جارٍ التنفيذ…',
     signedIn: 'تم تسجيل الدخول. جارٍ تحويلك…',
     signedOut: 'تم تسجيل الخروج.',
+    signedOutAll: 'تم تسجيل الخروج هنا وإلغاء جلسات الأجهزة الأخرى؛ قد يبقى جهاز آخر متصلًا حتى تنتهي جلسته الحالية (ساعة على الأكثر).',
     signupSent: 'أرسلنا رسالة تأكيد إلى بريدك الإلكتروني إن كان صالحًا للتسجيل. افتح الرابط في الرسالة لتفعيل حسابك ثم سجّل الدخول. إن لم تصلك الرسالة خلال دقائق فراجع مجلد الرسائل غير المرغوب فيها.',
     resetSent: 'إن كان هذا البريد مسجّلًا لدينا فستصلك رسالة فيها رابط لتعيين كلمة مرور جديدة. الرابط صالح لمدة محدودة.',
     resetDone: 'تم تحديث كلمة المرور بنجاح.',
@@ -40,8 +51,33 @@
     confirmed: 'تم تأكيد بريدك الإلكتروني. يمكنك تسجيل الدخول الآن.',
     notStaff: 'هذا الحساب ليست له صلاحيات موظف في المنصة. سنحوّلك إلى بوابة العميل.',
     sessionAs: 'أنت مسجّل الدخول بالحساب',
-    loadFail: 'تعذّر تحميل خدمة الدخول. تحقّق من اتصالك ثم أعد تحميل الصفحة.'
+    loadFail: 'تعذّر تحميل خدمة الدخول. تحقّق من اتصالك ثم أعد تحميل الصفحة.',
+    showPw: 'إظهار كلمة المرور',
+    hidePw: 'إخفاء كلمة المرور',
+    unknownError: 'حدث خطأ غير متوقع.',
+    inviteInvalid: 'رابط الدعوة غير صالح أو انتهت صلاحيته أو استُخدم من قبل. اطلب من مدير المؤسسة دعوة جديدة.',
+    inviteDemo: 'الدعوات تعمل في البيئة المتصلة فقط.',
+    inviteAccepted: 'تم قبول الدعوة. جارٍ تحويلك…',
+    inviteSignupSent: 'أنشأنا حسابك وأرسلنا رسالة تأكيد إلى بريدك. افتح رابط التأكيد ثم ارجع إلى رابط الدعوة نفسه (أو سجّل الدخول هنا في هذه النافذة) لقبول الدعوة.',
+    inviteMismatch: 'هذه الدعوة موجّهة إلى بريد إلكتروني آخر. سجّل الخروج ثم ادخل بالبريد المدعو.',
+    inviteUnconfirmed: 'يلزم تأكيد بريدك الإلكتروني أولًا من الرسالة المرسلة إليك، ثم اضغط «قبول الدعوة».',
+    inviteRetry: 'تعذّر التحقق من الدعوة الآن. تحقّق من اتصالك ثم أعد تحميل الصفحة.',
+    inviteDismissed: 'تم تجاهل الدعوة في هذه النافذة. يمكنك فتح رابطها من جديد لاحقًا.',
+    roleFallback: { admin: 'مدير المؤسسة', branch_manager: 'مدير الفرع', supervisor: 'مشرف', operations_manager: 'مدير العمليات',
+      accounts_manager: 'مدير الحسابات', accountant: 'محاسب', clearance_staff: 'موظف تخليص', transport_staff: 'موظف نقل', client: 'عميل (بوابة العميل)' }
   };
+  function interp(s, vars) {
+    return vars ? String(s).replace(/\{(\w+)\}/g, function (m, k) { return vars[k] != null ? vars[k] : m; }) : s;
+  }
+  function tr(k, vars) {
+    var key = 'login.' + k;
+    if (I && typeof I.t === 'function') {
+      var s = I.t(key, vars);
+      if (s && s !== key) return s;
+    }
+    return T[k] != null ? interp(T[k], vars) : k;
+  }
+  function lang() { return I && typeof I.lang === 'function' ? I.lang() : 'ar'; }
 
   var hashAtLoad = location.hash || '';
   var searchAtLoad = location.search || '';
@@ -64,11 +100,43 @@
   // Only same-site pages from this allow-list may be used as "next"
   function safeNext() {
     var n = String(query.next || '').replace(/^\.?\//, '');
-    return ['portal.html', 'admin.html'].indexOf(n) !== -1 ? n : '';
+    return ['portal.html', 'admin.html', 'platform.html'].indexOf(n) !== -1 ? n : '';
   }
   function cleanUrl(keepHash) {
     try { history.replaceState(null, '', location.pathname + (keepHash ? '#' + keepHash : '')); } catch (e) { /* ignore */ }
   }
+
+  /* ---- invitation token: ?invite=<64 hex> → sessionStorage, out of the address bar ---- */
+  var INVITE_KEY = 'marsa_invite';
+  var TOKEN_RE = /^[0-9a-f]{64}$/i;
+  var inviteToken = null;
+  var inviteFromUrl = false;   // the token came in THIS page's address (a link anyone could have sent)
+  // marker set by the invite sign-up form of this tab: {t: token, e: e-mail}. Only with it may
+  // the page accept automatically after the confirmation link (never from URL flags alone).
+  var SIGNUP_KEY = 'marsa_invite_signup';
+  function readSignupMarker() {
+    try { var m = JSON.parse(sessionStorage.getItem(SIGNUP_KEY) || 'null'); return m && typeof m === 'object' ? m : null; } catch (e) { return null; }
+  }
+  function storeSignupMarker(m) {
+    try { if (m) sessionStorage.setItem(SIGNUP_KEY, JSON.stringify(m)); else sessionStorage.removeItem(SIGNUP_KEY); } catch (e) { /* storage blocked */ }
+  }
+  function storeInvite(t) { try { if (t) sessionStorage.setItem(INVITE_KEY, t); else sessionStorage.removeItem(INVITE_KEY); } catch (e) { /* storage blocked: memory only */ } }
+  (function readInvite() {
+    if (query.invite != null) {
+      inviteFromUrl = true;
+      var t = String(query.invite).trim();
+      inviteToken = TOKEN_RE.test(t) ? t.toLowerCase() : '';
+      storeInvite(inviteToken || null);
+      delete query.invite;
+      // rebuild the URL without the token (keep the other parameters and the hash)
+      var rest = Object.keys(query).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(query[k]); }).join('&');
+      try { history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + location.hash); } catch (e) { /* ignore */ }
+      searchAtLoad = rest ? '?' + rest : '';
+      return;
+    }
+    try { var s = sessionStorage.getItem(INVITE_KEY); if (s && TOKEN_RE.test(s)) inviteToken = s; } catch (e) { /* ignore */ }
+  })();
+  function clearInvite() { inviteToken = null; invitePreview = null; storeInvite(null); storeSignupMarker(null); }
 
   /* ---- UI helpers ---- */
   var msgBox = $('[data-auth-msg]');
@@ -81,7 +149,7 @@
   }
   function hideMsg() { if (msgBox) msgBox.hidden = true; }
 
-  var VIEWS = ['tabs', 'forgot', 'reset', 'session', 'demo'];
+  var VIEWS = ['tabs', 'forgot', 'reset', 'session', 'demo', 'invite'];
   function showView(name) {
     VIEWS.forEach(function (v) {
       var el = $('[data-auth-view="' + v + '"]');
@@ -91,6 +159,9 @@
   function showClientSub(name) {   // signin | signup
     $$('[data-client-sub]').forEach(function (el) { el.hidden = el.getAttribute('data-client-sub') !== name; });
   }
+  function showInviteSub(name) {   // accept | signin | signup | none
+    $$('[data-invite-sub]').forEach(function (el) { el.hidden = el.getAttribute('data-invite-sub') !== name; });
+  }
   function selectTab(which) {
     var tab = document.getElementById('tab-' + which);
     if (tab) tab.click();
@@ -98,9 +169,13 @@
   function setBusy(form, busy) {
     var btn = form.querySelector('button[type="submit"]');
     $$('input, button, select', form).forEach(function (el) { el.disabled = busy; });
-    if (btn) {
-      if (busy) { btn.setAttribute('data-label', btn.textContent); btn.textContent = T.working; btn.setAttribute('aria-busy', 'true'); }
-      else if (btn.getAttribute('data-label')) { btn.textContent = btn.getAttribute('data-label'); btn.removeAttribute('aria-busy'); }
+    if (btn) btnBusy(btn, busy);
+  }
+  function btnBusy(btn, busy) {
+    if (busy) { btn.setAttribute('data-label', btn.textContent); btn.textContent = tr('working'); btn.setAttribute('aria-busy', 'true'); btn.disabled = true; }
+    else {
+      if (btn.getAttribute('data-label')) btn.textContent = btn.getAttribute('data-label');
+      btn.removeAttribute('data-label'); btn.removeAttribute('aria-busy'); btn.disabled = false;
     }
   }
   function fieldError(input, msg) {
@@ -129,7 +204,7 @@
   }
   function validEmail(s) { return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(s || '').trim()) && String(s).length <= 160; }
   function validPassword(s) { return typeof s === 'string' && s.length >= 8 && s.length <= 72 && /[A-Za-z؀-ۿ]/.test(s) && /\d/.test(s); }
-  function errText(err) { return (err && err.message) || (api && api.errorMessage ? api.errorMessage(err) : 'حدث خطأ غير متوقع.'); }
+  function errText(err) { return (err && err.message) || (api && api.errorMessage ? api.errorMessage(err) : tr('unknownError')); }
 
   /* ---- password show/hide toggles ---- */
   $$('[data-toggle-password]').forEach(function (btn) {
@@ -139,7 +214,7 @@
       var show = input.type === 'password';
       input.type = show ? 'text' : 'password';
       btn.setAttribute('aria-pressed', String(show));
-      btn.setAttribute('aria-label', show ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور');
+      btn.setAttribute('aria-label', show ? tr('hidePw') : tr('showPw'));
     });
   });
 
@@ -149,16 +224,17 @@
     routing = true;
     return api.myContext(true).then(function (r) {
       var ctx = r.data || {};
-      var slug = api.orgSlug;
-      var staff = !r.error && (ctx.memberships || []).some(function (m) { return m.org_slug === slug && m.role !== 'client'; });
+      // staff in any organization (multi-org users pick the org in admin.html)
+      var staff = !r.error && (ctx.memberships || []).some(function (m) { return m.role && m.role !== 'client'; });
+      var platform = !r.error && !!ctx.is_platform_admin;
       var next = safeNext();
-      var dest = staff ? (next || 'admin.html') : 'portal.html';
-      if (preferStaff && !staff) {
-        showMsg(T.notStaff, 'warning');
+      var dest = staff ? (next || 'admin.html') : (platform ? (next === 'platform.html' ? next : 'platform.html') : 'portal.html');
+      if (preferStaff && !staff && !platform) {
+        showMsg(tr('notStaff'), 'warning');
         setTimeout(function () { location.replace(dest); }, 1800);
         return;
       }
-      showMsg(T.signedIn, 'success');
+      showMsg(tr('signedIn'), 'success');
       location.replace(dest);
     });
   }
@@ -179,6 +255,11 @@
       var mc = $('[data-demo-misconfig]');
       if (mc) mc.hidden = false;
     }
+    if (inviteToken !== null) {
+      // an invitation cannot be used without the online setup
+      showMsg(inviteToken ? tr('inviteDemo') : tr('inviteInvalid'), 'warning');
+      clearInvite();
+    }
     return;
   }
 
@@ -188,7 +269,8 @@
   document.documentElement.setAttribute('data-auth-ready', 'loading');
   $$('[data-online-only]').forEach(function (el) { el.hidden = false; });
   var initialTab = /staff/.test(hashAtLoad) ? 'staff' : 'client';
-  showView('tabs');
+  if (inviteToken) { showView('invite'); showInviteSub('none'); }
+  else showView('tabs');
   selectTab(initialTab);
   showClientSub(/signup/.test(hashAtLoad) ? 'signup' : 'signin');
 
@@ -200,7 +282,7 @@
   });
   $$('[data-tab-hash]').forEach(function (t) {
     t.addEventListener('click', function () {
-      try { history.replaceState(null, '', location.pathname + location.search + '#' + t.getAttribute('data-tab-hash')); } catch (e) { /* ignore */ }
+      try { history.replaceState(null, '', location.pathname + searchAtLoad + '#' + t.getAttribute('data-tab-hash')); } catch (e) { /* ignore */ }
     });
   });
 
@@ -217,23 +299,27 @@
       if (fe) fe.focus();
     });
   });
-  $$('[data-go-tabs]').forEach(function (b) { b.addEventListener('click', function () { hideMsg(); showView('tabs'); }); });
+  $$('[data-go-tabs]').forEach(function (b) {
+    b.addEventListener('click', function () { hideMsg(); if (inviteToken && invitePreview) { showView('invite'); showInviteSub('signin'); } else showView('tabs'); });
+  });
 
   /* ---- sign-in (client + staff share Supabase auth) ---- */
-  function bindSignIn(form, emailId, pwId, preferStaff) {
+  // onSignedIn(): what happens after a successful sign-in (default: route by role)
+  function bindSignIn(form, emailId, pwId, preferStaff, onSignedIn) {
     if (!form) return;
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       hideMsg(); clearErrors(form);
       var em = $('#' + emailId), pw = $('#' + pwId), bad = false;
-      if (!validEmail(em.value)) { fieldError(em, T.email); bad = true; }
-      if (!pw.value) { fieldError(pw, T.required); bad = true; }
+      if (!validEmail(em.value)) { fieldError(em, tr('email')); bad = true; }
+      if (!pw.value) { fieldError(pw, tr('required')); bad = true; }
       if (bad) { (form.querySelector('[aria-invalid="true"]') || em).focus(); return; }
       setBusy(form, true);
       api.signIn(em.value.trim(), pw.value).then(function (r) {
         if (r.error) { setBusy(form, false); pw.value = ''; showMsg(errText(r.error), 'danger'); return; }
         pw.value = '';
-        return routeByRole(preferStaff).then(function () { setBusy(form, false); });
+        var next = onSignedIn ? onSignedIn(r.data) : routeByRole(preferStaff);
+        return Promise.resolve(next).then(function () { setBusy(form, false); });
       });
     });
   }
@@ -241,23 +327,23 @@
   bindSignIn($('#staff-signin-form'), 'st-email', 'st-password', true);
 
   /* ---- client sign-up ---- */
+  var signupRedirect = location.origin + location.pathname.replace(/[^/]*$/, '') + 'login.html?confirmed=1';
   var su = $('#client-signup-form');
   if (su) su.addEventListener('submit', function (e) {
     e.preventDefault();
     hideMsg(); clearErrors(su);
     var name = $('#su-name'), phone = $('#su-phone'), em = $('#su-email'), pw = $('#su-password'), pw2 = $('#su-password2'), ack = $('#su-ack');
     var bad = false, p = normPhone(phone.value);
-    if (String(name.value).trim().length < 2 || String(name.value).trim().length > 120) { fieldError(name, T.name); bad = true; }
-    if (!p) { fieldError(phone, T.phone); bad = true; }
-    if (!validEmail(em.value)) { fieldError(em, T.email); bad = true; }
-    if (!validPassword(pw.value)) { fieldError(pw, T.password); bad = true; }
-    if (pw2.value !== pw.value) { fieldError(pw2, T.passwordMatch); bad = true; }
+    if (String(name.value).trim().length < 2 || String(name.value).trim().length > 120) { fieldError(name, tr('name')); bad = true; }
+    if (!p) { fieldError(phone, tr('phone')); bad = true; }
+    if (!validEmail(em.value)) { fieldError(em, tr('email')); bad = true; }
+    if (!validPassword(pw.value)) { fieldError(pw, tr('password')); bad = true; }
+    if (pw2.value !== pw.value) { fieldError(pw2, tr('passwordMatch')); bad = true; }
     var ackGroup = ack.closest('.form-group');
     if (!ack.checked) { if (ackGroup) ackGroup.classList.add('has-error'); bad = true; } else if (ackGroup) ackGroup.classList.remove('has-error');
     if (bad) { (su.querySelector('[aria-invalid="true"]') || name).focus(); return; }
     setBusy(su, true);
-    var redirect = location.origin + location.pathname.replace(/[^/]*$/, '') + 'login.html?confirmed=1';
-    api.signUp(em.value.trim(), pw.value, { fullName: String(name.value).trim(), phone: p, locale: 'ar', redirectTo: redirect })
+    api.signUp(em.value.trim(), pw.value, { fullName: String(name.value).trim(), phone: p, locale: lang(), redirectTo: signupRedirect })
       .then(function (r) {
         setBusy(su, false);
         pw.value = ''; pw2.value = '';
@@ -265,7 +351,7 @@
         if (r.data && r.data.session) { return routeByRole(false); }   // email confirmation disabled on this project
         su.reset();
         showClientSub('signin');
-        showMsg(T.signupSent, 'success');
+        showMsg(tr('signupSent'), 'success');
       });
   });
 
@@ -275,7 +361,7 @@
     e.preventDefault();
     hideMsg(); clearErrors(fp);
     var em = $('#fp-email');
-    if (!validEmail(em.value)) { fieldError(em, T.email); em.focus(); return; }
+    if (!validEmail(em.value)) { fieldError(em, tr('email')); em.focus(); return; }
     setBusy(fp, true);
     var redirect = location.origin + location.pathname.replace(/[^/]*$/, '') + 'login.html?mode=reset';
     api.resetPassword(em.value.trim(), redirect).then(function (r) {
@@ -283,7 +369,7 @@
       // same message whether or not the address exists (no account enumeration)
       if (r.error && r.error.code === 'AUTH_RATE') { showMsg(errText(r.error), 'warning'); return; }
       if (r.error && r.error.code === 'MRS_NETWORK') { showMsg(errText(r.error), 'danger'); return; }
-      showMsg(T.resetSent, 'success');
+      showMsg(tr('resetSent'), 'success');
     });
   });
 
@@ -293,37 +379,206 @@
     e.preventDefault();
     hideMsg(); clearErrors(rp);
     var pw = $('#rp-password'), pw2 = $('#rp-password2'), bad = false;
-    if (!validPassword(pw.value)) { fieldError(pw, T.password); bad = true; }
-    if (pw2.value !== pw.value) { fieldError(pw2, T.passwordMatch); bad = true; }
+    if (!validPassword(pw.value)) { fieldError(pw, tr('password')); bad = true; }
+    if (pw2.value !== pw.value) { fieldError(pw2, tr('passwordMatch')); bad = true; }
     if (bad) { (rp.querySelector('[aria-invalid="true"]') || pw).focus(); return; }
     setBusy(rp, true);
     api.getSession().then(function (s) {
-      if (!s.data) { setBusy(rp, false); showMsg(T.resetNoSession, 'danger'); return; }
+      if (!s.data) { setBusy(rp, false); showMsg(tr('resetNoSession'), 'danger'); return; }
       return api.updatePassword(pw.value).then(function (r) {
         setBusy(rp, false);
         pw.value = ''; pw2.value = '';
         if (r.error) { showMsg(errText(r.error), 'danger'); return; }
         recoveryMode = false;
         cleanUrl();
-        if (M.toast) M.toast(T.resetDone, 'success');
-        showMsg(T.resetDone, 'success');
+        if (M.toast) M.toast(tr('resetDone'), 'success');
+        showMsg(tr('resetDone'), 'success');
+        if (inviteToken) return api.getSession().then(function (s2) { startInvite(s2.data, false); });
         routeByRole(false);
       });
     });
   });
 
-  /* ---- sign-out + continue (signed-in panel) ---- */
+  /* ---- sign-out (this device / all devices) + continue (signed-in panel) ---- */
   $$('[data-sign-out]').forEach(function (b) {
     b.addEventListener('click', function () {
       b.disabled = true;
       api.signOut().then(function () {
         b.disabled = false;
         showView('tabs'); selectTab('client'); showClientSub('signin');
-        showMsg(T.signedOut, 'info');
+        showMsg(tr('signedOut'), 'info');
+      });
+    });
+  });
+  $$('[data-sign-out-all]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      btnBusy(b, true);
+      api.signOutEverywhere().then(function (r) {
+        btnBusy(b, false);
+        if (r.error) { showMsg(errText(r.error), 'danger'); return; }
+        showView('tabs'); selectTab('client'); showClientSub('signin');
+        showMsg(tr('signedOutAll'), 'info');
       });
     });
   });
   $$('[data-continue]').forEach(function (b) { b.addEventListener('click', function () { routeByRole(false); }); });
+
+  /* ======================================================================
+     INVITATION
+     ====================================================================== */
+  var invitePreview = null;
+  function roleLabel(p) {
+    var l = lang();
+    return (l === 'en' ? p.role_label_en : p.role_label_ar) || p.role_label_ar ||
+      (I && I.has && I.has('login.role_' + p.role) ? I.t('login.role_' + p.role) : (T.roleFallback[p.role] || p.role || ''));
+  }
+  function fmtDate(d) {
+    if (!d) return '';
+    if (I && typeof I.fmtDate === 'function') return I.fmtDate(d, { time: true });
+    try { return new Date(d).toLocaleString('ar-SA-u-nu-latn-ca-gregory'); } catch (e) { return String(d); }
+  }
+  function renderInvite() {
+    var p = invitePreview;
+    if (!p) return;
+    var l = lang();
+    var set = function (sel, v) { var el = $(sel); if (el) el.textContent = v == null ? '' : String(v); };
+    set('[data-invite-org]', (l === 'en' && p.org_name_en) ? p.org_name_en : (p.org_name_ar || p.org_name_en || ''));
+    set('[data-invite-role]', roleLabel(p));
+    set('[data-invite-email]', p.email_masked || '');
+    set('[data-invite-expires]', fmtDate(p.expires_at));
+    var br = $('[data-invite-branch-row]');
+    if (br) br.hidden = !p.branch_name_ar;
+    set('[data-invite-branch]', p.branch_name_ar || '');
+    var lo = $('[data-invite-loading]'); if (lo) lo.hidden = true;
+    var card = $('[data-invite-card]'); if (card) card.hidden = false;
+  }
+  window.addEventListener('marsa:langchange', renderInvite);
+
+  // session: current Supabase session (or null); autoAccept: accept right away when signed in
+  function startInvite(session, autoAccept) {
+    hideMsg();
+    showView('invite'); showInviteSub('none');
+    var lo = $('[data-invite-loading]'); if (lo) lo.hidden = false;
+    var card = $('[data-invite-card]'); if (card) card.hidden = true;
+    return api.invitationPreview(inviteToken).then(function (r) {
+      if (r.error) {
+        if (lo) lo.hidden = true;
+        if (r.error.code === 'MRS_NOT_FOUND' || r.error.code === 'MRS_EXPIRED' || r.error.code === 'MRS_INVALID') {
+          clearInvite();
+          if (session) showSession(session.user); else showView('tabs');
+          showMsg(tr('inviteInvalid'), 'danger');
+        } else {
+          showMsg(tr('inviteRetry') + ' ' + errText(r.error), 'danger');
+        }
+        return;
+      }
+      invitePreview = r.data || {};
+      renderInvite();
+      if (session) {
+        var se = $('[data-invite-session-email]'); if (se) se.textContent = (session.user && session.user.email) || '';
+        showInviteSub('accept');
+        if (autoAccept) return acceptNow();
+      } else {
+        showInviteSub('signin');
+      }
+    });
+  }
+  function acceptNow() {
+    var btn = $('[data-invite-accept]');
+    if (!inviteToken) return Promise.resolve();
+    if (btn) btnBusy(btn, true);
+    var role = invitePreview && invitePreview.role;
+    return api.acceptInvitation(inviteToken).then(function (r) {
+      if (btn) btnBusy(btn, false);
+      if (r.error) {
+        var c = r.error.code;
+        api.getSession().then(function (s) {
+          if (c === 'MRS_NOT_FOUND' || c === 'MRS_EXPIRED') {
+            clearInvite();
+            if (s.data) showSession(s.data.user); else showView('tabs');
+            showMsg(tr('inviteInvalid'), 'danger');
+            return;
+          }
+          showView('invite');
+          if (s.data) {
+            var se = $('[data-invite-session-email]'); if (se) se.textContent = (s.data.user && s.data.user.email) || '';
+            showInviteSub('accept');
+          } else showInviteSub('signin');
+          showMsg(c === 'MRS_EMAIL_MISMATCH' ? tr('inviteMismatch') : c === 'MRS_EMAIL_UNCONFIRMED' ? tr('inviteUnconfirmed') : errText(r.error),
+            c === 'MRS_EMAIL_UNCONFIRMED' ? 'warning' : 'danger');
+        });
+        return;
+      }
+      var d = r.data || {};
+      clearInvite();
+      role = d.role || role;
+      showMsg(tr('inviteAccepted'), 'success');
+      var dest = role === 'client' ? 'portal.html' : 'admin.html';
+      var setOrg = d.org_id && role !== 'client' ? api.setActiveOrg(d.org_id) : Promise.resolve();
+      return setOrg.then(function () { routing = true; location.replace(dest); });
+    });
+  }
+  var acceptBtn = $('[data-invite-accept]');
+  if (acceptBtn) acceptBtn.addEventListener('click', function () { hideMsg(); acceptNow(); });
+  $$('[data-invite-go]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      hideMsg();
+      var to = b.getAttribute('data-invite-go');
+      showInviteSub(to);
+      var f = $(to === 'signup' ? '#ivs-name' : '#iv-email'); if (f) f.focus();
+    });
+  });
+  $$('[data-invite-switch]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      b.disabled = true;
+      api.signOut().then(function () {
+        storeInvite(inviteToken);   // signOut clears per-user storage; this invitation continues
+        b.disabled = false; hideMsg(); showInviteSub('signin'); var f = $('#iv-email'); if (f) f.focus();
+      });
+    });
+  });
+  $$('[data-invite-dismiss]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      clearInvite();
+      api.getSession().then(function (s) {
+        if (s.data) showSession(s.data.user); else { showView('tabs'); selectTab('client'); showClientSub('signin'); }
+        showMsg(tr('inviteDismissed'), 'info');
+      });
+    });
+  });
+  // sign in with the invited e-mail → accept right away (no role routing first)
+  bindSignIn($('#invite-signin-form'), 'iv-email', 'iv-password', false, function () { return acceptNow(); });
+
+  // sign up with the invited e-mail; accept after confirmation + sign-in
+  var ivs = $('#invite-signup-form');
+  if (ivs) ivs.addEventListener('submit', function (e) {
+    e.preventDefault();
+    hideMsg(); clearErrors(ivs);
+    var name = $('#ivs-name'), phone = $('#ivs-phone'), em = $('#ivs-email'), pw = $('#ivs-password'), pw2 = $('#ivs-password2'), ack = $('#ivs-ack');
+    var bad = false, p = phone.value.trim() ? normPhone(phone.value) : '';
+    if (String(name.value).trim().length < 2 || String(name.value).trim().length > 120) { fieldError(name, tr('name')); bad = true; }
+    if (p === null) { fieldError(phone, tr('phone')); bad = true; }
+    if (!validEmail(em.value)) { fieldError(em, tr('email')); bad = true; }
+    if (!validPassword(pw.value)) { fieldError(pw, tr('password')); bad = true; }
+    if (pw2.value !== pw.value) { fieldError(pw2, tr('passwordMatch')); bad = true; }
+    var ackGroup = ack.closest('.form-group');
+    if (!ack.checked) { if (ackGroup) ackGroup.classList.add('has-error'); bad = true; } else if (ackGroup) ackGroup.classList.remove('has-error');
+    if (bad) { (ivs.querySelector('[aria-invalid="true"]') || name).focus(); return; }
+    setBusy(ivs, true);
+    var email = em.value.trim();
+    api.signUp(email, pw.value, { fullName: String(name.value).trim(), phone: p || '', locale: lang(), redirectTo: signupRedirect })
+      .then(function (r) {
+        setBusy(ivs, false);
+        pw.value = ''; pw2.value = '';
+        if (r.error) { showMsg(errText(r.error), 'danger'); return; }
+        if (r.data && r.data.session) return acceptNow();   // email confirmation disabled on this project
+        storeSignupMarker({ t: inviteToken, e: email.toLowerCase() });
+        ivs.reset();
+        var ie = $('#iv-email'); if (ie) ie.value = email;
+        showInviteSub('signin');
+        showMsg(tr('inviteSignupSent'), 'success');
+      });
+  });
 
   /* ---- auth events ---- */
   api.onAuth(function (event) {
@@ -333,15 +588,32 @@
   /* ---- initial state ---- */
   api.ready().then(function (r) {
     document.documentElement.setAttribute('data-auth-ready', r.error ? 'error' : 'ready');
-    if (r.error) { showMsg(T.loadFail, 'danger'); $$('form[data-auth-form]').forEach(function (f) { setBusy(f, true); }); return; }
+    if (r.error) { showMsg(tr('loadFail'), 'danger'); $$('form[data-auth-form]').forEach(function (f) { setBusy(f, true); }); return; }
     return api.getSession().then(function (s) {
       var session = s.data;
       if (linkErrorAtLoad && !session) {
-        cleanUrl(); showView(recoveryMode ? 'forgot' : 'tabs'); showMsg(T.linkError, 'danger'); return;
+        cleanUrl(); showView(recoveryMode ? 'forgot' : 'tabs'); showMsg(tr('linkError'), 'danger'); return;
       }
       if (recoveryMode) {
         if (session) { showView('reset'); var f = $('#rp-password'); if (f) f.focus(); }
-        else { cleanUrl(); showView('forgot'); showMsg(T.resetNoSession, 'danger'); }
+        else { cleanUrl(); showView('forgot'); showMsg(tr('resetNoSession'), 'danger'); }
+        return;
+      }
+      if (inviteToken) {
+        // Back from the e-mail confirmation link in this tab → accept straight away, but only
+        // when this tab itself started the invite sign-up for this token and the signed-in
+        // e-mail is the one used there. A crafted login.html?invite=…&confirmed=1 link (or
+        // #type=signup) only shows the preview + accept button (no silent joining).
+        var mk = readSignupMarker();
+        var auto = !!(session && confirmedAtLoad && !inviteFromUrl && mk && mk.t === inviteToken
+          && session.user && String(session.user.email || '').toLowerCase() === mk.e);
+        if (confirmedAtLoad || inviteFromUrl) cleanUrl();
+        return startInvite(session, auto);
+      }
+      if (inviteToken === '') {   // ?invite= present but not a well-formed token
+        inviteToken = null;
+        if (session) showSession(session.user); else showView('tabs');
+        showMsg(tr('inviteInvalid'), 'danger');
         return;
       }
       if (session) {
@@ -349,7 +621,7 @@
         showSession(session.user);
         return;
       }
-      if (confirmedAtLoad) { cleanUrl('client'); showMsg(T.confirmed, 'success'); }
+      if (confirmedAtLoad) { cleanUrl('client'); showMsg(tr('confirmed'), 'success'); }
     });
   });
 })();

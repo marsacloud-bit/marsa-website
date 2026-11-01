@@ -25,6 +25,14 @@
 .pw-toggle:focus-visible { outline: none; box-shadow: var(--ring); }
 .pw-toggle .icon { width: 20px; height: 20px; }
 
+/* invitation preview (login.html?invite=…) */
+.invite-card { margin-top: 14px; padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--r); background: #F7FAFD; }
+.invite-card[hidden] { display: none; }
+.invite-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 20px; margin: 0 0 10px; }
+.invite-meta > div { min-width: 0; }
+.invite-meta dt { font-size: var(--fs-xs); color: var(--muted); font-weight: 700; }
+.invite-meta dd { margin: 2px 0 0; font-weight: 800; color: var(--navy-dark); overflow-wrap: anywhere; }
+
 [data-auth-msg]:focus { outline: none; }
 button[aria-busy="true"] { cursor: progress; opacity: .8; }
 

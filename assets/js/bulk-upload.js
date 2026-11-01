@@ -1412,7 +1412,7 @@
       caption: 'الأرقام المرجعية للطلبات المنشأة'
     };
     var MAX_ONLINE_ROWS = 5000;
-    var OPS_WRITER_ROLES = ['clearance_staff', 'operations_manager', 'supervisor', 'admin'];
+    var OPS_WRITER_ROLES = ['clearance_staff', 'operations_manager', 'branch_manager', 'supervisor', 'admin'];   // = app.ops_writer_roles()
     var auth = { checked: false, signedIn: false, staff: false };
     var uploading = false;
     function tpl(t, o) { return t.replace(/\{(\w+)\}/g, function (_, k) { return o[k] != null ? o[k] : ''; }); }

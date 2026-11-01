@@ -157,3 +157,12 @@
 .ts-local-kv { max-width: 560px; }
 .ts-containers { display: flex; flex-wrap: wrap; gap: 4px 12px; justify-content: flex-end; }
 .doc-list .doc-name[dir="auto"] { word-break: break-all; }
+
+/* ---- LTR (English, html[dir="ltr"] set by i18n.js): mirror the physically placed rules above ---- */
+html[dir="ltr"] .ts-ref h2 { text-align: left; }
+html[dir="ltr"] .ts-route .port:last-child { text-align: right; }
+html[dir="ltr"] .timeline .tl-meta { direction: ltr; }
+html[dir="ltr"] .track-empty ul { text-align: left; }
+@media (max-width: 900px) {
+  html[dir="ltr"] .stage, html[dir="ltr"] .stage-date { text-align: left; }
+}

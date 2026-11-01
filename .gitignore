@@ -1,5 +1,48 @@
+# ---------------------------------------------------------------------------
+# مرسى | MARSA — files that must never enter the repository
+# Secrets live in the shell environment or a password manager, never here.
+# ---------------------------------------------------------------------------
+
+# OS / editor noise
 .DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# Dependencies (tests install PGlite outside the repo, in /tmp/pgtest)
 node_modules/
+
+# Environment and secrets (SUPABASE_DB_URL, service_role keys, passwords)
 .env
+*.env
 .env.*
+!.env.example
 *.local
+*.local.*
+*.pem
+*.key
+.supabase/
+supabase/.temp/
+supabase/.branches/
+
+# Database dumps and backups (scripts/backup-staging.sh writes outside the
+# repo by default; these patterns are a safety net if one lands here)
+backups/
+dumps/
+*.dump
+*.backup
+*.pgdump
+*.sql.gz
+*.tar.gz
+*.dump.gz
+
+# Release zips for Hostinger (keep them next to the deploy copy, not in git)
+marsa-release-*.zip
+
+# Logs and scratch output
+*.log
+npm-debug.log*
+.cache/
+tmp/

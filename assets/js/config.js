@@ -14,7 +14,7 @@
    frontend). assets/js/supa.js refuses to start if it detects one.
 
    orgSlug: the tenant whose public forms this site feeds ('blue-sea').
-   Load order on every page:  config.js → main.js → supa.js → <page>.js
+   Load order on every page:  config.js → i18n.js → [assets/i18n/<page>.js] → main.js → supa.js → <page>.js
    ========================================================================== */
 window.MARSA_CONFIG = {
   supabaseUrl: 'https://cgzhidyxfpksfckwmauq.supabase.co',

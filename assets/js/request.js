@@ -32,6 +32,8 @@
     var STR = {
       sending: 'جارٍ الإرسال…',
       sentToast: 'استلمنا طلبك. الرقم المرجعي ',
+      // idempotent replay (the first response was lost): the server never stores the tracking token
+      tokenAlreadyShown: 'وصل طلبك وحُفظ بهذا الرقم المرجعي، لكن رمز التتبع صدر في ردّ سابق لم يصل إلى جهازك ولا يمكن عرضه مرة أخرى. لا تُرسل الطلب من جديد؛ تواصل مع المكتب مع ذكر الرقم المرجعي ليُصدر لك رمز تتبع جديدًا، أو تابع الطلب من بوابة العميل بعد تسجيل الدخول.',
       savedToast: 'تم الحفظ محليًا على هذا الجهاز (نسخة عرض تجريبية) — لم يُرسل إلى أي جهة. الرقم المرجعي المحلي ',
       statusOnline: 'جديد — بانتظار مراجعة الفريق',
       docsOnline: 'تُرفع لاحقًا من بوابة العملاء',
@@ -886,7 +888,9 @@
           if (res && !res.error && res.data && res.data.ref) {
             record.ref = res.data.ref;
             record.statusLabel = STR.statusOnline;
-            showSuccess(record, res.data.tracking_token || '');
+            // replay of an earlier (committed) submission: ref only, the token was already issued
+            var lost = !res.data.tracking_token && (res.data.token_shown === true || res.data.replayed === true);
+            showSuccess(record, res.data.tracking_token || '', lost);
           } else {
             showSaveError(res && res.error);
           }
@@ -933,7 +937,7 @@
       toast(ONLINE ? STR.sendFailed : 'تعذّر حفظ الطلب على هذا الجهاز — لم يُحفظ ولم يُرسل. فعّل التخزين المحلي ثم حاول مرة أخرى.', 'error');
     }
 
-    function showSuccess(r, token) {
+    function showSuccess(r, token, tokenLost) {
       wizard.hidden = true;
       success.hidden = false;
       qs('#success-ref').textContent = r.ref;
@@ -943,6 +947,15 @@
       if (tokWrap) {
         tokWrap.hidden = !token;
         qs('#success-token').textContent = token || '';
+        var lostEl = qs('#success-token-lost');
+        if (tokenLost && !lostEl) {
+          lostEl = document.createElement('div');
+          lostEl.id = 'success-token-lost';
+          lostEl.className = 'alert alert-warning mt-2';
+          lostEl.setAttribute('role', 'note');
+          tokWrap.parentNode.insertBefore(lostEl, tokWrap.nextSibling);
+        }
+        if (lostEl) { lostEl.hidden = !tokenLost; lostEl.textContent = tokenLost ? STR.tokenAlreadyShown : ''; }
       }
       var docsCount = Object.keys(r.documents).reduce(function (n, k) { return n + r.documents[k].length; }, 0);
       var docsText = docsCount ? docsCount + (docsCount === 1 ? ' ملف' : ' ملفات') : 'لم تُرفق بعد';

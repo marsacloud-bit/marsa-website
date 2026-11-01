@@ -213,6 +213,10 @@ async function fixtures() {
     await q(`INSERT INTO public.document_extractions (id, org_id, doc_type, source_name, source_sha256, engine, languages, raw_text, extracted_fields)
              VALUES ($1, $2, 'commercial_invoice', 'a-inv.jpg', $3, 'tesseract.js@5.1.1', 'ara+eng', 'فاتورة أ', '{"invoice_number":"A-1"}')`, [EXT_A, A, hex('d')]);
   });
+  // one pending invitation per org (so the isolation sweep covers invitations; 0200)
+  await q(`INSERT INTO public.invitations (org_id, email, role, token_hash, invited_by) VALUES
+             ($1, 'invite.a@example.com', 'clearance_staff', $3, $5), ($2, 'invite.b@example.com', 'clearance_staff', $4, $6)`,
+    [A, B, hex('e'), hex('f'), U.adminA, U.staffB]);
 }
 
 /* ------------------------------------------------------------------ tests */
@@ -234,9 +238,12 @@ const TENANT_TABLES = [
   ['transaction_events', `SELECT id::text id FROM public.transaction_events WHERE org_id = $1 LIMIT 1`, 'id::text',  'note = note'],
   ['contact_messages',   `SELECT id::text id FROM public.contact_messages WHERE org_id = $1 LIMIT 1`,   'id::text',  'org_id = org_id'],
   ['audit_log',          `SELECT id::text id FROM public.audit_log WHERE org_id = $1 LIMIT 1`,          'id::text',  'table_name = table_name'],
-  ['document_extractions', `SELECT id::text id FROM public.document_extractions WHERE org_id = $1 LIMIT 1`, 'id::text', 'review_note = review_note']
+  ['document_extractions', `SELECT id::text id FROM public.document_extractions WHERE org_id = $1 LIMIT 1`, 'id::text', 'review_note = review_note'],
+  ['invitations',        `SELECT id::text id FROM public.invitations WHERE org_id = $1 LIMIT 1`,        'id::text',  'email = email']
 ];
-const ALL_PUBLIC_TABLES = TENANT_TABLES.map(t => t[0]).concat(['status_labels']);
+// G2 internal tables: no API grant at all (written/read only through SECURITY DEFINER RPCs)
+const NO_API_TABLES = ['idempotency_keys', 'platform_admins', 'schema_versions', 'client_errors'];
+const ALL_PUBLIC_TABLES = TENANT_TABLES.map(t => t[0]).concat(['status_labels'], NO_API_TABLES);
 
 async function isolationSweep(who, targetOrg, memberUser, label) {
   for (const [t, sampleSql, idExpr, setClause] of TENANT_TABLES) {
@@ -290,23 +297,44 @@ async function main() {
     const bad = r.filter(x => x.policyname !== 'status_labels_read');
     return bad.length === 0 || bad.map(x => x.tablename + '.' + x.policyname + ' ' + x.roles).join(', ');
   });
-  await check('anon can execute exactly the 3 public RPCs', async () => {
+  await check('G2 internal tables: no privilege at all for anon/authenticated', async () => {
+    const r = await q(`SELECT grantee, table_name, privilege_type FROM information_schema.role_table_grants
+                        WHERE grantee IN ('anon','authenticated') AND table_schema = 'public' AND table_name = ANY($1)`, [NO_API_TABLES]);
+    const c = await q(`SELECT grantee, table_name FROM information_schema.column_privileges
+                        WHERE grantee IN ('anon','authenticated') AND table_schema = 'public' AND table_name = ANY($1)`, [NO_API_TABLES]);
+    return (r.length === 0 && c.length === 0) || r.concat(c).map(x => x.grantee + ':' + x.table_name + ':' + (x.privilege_type || 'column')).join(', ');
+  });
+  await check('anon can execute exactly the 6 public RPCs', async () => {
     const r = await q(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                         WHERE n.nspname = 'public' AND has_function_privilege('anon', p.oid, 'EXECUTE') ORDER BY 1`);
     const got = r.map(x => x.proname).join(',');
-    return got === 'public_track,submit_contact_message,submit_service_request' || 'anon may execute: ' + got;
+    return got === 'health_check,invitation_preview,log_client_error,public_track,submit_contact_message,submit_service_request' || 'anon may execute: ' + got;
+  });
+  await check('privilege tables carry the audit trigger (memberships, invitations, platform_admins)', async () => {
+    const r = await q(`SELECT c.relname FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+                        WHERE t.tgname = 'trg_audit' AND c.relname IN ('memberships','invitations','platform_admins') ORDER BY 1`);
+    return r.map(x => x.relname).join(',') === 'invitations,memberships,platform_admins' || 'audited: ' + r.map(x => x.relname).join(',');
   });
   await check('anon has no USAGE on schema app', async () =>
     (await q(`SELECT has_schema_privilege('anon', 'app', 'USAGE') u`))[0].u === false);
-  await check('authenticated can execute only the 13 documented public RPCs', async () => {
+  await check('authenticated can execute only the 31 documented public RPCs', async () => {
     const r = await q(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                         WHERE n.nspname = 'public' AND has_function_privilege('authenticated', p.oid, 'EXECUTE') ORDER BY 1`);
-    const exp = ['admin_add_member', 'admin_list_members', 'admin_set_member_active', 'convert_request_to_transaction', 'import_commit', 'issue_tracking_token', 'my_context', 'public_track',
-      'set_financial_status', 'set_request_status', 'set_transaction_status', 'staff_internal_fields', 'submit_contact_message', 'submit_service_request'];
+    const exp = ['admin_list_members', 'admin_set_member_active', 'convert_request_to_transaction', 'import_commit', 'issue_tracking_token', 'my_context', 'public_track',
+      'set_financial_status', 'set_request_status', 'set_transaction_status', 'staff_internal_fields', 'submit_contact_message', 'submit_service_request',
+      // G2 (0200 orgs/branches/invitations, 0300 ops/observability)
+      'accept_invitation', 'admin_audit_log', 'admin_create_branch', 'admin_invite', 'admin_list_invitations', 'admin_recent_errors',
+      'admin_reissue_invitation', 'admin_revoke_invitation', 'admin_update_branch', 'admin_update_org', 'health_check', 'invitation_preview',
+      'log_client_error', 'platform_create_org', 'platform_list_orgs', 'platform_recent_errors', 'platform_set_org_active',
+      'platform_reissue_admin_invitation'];
     const got = r.map(x => x.proname);
     const extra = got.filter(x => !exp.includes(x));
-    return extra.length === 0 || 'unexpected: ' + extra.join(', ');
+    const missing = exp.filter(x => !got.includes(x));
+    return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');
   });
+  await check('authenticated cannot execute admin_add_member (SQL Editor only; closes the account-existence oracle)', async () =>
+    (await q(`SELECT has_function_privilege('authenticated', 'public.admin_add_member(uuid, text, text, uuid)', 'EXECUTE') x`))[0].x === false
+    || 'authenticated may execute admin_add_member', '0200 REVOKE admin_add_member');
   await check('every SECURITY DEFINER function pins search_path', async () => {
     const r = await q(`SELECT n.nspname || '.' || p.proname f FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                         WHERE n.nspname IN ('public','app') AND p.prosecdef
@@ -339,6 +367,10 @@ async function main() {
   section('anon: no direct table access');
   for (const t of TENANT_TABLES.map(x => x[0])) {
     await expectErr(`anon cannot SELECT ${t}`, () => as('anon', `SELECT 1 FROM public.${t} LIMIT 1`), /permission denied/, 'REVOKE ALL ... FROM anon (0300 §6)');
+  }
+  for (const t of NO_API_TABLES) for (const who of ['anon', 'adminA', 'staffA']) {
+    await expectErr(`${who} cannot SELECT ${t} (G2 internal table)`, () => as(who, `SELECT 1 FROM public.${t} LIMIT 1`), /permission denied/, 'REVOKE ALL ... FROM anon, authenticated (G2)');
+    await expectErr(`${who} cannot DELETE ${t} (G2 internal table)`, () => as(who, `DELETE FROM public.${t} RETURNING 1`), /permission denied/, 'REVOKE ALL ... FROM anon, authenticated (G2)');
   }
   await expectErr('anon cannot INSERT service_requests', () => as('anon',
     `INSERT INTO public.service_requests (org_id, ref, tracking_token_hash, full_name, phone, direction, mode, port, goods)
@@ -391,7 +423,7 @@ async function main() {
     `INSERT INTO public.memberships (user_id, org_id, role) VALUES ($1, $2, 'admin')`, [U.adminA, B]), /row-level security|permission denied/, 'memberships: no direct writes');
   await expectErr('adminA cannot attach an org-B branch to an org-A membership', () => as('adminA',
     `INSERT INTO public.memberships (user_id, org_id, branch_id, role) VALUES ($1, $2, $3, 'clearance_staff')`, [U.staffA, A, B_BR]), /foreign key|violates|permission denied/, 'memberships_branch_fk');
-  await expectErr('admin_add_member refuses an org-B branch', () => as('adminA', `SELECT public.admin_add_member($1, 'staff.b@test.local', 'clearance_staff', $2)`, [A, B_BR]), /MRS_INVALID/);
+  await expectErr('admin_add_member refuses an org-B branch (no EXECUTE for authenticated)', () => as('adminA', `SELECT public.admin_add_member($1, 'staff.b@test.local', 'clearance_staff', $2)`, [A, B_BR]), /permission denied/);
   await check('adminA cannot bypass the last-admin guard with a direct UPDATE/DELETE', async () => {
     const u = await denied('adminA', `UPDATE public.memberships SET is_active = false WHERE user_id = $1 RETURNING 1`, [U.adminA]);
     const d = await denied('adminA', `DELETE FROM public.memberships WHERE org_id = $1 RETURNING 1`, [A]);
@@ -417,21 +449,20 @@ async function main() {
     ['staffA (non-admin) admin_list_members(org A)', 'staffA', `SELECT public.admin_list_members($1)`, [A], /MRS_FORBIDDEN/],
     ['clientA admin_list_members(org A)', 'clientA', `SELECT public.admin_list_members($1)`, [A], /MRS_FORBIDDEN/],
     ['adminA admin_list_members(org B)', 'adminA', `SELECT public.admin_list_members($1)`, [B], /MRS_FORBIDDEN/],
-    ['adminA admin_add_member into org B', 'adminA', `SELECT public.admin_add_member($1, 'staffa@example.com', 'admin', NULL)`, [B], /MRS_FORBIDDEN/],
-    ['adminA admin_add_member with org-B branch', 'adminA', `SELECT public.admin_add_member($1, 'staffb@example.com', 'clearance_staff', $2)`, [A, B_BR], /MRS_INVALID.*branch/],
-    ['adminA admin_add_member role=client', 'adminA', `SELECT public.admin_add_member($1, 'clienta2@example.com', 'client', NULL)`, [A], /MRS_INVALID.*role/],
+    ['adminA admin_add_member into org B', 'adminA', `SELECT public.admin_add_member($1, 'staffa@example.com', 'admin', NULL)`, [B], /permission denied/],
+    ['adminA admin_add_member with org-B branch', 'adminA', `SELECT public.admin_add_member($1, 'staffb@example.com', 'clearance_staff', $2)`, [A, B_BR], /permission denied/],
+    ['adminA admin_add_member role=client', 'adminA', `SELECT public.admin_add_member($1, 'clienta2@example.com', 'client', NULL)`, [A], /permission denied/],
     ['adminA admin_set_member_active on org-B membership', 'adminA', `SELECT public.admin_set_member_active($1, false)`, [memB], /MRS_NOT_FOUND/],
     ['adminA cannot deactivate itself', 'adminA', `SELECT public.admin_set_member_active($1, false)`, [memAdminA], /MRS_FORBIDDEN/],
-    ['staffA admin_add_member (self-promotion)', 'staffA', `SELECT public.admin_add_member($1, 'staffa@example.com', 'admin', NULL)`, [A], /MRS_FORBIDDEN/]
+    ['staffA admin_add_member (self-promotion)', 'staffA', `SELECT public.admin_add_member($1, 'staffa@example.com', 'admin', NULL)`, [A], /permission denied/]
   ]) await expectErr('admin RPC refused: ' + name, () => as(who, sql, params), re, 'public.admin_* (0650)');
   await check('adminA admin_list_members(org A) lists only org-A members', async () => {
     const r = (await as('adminA', `SELECT public.admin_list_members($1) r`, [A]))[0].r;
     return (r.length > 0 && !r.some(m => m.email === 'staffb@example.com' || m.email === 'clientb@example.com')) || JSON.stringify(r.map(m => m.email));
   });
-  await advisory('admin_add_member does not reveal whether an email has an account', async () => {
-    try { await as('adminA', `SELECT public.admin_add_member($1, 'no-such-user@example.com', 'clearance_staff', NULL)`, [A]); return 'added?'; }
-    catch (e) { return !/MRS_NOT_FOUND.*email/.test(errText(e)) || 'MRS_NOT_FOUND email vs success = account-existence oracle'; }
-  }, 'Any org admin can probe which e-mails are registered on the whole Supabase project (cross-tenant user enumeration) and attach ANY existing account (incl. another tenant\'s staff) as staff of his org. Acceptable for staging; for production use an invitation flow (0650 admin_add_member).');
+  // the former account-existence oracle (WARN until G2): authenticated can no longer execute admin_add_member at all
+  await expectErr('admin_add_member is not an account-existence oracle (EXECUTE revoked from authenticated)', () =>
+    as('adminA', `SELECT public.admin_add_member($1, 'no-such-user@example.com', 'clearance_staff', NULL)`, [A]), /permission denied/, '0200 REVOKE admin_add_member; UI uses admin_invite');
 
   await check('my_context of staffB lists only org B', async () => {
     const r = (await as('staffB', `SELECT public.my_context() r`))[0].r;

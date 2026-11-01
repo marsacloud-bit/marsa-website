@@ -11,6 +11,13 @@
 >
 > لا يوضع مفتاح `service_role` / secret في أي ملف من ملفات الموقع أبدًا. المفتاح العام (anon / publishable) فقط، والحماية تقوم بها سياسات RLS في قاعدة البيانات.
 
+## روابط سريعة
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — الفروع، قواعد الترحيلات، الاختبارات المطلوبة قبل طلب الدمج.
+- [`docs/online/ENVIRONMENTS_AR.md`](docs/online/ENVIRONMENTS_AR.md) — البيئات (محلي، Staging، إنتاج مستقبلي)، الأسرار، النشر إلى Hostinger والتراجع.
+- [`docs/online/BACKUP_RESTORE_AR.md`](docs/online/BACKUP_RESTORE_AR.md) — النسخ الاحتياطي قبل كل ترحيل، الاسترجاع للفحص، تمرين الاسترجاع.
+- [`assets/js/config.example.js`](assets/js/config.example.js) — قالب الإعداد الموثّق (المفتاح العام فقط).
+
 ## طريقة التشغيل
 
 1. **أسهل طريقة (نسخة العرض فقط):** افتح المجلد وانقر مرتين على `index.html`. سيفتح الموقع في المتصفح مباشرة. وضع Staging يحتاج إلى فتح الموقع عبر `http://` أو `https://` (خادم محلي أو خادمك) لأن تسجيل الدخول لا يعمل من `file://`.
@@ -67,7 +74,7 @@ mkdir -p /tmp/pgtest && cd /tmp/pgtest && npm i @electric-sql/pglite     # مر�
 NODE_PATH=/tmp/pgtest/node_modules node ~/Downloads/marsa-website/supabase/tests/rls-tests.js ~/Downloads/marsa-website
 #   --strict  لاعتبار التحذيرات (WARN) فشلًا      --quiet  لعرض الفشل والتحذيرات فقط
 ```
-النتيجة المتوقعة: `OK — 490 passed, 0 failed, 2 warnings` (التحذيران قراران مفتوحان للمالك).
+النتيجة المتوقعة: `OK — 589 passed, 0 failed, 1 warnings` (التحذير المتبقي قرار مفتوح للمالك: حدّ معدل الطلبات العامة). وبعد G2 شغّل أيضًا `g2-tests.js` (191) و`g2-ops-tests.js` (103) و`restore-drill.js` (17).
 
 ## الرفع الجماعي للبيانات (Excel / CSV)
 
