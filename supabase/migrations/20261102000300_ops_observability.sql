@@ -670,3 +670,13 @@ GRANT EXECUTE ON FUNCTION
   public.convert_request_to_transaction(uuid, uuid, uuid, uuid), public.set_transaction_status(uuid, text, text, uuid),
   public.set_financial_status(uuid, text, text, uuid), public.issue_tracking_token(uuid, uuid)
 TO authenticated;
+
+-- Re-run safety: G3 (20261103000200) replaces set_transaction_status(uuid, text, text, uuid) with a
+-- 5-argument version (+ p_docs_override boolean DEFAULT false). If this file is re-run on its own after
+-- G3, drop the 4-argument overload it just recreated (ambiguous calls, and it lacks the document gate).
+DO $reruns$
+BEGIN
+  IF to_regprocedure('public.set_transaction_status(uuid, text, text, uuid, boolean)') IS NOT NULL THEN
+    DROP FUNCTION IF EXISTS public.set_transaction_status(uuid, text, text, uuid);
+  END IF;
+END $reruns$;

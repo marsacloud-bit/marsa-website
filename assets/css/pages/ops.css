@@ -1,0 +1,136 @@
+/* =====================================================================
+   مرسى | MARSA — G3 operations views inside admin.html (#alerts, #schedule,
+   #parties, #exceptions, #requirements) and the transaction-detail sections.
+   Loaded after style.css + app.css + admin.css. Tiles, status badges, loading
+   spinner, table rows and dialog close button reuse the original admin markup
+   (.card-stat.adm-tile, .badge-<tone>, .adm-loading, .table.adm-table,
+   .adm-dialog-x); this file only adds layout, with the style.css tokens
+   (original look, no dark theme). Logical properties only.
+   Prefix: ops-.
+   ===================================================================== */
+
+/* ---- view frame ---- */
+.ops-view { display: grid; gap: 20px; min-width: 0; }
+.ops-head-main { min-width: 0; max-width: 78ch; }
+.ops-title { margin: 0; }
+.ops-groups { display: grid; gap: 20px; }
+.ops-muted { color: var(--muted); }
+.ops-sr { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.ops-pre { white-space: pre-wrap; }
+.ops-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ops-req { color: var(--danger); }
+.ops-ref { white-space: nowrap; }
+.ops-back { margin: 0; }
+.ops-back a { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); font-weight: 700; text-decoration: none; }
+.ops-back .icon { width: 16px; height: 16px; }
+.ops-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ops-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.ops-alert { display: flex; align-items: flex-start; gap: 12px; margin: 0; }
+.ops-alert .icon { flex-shrink: 0; margin-block-start: 2px; }
+.ops-alert-text { flex: 1; min-width: 0; }
+.ops-alert-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.ops-form-error[hidden] { display: none; }
+
+/* ---- KPIs (clickable filters): the original dashboard tile .card.card-stat.adm-tile ---- */
+button.ops-kpi { font: inherit; color: inherit; width: 100%; cursor: pointer; }
+.ops-kpi.is-active { border-color: var(--teal); box-shadow: 0 0 0 1px var(--teal) inset, var(--shadow-sm); }
+
+/* ---- tables (the original .table.adm-table; inside a card the wrapper drops its own frame) ---- */
+.ops-card.is-flush .table-wrap { border: 0; border-radius: 0; }
+.ops-card.is-flush .app-card-body > .table-wrap:last-child { border-end-start-radius: var(--r-lg); border-end-end-radius: var(--r-lg); }
+.ops-table td { vertical-align: top; }
+.ops-table tr.is-muted td { color: var(--muted); }
+.ops-table tr.is-muted .cell-main { color: var(--text); font-weight: 600; }
+.ops-col-actions { width: 1%; white-space: nowrap; text-align: end; }
+.ops-row-actions { display: flex; flex-wrap: nowrap; justify-content: flex-end; gap: 6px; }
+.ops-row-actions .btn-sm { min-height: 32px; padding: 4px 12px; }
+.ops-row-actions .btn-icon.btn-sm { width: 32px; min-width: 32px; height: 32px; padding: 0; }
+.ops-alert-title { display: flex; align-items: flex-start; gap: 8px; min-width: 220px; }
+.ops-alert-title .badge { flex-shrink: 0; margin-block-start: 2px; }
+.ops-due { display: inline-flex; flex-direction: column; white-space: nowrap; }
+.ops-due-main { font-weight: 700; }
+.ops-due.is-soon .ops-due-main { color: #9A6905; }
+.ops-due.is-overdue .ops-due-main { color: var(--danger); }
+.ops-reason { display: block; max-width: 48ch; overflow-wrap: anywhere; }
+.ops-doc { display: inline-flex; align-items: center; gap: 4px; }
+.ops-doc .icon { width: 14px; height: 14px; }
+/* severity groups: a colored start edge on the card (same idea as the original audit highlight) */
+.ops-group.ops-sev-critical { border-inline-start: 4px solid var(--danger); }
+.ops-group.ops-sev-warning { border-inline-start: 4px solid var(--warning); }
+.ops-group.ops-sev-info { border-inline-start: 4px solid var(--blue); }
+
+/* ---- toolbar extras ---- */
+.ops-inline-check { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--navy-dark); white-space: nowrap; }
+.ops-range { display: inline-flex; align-items: center; gap: 6px; }
+.toolbar-filters .ops-date, .ops-date { min-width: 0; width: 160px; }
+
+/* ---- schedule board ---- */
+.ops-sched-nav-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.ops-sched-step { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ops-sched-label { min-width: 12ch; text-align: center; color: var(--navy-dark); }
+.ops-sched-summary { margin: 0 0 12px; }
+.ops-board { display: grid; gap: 14px; }
+.ops-board.is-day { grid-template-columns: minmax(0, 1fr); }
+.ops-board.is-week { grid-template-columns: repeat(7, minmax(220px, 1fr)); overflow-x: auto; padding-block-end: 8px; scroll-snap-type: x proximity; }
+.ops-day {
+  display: flex; flex-direction: column; min-width: 0; background: #FAFCFE; border: 1px solid var(--border);
+  border-radius: var(--r-lg); scroll-snap-align: start;
+}
+.ops-day.is-today { border-color: var(--teal); box-shadow: 0 0 0 1px var(--teal) inset; }
+.ops-day-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 16px; border-block-end: 1px solid var(--border); }
+.ops-day-title { margin: 0; font-size: var(--fs-sm); font-weight: 800; color: var(--navy-dark); }
+.ops-day-list { list-style: none; margin: 0; padding: 12px; display: grid; gap: 10px; }
+.ops-board.is-day .ops-day-list { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.ops-day-empty { margin: 0; padding: 20px 16px; color: var(--muted); font-size: var(--fs-sm); text-align: center; }
+.ops-item {
+  display: grid; gap: 8px; padding: 12px 14px; background: #fff; border: 1px solid var(--border);
+  border-inline-start: 4px solid var(--blue); border-radius: var(--r); box-shadow: var(--shadow-sm);
+}
+.ops-item.is-trip { border-inline-start-color: var(--teal); }
+.ops-item[data-status="missed"] { border-inline-start-color: var(--danger); }
+.ops-item[data-status="cancelled"], .ops-item[data-status="rescheduled"] { opacity: .72; border-inline-start-color: var(--border-strong); }
+.ops-item[data-status="completed"], .ops-item[data-status="delivered"] { border-inline-start-color: var(--success); }
+.ops-item-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ops-item-time { font-weight: 800; color: var(--navy); font-size: var(--fs-md); direction: ltr; unicode-bidi: isolate; }
+.ops-item-kind { display: inline-flex; align-items: center; gap: 4px; margin-inline-end: auto; color: var(--muted); font-size: var(--fs-xs); font-weight: 700; }
+.ops-item-kind .icon { width: 14px; height: 14px; }
+.ops-item-route { margin: 0; font-weight: 700; color: var(--navy-dark); font-size: var(--fs-sm); }
+.ops-item-dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0; font-size: var(--fs-sm); }
+.ops-item-meta { display: contents; }
+.ops-item-meta dt { color: var(--muted); }
+.ops-item-meta dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.ops-item-actions { display: flex; flex-wrap: wrap; gap: 6px; padding-block-start: 8px; border-block-start: 1px dashed var(--border); }
+.ops-item-actions .btn-sm { min-height: 32px; padding: 4px 12px; }
+
+/* ---- parties ---- */
+.ops-carrier-grid { align-items: start; }
+
+/* ---- form modal (.app-modal) ---- */
+.ops-modal-x { margin-inline-start: auto; }
+.ops-modal-intro { color: var(--muted); margin-block-end: 12px; overflow-wrap: anywhere; }
+.ops-form { display: grid; gap: 14px; }
+.ops-form > .ops-alert { margin: 0; }
+.ops-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; }
+.app-modal.is-sm .ops-form-grid { grid-template-columns: minmax(0, 1fr); }
+.ops-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 0; }
+.ops-field.is-full { grid-column: 1 / -1; }
+.ops-field .form-error { display: block; }
+.ops-field .form-error:empty, .ops-field .form-error[hidden] { display: none; }
+.ops-checks { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.ops-checks legend { width: 100%; padding: 0; margin-block-end: 6px; }
+.ops-check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: var(--fs-sm); color: var(--text); }
+.ops-check input { flex-shrink: 0; }
+.ops-field.has-error .ops-checks legend { color: var(--danger); }
+@media (max-width: 640px) {
+  .ops-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .ops-board.is-week { grid-template-columns: repeat(7, minmax(78vw, 1fr)); }
+  .ops-sched-step { width: 100%; }
+  .ops-sched-label { flex: 1; }
+}
+@media (max-width: 767.98px) {
+  .ops-row-actions { flex-wrap: wrap; justify-content: flex-start; }
+  .ops-col-actions { text-align: start; }
+}
+@media print {
+  .ops-row-actions, .ops-item-actions, .ops-toolbar, .app-page-actions { display: none !important; }
+}

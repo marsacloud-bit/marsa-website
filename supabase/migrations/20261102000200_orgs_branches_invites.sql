@@ -1280,9 +1280,11 @@ TO authenticated;
 -- 4-argument version (p_idem_key uuid DEFAULT NULL; same body incl. branch_manager). If this
 -- file is re-run on its own after 0300, drop the 3-argument overload it just recreated, or
 -- every 3-argument call becomes ambiguous ("function ... is not unique").
+-- (G3 20261103000200 adds a 5th parameter, p_docs_override: same rule for that version.)
 DO $reruns$
 BEGIN
-  IF to_regprocedure('public.set_transaction_status(uuid, text, text, uuid)') IS NOT NULL THEN
+  IF to_regprocedure('public.set_transaction_status(uuid, text, text, uuid)') IS NOT NULL
+     OR to_regprocedure('public.set_transaction_status(uuid, text, text, uuid, boolean)') IS NOT NULL THEN
     DROP FUNCTION IF EXISTS public.set_transaction_status(uuid, text, text);
   END IF;
 END $reruns$;

@@ -1,6 +1,6 @@
 /* ==========================================================================
    مرسى | MARSA — login.html dictionary (namespace 'login'), ar + en.
-   Load order: config.js → i18n.js → assets/i18n/login.js → main.js → supa.js → pwa.js → auth.js (defer).
+   Load order: config.js → i18n.js → assets/i18n/login.js → assets/i18n/app.js → main.js → supa.js → pwa.js → auth.js (defer).
    Static markup carries the Arabic text and [data-i18n="login.<k>"];
    auth.js reads the JS messages with MarsaI18n.t('login.<k>').
    ========================================================================== */
@@ -120,36 +120,8 @@
     resetLead: 'اختر كلمة مرور جديدة لحسابك.',
     resetBtn: 'حفظ كلمة المرور',
 
-    /* app sign-in screen (split layout, theme toggle) */
-    docTitle: 'تسجيل الدخول | مرساة كلاود',
-    skip: 'تخطَّ إلى نموذج الدخول',
-    siteHomeAria: 'مرسى — الموقع الرئيسي',
-    productName: 'مرساة كلاود',
-    productBy: 'من مرسى للتخليص الجمركي',
-    brandTitle: 'كل عمليات التخليص في منصة واحدة',
-    brandLead: 'الطلبات والمعاملات والحاويات والمستندات والعملاء — بصلاحيات واضحة لكل دور وفرع.',
-    point1Title: 'متابعة لحظية',
-    point1Text: 'مراحل كل معاملة وحاوياتها ومواعيد الإرجاع أمامك.',
-    point2Title: 'صلاحيات وعزل للبيانات',
-    point2Text: 'كل مستخدم يرى بيانات مؤسسته وفرعه فقط.',
-    point3Title: 'مستندات محمية وسجل تدقيق',
-    point3Text: 'تخزين خاص للمستندات وتسجيل كل تغيير.',
-    envShort: 'بيئة تجريبية · Staging',
-    copyright: 'مرسى MARSA',
-    loading: 'جارٍ التحقق من الجلسة…',
-    demoTitle: 'الدخول إلى المنصة',
-    sessionTitle: 'أنت مسجّل الدخول',
-    signinTitle: 'تسجيل الدخول',
-    signinSub: 'اختر نوع الحساب ثم أدخل بياناتك.',
-    tabClient: 'عميل',
-    tabStaff: 'موظف',
-    footNav: 'روابط',
-    footSite: 'الموقع الرئيسي',
-    footHelp: 'المساعدة والتواصل',
-    themeAria: 'المظهر: {mode} — اضغط للتغيير',
-    theme_system: 'تلقائي حسب النظام',
-    theme_light: 'فاتح',
-    theme_dark: 'داكن'
+    /* session check (online mode, before the forms or a PWA redirect) */
+    loading: 'جارٍ التحقق من الجلسة…'
   };
 
   var en = {
@@ -263,36 +235,8 @@
     resetLead: 'Choose a new password for your account.',
     resetBtn: 'Save password',
 
-    /* app sign-in screen */
-    docTitle: 'Sign in | Marsa Cloud',
-    skip: 'Skip to the sign-in form',
-    siteHomeAria: 'Marsa — main website',
-    productName: 'Marsa Cloud',
-    productBy: 'by Marsa Customs Clearance',
-    brandTitle: 'All your clearance operations in one platform',
-    brandLead: 'Requests, transactions, containers, documents and clients — with clear permissions for every role and branch.',
-    point1Title: 'Live tracking',
-    point1Text: 'Every transaction’s stages, containers and return deadlines at a glance.',
-    point2Title: 'Permissions and data isolation',
-    point2Text: 'Each user only sees their own organization and branch.',
-    point3Title: 'Protected documents and audit log',
-    point3Text: 'Private document storage and a record of every change.',
-    envShort: 'Test environment · Staging',
-    copyright: 'Marsa MARSA',
-    loading: 'Checking your session…',
-    demoTitle: 'Sign in to the platform',
-    sessionTitle: 'You are signed in',
-    signinTitle: 'Sign in',
-    signinSub: 'Choose the account type, then enter your details.',
-    tabClient: 'Client',
-    tabStaff: 'Staff',
-    footNav: 'Links',
-    footSite: 'Main website',
-    footHelp: 'Help and contact',
-    themeAria: 'Theme: {mode} — click to change',
-    theme_system: 'System',
-    theme_light: 'Light',
-    theme_dark: 'Dark'
+    /* session check (online mode, before the forms or a PWA redirect) */
+    loading: 'Checking your session…'
   };
 
   window.MarsaI18n.register('login', { ar: ar, en: en });

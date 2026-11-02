@@ -13,12 +13,12 @@
      transaction link and original upload); otherwise the local history
      "marsa_extractions" (MarsaApi.localExtractions).
    - "Use in request" → sessionStorage "marsa_ocr_prefill" → request.html?from=ocr
-   - App page (app-shell.js → window.MarsaShell): the shell draws the sidebar /
-     topbar around <main id="app-main"> (a minimal sidebar when signed out —
-     the tool keeps working for visitors and in demo mode with the local
-     history). Toasts / confirmations go through Shell.toast / Shell.confirm
-     (Marsa.toast / window.confirm without the shell). Server history and the
-     transaction picker follow the active organization (marsa:orgchange).
+   - Original page layout (site header / page-hero / footer from main.js).
+     app-shell.js (window.MarsaShell, classic helper) only adds the Ctrl/⌘K
+     palette, the [data-shell-org] switcher and the toast / confirm dialogs;
+     without it Marsa.toast / window.confirm are used. The tool keeps working
+     for visitors and in demo mode with the local history. Server history and
+     the transaction picker follow the active organization (marsa:orgchange).
    Untrusted OCR text is only ever written with textContent / value.
    ===================================================================== */
 (function () {
@@ -37,7 +37,6 @@
     var $ = function (id) { return document.getElementById(id); };
     var qsa = function (s, c) { return Array.prototype.slice.call((c || document).querySelectorAll(s)); };
     var Shell = window.MarsaShell || null;
-    var I18 = window.MarsaI18n || null;
     var toast = Shell && typeof Shell.toast === 'function' ? function (m, t) { Shell.toast(m, t); }
       : (M.toast || function (m) { try { console.log(m); } catch (e) { /* noop */ } });
     // Promise<boolean>: the shell dialog when present, else the browser's
@@ -45,12 +44,8 @@
       if (Shell && typeof Shell.confirm === 'function') return Promise.resolve(Shell.confirm(o)).then(function (v) { return !!v; });
       return Promise.resolve(window.confirm(o.text || o.title));
     }
-    // shell strings in assets/i18n/ocr.js ('ocr.*'); Arabic fallback when missing
-    function tr(k, fb) { var key = 'ocr.' + k, v = I18 && typeof I18.t === 'function' ? I18.t(key) : key; return v === key ? fb : v; }
-    if (Shell) {
-      if (typeof Shell.setTitle === 'function') Shell.setTitle(tr('title', 'قراءة المستندات (OCR)'), [{ label: tr('crumb', 'العمل اليومي') }]);
-      if (typeof Shell.setActive === 'function') Shell.setActive('ocr');
-    }
+    // the static page-hero breadcrumb / title stay as in the markup; only mark the nav item (no-op without one)
+    if (Shell && typeof Shell.setActive === 'function') Shell.setActive('ocr');
 
     var card = $('ocr-card');
     if (!card || !P) return;
@@ -765,9 +760,7 @@
       renderSaveState(j);
       if (focus) { $('ocr-result-title').focus(); }
     }
-    // legacy badge names → app.css pill tones
-    var PILL = { 'badge-navy': 'neutral', 'badge-warning': 'warning', 'badge-success': 'success', 'badge-blue': 'info', 'badge-teal': 'brand', 'badge-danger': 'danger' };
-    function badge(cls, text) { return el('span', 'pill pill-' + (PILL[cls] || 'neutral'), text); }
+    function badge(cls, text) { return el('span', 'badge ' + cls, text); }
     function renderMeta(j) {
       var box = $('ocr-result-meta');
       box.textContent = '';

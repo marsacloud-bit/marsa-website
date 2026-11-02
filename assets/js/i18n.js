@@ -320,6 +320,7 @@
       MRS_IN_PROGRESS: 'العملية نفسها قيد التنفيذ الآن. انتظر لحظات ثم تحقّق من النتيجة قبل إعادة المحاولة.',
       MRS_UNKNOWN_RESULT: 'لم نتمكّن من تأكيد نتيجة العملية بسبب انقطاع الاتصال. إعادة المحاولة آمنة ولن تُنشئ نسخة مكرّرة.',
       MRS_TIMEOUT: 'استغرق الخادم وقتًا أطول من المعتاد. حاول مرة أخرى.',
+      MRS_DOCS_MISSING: 'لا يمكن الانتقال إلى هذه المرحلة قبل استكمال المستندات المطلوبة لها ({f}). ارفعها وصنّفها، أو تجاوز القاعدة بصلاحية مدير مع ذكر السبب.',
       MRS_EXPIRED: 'انتهت صلاحية هذا الرابط أو الدعوة. اطلب رابطًا جديدًا.',
       MRS_EMAIL_MISMATCH: 'هذه الدعوة مرسلة إلى بريد إلكتروني آخر. سجّل الدخول بالبريد الذي وصلته الدعوة.',
       MRS_EMAIL_UNCONFIRMED: 'يلزم تأكيد بريدك الإلكتروني أولًا من الرسالة المرسلة إليك، ثم أعد فتح رابط الدعوة.',
@@ -365,6 +366,7 @@
       MRS_IN_PROGRESS: 'The same operation is in progress right now. Wait a moment and check the result before retrying.',
       MRS_UNKNOWN_RESULT: 'We could not confirm the result because the connection dropped. Retrying is safe and will not create a duplicate.',
       MRS_TIMEOUT: 'The server took longer than usual to answer. Please try again.',
+      MRS_DOCS_MISSING: 'This stage needs its required documents first ({f}). Upload and classify them, or a manager may override the rule with a reason.',
       MRS_EXPIRED: 'This link or invitation has expired. Ask for a new one.',
       MRS_EMAIL_MISMATCH: 'This invitation was sent to a different e-mail address. Sign in with the address that received it.',
       MRS_EMAIL_UNCONFIRMED: 'Please confirm your e-mail address from the message we sent you first, then open the invitation link again.',
@@ -409,7 +411,23 @@
       slug_taken: 'Short identifier (used by another organization)', membership: 'Membership', filters: 'Filters',
       locale: 'Language', idempotencyKey: 'Operation key', idempotency_key: 'Operation key', unknown_key: 'Unknown field',
       self_invite: 'Self-invitation', admin_exists: 'Organization admin', invitation_pending: 'Pending invitation',
-      code_taken: 'Branch code (already used)', expired: 'Expired key'
+      code_taken: 'Branch code (already used)', expired: 'Expired key',
+      // G3 detail codes / fields
+      declaration_no: 'Declaration number', declaration_type: 'Declaration type', declaration_date: 'Declaration date',
+      declaration_no_taken: 'Declaration number (already used in this organization)',
+      declaration_no_cancelled: 'Declaration number (cancelled; only as an explicit replacement)', bl_number: 'B/L number',
+      bl_number_taken: 'B/L number (already registered with this type)', bl_type: 'B/L type', bl: 'Bill of lading', alias: 'Alias',
+      alias_taken: 'Alias (used by another client)', carrier_id: 'Carrier', shipping_agent_id: 'Shipping agent', terminal_party_id: 'Terminal',
+      return_yard_party_id: 'Return yard', return_instruction_document_id: 'Return instruction', driver_id: 'Driver', truck_id: 'Truck',
+      container_id: 'Container', container_no: 'Container number', appointment_at: 'Appointment time', window_minutes: 'Appointment window',
+      appointment_no: 'Appointment number', occurred_at: 'Date occurred', at: 'Status time', leg_no: 'Leg number',
+      cost: 'Cost and sell price (finance and managers only)', cost_basis: 'Cost basis', waiver: 'Waiver (manager role)',
+      document_or_amount: 'A document or an amount (required for this kind)', kind: 'Kind', source: 'Source', source_document_id: 'Source document',
+      replacement: 'Replacement declaration', replaces_id: 'Replaced declaration', use_cancel_declaration: 'Cancellation (use "Cancel declaration")',
+      use_reschedule_appointment: 'Time change (use "Reschedule")', no_change: 'No change', backward: 'Moving back to an earlier status',
+      cancelled: 'Cancelled record', resolved: 'Closed exception', link: 'B/L link', reason: 'Reason', severity: 'Severity', packages: 'Packages',
+      plate_no: 'Plate number', national_id_last4: 'Last 4 digits of the ID', ids: 'Identifiers', transaction: 'Transaction', org_id: 'Organization',
+      stage_skip: 'Stage skip', operational_state: 'Container operational state', gross_weight_kg: 'Gross weight'
     }
   });
 

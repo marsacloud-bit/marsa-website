@@ -219,6 +219,29 @@ async function fixtures() {
     [A, B, hex('e'), hex('f'), U.adminA, U.staffB]);
 }
 
+// G3 (20261103000100 / 0200): one row per org in every new tenant table, written through the real
+// RLS-guarded inserts / RPCs by each org's own staff. Org A uses TX3 (air, no containers) so the
+// G1/G2 status tests below are unaffected; document requirements are export-only so nothing is gated.
+async function g3Fixtures() {
+  const rpcAs = async (who, sql, params) => (await as(who, sql, params))[0].r;
+  for (const [who, org, tx, cl, tag] of [['staffA', A, TX3, CL101, 'A'], ['staffB', B, B_TX, B_CL, 'B']]) {
+    const carrier = (await as(who, `INSERT INTO public.parties (org_id, kinds, name_ar) VALUES ($1, ARRAY['carrier','terminal_operator'], $2) RETURNING id`,
+      [org, 'ناقل اختبار ' + tag]))[0].id;
+    const driver = (await as(who, `INSERT INTO public.drivers (org_id, carrier_id, full_name, national_id_last4) VALUES ($1, $2, $3, '1234') RETURNING id`,
+      [org, carrier, 'سائق ' + tag]))[0].id;
+    await as(who, `INSERT INTO public.trucks (org_id, carrier_id, plate_no) VALUES ($1, $2, $3)`, [org, carrier, 'RLS ' + tag + '100']);
+    await as(who, `INSERT INTO public.client_aliases (org_id, client_id, alias, source) VALUES ($1, $2, $3, 'manual')`, [org, cl, 'اسم بديل ' + tag]);
+    if (tag === 'B') await rpcAs(who, `SELECT public.add_declaration($1, $2) r`, [tx, { declaration_no: 'RLS-B-DEC-1' }]);
+    await rpcAs(who, `SELECT public.create_appointment($1) r`, [{ transaction_id: tx, terminal_party_id: carrier, appointment_at: '2026-12-01T08:00:00Z' }]);
+    await rpcAs(who, `SELECT public.create_trip($1) r`, [{ transaction_id: tx, carrier_id: carrier, driver_id: driver, origin: 'ميناء', destination: 'مستودع' }]);
+    await rpcAs(who, `SELECT public.create_exception($1) r`, [{ transaction_id: tx, kind: 'other', reason: 'استثناء اختبار ' + tag }]);
+    await rpcAs(who, `SELECT public.refresh_alerts($1) r`, [org]);
+  }
+  // owner-side (no org-B admin user here): one export-only rule per org
+  await q(`INSERT INTO public.document_requirements (org_id, operation, mode, document_kind, required_for_stage)
+           VALUES ($1, 'export', NULL, 'packing_list', 'customs_declaration'), ($2, 'export', NULL, 'packing_list', 'customs_declaration')`, [A, B]);
+}
+
 /* ------------------------------------------------------------------ tests */
 // every tenant table: [table, owner-side sample SQL returning {id}, filter column for "by id", update clause]
 const TENANT_TABLES = [
@@ -239,10 +262,24 @@ const TENANT_TABLES = [
   ['contact_messages',   `SELECT id::text id FROM public.contact_messages WHERE org_id = $1 LIMIT 1`,   'id::text',  'org_id = org_id'],
   ['audit_log',          `SELECT id::text id FROM public.audit_log WHERE org_id = $1 LIMIT 1`,          'id::text',  'table_name = table_name'],
   ['document_extractions', `SELECT id::text id FROM public.document_extractions WHERE org_id = $1 LIMIT 1`, 'id::text', 'review_note = review_note'],
-  ['invitations',        `SELECT id::text id FROM public.invitations WHERE org_id = $1 LIMIT 1`,        'id::text',  'email = email']
+  ['invitations',        `SELECT id::text id FROM public.invitations WHERE org_id = $1 LIMIT 1`,        'id::text',  'email = email'],
+  // G3 registry (20261103000100)
+  ['parties',            `SELECT id::text id FROM public.parties WHERE org_id = $1 LIMIT 1`,            'id::text',  'name_ar = name_ar'],
+  ['drivers',            `SELECT id::text id FROM public.drivers WHERE org_id = $1 LIMIT 1`,            'id::text',  'full_name = full_name'],
+  ['trucks',             `SELECT id::text id FROM public.trucks WHERE org_id = $1 LIMIT 1`,             'id::text',  'plate_type = plate_type'],
+  ['client_aliases',     `SELECT id::text id FROM public.client_aliases WHERE org_id = $1 LIMIT 1`,     'id::text',  'source = source'],
+  ['customs_declarations', `SELECT id::text id FROM public.customs_declarations WHERE org_id = $1 LIMIT 1`, 'id::text', 'status = status'],
+  ['bills_of_lading',    `SELECT id::text id FROM public.bills_of_lading WHERE org_id = $1 LIMIT 1`,    'id::text',  'vessel = vessel'],
+  ['transaction_bls',    `SELECT bl_id::text id FROM public.transaction_bls WHERE org_id = $1 LIMIT 1`, 'bl_id::text', 'is_primary = is_primary'],
+  // G3 operations (20261103000200); transport_trips: explicit columns only (cost / sell outside the SELECT grant)
+  ['document_requirements', `SELECT id::text id FROM public.document_requirements WHERE org_id = $1 LIMIT 1`, 'id::text', 'note = note'],
+  ['port_appointments',  `SELECT id::text id FROM public.port_appointments WHERE org_id = $1 LIMIT 1`,  'id::text',  'status = status'],
+  ['transport_trips',    `SELECT id::text id FROM public.transport_trips WHERE org_id = $1 LIMIT 1`,    'id::text',  'status = status'],
+  ['operational_exceptions', `SELECT id::text id FROM public.operational_exceptions WHERE org_id = $1 LIMIT 1`, 'id::text', 'status = status'],
+  ['operational_alerts', `SELECT id::text id FROM public.operational_alerts WHERE org_id = $1 LIMIT 1`, 'id::text',  'status = status']
 ];
 // G2 internal tables: no API grant at all (written/read only through SECURITY DEFINER RPCs)
-const NO_API_TABLES = ['idempotency_keys', 'platform_admins', 'schema_versions', 'client_errors'];
+const NO_API_TABLES = ['idempotency_keys', 'platform_admins', 'schema_versions', 'client_errors', 'operational_alert_runs'];
 const ALL_PUBLIC_TABLES = TENANT_TABLES.map(t => t[0]).concat(['status_labels'], NO_API_TABLES);
 
 async function isolationSweep(who, targetOrg, memberUser, label) {
@@ -272,6 +309,8 @@ async function main() {
   if (!await runFile(path.join(SUPA, 'seed.sql'))) return finish();
   try { await fixtures(); pass('fixtures: 2 tenants, 6 users, docs, storage objects'); }
   catch (e) { fail('fixtures', errText(e)); return finish(); }
+  try { await g3Fixtures(); pass('G3 fixtures: a row per org in every G3 table (parties … alerts)'); }
+  catch (e) { fail('G3 fixtures', errText(e)); return finish(); }
 
   /* ---------------------------------------------------------------- catalog */
   section('catalog: RLS, grants, function privileges');
@@ -317,7 +356,7 @@ async function main() {
   });
   await check('anon has no USAGE on schema app', async () =>
     (await q(`SELECT has_schema_privilege('anon', 'app', 'USAGE') u`))[0].u === false);
-  await check('authenticated can execute only the 31 documented public RPCs', async () => {
+  await check('authenticated can execute only the 56 documented public RPCs', async () => {
     const r = await q(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                         WHERE n.nspname = 'public' AND has_function_privilege('authenticated', p.oid, 'EXECUTE') ORDER BY 1`);
     const exp = ['admin_list_members', 'admin_set_member_active', 'convert_request_to_transaction', 'import_commit', 'issue_tracking_token', 'my_context', 'public_track',
@@ -326,8 +365,16 @@ async function main() {
       'accept_invitation', 'admin_audit_log', 'admin_create_branch', 'admin_invite', 'admin_list_invitations', 'admin_recent_errors',
       'admin_reissue_invitation', 'admin_revoke_invitation', 'admin_update_branch', 'admin_update_org', 'health_check', 'invitation_preview',
       'log_client_error', 'platform_create_org', 'platform_list_orgs', 'platform_recent_errors', 'platform_set_org_active',
-      'platform_reissue_admin_invitation'];
+      'platform_reissue_admin_invitation',
+      // G3 registry (20261103000100)
+      'match_client', 'add_declaration', 'set_declaration_status', 'cancel_declaration', 'correct_declaration', 'save_bl', 'link_bl',
+      'unlink_bl', 'container_history', 'transaction_completeness',
+      // G3 operations (20261103000200)
+      'tx_checklist', 'create_appointment', 'reschedule_appointment', 'set_appointment_status', 'create_trip', 'update_trip',
+      'set_trip_status', 'trip_finance', 'set_container_return', 'create_exception', 'resolve_exception', 'refresh_alerts',
+      'list_alerts', 'ack_alert', 'resolve_alert'];
     const got = r.map(x => x.proname);
+    if (exp.length !== 56) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');
@@ -390,7 +437,20 @@ async function main() {
     ['import_commit', `SELECT public.import_commit('${B_BATCH}')`],
     ['app.next_ref', `SELECT app.next_ref('${A}', 'request')`],
     ['app.insert_service_request', `SELECT app.insert_service_request('${A}', '{}'::jsonb, 'staff', NULL, NULL, NULL)`],
-    ['app.is_member', `SELECT app.is_member('${A}')`]
+    ['app.is_member', `SELECT app.is_member('${A}')`],
+    // G3
+    ['match_client', `SELECT public.match_client('${A}', '{"name":"x"}')`],
+    ['add_declaration', `SELECT public.add_declaration('${TX1}', '{"declaration_no":"X"}')`],
+    ['save_bl', `SELECT public.save_bl('{"org_id":"${A}","bl_number":"X"}')`],
+    ['container_history', `SELECT public.container_history('${A}', 'TSTU0000001')`],
+    ['transaction_completeness', `SELECT public.transaction_completeness('${TX1}')`],
+    ['tx_checklist', `SELECT public.tx_checklist('${TX1}')`],
+    ['create_trip', `SELECT public.create_trip('{"transaction_id":"${TX1}"}')`],
+    ['trip_finance', `SELECT public.trip_finance(ARRAY['${TX1}']::uuid[])`],
+    ['list_alerts', `SELECT public.list_alerts('${A}', '{}')`],
+    ['refresh_alerts', `SELECT public.refresh_alerts('${A}')`],
+    ['app.seed_document_requirements', `SELECT app.seed_document_requirements('${A}')`],
+    ['app.refresh_all_alerts', `SELECT app.refresh_all_alerts()`]
   ]) await expectErr(`anon cannot call ${fn}`, () => as('anon', sql), /permission denied/);
 
   /* ---------------------------------------------------------------- tenant isolation */

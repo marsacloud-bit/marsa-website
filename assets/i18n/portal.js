@@ -2,9 +2,11 @@
    مرسى | MARSA — portal.html shell strings (namespace 'portal'), ar + en.
    Load order: config.js → i18n.js → assets/i18n/portal.js → assets/i18n/app.js → main.js
                → supa.js → app-shell.js → pwa.js → portal.js (defer).
-   Only the strings added for the app shell (topbar title / breadcrumb, page
-   header). The portal content itself is still Arabic-only: portal.html has
-   no <html data-i18n-page>, so i18n.js renders it in Arabic / RTL.
+   Only the title strings portal.js hands to MarsaShell.setTitle (document
+   title / hero [data-shell-title]); the other keys are kept for later use.
+   The portal content itself is still Arabic-only: portal.html has no
+   <html data-i18n-page> (as in the original page), so i18n.js renders it in
+   Arabic / RTL.
    ========================================================================== */
 (function () {
   'use strict';

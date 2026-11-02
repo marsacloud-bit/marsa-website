@@ -3,10 +3,11 @@
    Load order: config.js → i18n.js → assets/i18n/platform.js → assets/i18n/app.js → main.js
                → supa.js → app-shell.js → pwa.js → platform.js  (plain <script defer>)
 
-   * App page: window.MarsaShell (app-shell.js) builds the sidebar / topbar
-     around <main id="app-main"> and owns the user menu (sign out, sign out of
-     all devices). This page only sets its title and uses Shell.toast /
-     Shell.confirm; it falls back to Marsa.toast / window.confirm without it.
+   * Classic page (marketing header + page-hero + .container sections). The
+     optional window.MarsaShell helper (app-shell.js) only sets the document
+     title / breadcrumb and provides toast / confirm; without it the page falls
+     back to Marsa.toast / window.confirm. The page's own top card keeps the
+     sign-out buttons, as in the original design.
 
    * Platform admins (public.platform_admins, rows added in the SQL Editor
      only) manage ORGANIZATIONS: list, create (org + first branch + admin
@@ -71,7 +72,8 @@
   }
   function setShellTitle() {
     if (!Shell) return;
-    if (typeof Shell.setTitle === 'function') Shell.setTitle(tr('title'), [{ label: tr('crumbRoot') }]);
+    // no extra crumbs: the hero breadcrumb stays الرئيسية ‹ لوحة المنصة; document.title follows the language
+    if (typeof Shell.setTitle === 'function') Shell.setTitle(tr('title'));
     if (typeof Shell.setActive === 'function') Shell.setActive('platform');
   }
   function errText(err) { return (err && err.message) || (api && api.errorMessage ? api.errorMessage(err) : tr('unknownError')); }
@@ -83,7 +85,6 @@
     gateEl.hidden = !name;
     $$('[data-pf-gate]', gateEl).forEach(function (el) { el.hidden = el.getAttribute('data-pf-gate') !== name; });
     if (appEl) appEl.hidden = !!name;
-    $$('[data-pf-console-only]').forEach(function (el) { el.hidden = !!name; });
   }
   var msgBox = $('[data-pf-msg]');
   function showMsg(text, type) {
@@ -137,7 +138,7 @@
 
   function kpiHealth(up, ms) {
     var v = $('[data-pf-kpi="health"]'), l = $('[data-pf-kpi="latency"]'), tile = $('[data-pf-kpi-health]');
-    if (v) clear(v).appendChild(h('span', { class: 'pill pill-dot ' + (up ? 'pill-success' : 'pill-danger'), text: up ? tr('healthOk') : tr('healthFail') }));
+    if (v) clear(v).appendChild(h('span', { class: 'badge ' + (up ? 'badge-success' : 'badge-danger'), text: up ? tr('healthOk') : tr('healthFail') }));
     if (l) l.textContent = ms + ' ms';
     if (tile) tile.setAttribute('data-tone', up ? 'success' : 'danger');
   }
@@ -162,9 +163,7 @@
   }
   function orgName(o) { return (lang() === 'en' && o.name_en) ? o.name_en : (o.name_ar || o.name_en || o.slug || ''); }
   function emptyRow(tbody, cols, text, loading) {
-    clear(tbody).appendChild(h('tr', { class: 'pf-empty-row' }, h('td', { colspan: cols },
-      h('div', { class: 'empty-state is-compact pf-empty', role: loading ? 'status' : null }, [
-        loading ? h('span', { class: 'skeleton skeleton-text is-mid pf-skel', 'aria-hidden': 'true' }) : null, h('p', { text: text })]))));
+    clear(tbody).appendChild(h('tr', null, h('td', { class: 'pf-empty', colspan: cols, role: loading ? 'status' : null, text: text })));
   }
   function renderOrgs() {
     if (!orgsBody) return;
@@ -180,25 +179,25 @@
       // masked by the server (a***@example.com): the platform does not see tenant user identity
       var admins = Array.isArray(o.admin_emails_masked) ? o.admin_emails_masked : [];
       var btn = h('button', {
-        class: 'btn btn-sm ' + (active ? 'btn-ghost pf-btn-danger' : 'btn-secondary'), type: 'button',
+        class: 'btn btn-sm ' + (active ? 'btn-ghost' : 'btn-secondary'), type: 'button',
         text: active ? tr('suspend') : tr('reactivate'),
         on: { click: function () { toggleOrg(o, btn); } }
       });
       orgsBody.appendChild(h('tr', { class: active ? null : 'pf-row-off' }, [
         h('td', null, [
-          h('strong', { class: 'cell-main', text: orgName(o) }),
-          o.name_en && lang() !== 'en' ? h('span', { class: 'cell-sub pf-sub', dir: 'ltr', text: o.name_en }) : null,
-          admins.length ? h('span', { class: 'cell-sub pf-sub', dir: 'ltr', text: admins.join(', ') }) : null,
-          o.pending_admin_invitations ? h('span', { class: 'cell-sub pf-sub', text: tr('pendingAdminInv', { n: fmtNum(o.pending_admin_invitations) }) }) : null
+          h('strong', { text: orgName(o) }),
+          o.name_en && lang() !== 'en' ? h('span', { class: 'pf-sub', dir: 'ltr', text: o.name_en }) : null,
+          admins.length ? h('span', { class: 'pf-sub', dir: 'ltr', text: admins.join(', ') }) : null,
+          o.pending_admin_invitations ? h('span', { class: 'pf-sub', text: tr('pendingAdminInv', { n: fmtNum(o.pending_admin_invitations) }) }) : null
         ]),
         h('td', null, [
           h('span', { class: 'pf-mono', dir: 'ltr', text: o.slug || '' }),
-          h('span', { class: 'cell-sub pf-sub', dir: 'ltr', text: (o.ref_prefix || '') + (o.environment ? ' · ' + o.environment : '') })
+          h('span', { class: 'pf-sub', dir: 'ltr', text: (o.ref_prefix || '') + (o.environment ? ' · ' + o.environment : '') })
         ]),
-        h('td', null, h('span', { class: 'pill pill-dot ' + (active ? 'pill-success' : 'pill-danger'), text: active ? tr('statusActive') : tr('statusSuspended') })),
-        h('td', { class: 'num', dir: 'ltr', text: fmtNum(o.branches) + ' / ' + fmtNum(o.members) + ' / ' + fmtNum(o.admins) }),
+        h('td', null, h('span', { class: 'badge ' + (active ? 'badge-success' : 'badge-danger'), text: active ? tr('statusActive') : tr('statusSuspended') })),
+        h('td', { dir: 'ltr', text: fmtNum(o.branches) + ' / ' + fmtNum(o.members) + ' / ' + fmtNum(o.admins) }),
         h('td', { class: 'pf-nowrap', text: fmtDate(o.created_at) }),
-        h('td', { class: 'pf-col-actions' }, h('div', { class: 'pf-row-actions' }, [btn, active && !o.admins ? reissueBtn(o) : null]))
+        h('td', null, h('div', { class: 'pf-row-actions' }, [btn, active && !o.admins ? reissueBtn(o) : null]))
       ]));
     });
   }
@@ -417,6 +416,17 @@
   var hr = $('[data-pf-health-run]'); if (hr) hr.addEventListener('click', runHealth);
   var orr = $('[data-pf-orgs-reload]'); if (orr) orr.addEventListener('click', loadOrgs);
   var err = $('[data-pf-errors-reload]'); if (err) err.addEventListener('click', loadErrors);
+  var so = $('[data-pf-signout]');
+  if (so) so.addEventListener('click', function () { so.disabled = true; hideInvite(); api.signOut().then(function () { location.replace('login.html#staff'); }); });
+  var soa = $('[data-pf-signout-all]');
+  if (soa) soa.addEventListener('click', function () {
+    busy(soa, true); hideInvite();
+    api.signOutEverywhere().then(function (r) {
+      busy(soa, false);
+      if (r && r.error) { showMsg(errText(r.error), 'danger'); return; }
+      location.replace('login.html#staff');
+    });
+  });
   $$('[data-pf-reload]').forEach(function (b) { b.addEventListener('click', function () { location.reload(); }); });
   // org list search + status filter (client side; the list is small)
   var oq = $('[data-pf-orgs-q]'), oqTimer = null;
@@ -427,7 +437,7 @@
   $$('[data-pf-filter]').forEach(function (b) {
     b.addEventListener('click', function () {
       orgFilter = b.getAttribute('data-pf-filter');
-      $$('[data-pf-filter]').forEach(function (x) { var on = x === b; x.classList.toggle('is-active', on); x.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+      $$('[data-pf-filter]').forEach(function (x) { x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
       renderOrgs();
     });
   });
@@ -441,6 +451,7 @@
     api.getSession().then(function (s) {
       if (s.error) { $('[data-pf-gate-error]').textContent = errText(s.error); gate('error'); return; }
       if (!s.data) { gate('signin'); return; }
+      var me = $('[data-pf-me-email]'); if (me) me.textContent = (s.data.user && s.data.user.email) || '';
       return api.myContext(true).then(function (r) {
         if (r.error) {
           if (r.error.code === 'MRS_AUTH_REQUIRED') { gate('signin'); return; }

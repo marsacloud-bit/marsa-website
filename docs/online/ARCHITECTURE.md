@@ -12,9 +12,10 @@
 المتصفح (HTML/CSS/JS ثابت، بلا Build)
   ├─ assets/js/config.js   ← window.MARSA_CONFIG (فارغ = وضع العرض المحلي)
   ├─ assets/js/i18n.js     ← window.MarsaI18n (G2.11: القاموس المركزي، اللغة والاتجاه، تنسيق التاريخ والأرقام)
-  ├─ assets/i18n/<page>.js ← قاموس الصفحة (index وlogin وadmin وplatform فقط حاليًا)
+  ├─ assets/i18n/<page>.js ← قاموس الصفحة (index وlogin وadmin وplatform وapp وportal وocr وbulk، ومنذ G3 ops لوحدات العمليات)
   ├─ assets/js/main.js     ← window.Marsa (مساعدات الواجهة الحالية)
   ├─ assets/js/supa.js     ← window.MarsaApi (طبقة البيانات: أونلاين أو محلي)
+  ├─ assets/js/ops/*.js    ← G3: window.MarsaOps (شاشات العمليات وأقسام المعاملة، تُحمَّل قبل admin.js)
   └─ assets/js/<page>.js   ← منطق الصفحة يستدعي MarsaApi فقط
             │  HTTPS (anon/publishable key + JWT المستخدم)
             ▼
@@ -45,6 +46,7 @@ Supabase (مشروع Staging واحد)
 4. إنشاء مستخدمي الاختبار من Dashboard (انظر رأس `seed.sql`) ثم تشغيل مقطع ربط الأدوار في آخره.
 5. وضع Project URL والمفتاح العام (anon/publishable) في `assets/js/config.js`.
 6. **G2:** تشغيل `20261102000100_idempotency.sql` ثم `…000200_orgs_branches_invites.sql` ثم `…000300_ops_observability.sql` (أو الحزمة `supabase/all_migrations.sql`)، ثم `supabase/make_platform_admin.sql` ببريد مدير المنصة. التفاصيل في `docs/online/G2_REPORT_AR.md` و`ENVIRONMENTS_AR.md`.
+7. **G3:** تشغيل `20261103000100_g3_registry.sql` ثم `…000200_g3_operations.sql`، **A ثم B دائمًا** (أو `supabase/all_migrations.sql`، 13 ترحيلًا). يُستحسن تفعيل `pg_cron` قبلهما. التفاصيل في `docs/online/G3_REPORT_AR.md` §3.
 
 ## 3. نموذج البيانات (ERD)
 
@@ -80,9 +82,39 @@ erDiagram
   clients |o--o{ invitations : "client-portal invite"
   organizations |o--o{ idempotency_keys : "G2: replay store"
   organizations |o--o{ client_errors : "G2: scrubbed UI errors"
+  organizations ||--o{ parties : "G3: counterparties"
+  parties ||--o{ drivers : "carrier"
+  parties ||--o{ trucks : "carrier"
+  clients ||--o{ client_aliases : "G3.2: other spellings"
+  transactions ||--o{ customs_declarations : "G3.5: declarations"
+  customs_declarations |o--o| customs_declarations : "replaced_by"
+  documents |o--o{ customs_declarations : "source document"
+  organizations ||--o{ bills_of_lading : "G3.6: B/Ls"
+  parties |o--o{ bills_of_lading : "shipping agent"
+  transactions ||--o{ transaction_bls : "B/L links (many-to-many)"
+  bills_of_lading ||--o{ transaction_bls : "feeds"
+  transaction_bls |o--o{ containers : "bl_id (same transaction)"
+  parties |o--o{ containers : "return yard"
+  documents |o--o{ containers : "Return Note (instruction)"
+  organizations ||--o{ document_requirements : "G3.10: rules"
+  transactions ||--o{ port_appointments : "G3.11"
+  containers |o--o{ port_appointments : "for container"
+  port_appointments |o--o| port_appointments : "rescheduled_from"
+  parties |o--o{ port_appointments : "terminal"
+  transactions ||--o{ transport_trips : "G3.12: legs"
+  containers |o--o{ transport_trips : "for container"
+  parties |o--o{ transport_trips : "carrier"
+  drivers |o--o{ transport_trips : "driver"
+  trucks |o--o{ transport_trips : "truck"
+  transactions ||--o{ operational_exceptions : "G3.14"
+  documents |o--o{ operational_exceptions : "supporting doc"
+  transactions ||--o{ operational_alerts : "G3.16"
+  organizations ||--o| operational_alert_runs : "refresh rate limit"
 ```
 
 `schema_versions` (G2) جدول مستقل بلا علاقات: صف لكل ملف ترحيل.
+
+جداول G3 كلها تتبع القواعد العامة أدناه: `org_id` في كل صف، ومفاتيح أجنبية مركّبة `(x_id, org_id)` إلى الأب، وRLS، وتريغر تدقيق. في `operational_alerts` يُدقَّق UPDATE فقط، لأن `last_seen_at` يتغير كل 15 دقيقة. `drivers` و`trucks` يمكن أن يكون الناقل فيهما فارغًا.
 
 **قواعد عامة:**
 - كل جدول تشغيلي يحمل `org_id`، ويرتبط بالأب عبر **مفتاح أجنبي مركّب `(parent_id, org_id)`**؛ لذلك يستحيل ربط معاملة في مؤسسة بعميل أو فرع من مؤسسة أخرى حتى لو أُدخل المعرّف يدويًا.
@@ -104,12 +136,24 @@ erDiagram
 | `client_users` | ربط مستخدم بوابة بملف عميل | يربطه الموظف فقط (D-02: لا ربط تلقائي بالهوية) |
 | `service_requests` | الطلب العام (Intake) | كل حقول نموذج `request.html`، `status` (new/under_review/converted/rejected)، `tracking_token_hash`، `declared_count` + `count_kind` منفصلان (arch-10)، `estimate` تقدير غير ضريبي (arch-08) |
 | `transactions` | **محور الربط** | `ref`، العملية import/export، الوسيلة، المنافذ، B/L (غير فريد)، رقم البيان (فريد داخل المؤسسة، D-03)، `container_count` رقمي، `operational_status` و`financial_status` منفصلان |
-| `containers` | زيارة حاوية لكل معاملة | رقم ISO `AAAA9999999` فريد **داخل المعاملة فقط** (DEC-02)، `return_deadline`، `return_status`، `evidence_document_id` |
+| `containers` | زيارة حاوية لكل معاملة | رقم ISO `AAAA9999999` فريد **داخل المعاملة فقط** (DEC-02)، `return_deadline`، `return_status`، `evidence_document_id`. G3: `bl_id` (يجب أن يكون من بوالص المعاملة نفسها)، `seal_no`، `size_type`، `gross_weight_kg`، `operational_state` (expected/at_port/released/gated_out/delivered/empty_returned؛ `empty_returned` فقط بعد `returned_verified` أو `waived`)، `visit_ref` (`<رقم الحاوية>@<المرجع>`)، `return_yard_party_id`، `return_instruction_document_id` (تعليمات، ليست دليلًا)، `evidence_received_at` (يختمه الخادم) |
 | `documents` | الأصل الثابت ومصدره | `kind` (ادعاء الرافع) ≠ `classification` (تحقق الموظف) + `classified_by/at`، `sha256`، `original_name`، `size_bytes`، `version` + `supersedes_id`، `source`/`source_ref`، `visibility`، الإلغاء بدل الحذف |
 | `transaction_events` | سجل زمني **Append-only** | `event_type`، `from_status`/`to_status`، `note`، `visible_to_client`، `actor` |
 | `import_batches` / `import_rows` | منطقة Staging للرفع الجماعي | بصمة الملف SHA-256، الورقة، رقم الصف، `raw` ثابت، `normalized`، `corrections`، `UNIQUE(org_id, fingerprint, sheet, row_no)` |
 | `contact_messages` | رسائل «تواصل معنا» | عبر RPC فقط |
 | `audit_log` | أثر تدقيق عام **Append-only** | الجدول، الصف، العملية، الحقول المتغيرة، القيم قبل وبعد، المنفّذ ودوره |
+| `parties` (G3) | دليل الجهات التشغيلية | `kinds text[]` (shipping_agent، terminal_operator، carrier، yard، customs_broker، supplier، other، وقد تجمع الجهة أكثر من نوع)، `name_ar` فريد داخل المؤسسة (بلا حالة أحرف)، السجل التجاري، الرقم الضريبي، التواصل، `notes`، `is_active`. لا حذف، بل تعطيل |
+| `drivers` / `trucks` (G3) | سائقو الناقل وشاحناته | `drivers`: الاسم، الجوال، `national_id_last4` (آخر 4 أرقام فقط)، الرخصة. `trucks`: `plate_no` فريد داخل المؤسسة، `plate_type`. كلاهما مرتبط اختياريًا بناقل من `parties` |
+| `client_aliases` (G3.2) | أسماء العميل البديلة | `alias`، `alias_norm` (`app.norm_name`) فريد داخل المؤسسة، `source` (bl/invoice/manual/ocr). إضافة وحذف فقط، بلا تعديل |
+| `customs_declarations` (G3.5) | البيانات الجمركية | `declaration_no` فريد داخل المؤسسة بين البيانات غير الملغاة أو المستبدلة. `status` (draft/submitted/under_inspection/released/cancelled/replaced)، `source` (manual/ocr/import/fasah)، `source_document_id`، `corrected_at`، `cancelled_at`، `cancel_reason`، `replaced_by_id`. الكتابة عبر RPC فقط. `transactions.declaration_no/date/type` مرآة لآخر بيان نشط |
+| `bills_of_lading` (G3.6) | البوالص | `(org_id, bl_number, bl_type)` فريد. `bl_type` (master/house/sea_waybill/awb/other)، الوكيل الملاحي، الناقل، السفينة والرحلة، الموانئ، المنشأ، البضاعة، الطرود، الوزن. الكتابة عبر RPC فقط. القراءة عبر المعاملات المرتبطة (`app.can_read_bl`) |
+| `transaction_bls` (G3.6) | ربط البوليصة بالمعاملة (كثير إلى كثير) | `(transaction_id, bl_id)`، `is_primary` (واحدة لكل معاملة، وتنعكس في `transactions.bl_number`) |
+| `document_requirements` (G3.10) | قواعد المستندات | `operation`/`mode`/`port` (NULL = أي)، `document_kind`، `required_for_stage`، `is_optional` (يظهر ولا يمنع)، `is_active`، `note`. فريد لكل (عملية، وسيلة، منفذ، نوع، مرحلة). 15 قاعدة افتراضية (`app.seed_document_requirements`) |
+| `port_appointments` (G3.11) | مواعيد الموانئ | المشغّل، `appointment_at`، `window_minutes`، `appointment_no`، السائق، الشاحنة، `status` (requested/confirmed/completed/missed/cancelled/rescheduled)، `status_reason`، `rescheduled_from_id`. إعادة الجدولة صف جديد |
+| `transport_trips` (G3.12) | رحلات النقل (نقلات) | `leg_no`، الناقل والسائق والشاحنة، المنشأ، الوجهة، `planned_at/loaded_at/unloaded_at`، `status` (planned/dispatched/loaded/delivered/cancelled)، `cost_*` و`sell_*` و`cost_basis` **خارج منح القراءة** (`trip_finance`). بلا حقول سداد |
+| `operational_exceptions` (G3.14) | الحالات الاستثنائية | `kind` (10 أنواع)، `occurred_at` و`source` و`reason` إلزامية، `document_id` أو `amount` إلزامي لـ demurrage/repair_fee/cleaning_fee، `status` (open/in_progress/resolved/waived)، `resolution_note` |
+| `operational_alerts` (G3.16) | التنبيهات التشغيلية | `kind` (7 أنواع)، `severity` (info/warning/critical)، `branch_id` يتبع المعاملة، `dedupe_key` فريد داخل المؤسسة، `first_seen_at/last_seen_at`، `status` (open/acknowledged/resolved)، `resolution` (auto/manual) |
+| `operational_alert_runs` (G3.16) | آخر تحديث للتنبيهات لكل مؤسسة | حد «مرة في الدقيقة». داخلي، بلا صلاحية API |
 
 ## 4. الأدوار ومصفوفة الصلاحيات (Role matrix)
 
@@ -138,7 +182,7 @@ erDiagram
   - الدعوة تعمل فقط ما دام من أصدرها يملك الصلاحية نفسها وقت القبول.
 - **امتداد على مستوى المؤسسة (قرار مفتوح رقم 10):** كل دور موظف مرتبط بفرع (`clearance_staff` و`operations_manager` و`branch_manager`) يصل إلى ما ليس له `branch_id` في كل المؤسسة. هذا يشمل: ملفات العملاء (قراءة وتعديل)، وقراءة `client_users`، و`import_batches/rows`، و`contact_messages`، والطلبات غير المسندة لفرع، وإظهار الملفات الشخصية عبر `can_see_profile`.
 
-الرموز: R قراءة، I إضافة، U تعديل، — لا شيء. «RPC» تعني أن العملية متاحة عبر دالة خادم فقط.
+الرموز: R قراءة، I إضافة، U تعديل، D حذف (`client_aliases` فقط)، — لا شيء. «RPC» تعني أن العملية متاحة عبر دالة خادم فقط.
 
 | الكيان | client | clearance | transport | accountant | accounts_mgr | ops_mgr | branch_mgr | supervisor | admin |
 |---|---|---|---|---|---|---|---|---|---|
@@ -156,6 +200,15 @@ erDiagram
 | import_batches/rows | R I U (دفعاته لملفه) | R I U | — | — | — | R I U | R I U | R I U | R I U |
 | contact_messages | — | R U | — | — | — | R U | R U | R U | R U |
 | audit_log | — | — | — | — | — | — | — | R | R |
+| parties / drivers / trucks (G3) | — | R I U | R I U | R | R | R I U | R I U | R I U | R I U |
+| client_aliases (G3) | — | R I D | R | R | R | R I D | R I D | R I D | R I D |
+| customs_declarations (G3) | R (معاملاته، بلا الملاحظات وسبب الإلغاء) | R · RPC | R | R | R | R · RPC | R · RPC | R · RPC | R · RPC |
+| bills_of_lading / transaction_bls (G3) | R (ما يغذي معاملاته وحده) | R · RPC | R | R | R | R · RPC | R · RPC | R · RPC | R · RPC |
+| document_requirements (G3) | — | R | R | R | R | R | R | R | R I U |
+| port_appointments (G3) | — (أوقات المؤكد عبر الأحداث) | R · RPC | R · RPC | R | R | R · RPC | R · RPC | R · RPC | R · RPC |
+| transport_trips (G3) | — | R · RPC | R · RPC (بلا التكلفة والبيع) | R + التكلفة والبيع | R + التكلفة والبيع | R · RPC + التكلفة والبيع | R · RPC + التكلفة والبيع | R · RPC + التكلفة والبيع | R · RPC + التكلفة والبيع |
+| operational_exceptions (G3) | — | R · RPC | R · RPC | R | R | R · RPC | R · RPC | R · RPC | R · RPC |
+| operational_alerts (G3) | — | R · RPC | R · RPC | R · RPC | R · RPC | R · RPC | R · RPC | R · RPC | R · RPC |
 
 \* تعديل المستند يقتصر على التصنيف والظهور والإلغاء؛ الأصل (المسار، البصمة، الاسم، الحجم) لا يتغير أبدًا. لا يوجد DELETE لأي مستند أو حدث أو سجل تدقيق.
 
@@ -177,6 +230,11 @@ erDiagram
 | أي رجوع للخلف (تصحيح) | operations_manager، branch_manager، supervisor، admin مع سبب إلزامي؛ إعادة فتح `closed` للـ admin فقط |
 
 منذ G2 تقبل `set_transaction_status` و`set_financial_status` معاملًا أخيرًا اختياريًا `p_idem_key uuid` (القسم 15).
+
+**G3 — بوابة المستندات:** صار التوقيع `set_transaction_status(p_transaction_id, p_status, p_note, p_idem_key, p_docs_override boolean DEFAULT false)`، وحُذف توقيع الأربعة معاملات.
+- **متى يُرفض:** الانتقال للأمام إلى مرحلة S (أو بعدها) يُرفض بـ `MRS_DOCS_MISSING`، والتفصيل يحمل الأنواع الناقصة، ما دام مستند إلزامي لـ S ناقصًا أو غير مراجَع. يُمنع هذا الانتقال وحده، لا المعاملة.
+- **التجاوز:** بالعلَم `p_docs_override = true` مع سبب في `p_note`. يسمح به لـ `operations_manager` و`branch_manager` و`supervisor` و`admin` (`app.senior_ops_roles`)، ويُسجَّل حدث داخلي `docs_override`.
+- **الأخطاء:** العلَم من دور آخر ← `MRS_FORBIDDEN 'docs_override'`. العلَم بلا سبب ← `MRS_NOTE_REQUIRED 'docs_override'`. الملاحظة وحدها لا تتجاوز البوابة أبدًا.
 
 يمكن القفز للأمام (مثل الشحن الجوي بلا حاويات). كل نقل يضيف حدثًا، ولا يُعدَّل حدث سابق.
 
@@ -202,6 +260,16 @@ erDiagram
 **الحالة المالية `financial_status`** — **مؤقتة (Placeholder) إلى G4**، ومستقلة تمامًا عن التشغيلية، ولا تظهر للعميل: `not_started` لم تبدأ، `estimate_only` تقدير غير ضريبي فقط، `draft_pending` مسودة قيد الإعداد، `invoiced` صدرت الفاتورة (خارج النظام)، `settled` مسددة.
 
 **حالات أخرى:** الطلب `request_status` (new، under_review، converted، rejected). إرجاع الحاوية `container_return_status` (pending، evidence_submitted، returned_verified، disputed، waived). تصنيف المستند `classification_status` (unreviewed، confirmed، reclassified، ambiguous). الرسالة `contact_status`. صف الاستيراد `import_row_status`.
+
+**قواميس G3** (في `status_labels`؛ المرئي للعميل مذكور):
+- `party_kind`، `alias_source`، `client_match` (strong/alias/weak).
+- `declaration_status` (مرئي للعميل) و`declaration_source`.
+- `bl_type` و`container_state` (مرئيان للعميل).
+- `requirement_status` (satisfied/unreviewed/missing/not_applicable).
+- `appointment_status` (للعميل فقط requested/confirmed/completed).
+- `trip_status`، `cost_basis`.
+- `exception_kind`، `exception_source`، `exception_status`.
+- `alert_kind`، `alert_severity`، `alert_status`.
 
 **أنواع المستندات `document_kind`:** bill_of_lading، commercial_invoice، packing_list، certificate_of_origin، saber_certificate، customs_declaration، delivery_order، appointment، container_delivery_eir، empty_return_note، **empty_return_receipt**، operator_invoice، government_doc، import_file، other.
 
@@ -250,7 +318,11 @@ sequenceDiagram
 
 ## 9. التدقيق والأحداث (Audit & events)
 
-- **`transaction_events`** خط زمني للأعمال: `created`، `request_converted`، `operational_status`، `financial_status`، `container_return`، `document`، `note`، `tracking_token`. الإضافة تأتي من RPC وتريغرات الخادم. المستخدم يضيف مباشرة نوع `note` فقط، ويُختم بـ`auth.uid()`.
+- **`transaction_events`** خط زمني للأعمال: `created`، `request_converted`، `operational_status`، `financial_status`، `container_return`، `document`، `note`، `tracking_token`. أضاف G3 الأنواع `declaration` و`bl` و`container` و`appointment` و`trip` و`exception` و`docs_override`.
+- **ما يراه العميل من أحداث G3:** حالة البيان، والحاوية (`operational_state` والإرجاع)، والموعد المؤكد. حدث الموعد يحمل الوقت والنافذة ورقم الحاوية و`appointment_ref` معتمًا، ثم `withdrawn` أو `completed` عند خروج الموعد من «مؤكد».
+- **ما يبقى داخليًا:** أحداث البوليصة (ومنها `conflict`)، والرحلات، والاستثناءات، و`docs_override`.
+
+الإضافة تأتي من RPC وتريغرات الخادم. المستخدم يضيف مباشرة نوع `note` فقط، ويُختم بـ`auth.uid()`.
 - **`audit_log`** أثر تقني عام لكل INSERT/UPDATE/DELETE على: organizations، branches، memberships، clients، client_users، service_requests، transactions، containers، documents، import_batches، contact_messages، و(منذ G2) invitations وplatform_admins (صفوف الأخيرة `org_id` فيها فارغ، فلا يراها إلا من SQL Editor). يحفظ القيم قبل وبعد (jsonb)، والحقول المتغيرة، و`actor` و`actor_role`. التحديث الذي لا يغير شيئًا لا يُسجَّل. `import_rows` مستثنى لأنه كثيف، وتصحيحاته محفوظة داخله في `corrections`.
 - **Append-only:** لا سياسات UPDATE/DELETE، وسحب الامتياز من `authenticated`، وتريغر `BEFORE UPDATE OR DELETE` وآخر `BEFORE TRUNCATE` يرفضان حتى مالك الجدول (`MRS_APPEND_ONLY`).
 - **التصحيح لا يمحو التاريخ:** الرجوع بالحالة حدث جديد بسبب إلزامي. إلغاء التحقق من حاوية يحتفظ بالدليل، ويسجل حدثًا. تعديل البيانات العادية يحفظ قبل وبعد في `audit_log`.
@@ -264,6 +336,7 @@ sequenceDiagram
 - إيصال تسليم الحاوية الممتلئة (EIR)، وتعليمات الإرجاع (Empty Return Note)، ورسالة الناقل **لا تثبت الإرجاع** (EV-01، EV-02، D-09)، ويرفضها الخادم (`MRS_EVIDENCE_INVALID`). عبارة «EMPTY RETURN By» تُسجَّل في `return_deadline`، فهي موعد وليست دليلًا.
 - `waived` تتطلب سببًا موثقًا. `disputed` للدليل الغامض بانتظار مراجعة بشرية.
 - إثبات الإرجاع لا يعني تسوية رسوم الغسيل أو الإصلاح، ولا يمس الحالة المالية.
+- **G3.13:** `set_container_return(p_container, p_payload)` يضبط المهلة والساحة والموقع ومستند التعليمات (Return Note). مستند التعليمات لا يُقبل دليلًا أبدًا. يُختم `evidence_received_at` على الخادم. `operational_state = 'empty_returned'` لا تُقبل إلا بعد `returned_verified` أو `waived`، وترجع إلى delivered أو gated_out أو released إذا أُلغي التحقق.
 
 ## 11. الرفع الجماعي (Import staging)
 
@@ -285,7 +358,12 @@ sequenceDiagram
 - بيئة الإنتاج، وMFA، واختبار الاختراق. (النسخ الاحتياطي وتمرين الاسترجاع **أُنجزا في G2** على PGlite: `restore-drill.js` و`BACKUP_RESTORE_AR.md`؛ لم تُشغَّل سكربتات pg_dump على Staging بعد.)
 - التحقق من بصمة الملف وحجمه على الخادم بعد الرفع (يحتاج Edge Function؛ لم يُنفَّذ في G2).
 - تنبيهات صحية خارجية (Uptime/Alerting): `health_check()` جاهزة، ولا يوجد ما يستدعيها دوريًا.
-- ~~لوحات الموظفين والبوابة نفسها~~ لوحة الموظفين (`admin.html`) والبوابة (`portal.html`) ولوحة المنصة (`platform.html`) موجودة كنموذج أولي؛ توسعتها التشغيلية في G3.
+- ~~لوحات الموظفين والبوابة نفسها~~ لوحة الموظفين (`admin.html`) والبوابة (`portal.html`) ولوحة المنصة (`platform.html`) موجودة كنموذج أولي؛ توسعتها التشغيلية **أُنجزت في G3** (`docs/online/G3_REPORT_AR.md`).
+- G3 أيضًا خارج نطاقه:
+  - مدفوعات الناقل وفواتير الموردين (G4)؛
+  - نقل الحقول المستخرجة آليًا (OCR) إلى البيانات والبوالص؛
+  - كيان «مهام» مستقل؛
+  - إشعارات التنبيهات بالبريد أو واتساب.
 
 ## 13. قرارات مفتوحة للمالك
 
@@ -303,6 +381,12 @@ sequenceDiagram
 12. **إرسال الدعوات:** الروابط تُنسخ يدويًا الآن. هل يُربط بريد (SMTP/Edge Function) أم يبقى النسخ اليدوي في Staging؟
 13. **التنظيف الدوري:** تفعيل `pg_cron` على مشروع Staging، أو الالتزام بالتشغيل اليدوي اليومي لـ`idem_purge_expired` و`client_errors_purge`.
 14. **مدة صلاحية الدعوة:** 7 أيام حاليًا. هل تناسب، وهل تُقصَّر لدعوات `admin`؟
+15. **G3 (G0 لم يُغلق):** قرارات العمل G3-1 إلى G3-14 في `G3_REPORT_AR.md` §5:
+    - البوليصة بيانات رئيسية على مستوى المؤسسة؛ والترقية التلقائية للبوليصة الرئيسية؛ والبوليصة المشتركة بين عميلين؛
+    - مسح رقم البيان؛ ونوع `other` القديم؛
+    - من يتجاوز نقص المستندات؛ ومن يعدّل القواعد؛ والقواعد الافتراضية وشهادة المنشأ الاختيارية؛
+    - حدود التنبيهات؛ ومواعيد العميل عبر الأحداث فقط؛ وإخفاء التكلفة والبيع عن موظف النقل؛
+    - من يسجّل الاستثناءات؛ ورموز اللوحات وصيغ الجهات؛ وخيار «تلقائي» في تحويل الطلب.
 
 ## 14. الربط بمبادئ G0
 
@@ -335,11 +419,11 @@ sequenceDiagram
 | `my_context()` | authenticated | `{user_id, profile, memberships[], clients[]}` · G2: + `is_platform_admin`، `organizations[{org_id, slug, name_ar, name_en, roles[]}]` |
 | `set_request_status(p_request_id uuid, p_status text, p_note text)` | موظفو العمليات | `{request_id, ref, from, to}` |
 | `convert_request_to_transaction(p_request_id uuid, p_branch_id uuid, p_client_id uuid, p_idem_key uuid DEFAULT NULL)` | موظفو العمليات | `{transaction_id, ref, client_id, client_created, containers, request_ref}` |
-| `set_transaction_status(p_transaction_id uuid, p_status text, p_note text, p_idem_key uuid DEFAULT NULL)` | بحسب الجدول في القسم 4 | `{transaction_id, ref, from, to, event_id}` |
+| `set_transaction_status(p_transaction_id uuid, p_status text, p_note text, p_idem_key uuid DEFAULT NULL, p_docs_override boolean DEFAULT false)` | بحسب الجدول في القسم 4 | `{transaction_id, ref, from, to, event_id, docs_override[]}` · G3: بوابة المستندات (القسم 4) |
 | `set_financial_status(p_transaction_id uuid, p_status text, p_note text, p_idem_key uuid DEFAULT NULL)` | أدوار المالية | `{transaction_id, from, to, event_id}` |
 | `issue_tracking_token(p_transaction_id uuid, p_idem_key uuid DEFAULT NULL)` | موظفو العمليات | `{ref, tracking_token}` · الرمز لا يُخزَّن؛ الإعادة `token_shown:true` |
 | `import_commit(p_batch_id uuid)` | منشئ الدفعة أو موظفو العمليات | `{committed, skipped, duplicates, errors, open_rows, batch_status, items[]}` |
-| `staff_internal_fields(table, ids)` | الموظفون | الحقول الداخلية المخفية بمنح الأعمدة (0700) |
+| `staff_internal_fields(table, ids)` | الموظفون | الحقول الداخلية المخفية بمنح الأعمدة (0700) · G3: + `customs_declarations` (`notes`، `cancel_reason`) و`bills_of_lading` (`notes`، بشرط `app.can_read_bl`) |
 | `admin_list_members(p_org uuid)` | مدير المؤسسة؛ مدير الفرع لفرعه | قائمة العضويات مع البريد |
 | `admin_set_member_active(p_membership uuid, p_active boolean)` | مدير المؤسسة؛ مدير الفرع لأدوار فرعه الأدنى | `{id, is_active, role, invitations_revoked}` · حارسا «نفسه» و«آخر مدير» (بقفل صف المؤسسة) |
 | `admin_add_member(…)` | **SQL Editor فقط** منذ G2 | — (سُحب EXECUTE من authenticated) |
@@ -367,9 +451,48 @@ sequenceDiagram
 | `admin_recent_errors(p_org uuid)` | مدير المؤسسة | أخطاء الواجهة لمؤسسته |
 | `admin_audit_log(p_org uuid, p_filters jsonb)` | مدير المؤسسة، المشرف | `{items[], next_before_id}` |
 
-المجموع: 6 دوال لـ anon و31 لـ authenticated، ويتحقق `rls-tests.js` من القائمتين حرفيًا (لا زائد ولا ناقص).
+**RPCs في G3** (`20261103000100` = A و`20261103000200` = B). كلها `SECURITY DEFINER` بـ `search_path = ''`، والتحقق من الهوية أولًا، و`REVOKE … FROM PUBLIC, anon, authenticated` ثم `GRANT` لـ authenticated. «كتّاب العمليات» = `ops_writer_roles` (clearance_staff، operations_manager، branch_manager، supervisor، admin). «كتّاب النقل» = `transport_writer_roles` (ما سبق + transport_staff). كلها ضمن فرع المعاملة.
+
+| الدالة | من يستدعيها | يعيد / ملاحظات |
+|---|---|---|
+| `match_client(p_org uuid, p_payload jsonb)` | الموظفون | `{candidates[{client_id, name_ar, name_en, cr_number, vat_number, is_active, match (strong/alias/weak), rank, score, reasons[]}], conflict, linked:false}` · لا يربط شيئًا |
+| `add_declaration(p_tx uuid, p_payload jsonb, p_idem_key uuid DEFAULT NULL)` | كتّاب العمليات (idempotent) | البيان · `replaces_id` لبديل صريح |
+| `set_declaration_status(p_id uuid, p_status text, p_note text DEFAULT NULL)` | كتّاب العمليات | البيان · الإلغاء والاستبدال عبر `cancel_declaration` فقط |
+| `cancel_declaration(p_id uuid, p_reason text, p_replacement jsonb DEFAULT NULL)` | كتّاب العمليات | `{cancelled, replacement?, exception_id}` · البديل مربوط بـ `replaced_by_id` في العملية نفسها، ومعه استثناء `declaration_cancelled` تلقائي (نسخة B نهائية) |
+| `correct_declaration(p_id uuid, p_payload jsonb, p_reason text)` | كتّاب العمليات | البيان · قبل/بعد في `audit_log`، و`corrected_at` |
+| `save_bl(p_payload jsonb, p_idem_key uuid DEFAULT NULL)` | كتّاب العمليات (idempotent) | البوليصة + الربط إن وُجد `transaction_id` · رقم موجود في فرع آخر ← `MRS_FORBIDDEN 'bl_other_branch'`؛ تُعاد `shared_with_other_client` |
+| `link_bl(p_tx uuid, p_bl uuid, p_primary boolean DEFAULT false)` | كتّاب العمليات | الربط · بوليصة لا يقرؤها المستدعي ← `MRS_NOT_FOUND 'bl'` |
+| `unlink_bl(p_tx uuid, p_bl uuid, p_reason text)` | كتّاب العمليات | سبب إلزامي؛ `containers.bl_id` يُفرَّغ |
+| `container_history(p_org uuid, p_container_no text)` | الموظفون | كل زيارات الرقم التي يقرؤها المستدعي |
+| `transaction_completeness(p_tx uuid)` | الموظفون | `{score 0–100, missing[{field|document, label_ar, label_en}], ready_for[], ready_limit?}` · لا مرحلة بعد البيان قبل `released` (نسخة B نهائية) |
+| `tx_checklist(p_tx uuid)` | الموظفون | لكل قاعدة: `satisfied / unreviewed / missing / not_applicable`، مع `is_optional` |
+| `create_appointment(p_payload jsonb, p_idem_key uuid DEFAULT NULL)` | كتّاب النقل (idempotent) | الموعد |
+| `reschedule_appointment(p_id uuid, p_payload jsonb, p_reason text, p_idem_key uuid DEFAULT NULL)` | كتّاب النقل (idempotent) | صف جديد بـ `rescheduled_from_id`، والقديم `rescheduled` |
+| `set_appointment_status(p_id uuid, p_status text, p_reason text DEFAULT NULL)` | كتّاب النقل | `missed` و`cancelled` يتطلبان سببًا · `rescheduled` عبر `reschedule_appointment` فقط (`use_reschedule_appointment`) |
+| `create_trip(p_payload jsonb, p_idem_key uuid DEFAULT NULL)` | كتّاب النقل (idempotent)؛ حقول التكلفة والبيع لأدوار `trip_finance_roles` فقط (غيرها ← `MRS_FORBIDDEN 'cost'`) | الرحلة (بلا التكلفة والبيع) |
+| `update_trip(p_id uuid, p_payload jsonb)` | الموظفون: حقول التشغيل لكتّاب النقل، والتكلفة والبيع لأدوار `trip_finance_roles` | الرحلة |
+| `set_trip_status(p_id uuid, p_status text, p_at timestamptz DEFAULT NULL, p_note text DEFAULT NULL)` | كتّاب النقل | يختم `loaded_at` و`unloaded_at` |
+| `trip_finance(p_ids uuid[])` | accountant، accounts_manager، operations_manager، branch_manager، supervisor، admin | `{<trip_id>: {cost_amount, cost_currency, sell_amount, sell_currency, cost_basis}}` · غيرهم يحصل على `{}` |
+| `set_container_return(p_container uuid, p_payload jsonb)` | كتّاب النقل | الحاوية · المهلة، الساحة، الموقع، مستند التعليمات |
+| `create_exception(p_payload jsonb, p_idem_key uuid DEFAULT NULL)` | كتّاب النقل (idempotent) | الاستثناء · `document_or_amount` للغرامات والرسوم |
+| `resolve_exception(p_id uuid, p_status text, p_note text DEFAULT NULL)` | كتّاب النقل؛ `waived` للأدوار العليا فقط | الاستثناء |
+| `refresh_alerts(p_org uuid)` | الموظفون، مرة في الدقيقة لكل مؤسسة | `{refreshed:true, rate_limited:false, last_run_at, opened, resolved}` أو `{refreshed:false, rate_limited:true, last_run_at, retry_after_seconds}` |
+| `list_alerts(p_org uuid, p_filters jsonb DEFAULT '{}')` | الموظفون (فرع المعاملة) | `{items[], counts, total, limit, offset}` · المرشحات: status، severity، kind، transaction_id، branch_id، limit (حتى 200)، offset |
+| `ack_alert(p_id uuid)` | الموظفون | يبقى التنبيه مفتوحًا حتى يزول السبب |
+| `resolve_alert(p_id uuid, p_note text)` | الموظفون | إغلاق يدوي بملاحظة إلزامية |
+
+دوال `app.*` داخلية بلا EXECUTE لأي دور API، ما عدا مساعدَي السياسات `app.is_bl_client` و`app.can_read_bl` (authenticated). `app.seed_document_requirements(p_org)` تُستدعى للمؤسسات الموجودة ومن `platform_create_org` (أُعيد إنشاؤها في B). `app.refresh_all_alerts()` تُجدول بـ `pg_cron` كل 15 دقيقة إن وُجد. الكتابة المباشرة المسموحة عبر RLS: `parties` و`drivers` و`trucks` (كتّاب النقل)، و`client_aliases` (إضافة وحذف لكتّاب العمليات)، و`document_requirements` (مدير المؤسسة)، و`containers` كما في G1.
+
+المجموع: 6 دوال لـ anon و**56** لـ authenticated (31 + 25 في G3)، ويتحقق `rls-tests.js` من القائمتين حرفيًا (لا زائد ولا ناقص).
 
 **طبقة MarsaApi (G2):** `newIdemKey`، والأغلفة idempotent تعيد المحاولة مرتين بالمفتاح نفسه عند انقطاع الشبكة أو المهلة أو أي 5xx بلا رمز PG، ثم تعيد `MRS_UNKNOWN_RESULT`. المفتاح المحفوظ يُنسى بعد دقيقتين أو عند أي جواب قاطع، و`issue_tracking_token` لا يعيد استخدام مفتاح محفوظ. الإعادة على مفتاح محفوظ تعيد `replayedEarlier:true`. الدوال الجديدة: `platformListOrgs`، `platformCreateOrg`، `platformSetOrgActive`، `platformReissueAdminInvitation`، `platformRecentErrors`، `updateOrg`، `createBranch`، `updateBranch`، `invite`، `listInvitations`، `revokeInvitation`، `reissueInvitation`، `invitationPreview`، `acceptInvitation`، `auditLog`، `recentErrors`، `healthCheck`، `setMyLocale`، `signOutEverywhere`، `activeOrgId`، `setActiveOrg`. دوال القوائم تقبل `orgId` اختياريًا. `addMembership` باقية للتوافق، وتعيد `MRS_FORBIDDEN` دون اتصال.
+
+**طبقة MarsaApi (G3):** الأسماء الـ 42 في `G3_SPEC.md` (`listParties` … `refreshAlerts`)، وكلها تعيد `{data, error}`، وفي وضع العرض `MRS_DEMO_MODE`.
+- `setTransactionStatus(id, s, note, key, {docsOverride})` يرسل `p_docs_override`. ترسله نافذة التجاوز للأدوار العليا وحدها.
+- `listAlerts(f)` يرسل مفاتيح الخادم فقط، بحد 200 لكل صفحة. يعيد `counts` و`total` من الخادم، ويضيف `transaction_ref` لكل صف. `{count_only:true}` يعيد `{count, counts}` لشارة القائمة.
+- `listTrips({anyAt})` يطابق `planned_at` أو `loaded_at` أو `unloaded_at`.
+- `globalSearch` يطابق البيانات بكل حالاتها وأرقام البوالص من الجداول الجديدة.
+- **وحدات الواجهة:** `window.MarsaOps = {views, txSections}` في `assets/js/ops/*.js`، وتُحمَّل قبل `admin.js`. المسارات `#alerts` و`#schedule` و`#exceptions` و`#parties` للموظفين، و`#requirements` لمدير المؤسسة، والقواميس في `assets/i18n/ops.js`.
 
 **مفاتيح `payload` لطلب الخدمة** (هي أسماء حقول `request.html`): `fullName company phone email clientType taxId crNumber contactPref direction service mode country port goods hsCode declarationNo needAci value currency weight containerType containerNumbers count blNumber shippingLine eta docsLater notes documents[] calc terms branchCode orgSlug`. يقبل `MarsaApi.submitServiceRequest` السجل الحالي الذي يبنيه `request.js` (بالكائنين `client` و`shipment`) ويحوّله بنفسه.
 
@@ -379,13 +502,22 @@ sequenceDiagram
 
 حقول `DETAIL` الجديدة في G2: `slug_taken`، `code_taken`، `invitation_pending`، `unknown_key`، `last_branch`، `self_invite`، `email` (دعوة غير المدير لبريده)، `client` (عميل خارج فروع مدير الفرع)، `admin_exists`، `role`، `branch`. صفحتا admin وplatform تترجمان بعضها محليًا؛ الباقي يظهر برسالة الرمز العامة.
 
+**رموز G3:** رمز خادم جديد واحد هو `MRS_DOCS_MISSING`، والتفصيل فيه قائمة الأنواع الناقصة مفصولة بفواصل. الباقي رموز قائمة بحقول `DETAIL` جديدة، منها:
+- **التكرار والتعارض:** `alias_taken`، `bl_number_taken`، `declaration_no_taken`، `declaration_no_cancelled`، `bl_other_branch`.
+- **التوجيه إلى الدالة الصحيحة:** `use_correct_declaration`، `use_cancel_declaration`، `use_reschedule_appointment`.
+- **الصلاحية والسبب:** `docs_override` (`MRS_FORBIDDEN` أو `MRS_NOTE_REQUIRED`)، `cost` (`MRS_FORBIDDEN`).
+- **البيانات الناقصة:** `document_or_amount`، `empty_return_receipt_required`.
+- **الحالة:** `same_status`، `resolved`، `no_change`.
+
+لكل تفصيل تسمية بالعربية في `supa.js` وبالإنجليزية في `i18n.js`، ولـ `err.MRS_DOCS_MISSING` مفتاح باللغتين.
+
 **قواعد للمطورين:**
 - ترتيب السكربتات: `config.js` ← `i18n.js` ← [`assets/i18n/<page>.js`] ← `main.js` ← `supa.js` ← سكربت الصفحة، وكلها `defer`. الصفحات المترجمة تحمل `<html data-i18n-page>` وسكربتًا قصيرًا في `<head>` يضبط `lang/dir` قبل CSS؛ غيرها يُعرض بالعربية بلا زر لغة. لا تضف وسم supabase-js يدويًا؛ `supa.js` يحمّله عند الحاجة.
 - كل دالة في `MarsaApi` تعيد Promise بالشكل `{data, error}` ولا ترمي استثناءً. **لا تعرض شاشة نجاح أو رقمًا مرجعيًا إلا إذا كان `error` فارغًا.**
 - في وضع العرض: `submitServiceRequest` و`submitContactMessage` و`publicTrack` تحفظ وتقرأ من localStorage كما الآن (`publicTrack` يعيد السجل المحلي في `data.local`). بقية الدوال تعيد `MRS_DEMO_MODE`، فاعرض للمستخدم رسالة `error.message`.
 - `tracking_token` يظهر مرة واحدة فقط: اعرضه مع رابط `tracking.html?ref=…&t=…`، ونبّه المستخدم إلى حفظه. لا تحفظه في localStorage إلا بموافقة صريحة.
 - نص الفوتر عن «البيانات تبقى على جهازك» يجب أن يتغير في الوضع المتصل؛ العنصر `<html data-marsa-mode="online|demo">` متاح لذلك.
-- الاختبار المحلي: `cd /tmp/pgtest && NODE_PATH=/tmp/pgtest/node_modules node supabase/tests/<file>.js --quiet` للملفات `rls-tests` و`g2-tests` و`g2-ops-tests` و`restore-drill` (يحمّل shim ثم كل الترحيلات ثم البذرة). الأرقام الحالية في `G2_REPORT_AR.md`.
+- الاختبار المحلي: `cd /tmp/pgtest && NODE_PATH=/tmp/pgtest/node_modules node supabase/tests/<file>.js --quiet` للملفات `rls-tests` و`g2-tests` و`g2-ops-tests` و`restore-drill` و`g3-tests` و`g3-cycle-tests` (يحمّل shim ثم كل الترحيلات ثم البذرة). الأرقام الحالية في `G3_REPORT_AR.md` (813 / 222 / 110 / 19 / 578 / 70، بلا فشل).
 
 ## Security review (2026-10-31, staging)
 
@@ -419,5 +551,35 @@ Fixed in migrations 0100 / 0200 / 0300 (tests: `rls-tests.js`, `g2-tests.js`, `g
 - `log_client_error`: scrubbed before storage, rate limited per user/visitor + all visitors + global; the visitor key ignores the client-controlled left-most `X-Forwarded-For` hop.
 - Internal tables `idempotency_keys`, `platform_admins`, `schema_versions`, `client_errors`: no API privileges at all (tested as `NO_API_TABLES`).
 - Backup scripts refuse a non-staging host unless `--force-other`; the DB URL comes from the environment only.
+
+### G3 additions (2026-11-02, staging)
+
+Fixed in migrations A / B (tests: `g3-tests.js`, `g3-cycle-tests.js`, `rls-tests.js` with the 12 new tenant tables and real per-org rows):
+- **Branch scoping follows the parent transaction.**
+  - Appointments, trips, exceptions and alerts use `app.has_tx_role`.
+  - When a transaction moves branch, `trg_alert_branch` hands its active alerts to the new branch, and the old branch gets `MRS_NOT_FOUND`.
+  - A B/L is readable only through a linked transaction the caller can read (`app.can_read_bl`). Its notes are reachable only through `staff_internal_fields`, under the same check.
+- **Client privacy.**
+  - Clients read declarations, B/Ls and containers of their own transactions only, without internal columns. A B/L shared with another client's transaction is hidden from both clients.
+  - Legacy `bl_number` adoption never reuses another client's or another branch's B/L; it writes an internal `conflict` event instead.
+  - Appointments, trips, exceptions, alerts and requirements are staff-only. The portal gets confirmed appointment times from client-visible events, which carry an opaque `appointment_ref` plus `withdrawn` / `completed`.
+- **Trip money.** `cost_*` / `sell_*` / `cost_basis` sit outside the SELECT grant, which fails closed for new columns. Only `trip_finance` returns them, and only to `trip_finance_roles`; writing them needs the same roles.
+- **Document gate.** The override is an explicit flag plus a reason, for senior roles only. A note alone never overrides. The flag is part of the idempotency hash.
+- **Declarations.**
+  - Renumbering or clearing through the transaction record is refused.
+  - A cancelled number cannot be reused without an explicit replacement.
+  - Corrections keep before/after values in `audit_log`.
+- **Migration safety.**
+  - A read-only preflight stops before any DDL on normalized declaration-number collisions.
+  - The backfill tolerates containers whose evidence was voided later.
+  - Backfilled declarations keep their legacy timestamps.
+  - Re-running A alone after B keeps B's functions.
+  - `20261102000200` / `0300` gained rerun guards against `set_transaction_status` overload ambiguity.
+- **Grants and privileges.**
+  - Every new SECURITY DEFINER function has `search_path = ''`, an auth check first, and REVOKE from PUBLIC / anon / authenticated before the GRANT to authenticated.
+  - anon still executes exactly 6 functions, and authenticated exactly 56.
+  - `operational_alert_runs` is in `NO_API_TABLES`.
+
+Still open (G3): not exercised against the real PostgREST (composite-FK embeds) or a browser; voiding a document that is still a container's evidence is allowed; the B/L `conflict` event has no alert or badge yet; `seed.sql` does not seed document requirements on a fresh database.
 
 Still open: server-side upload hash/size verification (Edge Function); MFA for app users; e-mail delivery of invitations; the `X-Forwarded-For` / `cf-connecting-ip` assumption must be confirmed on the real Supabase edge; the last-admin race fix is verified only by a source check (PGlite has one connection); none of the above was exercised against the real Staging project or in a browser.

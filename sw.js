@@ -1,10 +1,11 @@
 /* ==========================================================================
-   مرساة كلاود | Marsa Cloud — service worker (STAGING)
+   مرسى | MARSA — service worker (STAGING)
    Registered by assets/js/pwa.js with scope './'. Contract: docs/online/APP_UI_SPEC.md §PWA.
 
    * One versioned cache (CACHE). Bump VERSION whenever the precache list or this
      file's strategy changes; activate deletes every other 'marsa-' cache.
-   * Precache: the app shell (pages + local CSS/JS/icons + offline.html). Each file
+   * Precache: the signed-in pages in their original site layout + their local
+     CSS / JS / i18n / images + offline.html. Each file
      is fetched on its own so a missing optional file never blocks install; only
      offline.html is mandatory.
    * Strategies (same-origin GET only):
@@ -30,7 +31,7 @@
    ========================================================================== */
 'use strict';
 
-var VERSION = '2026-11-02.3';
+var VERSION = '2026-11-03.1';   // restored original design (classic pages, no app shell / dark theme)
 var CACHE = 'marsa-app-' + VERSION;
 var OFFLINE_URL = 'offline.html';
 
@@ -39,16 +40,22 @@ var PRECACHE = [
   OFFLINE_URL,
   'login.html', 'admin.html', 'platform.html', 'portal.html', 'ocr.html', 'bulk-upload.html',
   'manifest.json',
+  // styles: the original design system + shared components + page sheets
   'assets/css/style.css', 'assets/css/app.css',
-  'assets/css/pages/login.css', 'assets/css/pages/admin.css', 'assets/css/pages/platform.css',
+  'assets/css/pages/login.css', 'assets/css/pages/admin.css', 'assets/css/pages/ops.css', 'assets/css/pages/platform.css',
   'assets/css/pages/portal.css', 'assets/css/pages/ocr.css', 'assets/css/pages/bulk-upload.css',
+  // scripts
   'assets/js/config.js', 'assets/js/i18n.js', 'assets/js/main.js', 'assets/js/supa.js',
   'assets/js/app-shell.js', 'assets/js/pwa.js', 'assets/js/auth.js',
   'assets/js/admin.js', 'assets/js/platform.js', 'assets/js/portal.js',
   'assets/js/ocr.js', 'assets/js/ocr-parse.js', 'assets/js/bulk-upload.js', 'assets/js/xlsx-lite.js',
-  'assets/i18n/app.js', 'assets/i18n/login.js', 'assets/i18n/admin.js', 'assets/i18n/platform.js',
+  'assets/js/ops/alerts.js', 'assets/js/ops/schedule.js', 'assets/js/ops/parties.js',
+  'assets/js/ops/exceptions.js', 'assets/js/ops/requirements.js', 'assets/js/ops/tx-sections.js',
+  // dictionaries (a missing optional file never blocks the install)
+  'assets/i18n/app.js', 'assets/i18n/login.js', 'assets/i18n/admin.js', 'assets/i18n/ops.js', 'assets/i18n/platform.js',
   'assets/i18n/ocr.js', 'assets/i18n/bulk.js', 'assets/i18n/portal.js',
-  'assets/img/favicon.png', 'assets/img/logo-header.png', 'assets/img/logo.png',
+  // images: header logo (site-header / drawer / footer), favicon, PWA icons
+  'assets/img/logo-header.png', 'assets/img/favicon.png', 'assets/img/logo.png',
   'assets/img/icons/icon-180.png', 'assets/img/icons/icon-192.png',
   'assets/img/icons/icon-512.png', 'assets/img/icons/maskable-512.png'
 ];
@@ -95,10 +102,10 @@ function put(key, res) {
 // inline recovery page for a 401 navigation (see header). The sessionStorage flag stops a
 // reload loop when unregistering does not take effect; then the user gets a manual button.
 var AUTH_RECOVERY_HTML = '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">' +
-  '<meta name="viewport" content="width=device-width,initial-scale=1"><title>مرساة كلاود</title>' +
-  '<style>body{font:16px/1.6 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;background:#F5F8FB;color:#0B1B2E}' +
-  '@media (prefers-color-scheme:dark){body{background:#0A111D;color:#E6EDF6}}main{max-width:28rem;padding:24px;text-align:center}' +
-  'button{font:inherit;padding:8px 16px;border-radius:8px;border:1px solid currentColor;background:transparent;color:inherit;cursor:pointer}</style></head>' +
+  '<meta name="viewport" content="width=device-width,initial-scale=1"><title>مرسى MARSA</title>' +
+  '<style>body{font:16px/1.6 "Cairo","Segoe UI",Tahoma,system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;background:#F4F8FB;color:#0F1E33}' +
+  'main{max-width:28rem;padding:24px;text-align:center}' +
+  'button{font:inherit;font-weight:700;padding:10px 22px;border-radius:999px;border:0;background:#0B3A6E;color:#fff;cursor:pointer}</style></head>' +
   '<body><main><p>يلزم تسجيل الدخول إلى بيئة الاختبار من جديد… <span lang="en" dir="ltr">Re-authenticating…</span></p>' +
   '<p><button type="button" id="r" hidden>إعادة المحاولة · Retry</button></p></main><script>(function(){' +
   'var k="marsa_sw_auth",b=document.getElementById("r");b.onclick=function(){try{sessionStorage.removeItem(k)}catch(e){}go()};' +

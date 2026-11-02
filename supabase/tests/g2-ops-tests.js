@@ -168,12 +168,15 @@ async function main() {
       const r = await q(`SELECT p.oid::regprocedure::text sig, pg_get_function_arguments(p.oid) a FROM pg_proc p
                           JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = $1`, [fn]);
       const old = (await q(`SELECT to_regprocedure($1) IS NOT NULL x`, [`public.${fn}(${oldSig})`]))[0].x;
-      return (r.length === 1 && !old && /p_idem_key uuid DEFAULT NULL(::uuid)?$/.test(r[0].a)) || JSON.stringify(r);
+      // G3 (20261103000200) appends p_docs_override boolean DEFAULT false to set_transaction_status
+      const tail = fn === 'set_transaction_status'
+        ? /p_idem_key uuid DEFAULT NULL(::uuid)?, p_docs_override boolean DEFAULT false$/ : /p_idem_key uuid DEFAULT NULL(::uuid)?$/;
+      return (r.length === 1 && !old && tail.test(r[0].a)) || JSON.stringify(r);
     });
   }
   const NEW_RPCS = ['health_check()', 'log_client_error(jsonb)', 'admin_recent_errors(uuid)', 'platform_recent_errors()',
     'admin_audit_log(uuid,jsonb)', 'submit_service_request(jsonb)', 'submit_contact_message(jsonb)',
-    'convert_request_to_transaction(uuid,uuid,uuid,uuid)', 'set_transaction_status(uuid,text,text,uuid)',
+    'convert_request_to_transaction(uuid,uuid,uuid,uuid)', 'set_transaction_status(uuid,text,text,uuid,boolean)',
     'set_financial_status(uuid,text,text,uuid)', 'issue_tracking_token(uuid,uuid)'];
   const ANON_OK = new Set(['health_check()', 'log_client_error(jsonb)', 'submit_service_request(jsonb)', 'submit_contact_message(jsonb)']);
   for (const fn of NEW_RPCS) {

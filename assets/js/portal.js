@@ -3,16 +3,20 @@
    Load order: config.js → i18n.js → assets/i18n/portal.js → assets/i18n/app.js → main.js
                → supa.js → app-shell.js → pwa.js → portal.js  (plain <script defer>)
 
-   * App page: window.MarsaShell (app-shell.js) draws the sidebar / topbar
-     around <main id="app-main"> (user menu with sign out / sign out of all
-     devices); the profile tab keeps its own sign-out buttons. Toasts go
-     through Shell.toast (Marsa.toast without the shell).
+   * Classic layout (marketing header + page hero + .container card). The
+     optional window.MarsaShell helper (app-shell.js) only sets the title,
+     fills the hero's [data-shell-org] / [data-shell-search] slots and shows
+     toasts (Marsa.toast without it); it never moves the page's DOM.
 
    * Demo mode: shows a notice (login needs the online setup); no network.
    * Online: guard → login.html when there is no session. Everything shown is
      what RLS lets this user read: requests they submitted while signed in,
      and transactions / containers / documents / client-visible events of
      the client files staff linked to them (client_users, decision D-02).
+     G3: the transaction detail also shows the declaration number + status,
+     the B/L numbers, container operational states / return deadlines and
+     the times of confirmed port appointments (nothing internal: no costs,
+     drivers, notes, exceptions or alerts).
    * All user/DB text is inserted with textContent (no innerHTML of data).
    ========================================================================== */
 (function () {
@@ -26,7 +30,8 @@
   function tr(k, fb) { var key = 'portal.' + k, v = I && typeof I.t === 'function' ? I.t(key) : key; return v === key ? fb : v; }
   function setShellTitle() {
     if (!Shell) return;
-    if (typeof Shell.setTitle === 'function') Shell.setTitle(tr('title', 'بوابة العميل'), [{ label: tr('crumb', 'حسابي') }]);
+    // no extra crumbs: the hero breadcrumb stays «الرئيسية ‹ بوابة العميل» as in the original page
+    if (typeof Shell.setTitle === 'function') Shell.setTitle(tr('title', 'بوابة العميل'));
     if (typeof Shell.setActive === 'function') Shell.setActive('portal');
   }
   setShellTitle();
@@ -68,8 +73,15 @@
     eventTypes: {
       created: 'إنشاء المعاملة', request_converted: 'تحويل الطلب إلى معاملة', operational_status: 'تغيّر المرحلة التشغيلية',
       financial_status: 'تحديث الحالة المالية', container_return: 'إرجاع حاوية', document: 'مستند', note: 'ملاحظة',
-      tracking_token: 'إصدار رمز تتبع'
+      tracking_token: 'إصدار رمز تتبع', appointment: 'تأكيد موعد الميناء'
     },
+    // G3 client visibility: declaration no. + status, B/L numbers, container states / deadlines, confirmed appointment times
+    declStatus: { draft: 'قيد الإعداد', submitted: 'مقدَّم', under_inspection: 'تحت المعاينة', released: 'مُفرج عنه', cancelled: 'ملغى', replaced: 'مستبدَل' },
+    ctrState: { expected: 'متوقعة', at_port: 'في الميناء', released: 'مُفرج عنها', gated_out: 'خرجت من الميناء', delivered: 'سُلّمت', empty_returned: 'أُرجعت فارغة' },
+    noAppointments: 'لا توجد مواعيد مؤكدة حاليًا.',
+    // client 'appointment' events other than the confirmation (the slot no longer stands / took place)
+    apptOps: { withdrawn: 'أُلغي موعد الميناء أو تغيّر', completed: 'تم موعد الميناء' },
+    appointmentsHint: 'تظهر هنا أوقات المواعيد المؤكدة في الميناء فقط، وقد تتغير؛ نخبرك عند أي تعديل.',
     direction: { import: 'استيراد', export: 'تصدير', transit: 'عبور (ترانزيت)' },
     mode: { sea: 'بحري', air: 'جوي', land: 'بري' }
   };
@@ -136,23 +148,11 @@
     return h('div', { class: 'alert alert-' + type, role: type === 'danger' ? 'alert' : 'status' }, [
       svgIcon(['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z', 'M12 16v-4M12 8h.01']), h('span', { text: text })]);
   }
-  function loadingBox() {
-    return h('div', { class: 'portal-skeleton', role: 'status', 'aria-live': 'polite' }, [h('span', { class: 'sr-only', text: T.loading }),
-      h('span', { class: 'skeleton skeleton-title', 'aria-hidden': 'true' }), h('span', { class: 'skeleton skeleton-text', 'aria-hidden': 'true' }),
-      h('span', { class: 'skeleton skeleton-text is-mid', 'aria-hidden': 'true' }), h('span', { class: 'skeleton skeleton-text is-short', 'aria-hidden': 'true' })]);
-  }
-  // empty list: icon + message (+ optional action)
-  function emptyBox(text, action) {
-    return h('div', { class: 'empty-state portal-empty' }, [
-      h('span', { class: 'empty-state-icon', 'aria-hidden': 'true' }, [svgIcon(['M3 7h18v13H3z', 'M3 7l2-4h14l2 4', 'M9 12h6'])]),
-      h('p', { text: text }), action ? h('div', { class: 'empty-state-actions' }, [action]) : null]);
-  }
-  // app.css card: .app-card-head (title) + .app-card-body; returns the section, children go into the body
+  function loadingBox() { return h('p', { class: 'portal-loading', role: 'status' }, [h('span', { class: 'dot dot-pulse' }), T.loading]); }
+  // original card section: <section class="card"><h4>title</h4>…</section>; sec.body is the section itself
   function panel(id, title, kids) {
-    var body = h('div', { class: 'app-card-body portal-panel-body' }, kids || []);
-    var sec = h('section', { class: 'app-card portal-panel', 'aria-labelledby': id }, [
-      h('div', { class: 'app-card-head' }, [h('h4', { id: id, class: 'app-card-title', text: title })]), body]);
-    sec.body = body;   // callers append later content to sec.body
+    var sec = h('section', { class: 'card', 'aria-labelledby': id }, [h('h4', { id: id, text: title })].concat(kids || []));
+    sec.body = sec;   // callers append later content to sec.body
     return sec;
   }
   function errorBox(err, retryFn) {
@@ -231,13 +231,12 @@
       });
     });
   }
-  // status → pill tone (app.css .pill-<tone>)
   function statusBadge(domain, code) {
-    var tone = 'info';
-    if (domain === 'request_status') tone = { new: 'info', under_review: 'warning', converted: 'success', rejected: 'danger' }[code] || tone;
-    if (domain === 'operational_status') tone = { operationally_complete: 'success', under_billing: 'brand', billed: 'brand', closed: 'neutral' }[code] || 'info';
-    if (domain === 'container_return_status') tone = { pending: 'warning', evidence_submitted: 'info', returned_verified: 'success', disputed: 'danger', waived: 'neutral' }[code] || tone;
-    return h('span', { class: 'pill pill-dot pill-' + tone, text: label(domain, code) });
+    var cls = 'badge-blue';
+    if (domain === 'request_status') cls = { new: 'badge-blue', under_review: 'badge-warning', converted: 'badge-success', rejected: 'badge-danger' }[code] || cls;
+    if (domain === 'operational_status') cls = { operationally_complete: 'badge-success', under_billing: 'badge-teal', billed: 'badge-teal', closed: 'badge-navy' }[code] || 'badge-blue';
+    if (domain === 'container_return_status') cls = { pending: 'badge-warning', evidence_submitted: 'badge-blue', returned_verified: 'badge-success', disputed: 'badge-danger', waived: 'badge-teal' }[code] || cls;
+    return h('span', { class: 'badge ' + cls, text: label(domain, code) });
   }
 
   /* ---- header: user + sign-out ---- */
@@ -282,7 +281,7 @@
       if (r.error) { txList.appendChild(errorBox(r.error, loadTransactions)); return; }
       var rows = r.data || [];
       var cnt = $('[data-count="tx"]'); if (cnt) cnt.textContent = String(rows.length);
-      if (!rows.length) { txList.appendChild(emptyBox(T.noTx)); return; }
+      if (!rows.length) { txList.appendChild(alertBox('info', T.noTx)); return; }
       state.txCache = {};
       var tbody = h('tbody');
       rows.forEach(function (t) {
@@ -293,11 +292,11 @@
           h('td', null, [t.bl_number ? num(t.bl_number) : '—']),
           h('td', null, [statusBadge('operational_status', t.operational_status)]),
           h('td', { text: fmtDate(t.status_changed_at || t.updated_at) }),
-          h('td', { class: 'portal-col-actions' }, [h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: T.details,
+          h('td', null, [h('button', { class: 'btn btn-sm btn-secondary', type: 'button', text: T.details,
             'aria-label': T.details + ' ' + (t.ref || ''), onclick: function () { openTransaction(t.id); } })])
         ]));
       });
-      txList.appendChild(h('div', { class: 'data-table-wrap' }, [h('table', { class: 'data-table portal-table' }, [
+      txList.appendChild(h('div', { class: 'table-wrap' }, [h('table', { class: 'table table-striped' }, [
         h('caption', { class: 'sr-only', text: 'معاملاتي' }),
         h('thead', null, [h('tr', null, ['الرقم المرجعي', 'العملية', 'رقم البوليصة', 'المرحلة الحالية', 'آخر تحديث', ''].map(function (x) { return h('th', { scope: 'col', text: x }); }))]),
         tbody])]));
@@ -307,14 +306,42 @@
   function openTransaction(id) {
     txList.hidden = true; txDetail.hidden = false;
     clear(txDetail).appendChild(loadingBox());
-    Promise.all([api.getTransaction(id), api.listEvents(id), api.listDocuments({ transactionId: id })]).then(function (rs) {
+    // G3 reads are optional: an older data layer (or a missing table) leaves those parts empty
+    function g3(name, a, b) { return typeof api[name] === 'function' ? api[name](a, b) : Promise.resolve({ data: [], error: null }); }
+    Promise.all([api.getTransaction(id), api.listEvents(id), api.listDocuments({ transactionId: id }),
+      g3('listDeclarations', id, { minimal: true }), g3('listBLs', id, { minimal: true }),
+      g3('listAppointments', { txId: id, status: 'confirmed', minimal: true })]).then(function (rs) {
       clear(txDetail);
-      var back = h('button', { class: 'btn btn-sm btn-ghost portal-back', type: 'button', onclick: function () { txDetail.hidden = true; txList.hidden = false; } },
+      var back = h('button', { class: 'btn btn-sm btn-ghost mb-3', type: 'button', onclick: function () { txDetail.hidden = true; txList.hidden = false; } },
         [svgIcon('M5 12h14M13 6l6 6-6 6'), T.back]);
       txDetail.appendChild(back);
       var tr = rs[0], ev = rs[1], dr = rs[2];
       if (tr.error || !tr.data) { txDetail.appendChild(errorBox(tr.error || { message: '' }, function () { openTransaction(id); })); return; }
       var t = tr.data;
+      var decls = rs[3].error ? [] : (rs[3].data || []), bls = rs[4].error ? [] : (rs[4].data || []);
+      var appts = rs[5].error ? [] : (rs[5].data || []).filter(function (a) { return a && a.status === 'confirmed'; });
+      // clients do not read port_appointments (RLS): confirmed slots reach them as client-visible 'appointment'
+      // events { op: confirmed | withdrawn | completed, appointment_ref, appointment_at, window_minutes, container_no }.
+      // Events come in time order: a later withdrawal (rescheduled / cancelled / missed) or completion drops the
+      // slot. Older events carry no ref (confirmed only) and are keyed by their time.
+      if (!appts.length && !ev.error) {
+        var slots = {}, order = [];
+        (ev.data || []).forEach(function (e) {
+          var pl = e && e.event_type === 'appointment' && e.payload;
+          if (!pl || !pl.appointment_at) return;
+          var key = pl.appointment_ref ? 'ref:' + pl.appointment_ref : 'at:' + pl.appointment_at;
+          if (pl.op === 'confirmed') {
+            if (!slots[key]) order.push(key);
+            slots[key] = { appointment_at: pl.appointment_at, window_minutes: pl.window_minutes || null, container_no: pl.container_no || null, status: 'confirmed' };
+          } else if (pl.op === 'withdrawn' || pl.op === 'completed') {
+            slots[key] = null;
+          }
+        });
+        order.forEach(function (k) { if (slots[k]) appts.push(slots[k]); });
+      }
+      // the active declaration (not cancelled / replaced) first, else the newest
+      var decl = decls.filter(function (d) { return d.status !== 'cancelled' && d.status !== 'replaced'; })[0] || decls[0] || null;
+      var blNos = bls.map(function (b) { return b.bl_number; }).filter(Boolean);
       txDetail.appendChild(h('div', { class: 'portal-detail-head' }, [
         h('div', null, [h('p', { class: 'eyebrow mb-1', text: 'معاملة' }), h('h3', { class: 'mb-0' }, [num(t.ref)])]),
         statusBadge('operational_status', t.operational_status)
@@ -337,8 +364,9 @@
           ['وصف البضاعة', t.goods_description],
           ['رمز HS', t.hs_code ? num(t.hs_code) : null],
           ['الخط الملاحي', t.shipping_line],
-          ['رقم البوليصة', t.bl_number ? num(t.bl_number) : null],
-          ['رقم البيان الجمركي', t.declaration_no ? num(t.declaration_no) : null],
+          [blNos.length > 1 ? 'أرقام البوالص' : 'رقم البوليصة', blNos.length ? blList(blNos) : (t.bl_number ? num(t.bl_number) : null)],
+          ['رقم البيان الجمركي', decl ? num(decl.declaration_no) : (t.declaration_no ? num(t.declaration_no) : null)],
+          decl ? ['حالة البيان الجمركي', T.declStatus[decl.status] || decl.status] : null,
           ['تاريخ الوصول المتوقع', t.eta ? fmtDate(t.eta) : null],
           ['عدد الحاويات', t.container_count != null ? num(t.container_count) : null]
         ])
@@ -346,6 +374,8 @@
 
       // containers
       main.appendChild(renderContainers(t.containers || []));
+      // confirmed port appointments (time only)
+      main.appendChild(renderAppointments(appts, t.containers || []));
       // documents (+ upload)
       main.appendChild(renderDocuments(t, dr));
       // stages + event history
@@ -385,6 +415,9 @@
         detail = ((e.payload && e.payload.container_no) ? e.payload.container_no + ': ' : '') + label('container_return_status', e.to_status);
       } else if (e.event_type === 'document' && e.payload) {
         detail = label('document_kind', e.payload.kind);
+      } else if (e.event_type === 'appointment' && e.payload && e.payload.appointment_at) {
+        if (T.apptOps[e.payload.op]) title = T.apptOps[e.payload.op];
+        detail = (e.payload.container_no ? e.payload.container_no + ': ' : '') + fmtDate(e.payload.appointment_at, true);
       }
       ol.appendChild(h('li', { class: i === 0 ? 'is-current' : 'is-done' }, [
         h('span', { class: 'tl-dot' }),
@@ -406,16 +439,39 @@
     list.forEach(function (c) {
       tbody.appendChild(h('tr', null, [
         h('td', null, [num(c.container_no)]),
-        h('td', null, [num(c.container_type)]),
+        h('td', null, [num(c.size_type || c.container_type)]),
+        h('td', { text: c.operational_state ? (T.ctrState[c.operational_state] || c.operational_state) : '—' }),
         h('td', null, [statusBadge('container_return_status', c.return_status)]),
         h('td', { text: c.return_deadline ? fmtDate(c.return_deadline) : '—' }),
         h('td', { text: c.returned_at ? fmtDate(c.returned_at) : '—' })
       ]));
     });
-    sec.body.appendChild(h('div', { class: 'data-table-wrap' }, [h('table', { class: 'data-table is-compact portal-table' }, [
-      h('thead', null, [h('tr', null, ['رقم الحاوية', 'النوع', 'حالة الإرجاع', 'آخر موعد للإرجاع', 'تاريخ الإرجاع'].map(function (x) { return h('th', { scope: 'col', text: x }); }))]),
+    sec.body.appendChild(h('div', { class: 'table-wrap' }, [h('table', { class: 'table' }, [
+      h('thead', null, [h('tr', null, ['رقم الحاوية', 'النوع', 'الحالة التشغيلية', 'حالة الإرجاع', 'آخر موعد للإرجاع', 'تاريخ الإرجاع'].map(function (x) { return h('th', { scope: 'col', text: x }); }))]),
       tbody])]));
     sec.body.appendChild(h('p', { class: 'text-xs text-muted mt-2', text: 'تُعدّ الحاوية مُرجعة فقط بإيصال استلام الفارغ من الساحة أو المشغّل بعد تحقق موظف مرسى؛ تعليمات الإرجاع أو إيصال تسليم الممتلئ ليست إثباتًا.' }));
+    return sec;
+  }
+
+  function blList(nos) {
+    var kids = [];
+    nos.forEach(function (n, i) { if (i) kids.push('، '); kids.push(num(n)); });
+    return h('span', null, kids);
+  }
+  function renderAppointments(list, containers) {
+    var sec = panel('tx-ap-h', 'مواعيد الميناء المؤكدة');
+    if (!list.length) { sec.body.appendChild(h('p', { class: 'text-muted text-sm', text: T.noAppointments })); return sec; }
+    var byId = {};
+    containers.forEach(function (c) { byId[c.id] = c.container_no; });
+    var ul = h('ul', { class: 'kv' });
+    list.slice().sort(function (a, b) { return String(a.appointment_at).localeCompare(String(b.appointment_at)); }).forEach(function (a) {
+      ul.appendChild(h('li', null, [
+        h('span', { class: 'k' }, [a.container_no ? num(a.container_no) : (a.container_id && byId[a.container_id] ? num(byId[a.container_id]) : 'المعاملة كلها')]),
+        h('span', { class: 'v', text: fmtDate(a.appointment_at, true) + (a.window_minutes ? ' (± ' + a.window_minutes + ' دقيقة)' : '') })
+      ]));
+    });
+    sec.body.appendChild(ul);
+    sec.body.appendChild(h('p', { class: 'text-xs text-muted mt-2', text: T.appointmentsHint }));
     return sec;
   }
 
@@ -529,7 +585,8 @@
       var rows = r.data || [];
       var cnt = $('[data-count="req"]'); if (cnt) cnt.textContent = String(rows.length);
       if (!rows.length) {
-        reqList.appendChild(emptyBox(T.noReq, h('a', { class: 'btn btn-primary btn-sm', href: 'request.html', text: 'اطلب تخليص' })));
+        reqList.appendChild(alertBox('info', T.noReq));
+        reqList.appendChild(h('p', { class: 'mt-2' }, [h('a', { class: 'btn btn-primary btn-sm', href: 'request.html', text: 'اطلب تخليص' })]));
         return;
       }
       var tbody = h('tbody');
@@ -541,11 +598,11 @@
           h('td', { text: [T.direction[q.direction] || q.direction, T.mode[q.mode] || q.mode].filter(Boolean).join(' · ') || '—' }),
           h('td', { text: q.port || '—' }),
           h('td', null, [statusBadge('request_status', q.status)]),
-          h('td', { class: 'portal-col-actions' }, [h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: T.details,
+          h('td', null, [h('button', { class: 'btn btn-sm btn-secondary', type: 'button', text: T.details,
             'aria-label': T.details + ' ' + (q.ref || ''), onclick: function () { openRequest(q.id); } })])
         ]));
       });
-      reqList.appendChild(h('div', { class: 'data-table-wrap' }, [h('table', { class: 'data-table portal-table' }, [
+      reqList.appendChild(h('div', { class: 'table-wrap' }, [h('table', { class: 'table table-striped' }, [
         h('caption', { class: 'sr-only', text: 'طلباتي' }),
         h('thead', null, [h('tr', null, ['رقم الطلب', 'تاريخ الإرسال', 'العملية', 'المنفذ', 'الحالة', ''].map(function (x) { return h('th', { scope: 'col', text: x }); }))]),
         tbody])]));
@@ -556,14 +613,14 @@
     if (!q) return;
     reqList.hidden = true; reqDetail.hidden = false;
     clear(reqDetail);
-    reqDetail.appendChild(h('button', { class: 'btn btn-sm btn-ghost portal-back', type: 'button', onclick: function () { reqDetail.hidden = true; reqList.hidden = false; } },
+    reqDetail.appendChild(h('button', { class: 'btn btn-sm btn-ghost mb-3', type: 'button', onclick: function () { reqDetail.hidden = true; reqList.hidden = false; } },
       [svgIcon('M5 12h14M13 6l6 6-6 6'), T.back]));
     reqDetail.appendChild(h('div', { class: 'portal-detail-head' }, [
       h('div', null, [h('p', { class: 'eyebrow mb-1', text: 'طلب خدمة' }), h('h3', { class: 'mb-0' }, [num(q.ref)])]),
       statusBadge('request_status', q.status)
     ]));
     var docs = (q.declared_documents || []).map(function (d) { return d && d.name; }).filter(Boolean);
-    reqDetail.appendChild(h('section', { class: 'app-card portal-panel' }, [h('div', { class: 'app-card-body portal-panel-body' }, [
+    reqDetail.appendChild(h('section', { class: 'card' }, [
       kvList([
         ['تاريخ الإرسال', fmtDate(q.created_at, true)],
         ['مقدّم الطلب', q.full_name], ['الشركة', q.company],
@@ -576,7 +633,7 @@
       ]),
       q.status === 'converted' ? h('p', { class: 'text-sm mt-2', text: 'تحوّل هذا الطلب إلى معاملة؛ تظهر في تبويب «معاملاتي» بعد ربط ملف العميل بحسابك.' }) : null,
       h('p', { class: 'text-xs text-muted mt-2', text: 'المستندات المعلنة أسماء ملفات فقط؛ ارفع الأصول من صفحة المعاملة بعد تحويل الطلب.' })
-    ])]));
+    ]));
   }
 
   /* ======================================================================
@@ -606,7 +663,7 @@
            ['تاريخ الإرسال', d.request ? fmtDate(d.request.created_at) : null]];
       var send = h('button', { class: 'btn btn-primary mt-3', type: 'button', text: 'اطلب ربطه بحسابي' });
       send.addEventListener('click', function () { requestLink(ref, send); });
-      linkResult.appendChild(h('div', { class: 'app-card-body app-card portal-panel is-muted' }, [
+      linkResult.appendChild(h('div', { class: 'card card-muted' }, [
         alertBox('success', 'تم التحقق من الرقم المرجعي ورمز التتبع.'),
         h('div', { class: 'mt-2' }, [kvList(info)]),
         h('p', { class: 'text-sm mt-2', text: 'الربط بحسابك قرار يتخذه فريق مرسى بعد التحقق (لا يتم تلقائيًا). سنرسل إليهم الرقم المرجعي وبيانات حسابك فقط، دون رمز التتبع.' }),

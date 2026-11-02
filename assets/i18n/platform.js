@@ -114,8 +114,7 @@
     colCode: 'الرمز',
     colMessage: 'الرسالة',
 
-    /* app shell (topbar title / breadcrumb) + console additions */
-    crumbRoot: 'المنصة',
+    /* console additions (KPI tiles, org search / filter, confirm dialogs) */
     kpiAria: 'ملخص المنصة',
     kpiOrgs: 'المؤسسات',
     kpiActive: 'مفعّلة',
@@ -238,7 +237,6 @@
     colCode: 'Code',
     colMessage: 'Message',
 
-    crumbRoot: 'Platform',
     kpiAria: 'Platform summary',
     kpiOrgs: 'Organizations',
     kpiActive: 'Active',

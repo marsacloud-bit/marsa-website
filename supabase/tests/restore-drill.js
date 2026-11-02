@@ -133,6 +133,18 @@ async function buildSample() {
   await rpc('staffA', `SELECT public.log_client_error($1) r`, [{ orgId: A, message: 'restore drill error A', code: 'E_A' }]);
   await rpc('staffB', `SELECT public.log_client_error($1) r`, [{ orgId: B, message: 'restore drill error B', code: 'E_B' }]);
   await rpc('anon', `SELECT public.log_client_error($1) r`, [{ message: 'restore drill visitor error' }]);
+  // G3 (20261103000100 / 0200): registry + operations rows through the real inserts / RPCs, so every G3 table
+  // (and its audit / event rows) is part of the restore comparison
+  await q(`SELECT app.seed_document_requirements($1)`, [A]);
+  const carrier = (await as('staffA', `INSERT INTO public.parties (org_id, kinds, name_ar) VALUES ($1, ARRAY['carrier','terminal_operator'], 'ناقل الاستعادة') RETURNING id`, [A]))[0].id;
+  const driver = (await as('staffA', `INSERT INTO public.drivers (org_id, carrier_id, full_name, national_id_last4) VALUES ($1, $2, 'سائق الاستعادة', '4321') RETURNING id`, [A, carrier]))[0].id;
+  await as('staffA', `INSERT INTO public.trucks (org_id, carrier_id, plate_no) VALUES ($1, $2, 'RST 1001')`, [A, carrier]);
+  await as('staffA', `INSERT INTO public.client_aliases (org_id, client_id, alias, source) VALUES ($1, $2, 'اسم الاستعادة البديل', 'manual')`, [A, CL101]);
+  await rpc('staffA', `SELECT public.save_bl($1, $2) r`, [{ transaction_id: TX1, bl_number: 'RSTBL-G3-1', bl_type: 'house' }, '0d0d0000-0000-4000-8000-000000000005']);
+  await rpc('staffA', `SELECT public.create_appointment($1, $2) r`, [{ transaction_id: TX1, terminal_party_id: carrier, appointment_at: '2026-12-01T08:00:00Z', status: 'confirmed' }, '0d0d0000-0000-4000-8000-000000000006']);
+  await rpc('staffA', `SELECT public.create_trip($1, $2) r`, [{ transaction_id: TX1, carrier_id: carrier, driver_id: driver, origin: 'ميناء جدة', destination: 'مستودع' }, '0d0d0000-0000-4000-8000-000000000007']);
+  await rpc('staffA', `SELECT public.create_exception($1, $2) r`, [{ transaction_id: TX1, kind: 'inspection', reason: 'معاينة جمركية (اختبار الاستعادة)' }, '0d0d0000-0000-4000-8000-000000000008']);
+  await rpc('staffA', `SELECT public.refresh_alerts($1) r`, [A]);
   return r1;
 }
 
@@ -182,7 +194,11 @@ async function main() {
 
   const before = await snapshot();
   const empty = ['public.organizations', 'public.transactions', 'public.audit_log', 'public.transaction_events', 'public.idempotency_keys',
-    'public.invitations', 'public.client_errors', 'public.schema_versions', 'public.documents', 'storage.objects']
+    'public.invitations', 'public.client_errors', 'public.schema_versions', 'public.documents', 'storage.objects',
+    // G3
+    'public.parties', 'public.drivers', 'public.trucks', 'public.client_aliases', 'public.customs_declarations', 'public.bills_of_lading',
+    'public.transaction_bls', 'public.document_requirements', 'public.port_appointments', 'public.transport_trips',
+    'public.operational_exceptions', 'public.operational_alerts', 'public.operational_alert_runs']
     .filter(k => !before[k] || before[k].n === 0);
   await check('source has rows in the key tables (drill is not vacuous)', () => empty.length === 0 || 'empty: ' + empty.join(', '));
   await check('both orgs present in the source', async () =>
@@ -270,6 +286,20 @@ async function main() {
     if (r.items.length !== 5) return 'org A items: ' + r.items.length;
     try { await as('adminA', `SELECT public.admin_audit_log($1, '{}')`, [B]); return 'org B readable'; }
     catch (e) { return /MRS_FORBIDDEN/.test(errText(e)) || errText(e); }
+  });
+  await check('G3 after restore: staffB sees no org A registry / operations rows', async () => {
+    for (const t of ['parties', 'customs_declarations', 'bills_of_lading', 'port_appointments', 'operational_exceptions', 'operational_alerts']) {
+      const r = await denied('staffB', `SELECT 1 FROM public.${t} WHERE org_id = $1`, [A]);
+      if (r !== true) return t + ': ' + r;
+    }
+    return denied('staffB', `SELECT id FROM public.transport_trips WHERE org_id = $1`, [A]);
+  });
+  await check('G3 after restore: list_alerts / trip_finance / tx_checklist answer for org A staff', async () => {
+    const al = await rpc('staffA', `SELECT public.list_alerts($1) r`, [A]);
+    const trip = (await q(`SELECT id FROM public.transport_trips WHERE org_id = $1 LIMIT 1`, [A]))[0].id;
+    const fin = await rpc('adminA', `SELECT public.trip_finance($1) r`, [[trip]]);
+    const ck = await rpc('staffA', `SELECT public.tx_checklist($1) r`, [TX1]);
+    return (al.total > 0 && fin[trip] && ck.configured === true && ck.items.length > 0) || JSON.stringify({ al: al.total, fin, ck: ck.configured });
   });
   await check('writes work after restore (new request gets the next ref)', async () => {
     const r = await rpc('anon', `SELECT public.submit_service_request($1) r`, [reqPayload('0559000099', {})]);

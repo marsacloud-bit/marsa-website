@@ -63,6 +63,7 @@
       MRS_IN_PROGRESS: 'العملية نفسها ما زالت قيد التنفيذ. انتظر قليلًا ثم تحقّق من النتيجة.',
       MRS_UNKNOWN_RESULT: 'لم نتمكن من تأكيد نتيجة العملية بسبب انقطاع الاتصال. إعادة المحاولة آمنة ولن تُنشئ نسخة مكرّرة.',
       MRS_TIMEOUT: 'استغرق الخادم وقتًا أطول من المعتاد. حاول مرة أخرى.',
+      MRS_DOCS_MISSING: 'لا يمكن الانتقال إلى هذه المرحلة قبل استكمال المستندات المطلوبة لها ({f}). ارفعها وصنّفها، أو تجاوز القاعدة بصلاحية مدير مع ذكر السبب.',
       DUPLICATE: 'هذا السجل موجود من قبل (تكرار). إن كان ملفًا فقد رُفع سابقًا.',
       FK: 'مرجع غير صالح أو لا يخص مؤسستك.',
       CHECK: 'بعض القيم غير صحيحة.',
@@ -97,7 +98,22 @@
       contact_phone: 'هاتف التواصل', contact_email: 'بريد التواصل', address_ar: 'العنوان بالعربية',
       address_en: 'العنوان بالإنجليزية', logo_path: 'الشعار', settings: 'الإعدادات', organization: 'المؤسسة',
       branch_id: 'الفرع', client_id: 'العميل', invitation: 'الدعوة', token: 'رمز الدعوة', last_branch: 'آخر فرع مفعّل',
-      slug_taken: 'المعرّف المختصر (مستخدم لمؤسسة أخرى)', membership: 'العضوية', filters: 'عوامل التصفية', locale: 'اللغة', idempotencyKey: 'مفتاح العملية'
+      slug_taken: 'المعرّف المختصر (مستخدم لمؤسسة أخرى)', membership: 'العضوية', filters: 'عوامل التصفية', locale: 'اللغة', idempotencyKey: 'مفتاح العملية',
+      // G3 detail codes / fields
+      declaration_no: 'رقم البيان الجمركي', declaration_type: 'نوع البيان', declaration_date: 'تاريخ البيان',
+      declaration_no_taken: 'رقم البيان (مسجّل لمعاملة أخرى في المؤسسة)', declaration_no_cancelled: 'رقم البيان (ملغى؛ يُستخدم فقط كبديل صريح)',
+      bl_number: 'رقم البوليصة', bl_number_taken: 'رقم البوليصة (مسجّل من قبل بالنوع نفسه)', bl_type: 'نوع البوليصة', bl: 'البوليصة',
+      alias: 'الاسم البديل', alias_taken: 'الاسم البديل (مستخدم لعميل آخر)', carrier_id: 'الناقل', shipping_agent_id: 'الوكيل الملاحي',
+      terminal_party_id: 'المحطة', return_yard_party_id: 'ساحة الإرجاع', return_instruction_document_id: 'تعليمات الإرجاع', driver_id: 'السائق',
+      truck_id: 'الشاحنة', container_id: 'الحاوية', container_no: 'رقم الحاوية', appointment_at: 'وقت الموعد', window_minutes: 'مدة نافذة الموعد',
+      appointment_no: 'رقم الموعد', occurred_at: 'تاريخ الحدوث', at: 'وقت الحالة', leg_no: 'رقم المرحلة',
+      cost: 'التكلفة وسعر البيع (لصلاحيات المالية والإدارة فقط)', cost_basis: 'أساس التكلفة', waiver: 'الإعفاء (لصلاحية مدير)',
+      document_or_amount: 'مستند أو مبلغ (مطلوب لهذا النوع)', kind: 'النوع', source: 'المصدر', source_document_id: 'المستند المصدر',
+      replacement: 'البيان البديل', replaces_id: 'البيان المستبدَل', use_cancel_declaration: 'الإلغاء (استخدم «إلغاء البيان»)',
+      use_reschedule_appointment: 'تغيير الموعد (استخدم «إعادة الجدولة»)', no_change: 'لا يوجد تغيير', backward: 'الرجوع إلى حالة سابقة',
+      cancelled: 'سجل ملغى', resolved: 'استثناء مغلق', link: 'ربط البوليصة', reason: 'السبب', severity: 'الأهمية', packages: 'عدد الطرود',
+      plate_no: 'رقم اللوحة', national_id_last4: 'آخر 4 أرقام من الهوية', ids: 'المعرّفات', transaction: 'المعاملة', org_id: 'المؤسسة',
+      stage_skip: 'تخطي مرحلة', unknown_key: 'حقل غير معروف', operational_state: 'الحالة التشغيلية للحاوية', gross_weight_kg: 'الوزن الإجمالي'
     },
     banner: {
       staging: 'بيئة تجريبية (Staging) — البيانات للاختبار فقط'
@@ -857,10 +873,15 @@
   function updateTransaction(id, patch) {
     return online(function (c) { return c.from('transactions').update(patch).eq('id', id).select(TX_COLS).single(); }).then(function (r) { return withInternal('transactions', r); });
   }
-  // idemKey (optional 4th arg) → p_idem_key; generated when absent and kept for the retries
-  function setTransactionStatus(id, status, note, idemKey) {
+  // idemKey (optional 4th arg) → p_idem_key; generated when absent and kept for the retries.
+  // opts.docsOverride (G3.10) → p_docs_override: the explicit manager override of the document gate
+  // (sent only by the override dialog, with the reason in note). Never inferred from a note.
+  function setTransactionStatus(id, status, note, idemKey, opts) {
+    var ov = !!(opts && opts.docsOverride);
     return idemRpc('set_transaction_status', idemKey, function (k) {
-      return { p_transaction_id: id, p_status: status, p_note: note || null, p_idem_key: k };
+      var a = { p_transaction_id: id, p_status: status, p_note: note || null, p_idem_key: k };
+      if (ov) a.p_docs_override = true;
+      return a;
     });
   }
   function setFinancialStatus(id, status, note, idemKey) {
@@ -1261,6 +1282,348 @@
   }
 
   /* ------------------------------------------------------------------
+     G3 — clearance & transport operations (docs/online/G3_SPEC.md)
+     Directories (parties / drivers / trucks / client aliases / document
+     requirements) are RLS-guarded direct reads and writes. Everything with a
+     state machine goes through its RPC; the creating RPCs are idempotent
+     (p_idem_key, same key across retries — pass opts.idemKey to keep one
+     across a page-level retry). Lists are scoped to the active org (or
+     f.orgId). Internal notes / trip money are never selected directly:
+     staff_internal_fields() and trip_finance() add them for the roles that
+     may read them.
+     ------------------------------------------------------------------ */
+  // active org (or the explicit one) → fn(orgId)
+  function inActiveOrg(explicit, fn) {
+    if (!configured) return demoOnly();
+    var pick = explicit ? Promise.resolve(ok(explicit)) : orgId();
+    return pick.then(function (r) { return r.error ? r : fn(r.data); });
+  }
+  // org of a parent row (child inserts carry the parent's org_id)
+  function orgOfRow(table, id) {
+    if (!configured) return demoOnly();
+    return online(function (c) { return c.from(table).select('org_id').eq('id', id).maybeSingle(); })
+      .then(function (r) { return r.error ? r : (r.data ? ok(r.data.org_id) : fail('MRS_NOT_FOUND')); });
+  }
+  // insert (no id) or update (id) of a directory row; id / org_id / audit columns are never patched
+  function saveRow(table, cols, p, orgFn) {
+    if (!configured) return demoOnly();
+    p = Object.assign({}, p || {});
+    var id = p.id;
+    ['id', 'org_id', 'created_by', 'created_at', 'updated_at'].forEach(function (k) { delete p[k]; });
+    if (id) return online(function (c) { return c.from(table).update(p).eq('id', id).select(cols).single(); });
+    return orgFn().then(function (r) {
+      if (r.error) return r;
+      return online(function (c) { return c.from(table).insert(Object.assign(p, { org_id: r.data })).select(cols).single(); });
+    });
+  }
+  function rowsOrList(r) {   // RPCs may return a bare array or {rows|items|visits}
+    if (!r || r.error || !r.data || Array.isArray(r.data)) return r;
+    var d = r.data.rows || r.data.items || r.data.visits;
+    return Array.isArray(d) ? { data: d, error: null, count: r.data.total != null ? r.data.total : d.length } : r;
+  }
+  function dayStart(v) { if (!v) return null; var d = new Date(v); return isNaN(d) ? null : d.toISOString(); }
+
+  /* parties (+ drivers / trucks) */
+  var PARTY_COLS = 'id,org_id,kinds,name_ar,name_en,cr_number,vat_number,phone,email,notes,is_active,created_at,updated_at';
+  var DRIVER_COLS = 'id,org_id,carrier_id,full_name,phone,national_id_last4,license_no,is_active,created_at,updated_at';
+  var TRUCK_COLS = 'id,org_id,carrier_id,plate_no,plate_type,is_active,created_at,updated_at';
+  // f = { kind, search, active (default true; false = include inactive), orgId, limit, offset }
+  function listParties(f) {
+    f = f || {};
+    return inActiveOrg(f.orgId, function (oid) {
+      return online(function (c) {
+        var q = c.from('parties').select(PARTY_COLS, { count: 'exact' }).eq('org_id', oid).order('name_ar');
+        if (f.kind) q = q.contains('kinds', [f.kind]);
+        if (f.active !== false) q = q.eq('is_active', true);
+        if (f.search) { var s = likeSafe(f.search); if (s) q = q.or('name_ar.ilike.%' + s + '%,name_en.ilike.%' + s + '%,cr_number.ilike.%' + s + '%,vat_number.ilike.%' + s + '%'); }
+        return range(q, f);
+      });
+    });
+  }
+  function saveParty(p) { return saveRow('parties', PARTY_COLS, p, function () { return orgId(); }); }
+  function listChildren(table, cols, order, carrierId) {
+    return inActiveOrg(null, function (oid) {
+      return online(function (c) {
+        var q = c.from(table).select(cols).eq('org_id', oid).order(order);
+        if (carrierId) q = q.eq('carrier_id', carrierId);
+        return q.limit(500);
+      });
+    });
+  }
+  function listDrivers(carrierId) { return listChildren('drivers', DRIVER_COLS, 'full_name', carrierId); }
+  function listTrucks(carrierId) { return listChildren('trucks', TRUCK_COLS, 'plate_no', carrierId); }
+  function saveDriver(p) {
+    p = p || {};
+    if (!p.id && !p.carrier_id) return Promise.resolve(fail('MRS_REQUIRED', 'carrier_id'));
+    return saveRow('drivers', DRIVER_COLS, p, function () { return orgOfRow('parties', p.carrier_id); });
+  }
+  function saveTruck(p) {
+    p = p || {};
+    if (!p.id && !p.carrier_id) return Promise.resolve(fail('MRS_REQUIRED', 'carrier_id'));
+    if (p.plate_no) p = Object.assign({}, p, { plate_no: String(p.plate_no).trim().toUpperCase() });
+    return saveRow('trucks', TRUCK_COLS, p, function () { return orgOfRow('parties', p.carrier_id); });
+  }
+
+  /* client identity (G3.2) — alias_norm is computed by the server */
+  var ALIAS_COLS = 'id,org_id,client_id,alias,alias_norm,source,created_by,created_at';
+  function listClientAliases(clientId) {
+    return online(function (c) { return c.from('client_aliases').select(ALIAS_COLS).eq('client_id', clientId).order('created_at'); });
+  }
+  function addClientAlias(clientId, alias, source) {
+    var a = String(alias || '').replace(/\s+/g, ' ').trim();
+    if (!a) return Promise.resolve(fail('MRS_REQUIRED', 'alias'));
+    return orgOfRow('clients', clientId).then(function (r) {
+      if (r.error) return r;
+      return online(function (c) {
+        return c.from('client_aliases').insert({ org_id: r.data, client_id: clientId, alias: a.slice(0, 200), source: source || 'manual' }).select(ALIAS_COLS).single();
+      });
+    });
+  }
+  function removeClientAlias(id) {
+    return online(function (c) { return c.from('client_aliases').delete().eq('id', id).select('id').maybeSingle(); });
+  }
+  // payload = { name, vat_number, cr_number } → ranked candidates [{client_id, name_ar, strength, reasons…}]; never links
+  function matchClient(payload, o) {
+    o = o || {};
+    return inActiveOrg(o.orgId, function (oid) { return rpc('match_client', { p_org: oid, p_payload: payload || {} }); });
+  }
+
+  /* customs declarations (G3.5) — any status; the newest first */
+  // notes / cancel_reason are not API-selectable (column grants): staff get them through staff_internal_fields()
+  var DECL_COLS = 'id,org_id,transaction_id,declaration_no,declaration_type,declaration_date,status,source,source_document_id,' +
+    'corrected_at,cancelled_at,replaced_by_id,created_by,created_at,updated_at';
+  var DECL_CLIENT_COLS = 'id,transaction_id,declaration_no,declaration_type,declaration_date,status,replaced_by_id,created_at';
+  // o = { minimal } (portal: number / type / date / status only)
+  function listDeclarations(txId, o) {
+    o = o || {};
+    return online(function (c) {
+      return c.from('customs_declarations').select(o.minimal ? DECL_CLIENT_COLS : DECL_COLS).eq('transaction_id', txId)
+        .order('created_at', { ascending: false });
+    }).then(function (r) { return o.minimal ? r : withInternal('customs_declarations', r); });
+  }
+  // p = { declaration_no, declaration_type, declaration_date, status, source, source_document_id, notes }
+  function addDeclaration(txId, p, opts) {
+    opts = opts || {};
+    return idemRpc('add_declaration', opts.idemKey, function (k) { return { p_tx: txId, p_payload: p || {}, p_idem_key: k }; });
+  }
+  function setDeclarationStatus(id, s, note) { return rpc('set_declaration_status', { p_id: id, p_status: s, p_note: note || null }); }
+  // replacement (optional) = a new declaration payload linked via replaced_by_id, in the same server transaction
+  function cancelDeclaration(id, reason, replacement) {
+    return rpc('cancel_declaration', { p_id: id, p_reason: reason || null, p_replacement: replacement || null });
+  }
+  function correctDeclaration(id, p, reason) { return rpc('correct_declaration', { p_id: id, p_payload: p || {}, p_reason: reason || null }); }
+
+  /* bills of lading (G3.6) — many-to-many with transactions */
+  var BL_COLS = 'id,org_id,bl_number,bl_type,shipping_agent_id,carrier_name,vessel,voyage,port_of_loading,port_of_discharge,' +
+    'origin_country,goods_description,packages,gross_weight_kg,issued_at,created_by,created_at,updated_at';
+  var BL_CLIENT_COLS = 'id,bl_number,bl_type,vessel,voyage,port_of_loading,port_of_discharge';
+  // listBLs(txId) → the transaction's B/Ls [{…bl, is_primary, linked_at}] (primary first);
+  // listBLs({ search, orgId, limit }) → the org's B/L register (to link an existing one).
+  // o = { minimal } (portal)
+  function listBLs(txId, o) {
+    o = o || {};
+    if (txId && typeof txId === 'object') {
+      var f = txId;
+      return inActiveOrg(f.orgId, function (oid) {
+        return online(function (c) {
+          var q = c.from('bills_of_lading').select(BL_COLS, { count: 'exact' }).eq('org_id', oid).order('created_at', { ascending: false });
+          if (f.search) { var pat = likeContains(f.search); if (pat) q = q.ilike('bl_number', pat); }
+          return range(q, f);
+        });
+      }).then(function (r) { return withInternal('bills_of_lading', r); });
+    }
+    return online(function (c) {
+      return c.from('transaction_bls').select('transaction_id,bl_id,is_primary,created_at,bills_of_lading(' + (o.minimal ? BL_CLIENT_COLS : BL_COLS) + ')')
+        .eq('transaction_id', txId).order('is_primary', { ascending: false }).order('created_at');
+    }).then(function (r) {
+      if (r.error) return r;
+      var rows = (r.data || []).filter(function (x) { return x && x.bills_of_lading; }).map(function (x) {
+        return Object.assign({}, x.bills_of_lading, { is_primary: !!x.is_primary, linked_at: x.created_at, transaction_id: x.transaction_id });
+      });
+      return o.minimal ? ok(rows) : withInternal('bills_of_lading', ok(rows));
+    });
+  }
+  // p = { id? (update), bl_number, bl_type, shipping_agent_id, carrier_name, vessel, voyage, …,
+  //       transaction_id + primary (optional: link in the same server transaction → result.linked) }
+  function saveBL(p, opts) {
+    opts = opts || {};
+    return idemRpc('save_bl', opts.idemKey, function (k) { return { p_payload: withKey(p, null), p_idem_key: k }; });
+  }
+  function linkBL(txId, blId, primary) { return rpc('link_bl', { p_tx: txId, p_bl: blId, p_primary: !!primary }); }
+  function unlinkBL(txId, blId, reason) { return rpc('unlink_bl', { p_tx: txId, p_bl: blId, p_reason: reason || null }); }
+
+  /* containers (G3.7 / G3.13) — updateContainer (above) patches operational fields */
+  // every visit of a container number in the org (a number may repeat across transactions)
+  function containerHistory(no, o) {
+    o = o || {};
+    var n = String(no || '').toUpperCase().replace(/[\s-]/g, '');
+    if (!n) return Promise.resolve(fail('MRS_REQUIRED', 'container_no'));
+    return inActiveOrg(o.orgId, function (oid) { return rpc('container_history', { p_org: oid, p_container_no: n }).then(rowsOrList); });
+  }
+  // p = { return_deadline, return_yard_party_id, return_location, return_instruction_document_id } (evidence_received_at: server-stamped)
+  // (returned_verified keeps its own evidence path: updateContainer with a confirmed empty_return_receipt)
+  function setContainerReturn(id, p) { return rpc('set_container_return', { p_container: id, p_payload: p || {} }); }
+
+  /* completeness + document checklist (G3.4 / G3.10) */
+  function txCompleteness(txId) { return rpc('transaction_completeness', { p_tx: txId }); }
+  function txChecklist(txId) { return rpc('tx_checklist', { p_tx: txId }).then(rowsOrList); }
+  var REQ_RULE_COLS = 'id,org_id,operation,mode,port,document_kind,required_for_stage,is_optional,is_active,note,created_at,updated_at';
+  function listRequirements(f) {
+    f = f || {};
+    return inActiveOrg(f.orgId, function (oid) {
+      return online(function (c) {
+        return c.from('document_requirements').select(REQ_RULE_COLS).eq('org_id', oid)
+          .order('operation').order('mode').order('required_for_stage').order('document_kind');
+      });
+    });
+  }
+  function saveRequirement(p) { return saveRow('document_requirements', REQ_RULE_COLS, p, function () { return orgId(); }); }
+
+  /* port appointments (G3.11) — a reschedule is a NEW row; the old one becomes 'rescheduled' */
+  var APPT_COLS = 'id,org_id,transaction_id,container_id,terminal_party_id,appointment_at,window_minutes,appointment_no,driver_id,truck_id,' +
+    'status,status_reason,rescheduled_from_id,created_by,created_at,updated_at,transactions(id,ref,branch_id),containers(container_no)';
+  var APPT_CLIENT_COLS = 'id,transaction_id,container_id,appointment_at,window_minutes,status';
+  // f = { txId, containerId, status (code or array), terminalId, driverId, from, to (ISO / date), orgId, limit, offset, minimal }
+  function listAppointments(f) {
+    f = f || {};
+    function build(c, oid) {
+      var q = c.from('port_appointments').select(f.minimal ? APPT_CLIENT_COLS : APPT_COLS, f.minimal ? undefined : { count: 'exact' }).order('appointment_at');
+      if (oid) q = q.eq('org_id', oid);
+      if (f.txId) q = q.eq('transaction_id', f.txId);
+      if (f.containerId) q = q.eq('container_id', f.containerId);
+      if (f.status) q = Array.isArray(f.status) ? q.in('status', f.status) : q.eq('status', f.status);
+      if (f.terminalId) q = q.eq('terminal_party_id', f.terminalId);
+      if (f.driverId) q = q.eq('driver_id', f.driverId);
+      if (f.from) q = q.gte('appointment_at', dayStart(f.from));
+      if (f.to) q = q.lt('appointment_at', dayStart(f.to));
+      return range(q, Object.assign({ limit: 500 }, f));
+    }
+    // a transaction's rows need no org filter (RLS + the transaction scope it); the portal never sends one
+    if (f.txId || f.minimal) return online(function (c) { return build(c, f.orgId || null); });
+    return inActiveOrg(f.orgId, function (oid) { return online(function (c) { return build(c, oid); }); });
+  }
+  // p = { transaction_id, container_id, terminal_party_id, appointment_at, window_minutes, appointment_no, driver_id, truck_id, status }
+  function createAppointment(p, opts) {
+    opts = opts || {};
+    return idemRpc('create_appointment', opts.idemKey, function (k) { return { p_payload: withKey(p, null), p_idem_key: k }; });
+  }
+  function rescheduleAppointment(id, p, reason, opts) {
+    opts = opts || {};
+    return idemRpc('reschedule_appointment', opts.idemKey, function (k) { return { p_id: id, p_payload: withKey(p, null), p_reason: reason || null, p_idem_key: k }; });
+  }
+  function setAppointmentStatus(id, s, reason) { return rpc('set_appointment_status', { p_id: id, p_status: s, p_reason: reason || null }); }
+
+  /* transport trips (G3.12) — cost / sell come only from tripFinance() (column grants) */
+  // notes are API-selectable (staff only read trips); only cost / sell / currencies / cost_basis are outside the grant
+  var TRIP_COLS = 'id,org_id,transaction_id,container_id,leg_no,carrier_id,driver_id,truck_id,origin,destination,planned_at,loaded_at,' +
+    'unloaded_at,status,status_reason,notes,created_by,created_at,updated_at,transactions(id,ref,branch_id),containers(container_no)';
+  // f = { txId, containerId, status, carrierId, driverId, from, to (planned_at), anyAt, orgId, limit, offset }
+  // anyAt (with from + to): the window matches planned_at, else loaded_at, else unloaded_at (a leg created
+  // without a planned time still shows on a board once it is loaded / delivered)
+  function listTrips(f) {
+    f = f || {};
+    function build(c, oid) {
+      var q = c.from('transport_trips').select(TRIP_COLS, { count: 'exact' }).order('planned_at', { nullsFirst: false }).order('leg_no');
+      if (oid) q = q.eq('org_id', oid);
+      if (f.txId) q = q.eq('transaction_id', f.txId);
+      if (f.containerId) q = q.eq('container_id', f.containerId);
+      if (f.status) q = Array.isArray(f.status) ? q.in('status', f.status) : q.eq('status', f.status);
+      if (f.carrierId) q = q.eq('carrier_id', f.carrierId);
+      if (f.driverId) q = q.eq('driver_id', f.driverId);
+      if (f.anyAt && dayStart(f.from) && dayStart(f.to)) {
+        var F = '"' + dayStart(f.from) + '"', T = '"' + dayStart(f.to) + '"';
+        q = q.or('and(planned_at.gte.' + F + ',planned_at.lt.' + T + '),' +
+          'and(planned_at.is.null,loaded_at.gte.' + F + ',loaded_at.lt.' + T + '),' +
+          'and(planned_at.is.null,loaded_at.is.null,unloaded_at.gte.' + F + ',unloaded_at.lt.' + T + ')');
+      } else {
+        if (f.from) q = q.gte('planned_at', dayStart(f.from));
+        if (f.to) q = q.lt('planned_at', dayStart(f.to));
+      }
+      return range(q, Object.assign({ limit: 500 }, f));
+    }
+    return f.txId ? online(function (c) { return build(c, f.orgId || null); })
+      : inActiveOrg(f.orgId, function (oid) { return online(function (c) { return build(c, oid); }); });
+  }
+  // p = { transaction_id, container_id, leg_no, carrier_id, driver_id, truck_id, origin, destination, planned_at,
+  //       cost_amount, cost_currency, sell_amount, sell_currency, cost_basis, notes }
+  function createTrip(p, opts) {
+    opts = opts || {};
+    return idemRpc('create_trip', opts.idemKey, function (k) { return { p_payload: withKey(p, null), p_idem_key: k }; });
+  }
+  function updateTrip(id, p) { return rpc('update_trip', { p_id: id, p_payload: p || {} }); }
+  function setTripStatus(id, s, at, note) { return rpc('set_trip_status', { p_id: id, p_status: s, p_at: at || null, p_note: note || null }); }
+  // { <trip id>: {cost_amount, cost_currency, sell_amount?, sell_currency?, cost_basis} } — only for the roles allowed
+  // (the server leaves out what the caller may not see; transport_staff / clients get nothing)
+  function tripFinance(ids) {
+    ids = (ids || []).filter(isUuid).slice(0, 500);
+    if (!ids.length) return Promise.resolve(ok({}));
+    return rpc('trip_finance', { p_ids: ids }).then(function (r) {
+      if (r.error || !Array.isArray(r.data)) return r;
+      var map = {};   // tolerate a row list
+      r.data.forEach(function (x) { if (x && x.id) map[x.id] = x; });
+      return ok(map);
+    });
+  }
+
+  /* operational exceptions (G3.14) */
+  var EXC_COLS = 'id,org_id,transaction_id,container_id,kind,occurred_at,source,document_id,reason,amount,currency,status,' +
+    'resolved_at,resolved_by,resolution_note,created_by,created_at,updated_at,transactions(id,ref,branch_id)';
+  // f = { txId, containerId, status (code or array), kind, from, to (occurred_at), orgId, limit, offset }
+  function listExceptions(f) {
+    f = f || {};
+    function build(c, oid) {
+      var q = c.from('operational_exceptions').select(EXC_COLS, { count: 'exact' }).order('occurred_at', { ascending: false });
+      if (oid) q = q.eq('org_id', oid);
+      if (f.txId) q = q.eq('transaction_id', f.txId);
+      if (f.containerId) q = q.eq('container_id', f.containerId);
+      if (f.status) q = Array.isArray(f.status) ? q.in('status', f.status) : q.eq('status', f.status);
+      if (f.kind) q = q.eq('kind', f.kind);
+      if (f.from) q = q.gte('occurred_at', dayStart(f.from));
+      if (f.to) q = q.lt('occurred_at', dayStart(f.to));
+      return range(q, Object.assign({ limit: 500 }, f));
+    }
+    if (f.txId) return online(function (c) { return build(c, f.orgId || null); });
+    return inActiveOrg(f.orgId, function (oid) { return online(function (c) { return build(c, oid); }); });
+  }
+  // p = { transaction_id, container_id, kind, occurred_at, source, document_id, reason, amount, currency }
+  function createException(p, opts) {
+    opts = opts || {};
+    return idemRpc('create_exception', opts.idemKey, function (k) { return { p_payload: withKey(p, null), p_idem_key: k }; });
+  }
+  function resolveException(id, s, note) { return rpc('resolve_exception', { p_id: id, p_status: s, p_note: note || null }); }
+
+  /* operational alerts (G3.16) — viewing never closes an alert */
+  // f = { status, severity, kind, branch_id, transaction_id, due_before, limit, before_id, orgId } → p_filters (orgId stripped)
+  // count_only → { data: { count, counts } } (nav badge). list_alerts accepts only the keys below and limit ≤ 200;
+  // rows get transaction_ref (= ref) and the result carries the server's per-severity counts (r.counts).
+  var ALERT_FILTER_KEYS = ['status', 'severity', 'kind', 'transaction_id', 'branch_id', 'limit', 'offset'];
+  function listAlerts(f) {
+    f = Object.assign({}, f || {});
+    var explicit = f.orgId, countOnly = !!f.count_only, pf = {};
+    ALERT_FILTER_KEYS.forEach(function (k) { if (f[k] != null && f[k] !== '') pf[k] = f[k]; });
+    if (countOnly) pf.limit = 1;
+    else if (pf.limit != null) pf.limit = Math.max(1, Math.min(200, parseInt(pf.limit, 10) || 100));
+    return inActiveOrg(explicit, function (oid) {
+      return rpc('list_alerts', { p_org: oid, p_filters: pf }).then(function (r) {
+        if (r.error || !r.data || Array.isArray(r.data)) return r;
+        var counts = r.data.counts || null;
+        if (countOnly) return ok({ count: r.data.total != null ? r.data.total : 0, counts: counts });
+        (r.data.items || []).forEach(function (a) { if (a && a.ref && !a.transaction_ref) a.transaction_ref = a.ref; });
+        var out = rowsOrList(r);
+        out.counts = counts;
+        return out;
+      });
+    });
+  }
+  function ackAlert(id) { return rpc('ack_alert', { p_id: id }); }
+  function resolveAlert(id, note) { return rpc('resolve_alert', { p_id: id, p_note: note || null }); }
+  // staff may refresh at most once per minute per org (the server rate-limits and says so)
+  function refreshAlerts(o) {
+    o = o || {};
+    return inActiveOrg(o.orgId, function (oid) { return rpc('refresh_alerts', { p_org: oid }); });
+  }
+
+  /* ------------------------------------------------------------------
      App shell: global search (command palette) + dashboard counters.
      Plain RLS-scoped PostgREST reads, limited to the active org (or o.orgId).
      ------------------------------------------------------------------ */
@@ -1278,7 +1641,10 @@
   var SEARCH_TX_COLS = 'id,org_id,ref,bl_number,declaration_no,operational_status,created_at,clients(name_ar,name_en)';
   // q ≥ 2 characters. o = { limit (≤ 8 per group), orgId }.
   // → { data: { transactions: [{…row, matched, container_no?}], clients: [{…row, matched}], requests: [{…row, matched}] }, error }
-  // Transactions match ref / B/L / declaration no. / container no.; clients name (ar/en) / CR / VAT; requests ref.
+  // Transactions match ref / B/L / declaration no. / container no., plus (G3) any customs declaration of any status
+  // (customs_declarations, incl. cancelled / replaced numbers) and every linked B/L (bills_of_lading via
+  // transaction_bls); such hits carry declaration_no + declaration_status or bl_number of the matching row.
+  // Clients name (ar/en) / CR / VAT; requests ref.
   // error only when every query failed (e.g. network); a failed group is otherwise just empty.
   function globalSearch(q, o) {
     o = o || {};
@@ -1289,17 +1655,26 @@
     var limit = Math.min(Math.max(parseInt(o.limit, 10) || 8, 1), 8);
     var oid = o.orgId || (ctxCache ? pickActiveOrg(ctxCache) : null);
     function scoped(b) { return oid ? b.eq('org_id', oid) : b; }
-    function by(table, cols, col, order) {
+    // map(row) → the transaction item of a child-table hit (or null); matched = the column reported to the caller
+    function by(table, cols, col, order, map, matched) {
       return online(function (c) {
         var b = scoped(c.from(table).select(cols)).ilike(col, pat);
         if (order) b = b.order(order, { ascending: false });
         return b.limit(limit);
-      }).then(function (r) { r.col = col; return r; });
+      }).then(function (r) { r.col = matched || col; r.map = map || null; return r; });
+    }
+    function viaTx(extra) {
+      return function (row) { return row && row.transactions ? Object.assign({}, row.transactions, extra(row)) : null; };
     }
     var groups = {
       transactions: [by('transactions', SEARCH_TX_COLS, 'ref', 'created_at'), by('transactions', SEARCH_TX_COLS, 'bl_number', 'created_at'),
         by('transactions', SEARCH_TX_COLS, 'declaration_no', 'created_at'),
-        by('containers', 'container_no,transaction_id,transactions(' + SEARCH_TX_COLS + ')', 'container_no')],
+        by('containers', 'container_no,transaction_id,transactions(' + SEARCH_TX_COLS + ')', 'container_no', null,
+          viaTx(function (row) { return { container_no: row.container_no }; })),
+        by('customs_declarations', 'declaration_no,status,transaction_id,transactions(' + SEARCH_TX_COLS + ')', 'declaration_no', 'created_at',
+          viaTx(function (row) { return { declaration_no: row.declaration_no, declaration_status: row.status }; })),
+        by('transaction_bls', 'transaction_id,bills_of_lading!inner(bl_number),transactions(' + SEARCH_TX_COLS + ')', 'bills_of_lading.bl_number', null,
+          viaTx(function (row) { return { bl_number: row.bills_of_lading && row.bills_of_lading.bl_number }; }), 'bl_number')],
       clients: ['name_ar', 'name_en', 'cr_number', 'vat_number'].map(function (col) {
         return by('clients', 'id,org_id,client_type,name_ar,name_en,cr_number,vat_number,is_active', col, null);
       }),
@@ -1315,11 +1690,7 @@
           var r = res[i++];
           if (r.error) { failed.push(r.error); return; }
           (r.data || []).forEach(function (row) {
-            var item = row;
-            if (r.col === 'container_no') {   // container hit → its transaction
-              if (!row || !row.transactions) return;
-              item = Object.assign({}, row.transactions, { container_no: row.container_no });
-            }
+            var item = r.map ? r.map(row) : row;   // container / declaration / B/L hit → its transaction
             if (!item || !item.id || seen[item.id] || out.length >= limit) return;
             seen[item.id] = true;
             out.push(Object.assign({}, item, { matched: r.col }));
@@ -1479,6 +1850,20 @@
     localExtractions: localExtractions,
     // inbox / audit
     listContactMessages: listContactMessages, setContactStatus: setContactStatus, listAudit: listAudit,
+    // G3 operations (docs/online/G3_SPEC.md)
+    listParties: listParties, saveParty: saveParty, listDrivers: listDrivers, saveDriver: saveDriver,
+    listTrucks: listTrucks, saveTruck: saveTruck,
+    listClientAliases: listClientAliases, addClientAlias: addClientAlias, removeClientAlias: removeClientAlias, matchClient: matchClient,
+    listDeclarations: listDeclarations, addDeclaration: addDeclaration, setDeclarationStatus: setDeclarationStatus,
+    cancelDeclaration: cancelDeclaration, correctDeclaration: correctDeclaration,
+    listBLs: listBLs, saveBL: saveBL, linkBL: linkBL, unlinkBL: unlinkBL,
+    containerHistory: containerHistory, setContainerReturn: setContainerReturn,
+    txCompleteness: txCompleteness, txChecklist: txChecklist, listRequirements: listRequirements, saveRequirement: saveRequirement,
+    listAppointments: listAppointments, createAppointment: createAppointment, rescheduleAppointment: rescheduleAppointment,
+    setAppointmentStatus: setAppointmentStatus,
+    listTrips: listTrips, createTrip: createTrip, updateTrip: updateTrip, setTripStatus: setTripStatus, tripFinance: tripFinance,
+    listExceptions: listExceptions, createException: createException, resolveException: resolveException,
+    listAlerts: listAlerts, ackAlert: ackAlert, resolveAlert: resolveAlert, refreshAlerts: refreshAlerts,
     // app shell
     globalSearch: globalSearch, dashboardStats: dashboardStats,
     // utils

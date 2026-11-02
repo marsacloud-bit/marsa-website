@@ -3,12 +3,13 @@
    --------------------------------------------------------------------------
    Load order: config.js → i18n.js → assets/i18n/admin.js → assets/i18n/app.js
    → main.js → supa.js → app-shell.js → pwa.js → admin.js (all defer).
-   * App shell: window.MarsaShell builds sidebar / topbar / org switcher /
-     user menu (sign out, sign out everywhere) around <main id="app-main">.
-     admin.js waits for MarsaShell.ready (my_context or null), sets the
-     title + active nav item on every route, follows 'marsa:orgchange',
-     and uses MarsaShell.toast / confirm. Without the shell it falls back
-     to its own session check and a minimal in-page section nav.
+   * Classic layout (as in efa96c9): site header + page hero + .adm-topbar
+     card (me, org switch, search, refresh, sign out) + the in-page section
+     nav #adm-nav + #adm-view. window.MarsaShell (classic helper, optional)
+     supplies MarsaShell.ready (my_context or null), the breadcrumb/title,
+     the active nav item, the open-alerts count badge, the Ctrl/⌘K search
+     palette and toast / confirm. Without it the page keeps its own session
+     check, nav and document title.
    * Online only. In demo mode (empty config) the page shows a notice and
      never touches localStorage data.
    * Role guard: any active staff membership in the active org (the shell's
@@ -23,6 +24,12 @@
    * All user-supplied values are HTML-escaped before rendering (esc()).
      The G2 console views (org, branches, members & invitations, audit,
      client errors) build DOM nodes and set data with textContent only.
+   * G3 (docs/online/G3_SPEC.md): assets/js/ops/*.js register MarsaOps.views
+     (merged into the routing with the R role sets) and MarsaOps.txSections
+     (rendered inside #tx/<id> after the cards below); see "G3 module hook".
+     admin.js itself adds the dashboard alert / appointment KPIs, client
+     aliases, matchClient candidates in request conversion and the new
+     transaction dialog (from a B/L or partial data).
    * Local helpers that MarsaApi does not provide yet (see "LOCAL API GAPS")
      use MarsaApi.client after MarsaApi.ready() and the same {data,error} shape.
    ========================================================================== */
@@ -36,7 +43,7 @@
   var gate = document.getElementById('adm-gate');
   var app = document.getElementById('adm-app');
   var view = document.getElementById('adm-view');
-  var nav = null;   // fallback section nav (only without the app shell)
+  var nav = document.getElementById('adm-nav');   // in-page section nav (ul.adm-nav-list)
   if (!gate || !app || !view) return;
 
   /* ------------------------------------------------------------------
@@ -92,7 +99,9 @@
     service: { clearance: 'تخليص جمركي متكامل', aci: 'البيان المسبق ومنصة فسح', hs: 'تصنيف HS Code', inspection: 'متابعة المعاينة والإفراج', door: 'تخليص وتوصيل', freight: 'شحن دولي مع التخليص', export: 'تخليص صادرات', consult: 'استشارة جمركية' },
     subject: { quote: 'طلب عرض سعر', aci: 'البيان المسبق ومنصة فسح', saber: 'شهادة سابر', hs: 'تصنيف HS Code', duties: 'الرسوم والضريبة', tracking: 'متابعة شحنة', export: 'التصدير والشحن', partnership: 'شراكات', complaint: 'شكوى أو اقتراح', other: 'موضوع آخر' },
     container_type: { '20ft': '20 قدم', '40ft': '40 قدم', '40hc': '40 قدم عالية', '45ft': '45 قدم', '20rf': '20 قدم مبردة', '40rf': '40 قدم مبردة', LCL: 'شحنة جزئية LCL', other: 'أخرى' },
-    event_type: { created: 'إنشاء المعاملة', request_converted: 'تحويل من طلب خدمة', operational_status: 'تغيير الحالة التشغيلية', financial_status: 'تغيير الحالة المالية', container_return: 'حالة إرجاع حاوية', document: 'مستند', note: 'ملاحظة', tracking_token: 'إصدار رمز تتبع' }
+    event_type: { created: 'إنشاء المعاملة', request_converted: 'تحويل من طلب خدمة', operational_status: 'تغيير الحالة التشغيلية', financial_status: 'تغيير الحالة المالية', container_return: 'حالة إرجاع حاوية', document: 'مستند', note: 'ملاحظة', tracking_token: 'إصدار رمز تتبع',
+      // G3 (transaction children)
+      declaration: 'البيان الجمركي', bill_of_lading: 'بوليصة الشحن', bl: 'بوليصة الشحن', container: 'حاوية', container_state: 'الحالة التشغيلية للحاوية', appointment: 'موعد الميناء', trip: 'رحلة نقل', exception: 'استثناء تشغيلي', override: 'تجاوز قاعدة المستندات', docs_override: 'تجاوز قاعدة المستندات' }
   };
   var LABELS = JSON.parse(JSON.stringify(FALLBACK));
   var LABELS_EN = {};   // status_labels.label_en per domain (filled by loadLabels)
@@ -263,12 +272,14 @@
     import_row_status: { pending: 'blue', valid: 'success', error: 'danger', duplicate: 'warning', committed: 'navy', skipped: 'blue' },
     batch_status: { draft: 'warning', committed: 'success', cancelled: 'danger' }
   };
-  // legacy colour names → status-pill tones (app.css .pill + admin.css [data-tone])
+  // colour names → tones (chart bars use [data-tone]); badges use the style.css .badge-<colour> classes
   var TONE = { blue: 'info', teal: 'brand', navy: 'neutral', warning: 'warning', danger: 'danger', success: 'success' };
+  var BCOL = { info: 'blue', brand: 'teal', neutral: 'navy', muted: 'muted', success: 'success', warning: 'warning', danger: 'danger', blue: 'blue', teal: 'teal', navy: 'navy' };
   function toneOf(domain, code) { return TONE[(BADGE[domain] || {})[code] || 'blue'] || 'info'; }
-  function pillHtml(tone, text) { return '<span class="pill pill-' + tone + ' adm-pill" data-tone="' + tone + '">' + esc(text) + '</span>'; }
+  function badgeCls(tone) { return 'badge badge-' + (BCOL[tone] || 'blue'); }
+  function pillHtml(tone, text) { return '<span class="' + badgeCls(tone) + '">' + esc(text) + '</span>'; }
   function badge(domain, code) { return pillHtml(toneOf(domain, code), lbl(domain, code)); }
-  function pillNode(tone, text) { return el('span', { class: 'pill pill-' + tone + ' adm-pill', 'data-tone': tone, text: text }); }
+  function pillNode(tone, text) { return el('span', { class: badgeCls(tone), text: text }); }
   function badgeNode(domain, code) { return pillNode(toneOf(domain, code), lbl(domain, code)); }
   function kv(rows) {
     return '<ul class="kv">' + rows.filter(Boolean).map(function (r) {
@@ -278,18 +289,10 @@
   function alertBox(type, text, html) {
     return '<div class="alert alert-' + type + '" role="' + (type === 'danger' ? 'alert' : 'status') + '">' + icon('info') + '<div>' + (html ? text : esc(text)) + '</div></div>';
   }
-  function emptyRow(cols, text) {
-    return '<tr class="adm-empty-row"><td colspan="' + cols + '"><div class="empty-state is-compact"><div class="empty-state-icon">' + icon('inbox') + '</div><p>' + esc(text || T.common.empty) + '</p></div></td></tr>';
-  }
-  // skeleton placeholder while a view loads (shape: header + toolbar + rows)
-  function loadingBox() {
-    var rows = '';
-    for (var i = 0; i < 7; i++) rows += '<span class="skeleton skeleton-text' + (i % 3 === 2 ? ' is-mid' : '') + '"></span>';
-    return '<div class="adm-skel" role="status"><span class="adm-sr">' + esc(t('loading')) + '</span>' +
-      '<span class="skeleton skeleton-title"></span><span class="skeleton skeleton-text is-short"></span>' +
-      '<div class="adm-skel-kpis"><span class="skeleton skeleton-block"></span><span class="skeleton skeleton-block"></span><span class="skeleton skeleton-block"></span></div>' +
-      '<div class="app-card adm-skel-card">' + rows + '</div></div>';
-  }
+  function emptyRow(cols, text) { return '<tr><td colspan="' + cols + '" class="adm-empty">' + esc(text || T.common.empty) + '</td></tr>'; }
+  function loadingBox() { return '<div class="adm-loading" role="status"><span class="adm-spinner" aria-hidden="true"></span>' + esc(tx2('loading', T.common.loading)) + '</div>'; }
+  // translated string with an Arabic fallback when the key is missing
+  function tx2(k, fallback) { var s = t(k); return s === k ? fallback : s; }
 
   /* ------------------------------------------------------------------
      LOCAL API GAPS — queries MarsaApi does not expose (yet).
@@ -491,8 +494,8 @@
       actions = '<button class="btn btn-primary" type="button" data-gate="retry">' + esc(t('gate_retry')) + '</button>';
     }
     if (isEn()) { var k = 'gate_' + kind + '_title', k2 = 'gate_' + kind + '_text'; if (t(k) !== k) title = t(k); if (kind !== 'error' && t(k2) !== k2) text = t(k2); }
-    gateBody.innerHTML = '<span class="adm-gate-icon" aria-hidden="true">' + icon(ico) + '</span>' +
-      '<h2>' + esc(title) + '</h2><p class="text-muted">' + esc(text) + '</p><div class="adm-gate-actions">' + actions + '</div>';
+    gateBody.innerHTML = '<span class="icon-box icon-box-lg icon-box-soft">' + icon(ico) + '</span>' +
+      '<h2>' + esc(title) + '</h2><p class="text-muted">' + esc(text) + '</p><div class="btn-group adm-gate-actions">' + actions + '</div>';
     setPageTitle(t('page_title'), null);
   }
   gate.addEventListener('click', function (e) {
@@ -502,9 +505,21 @@
     if (b.getAttribute('data-gate') === 'signout') signOut();
   });
 
-  // sign out / sign out everywhere live in the shell's user menu; the forbidden gate keeps its own button
   function signOut() {
     api.signOut().then(function () { location.href = 'login.html#staff'; });
+  }
+  // revokes the refresh tokens of every device (other devices end within their access-token lifetime)
+  function signOutAll() {
+    var b = document.getElementById('adm-signout-all');
+    askConfirm({ title: t('signout_all'), text: tx2('signout_all_confirm', 'سيُنهى الدخول على كل الأجهزة المسجّلة بهذا الحساب. هل تريد المتابعة؟'), okText: t('signout_all'), danger: true }).then(function (ok) {
+      if (!ok) return;
+      if (b) b.disabled = true;
+      api.signOutEverywhere().then(function (r) {
+        if (b) b.disabled = false;
+        if (r && r.error) return toast(errText(r.error), 'error');
+        location.href = 'login.html#staff';
+      });
+    });
   }
 
   // MarsaShell.ready → my_context data, or null (signed out / demo). Tolerates a {data,error} value.
@@ -607,27 +622,178 @@
     { id: 'audit', allow: R.auditRead },
     { id: 'errors', allow: R.orgAdmin }
   ];
-  function allowedViews() { return VIEWS.filter(function (v) { return canAny(v.allow); }); }
+  /* ------------------------------------------------------------------
+     G3 module hook — assets/js/ops/*.js load before admin.js and register
+       MarsaOps.views.<id>  = { allow: 'staff'|'opsWriter'|'transportWriter'|'orgAdmin'|'finance' (or a role list),
+                                titleKey, render(root, opsApi, param) }   → route #<id> / #<id>/<param>
+       MarsaOps.txSections  = [{ id, order, render(root, tx, opsApi) }] → inside #tx/<id>, after admin.js' own cards
+     The hook is read on every route, so a module that registers late still shows up.
+     ------------------------------------------------------------------ */
+  var OPS = window.MarsaOps = window.MarsaOps || { views: {}, txSections: [] };
+  var OPS_SETS = ['staff', 'opsWriter', 'transportWriter', 'orgAdmin', 'finance'];
+  function opsRoleSet(allow) {
+    if (Array.isArray(allow)) return allow;
+    return OPS_SETS.indexOf(allow) !== -1 ? R[allow] : R.staff;
+  }
+  function opsView(id) {
+    var v = OPS.views && Object.prototype.hasOwnProperty.call(OPS.views, id) ? OPS.views[id] : null;
+    return v && typeof v.render === 'function' && /^[a-z][a-z0-9_-]{0,30}$/.test(id) ? v : null;
+  }
+  function opsViewList() {
+    var builtIn = VIEWS.map(function (v) { return v.id; }).concat(Object.keys(DETAIL));
+    return Object.keys(OPS.views || {}).filter(function (id) { return builtIn.indexOf(id) === -1 && opsView(id); })
+      .map(function (id) { return { id: id, allow: opsRoleSet(OPS.views[id].allow), ops: OPS.views[id] }; });
+  }
+  function allowedViews() { return VIEWS.concat(opsViewList()).filter(function (v) { return canAny(v.allow); }); }
+  // what the modules get (one object per render; S may change on an org switch)
+  function opsApi() {
+    var I = window.MarsaI18n;
+    return {
+      orgId: S.orgId, roles: S.roles.slice(), branches: S.branches.slice(), userId: S.ctx ? S.ctx.user_id : null,
+      // can('opsWriter') · can('transportWriter', tx.branch_id) · can(['admin', 'supervisor'], branchId)
+      can: function (set, branchId) {
+        var roles = Array.isArray(set) ? set : R[set];
+        if (!roles) return false;
+        return branchId ? canAt(branchId, roles) : canAny(roles);
+      },
+      t: function (key, vars) { return I && typeof I.t === 'function' ? I.t(key, vars) : key; },
+      el: el, toast: toast, confirm: askConfirm, modal: opsModal, go: go, refresh: rerender,
+      MarsaApi: api, label: opsLabel, fmtDate: fmtWhen, fmtMoney: fmtMoney, fmtNumber: fmtCount,
+      who: who, isEn: isEn, errText: apiErr, newIdemKey: newKey
+    };
+  }
+  // status_labels / admin dictionaries first, then 'label.<domain>.<code>' (MarsaI18n.label) and the ops dictionaries
+  function opsLabel(domain, code) {
+    if (code == null || code === '') return T.common.none;
+    if (LABELS[domain] && LABELS[domain][code] != null) return lbl(domain, code);
+    var I = window.MarsaI18n, keys = ['label.' + domain + '.' + code, 'ops.' + domain + '_' + code, 'opstx.lbl_' + domain + '_' + code];
+    if (I && typeof I.t === 'function') {
+      for (var i = 0; i < keys.length; i++) { var s = I.t(keys[i]); if (s && s !== keys[i]) return s; }
+    }
+    return String(code);
+  }
+  function fmtMoney(n, currency) {
+    if (n == null || n === '') return T.common.none;
+    var I = window.MarsaI18n;
+    if (I && typeof I.fmtMoney === 'function') { try { return I.fmtMoney(+n, currency || 'SAR'); } catch (e) { /* plain */ } }
+    return (+n).toFixed(2) + ' ' + (currency || 'SAR');
+  }
+  // modal({ title, body: Node | Node[] | fn(bodyEl) → Node(s), submitText, danger, wide, noSubmit,
+  //         onSubmit(form, bodyEl) → true (close) | 'error text' | Promise of those, onOpen(bodyEl) })
+  // Uses the page's native <dialog>; form fields are read through form.elements[name].
+  function opsModal(o) {
+    o = o || {};
+    openDialog({
+      title: o.title || '', body: '', submit: o.submitText || o.submit || o.okText, danger: !!o.danger, wide: !!o.wide, noSubmit: !!o.noSubmit,
+      onSubmit: o.onSubmit ? function (form) { return o.onSubmit(form, dlgBody); } : null,
+      onOpen: function (b) {
+        var kids = typeof o.body === 'function' ? o.body(b) : o.body;
+        if (kids) append(b, kids);
+        if (o.onOpen) o.onOpen(b);
+      }
+    });
+    return { close: closeDialog, body: dlgBody, error: dialogError };
+  }
+  // a registered view: the module fills root (sync or async); a throw shows inside the view.
+  // root is returned (and attached) at once, not after the module's promise: the views paint async
+  // results only while root is connected (MarsaOps.ui scope), so waiting would leave them loading.
+  function renderOpsView(id, param) {
+    var def = opsView(id), root = el('div', { class: 'ops-view', 'data-ops-view': id });
+    if (!def) return root;
+    try {
+      var p = def.render(root, opsApi(), param || null);
+      if (p && typeof p.then === 'function') p.then(null, function (e) { root.appendChild(dAlert('danger', errText(e))); });
+    } catch (e) { root.appendChild(dAlert('danger', errText(e))); }
+    return root;
+  }
+  // transaction detail sections, sorted by order; each fails on its own
+  function renderTxSections(host, tx) {
+    var list = (Array.isArray(OPS.txSections) ? OPS.txSections : []).filter(function (s) { return s && typeof s.render === 'function'; })
+      .slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+    var seen = {};
+    list.forEach(function (s) {
+      if (s.id && seen[s.id]) return;   // a module loaded twice
+      if (s.id) seen[s.id] = true;
+      var box = el('div', { class: 'ops-tx-section', 'data-section': s.id || null });
+      host.appendChild(box);
+      try {
+        var p = s.render(box, tx, opsApi());
+        if (p && typeof p.then === 'function') p.then(null, function (e) { box.appendChild(dAlert('danger', errText(e))); });
+      } catch (e) { box.appendChild(dAlert('danger', errText(e))); }
+    });
+  }
 
   function startApp() {
     gate.hidden = true; app.hidden = false;
-    if (!SH) buildNav();
+    fillMe();
+    buildNav();
+    fillOrgSwitch();
     if (window.MarsaI18n && typeof window.MarsaI18n.apply === 'function') { try { window.MarsaI18n.apply(app); } catch (e) { /* static Arabic stays */ } }
     route();
   }
-  // fallback section nav, only when the app shell is not loaded
-  function buildNav() {
-    if (!nav) {
-      var wrap = el('nav', { class: 'adm-nav', 'aria-label': t('nav_aria') });
-      nav = el('ul', { class: 'adm-nav-list' });
-      wrap.appendChild(nav);
-      app.insertBefore(wrap, view);
-    }
-    nav.textContent = '';
-    allowedViews().forEach(function (v) {
-      nav.appendChild(el('li', null, el('a', { class: 'adm-nav-link', href: '#' + v.id, 'data-view': v.id, text: viewLabel(v.id) })));
-    });
+  // .adm-topbar: name + roles per branch (my_context profile / memberships of the active org)
+  function fillMe() {
+    var p = (S.ctx && S.ctx.profile) || {};
+    var nameEl = document.getElementById('adm-me-name'), rolesEl = document.getElementById('adm-me-roles');
+    if (nameEl) nameEl.textContent = p.full_name || tx2('me_staff', 'موظف');
+    if (rolesEl) rolesEl.textContent = S.memberships.map(function (m) {
+      var b = m.branch_id ? (branchName(m.branch_id) || m.branch_name_ar || t('branch_specific')) : t('all_branches');
+      return roleLabel(m.role) + ' — ' + b;
+    }).filter(function (x, i, a) { return a.indexOf(x) === i; }).join(isEn() ? ', ' : '، ');
   }
+  // In-page section nav (original pill bar): the admin views this role may open (VIEWS + G3 module
+  // views), then the staff pages elsewhere (bulk upload, OCR, platform) from MarsaShell.navItems().
+  // Each link carries data-nav-id so MarsaShell.setActive / setBadge('alerts') find it.
+  var NAV_EXTERNAL = ['bulk', 'ocr', 'platform'];
+  // daily work → G3 operations → management (unknown module views go last, stable)
+  var NAV_ORDER = ['dashboard', 'requests', 'transactions', 'clients', 'messages', 'imports', 'alerts', 'schedule', 'exceptions', 'parties',
+    'org', 'branches', 'members', 'requirements', 'audit', 'errors'];
+  function buildNav() {
+    if (!nav) return;
+    nav.textContent = '';
+    var rank = function (v) { var i = NAV_ORDER.indexOf(v.id); return i === -1 ? NAV_ORDER.length : i; };
+    allowedViews().slice().sort(function (a, b) { return rank(a) - rank(b); }).forEach(function (v) {
+      nav.appendChild(el('li', null, el('a', { class: 'adm-nav-link', href: '#' + v.id, 'data-view': v.id, 'data-nav-id': v.id, text: viewLabel(v.id) })));
+    });
+    var items = [];
+    if (SH && typeof SH.navItems === 'function') { try { items = SH.navItems() || []; } catch (e) { items = []; } }
+    items.filter(function (n) { return n && !n.local && NAV_EXTERNAL.indexOf(n.id) !== -1 && /^[a-z-]+\.html$/.test(n.page || ''); }).forEach(function (n) {
+      nav.appendChild(el('li', { class: 'adm-nav-ext' }, el('a', { class: 'adm-nav-link', href: n.href, 'data-nav-id': n.id, text: n.label })));
+    });
+    if (SH && typeof SH.setBadge === 'function') { try { SH.setBadge('alerts'); } catch (e) { /* helper optional */ } }
+  }
+  var orgWrap = document.getElementById('adm-org-switch-wrap');
+  var orgSel = document.getElementById('adm-org-switch');
+  function orgName(o) { return (isEn() && o.name_en) || o.name_ar || o.slug || String(o.org_id).slice(0, 8); }
+  function fillOrgSwitch() {
+    if (!orgWrap || !orgSel) return;
+    orgSel.textContent = '';
+    S.orgs.forEach(function (o) { orgSel.appendChild(el('option', { value: o.org_id, text: orgName(o) })); });
+    orgSel.value = S.orgId || '';
+    orgWrap.hidden = S.orgs.length < 2;
+  }
+  // MarsaApi.setActiveOrg stores the org and fires 'marsa:orgchange' (handled below: reload this org)
+  function switchOrg(id) {
+    if (!id || id === S.orgId || !UUID_RE.test(id)) return;
+    orgSel.disabled = true;
+    var viaApi = api && typeof api.setActiveOrg === 'function';
+    var p = viaApi
+      ? Promise.resolve().then(function () { return api.setActiveOrg(id); })
+      : Promise.resolve((function () { try { localStorage.setItem('marsa_active_org', id); } catch (e) { /* private mode */ } return null; })());
+    p.then(function (r) {
+      orgSel.disabled = false;
+      if (r && r.error) { orgSel.value = S.orgId; return toast(apiErr(r.error), 'error'); }
+      // an older supa.js without the event: switch here
+      if (S.orgId !== id && orgPending !== id) onOrgChange(id);
+    }, function (e) { orgSel.disabled = false; orgSel.value = S.orgId; toast(errText(e), 'error'); });
+  }
+  if (orgSel) orgSel.addEventListener('change', function () { switchOrg(orgSel.value); });
+  var soBtn = document.getElementById('adm-signout');
+  if (soBtn) soBtn.addEventListener('click', signOut);
+  var soAll = document.getElementById('adm-signout-all');
+  if (soAll) soAll.addEventListener('click', signOutAll);
+  var refBtn = document.getElementById('adm-refresh');
+  if (refBtn) refBtn.addEventListener('click', function () { route(true); });
   window.addEventListener('hashchange', function () { if (!app.hidden) route(false); });
   if (api && api.onAuth) {
     api.onAuth(function (event) { if (event === 'SIGNED_OUT') { S.ctx = null; showGate('signin'); } });
@@ -640,17 +806,22 @@
     var crumbs = [{ label: t('page_title'), href: '#dashboard' }];
     if (parentId && parentId !== 'dashboard') crumbs.push({ label: viewLabel(parentId), href: '#' + parentId });
     if (title !== t('page_title')) crumbs.push({ label: title });
-    if (SH && typeof SH.setTitle === 'function') { try { SH.setTitle(title, crumbs); } catch (e) { /* shell optional */ } }
-    else document.title = title + ' | ' + t('doc_title_suffix');
+    if (SH && typeof SH.setTitle === 'function') { try { SH.setTitle(title, crumbs); return; } catch (e) { /* helper optional */ } }
+    document.title = title + ' | ' + t('doc_title_suffix');
   }
   function setNav(id) {
-    if (SH && typeof SH.setActive === 'function') { try { SH.setActive(id); } catch (e) { /* shell optional */ } }
+    if (SH && typeof SH.setActive === 'function') { try { SH.setActive(id); } catch (e) { /* helper optional */ } }
     if (!nav) return;
-    Array.prototype.forEach.call(nav.querySelectorAll('[data-view]'), function (a) {
-      var on = a.getAttribute('data-view') === id;
+    Array.prototype.forEach.call(nav.querySelectorAll('[data-nav-id]'), function (a) {
+      var on = a.getAttribute('data-nav-id') === id;
       a.classList.toggle('is-active', on);
       if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
+    // keep the active pill in view on narrow screens (the bar scrolls sideways)
+    var cur = nav.querySelector('.adm-nav-link.is-active');
+    if (cur && typeof cur.scrollIntoView === 'function' && nav.parentNode && nav.parentNode.scrollWidth > nav.parentNode.clientWidth) {
+      try { cur.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* old browsers */ }
+    }
   }
 
   /* ------------------------------------------------------------------
@@ -704,6 +875,11 @@
       import: renderImport, members: renderMembers,
       org: renderOrg, branches: renderBranches, audit: renderAudit, errors: renderErrors
     }[name];
+    // G3 module views (#alerts, #schedule, …): the optional param is a short token, never markup
+    if (!fn && opsView(name)) {
+      var param = id && /^[A-Za-z0-9_.:@-]{1,80}$/.test(id) ? id : null;
+      fn = function () { return renderOpsView(name, param); };
+    }
     Promise.resolve(fn(id)).then(function (html) {
       if (seq !== S.renderSeq) return;            // a newer navigation won
       if (html && html.nodeType) { view.textContent = ''; view.appendChild(html); }   // DOM views
@@ -720,33 +896,27 @@
   }
   function rerender() { route(true); }   // keeps an open result dialog (e.g. a one-time token)
   function go(hash) { if (location.hash === hash) route(); else location.hash = hash; }
-  function refreshBtnHtml() {
-    return '<button class="btn btn-sm btn-ghost btn-icon adm-icon-btn" type="button" data-act="refresh" aria-label="' + esc(t('refresh')) + '" title="' + esc(t('refresh')) + '">' + icon('refresh') + '</button>';
-  }
-  // view header: optional back link (to the parent list), title (trusted HTML), subtitle, actions bar
+  // view header (original .adm-head): optional back link (to the parent list), title (trusted HTML), subtitle, actions
   function head(title, sub, actions, backHash) {
-    var back = '';
-    if (backHash) {
-      var pid = backHash.replace(/^#/, '');
-      back = '<a class="adm-back" href="' + esc(backHash) + '">' + icon('chevron') + '<span>' + esc(viewLabel(pid)) + '</span></a>';
-    }
-    return '<header class="app-page-head adm-head' + (backHash ? ' adm-head-detail' : '') + '"><div class="adm-head-main">' + back +
-      '<h2 class="adm-title">' + title + '</h2>' + (sub ? '<p class="app-page-sub adm-head-sub">' + sub + '</p>' : '') + '</div>' +
-      '<div class="app-page-actions adm-head-actions">' + (actions || '') + refreshBtnHtml() + '</div></header>';
+    var back = backHash ? '<a class="btn btn-sm btn-ghost adm-back" href="' + esc(backHash) + '">' + icon('back') + esc(tx2('back', T.common.back)) + '</a>' : '';
+    return '<div class="adm-head">' +
+      '<div class="adm-head-title">' + back +
+      '<div><h2 class="adm-title">' + title + '</h2>' + (sub ? '<p class="text-sm text-muted">' + sub + '</p>' : '') + '</div></div>' +
+      (actions ? '<div class="btn-group adm-head-actions">' + actions + '</div>' : '') + '</div>';
   }
   function card(title, body, actions, cls) {
-    return '<section class="app-card adm-card' + (cls ? ' ' + cls : '') + '"><header class="app-card-head adm-card-head"><h3 class="app-card-title">' + title + '</h3>' +
-      (actions ? '<div class="adm-card-actions">' + actions + '</div>' : '') + '</header><div class="app-card-body adm-card-body">' + body + '</div></section>';
+    return '<div class="card card-flush adm-card' + (cls ? ' ' + cls : '') + '"><div class="card-header"><h3>' + title + '</h3>' +
+      (actions ? '<div class="btn-group">' + actions + '</div>' : '') + '</div><div class="card-body">' + body + '</div></div>';
   }
   function table(headers, rows, cols) {
-    return '<div class="data-table-wrap adm-table-wrap"><table class="data-table adm-dt"><thead><tr>' +
+    return '<div class="table-wrap"><table class="table table-striped adm-table"><thead><tr>' +
       headers.map(function (h) { return '<th scope="col">' + esc(h) + '</th>'; }).join('') + '</tr></thead><tbody>' +
       (rows.length ? rows.join('') : emptyRow(cols || headers.length)) + '</tbody></table></div>';
   }
 
   /* ------------------------------------------------------------------
      List views: toolbar (quick filter + server filters) → sortable,
-     paginated .data-table. Built with DOM nodes (textContent only).
+     paginated .table. Built with DOM nodes (textContent only).
      cfg = { key, rows, total, error, columns:[{id,label,value(row),cell(row),num,desc}],
              href(row) | open(row), text(row), tools:[nodes], placeholder, empty,
              serverSearch (Enter searches every record on the server) }
@@ -763,7 +933,7 @@
   function listView(cfg) {
     var st = listState(cfg.key), f = S.filters[cfg.key] || {};
     var rows = cfg.rows || [];
-    var root = el('section', { class: 'app-card is-flush adm-list-card' });
+    var root = el('div', { class: 'card card-flush adm-list-card' });
 
     // toolbar: quick filter · server filters · count
     var qIn = el('input', { class: 'form-control', type: 'search', value: st.q, maxlength: 60,
@@ -775,7 +945,7 @@
       el('div', { class: 'toolbar-actions' }, countEl)
     ]));
     if (cfg.serverSearch && f.search) {
-      root.appendChild(el('div', { class: 'adm-chips-row' }, el('span', { class: 'pill pill-info adm-chip' }, [
+      root.appendChild(el('div', { class: 'adm-chips-row' }, el('span', { class: 'badge badge-blue adm-chip' }, [
         el('span', { text: t('server_search_chip', { q: f.search }) }),
         el('button', { class: 'adm-chip-x', type: 'button', 'aria-label': t('clear_search'), title: t('clear_search'),
           onclick: function () { f.search = ''; f.offset = 0; st.page = 0; rerender(); } }, svgIcon('x'))
@@ -811,10 +981,10 @@
       return th;
     });
     var tbody = el('tbody');
-    var wrap = el('div', { class: 'data-table-wrap is-scroll adm-table-wrap' },
-      el('table', { class: 'data-table adm-dt' }, [el('thead', null, el('tr', null, ths)), tbody]));
+    var wrap = el('div', { class: 'table-wrap adm-table-wrap' },
+      el('table', { class: 'table table-striped adm-table' }, [el('thead', null, el('tr', null, ths)), tbody]));
     root.appendChild(wrap);
-    var foot = el('div', { class: 'data-table-foot adm-pager' });
+    var foot = el('div', { class: 'adm-pager adm-list-foot' });
     root.appendChild(foot);
 
     function filtered() {
@@ -835,7 +1005,7 @@
       });
       tbody.textContent = '';
       if (!slice.length) {
-        tbody.appendChild(el('tr', { class: 'adm-empty-row' }, el('td', { colspan: cols.length },
+        tbody.appendChild(el('tr', { class: 'adm-empty-row' }, el('td', { colspan: cols.length, class: 'adm-empty' },
           emptyState(st.q ? 'search' : 'inbox', st.q ? t('no_match', { q: st.q.trim() }) : (cfg.empty || T.common.empty),
             st.q ? dBtn(t('clear_filter'), 'btn-secondary', function () { st.q = ''; qIn.value = ''; st.page = 0; paint(); qIn.focus(); }) : null))));
       }
@@ -858,11 +1028,11 @@
       foot.hidden = list.length <= PAGE;
       if (list.length > PAGE) {
         append(foot, [
-          el('span', { class: 'adm-pager-info num', text: t('pager_range', { from: from + 1, to: Math.min(from + PAGE, list.length), total: list.length }) }),
-          el('div', { class: 'adm-pager-btns' }, [
-            dBtn(t('prev'), 'btn-secondary', function () { st.page--; paint(); toTop(); }, { disabled: st.page <= 0 }),
-            el('span', { class: 'adm-pager-page num', text: t('pager_page', { p: st.page + 1, n: pages }) }),
-            dBtn(t('next'), 'btn-secondary', function () { st.page++; paint(); toTop(); }, { disabled: st.page >= pages - 1 })
+          el('span', { class: 'adm-pager-info text-xs text-muted num', text: t('pager_range', { from: from + 1, to: Math.min(from + PAGE, list.length), total: list.length }) }),
+          el('div', { class: 'btn-group adm-pager-btns' }, [
+            dBtn(t('prev'), 'btn-ghost', function () { st.page--; paint(); toTop(); }, { disabled: st.page <= 0 }),
+            el('span', { class: 'adm-pager-page text-xs text-muted num', text: t('pager_page', { p: st.page + 1, n: pages }) }),
+            dBtn(t('next'), 'btn-ghost', function () { st.page++; paint(); toTop(); }, { disabled: st.page >= pages - 1 })
           ])
         ]);
       }
@@ -889,7 +1059,7 @@
   }
   // toolbar <select> bound to a server filter of S.filters[key]
   function filterSelect(key, name, label, options) {
-    var s = el('select', { class: 'form-control is-sm adm-select', 'aria-label': label, title: label },
+    var s = el('select', { class: 'form-control adm-select', 'aria-label': label, title: label },
       options.map(function (o) { return el('option', { value: o[0], text: o[1] }); }));
     s.value = S.filters[key][name] || '';
     s.addEventListener('change', function () { S.filters[key][name] = s.value; S.filters[key].offset = 0; listState(key).page = 0; rerender(); });
@@ -981,11 +1151,13 @@
     return String(v);
   }
   function kpiNode(o) {
-    // o: {label, value, foot, href, icon, tone, alert}; the tone draws the top accent bar, alert colours the value
-    return el('a', { class: 'kpi adm-kpi' + (o.alert ? ' is-alert' : ''), href: o.href, 'data-tone': o.tone || null }, [
-      el('span', { class: 'adm-kpi-top' }, [el('span', { class: 'kpi-label', text: o.label }), el('span', { class: 'adm-kpi-icon', 'aria-hidden': 'true' }, svgIcon(o.icon))]),
-      el('span', { class: 'kpi-value', text: fmtCount(o.value) }),
-      o.foot ? el('span', { class: 'kpi-foot', text: o.foot }) : null
+    // o: {label, value, foot, href, icon, tone, alert}: the original stat tile (.card-stat.adm-tile);
+    // a danger / warning tone with a non-zero value tints the tile (.adm-tile-danger / -warning)
+    var tint = (o.tone === 'danger' || o.tone === 'warning') && o.value ? ' adm-tile-' + o.tone : '';
+    return el('a', { class: 'card card-stat adm-tile' + tint, href: o.href }, [
+      el('span', { class: 'stat-value num', text: fmtCount(o.value) }),
+      el('span', { class: 'stat-label', text: o.label }),
+      o.foot ? el('span', { class: 'adm-tile-foot text-xs text-muted', text: o.foot }) : null
     ]);
   }
   function miniList(items, emptyText) {
@@ -1004,15 +1176,43 @@
     else if (e.event_type === 'container_return') s += (p.container_no ? ' ' + p.container_no : '') + ': ' + lbl('container_return_status', e.to_status);
     return s;
   }
+  // G3 KPI counts: alerts by severity (status open / acknowledged) and today's appointments (not cancelled /
+  // rescheduled away). null for a part whose read failed (e.g. G3 migrations not applied yet).
+  function opsDashCounts(ar, pr) {
+    var out = { alerts: null, appts: null };
+    if (ar && !ar.error && ar.counts) {   // server counts (open + acknowledged), not limited by the page size
+      out.alerts = { critical: +ar.counts.critical || 0, warning: +ar.counts.warning || 0, info: +ar.counts.info || 0 };
+    } else if (ar && !ar.error) {
+      out.alerts = { critical: 0, warning: 0, info: 0 };
+      rowsOf(ar.data).forEach(function (a) {
+        if (!a || a.status === 'resolved') return;
+        if (out.alerts[a.severity] != null) out.alerts[a.severity]++;
+      });
+    }
+    if (pr && !pr.error) {
+      out.appts = { total: 0, confirmed: 0, requested: 0 };
+      rowsOf(pr.data).forEach(function (x) {
+        if (!x || x.status === 'cancelled' || x.status === 'rescheduled') return;
+        out.appts.total++;
+        if (x.status === 'confirmed') out.appts.confirmed++;
+        if (x.status === 'requested') out.appts.requested++;
+      });
+    }
+    return out;
+  }
   function renderDashboard() {
     var ops = canAny(R.opsWriter);
     var statsP = typeof (api && api.dashboardStats) === 'function' ? call('dashboardStats', S.orgId) : Promise.resolve({ data: null, error: { code: 'MRS_UNAVAILABLE' } });
     var listsP = Promise.all([
       ops ? api.listRequests({ orgId: S.orgId, limit: 6 }) : Promise.resolve({ data: [] }),
-      L.containersNext(6), L.recentEvents(8)
+      L.containersNext(6), L.recentEvents(8),
+      // G3: open alerts (acknowledged ones stay open) and today's port appointments
+      call('listAlerts', { orgId: S.orgId }),
+      call('listAppointments', { orgId: S.orgId, from: todayISO(0) + 'T00:00:00', to: todayISO(1) + 'T00:00:00' })
     ]);
     return Promise.all([statsP.then(function (r) { return fillStats(r.error ? {} : normStats(r.data)); }), listsP]).then(function (res) {
       var st = res[0], rr = res[1][0], cc = res[1][1], ee = res[1][2];
+      var g3 = opsDashCounts(res[1][3], res[1][4]);
       return L.profiles((ee.data || []).map(function (e) { return e.actor; })).then(function () {
         var out = frag(dHead(viewLabel('dashboard'), t('dash_sub')));
         var tx = st.tx || {}, txTotal = 0, txOpen = 0;
@@ -1027,7 +1227,13 @@
         kpis.push({ label: t('kpi_ctr_overdue'), value: st.overdue, icon: 'clock', href: '#transactions?status=',
           foot: st.due3 != null ? t('kpi_ctr_due3', { n: fmtCount(st.due3) }) : null, tone: st.overdue ? 'danger' : (st.due3 ? 'warning' : null), alert: !!st.overdue });
         kpis.push({ label: t('kpi_docs'), value: st.docs, icon: 'file', href: '#transactions', foot: t('kpi_docs_hint'), tone: st.docs ? 'warning' : null, alert: !!st.docs });
-        out.appendChild(el('div', { class: 'kpi-grid adm-kpis' }, kpis.map(kpiNode)));
+        kpis.push({ label: t('kpi_alerts'), value: g3.alerts ? g3.alerts.critical : null, icon: 'alert', href: '#alerts',
+          foot: g3.alerts ? t('kpi_alerts_hint', { w: fmtCount(g3.alerts.warning), i: fmtCount(g3.alerts.info) }) : t('kpi_unavailable'),
+          tone: g3.alerts ? (g3.alerts.critical ? 'danger' : (g3.alerts.warning ? 'warning' : null)) : null, alert: !!(g3.alerts && g3.alerts.critical) });
+        kpis.push({ label: t('kpi_appts_today'), value: g3.appts ? g3.appts.total : null, icon: 'clock', href: '#schedule',
+          foot: g3.appts ? t('kpi_appts_hint', { c: fmtCount(g3.appts.confirmed), r: fmtCount(g3.appts.requested) }) : t('kpi_unavailable'),
+          tone: g3.appts && g3.appts.total ? 'info' : null });
+        out.appendChild(el('div', { class: 'adm-tiles' }, kpis.map(kpiNode)));
 
         // stage chart + needs attention
         var max = 0;
@@ -1044,13 +1250,13 @@
           return bar;
         })) : dAlert('warning', t('stats_unavailable'));
         var attn = [];
-        if (ops && st.req) attn.push({ title: t('attn_review'), href: '#requests?status=under_review', side: el('span', { class: 'adm-count-pill', text: fmtCount(st.req.under_review || 0) }) });
-        attn.push({ title: t('attn_evidence'), href: '#transactions?status=', side: el('span', { class: 'adm-count-pill', 'data-tone': st.evidence ? 'warning' : null, text: fmtCount(st.evidence) }) });
-        attn.push({ title: t('attn_due3'), href: '#transactions?status=', side: el('span', { class: 'adm-count-pill', 'data-tone': st.due3 ? 'warning' : null, text: fmtCount(st.due3) }) });
-        if (canAny(R.contact)) attn.push({ title: t('attn_messages'), href: '#messages?status=new', side: el('span', { class: 'adm-count-pill', 'data-tone': st.msgNew ? 'info' : null, text: fmtCount(st.msgNew) }) });
-        if (ops) attn.push({ title: t('attn_imports'), href: '#imports?status=draft', side: el('span', { class: 'adm-count-pill', text: fmtCount(st.impDraft) }) });
-        out.appendChild(el('div', { class: 'adm-dash-grid' }, [
-          dCard(t('chart_stages'), [bars, st.tx ? el('p', { class: 'adm-card-foot-note', text: t('chart_hint') }) : null], null, 'adm-span-2'),
+        if (ops && st.req) attn.push({ title: t('attn_review'), href: '#requests?status=under_review', side: pillNode(st.req.under_review ? 'warning' : 'muted', fmtCount(st.req.under_review || 0)) });
+        attn.push({ title: t('attn_evidence'), href: '#transactions?status=', side: pillNode(st.evidence ? 'warning' : 'muted', fmtCount(st.evidence)) });
+        attn.push({ title: t('attn_due3'), href: '#transactions?status=', side: pillNode(st.due3 ? 'warning' : 'muted', fmtCount(st.due3)) });
+        if (canAny(R.contact)) attn.push({ title: t('attn_messages'), href: '#messages?status=new', side: pillNode(st.msgNew ? 'info' : 'muted', fmtCount(st.msgNew)) });
+        if (ops) attn.push({ title: t('attn_imports'), href: '#imports?status=draft', side: pillNode(st.impDraft ? 'warning' : 'muted', fmtCount(st.impDraft)) });
+        out.appendChild(el('div', { class: 'adm-cols adm-cols-wide' }, [
+          dCard(t('chart_stages'), [bars, st.tx ? el('p', { class: 'text-xs text-muted adm-card-foot-note', text: t('chart_hint') }) : null]),
           dCard(t('attn_title'), miniList(attn))
         ]));
 
@@ -1065,13 +1271,13 @@
           var n = daysFrom(c.return_deadline);
           return { href: '#tx/' + c.transaction_id, title: [el('bdi', { dir: 'ltr', class: 'num', text: c.container_no || '' }), c.transactions && c.transactions.ref ? [' · ', el('bdi', { dir: 'ltr', class: 'num adm-muted', text: c.transactions.ref })] : null],
             sub: fmtWhen(c.return_deadline) + ' · ' + lbl('container_return_status', c.return_status),
-            side: pillNode(n == null ? 'neutral' : n < 0 ? 'danger' : n <= 3 ? 'warning' : 'neutral', dueText(c.return_deadline)) };
+            side: pillNode(n == null ? 'muted' : n < 0 ? 'danger' : n <= 3 ? 'warning' : 'muted', dueText(c.return_deadline)) };
         }), t('empty_deadlines')), [el('a', { class: 'btn btn-sm btn-ghost', href: '#transactions?status=', text: t('see_all') })]));
         cols3.push(dCard(t('recent_activity'), ee.error ? dAlert('danger', errText(ee.error)) : miniList((ee.data || []).map(function (e) {
           return { href: '#tx/' + e.transaction_id, title: eventText(e), sub: who(e.actor) + ' · ' + fmtWhen(e.created_at, true),
             side: e.transactions && e.transactions.ref ? el('bdi', { dir: 'ltr', class: 'num adm-muted', text: e.transactions.ref }) : null };
         }), t('empty_activity'))));
-        out.appendChild(el('div', { class: (cols3.length > 2 ? 'app-grid-3' : 'app-grid-2') + ' adm-dash-cols' }, cols3));
+        out.appendChild(el('div', { class: 'adm-cols' + (cols3.length > 2 ? ' adm-cols-3' : '') }, cols3));
         return out;
       });
     });
@@ -1210,6 +1416,11 @@
           body.querySelector('[data-dlg=client-search]').addEventListener('click', load);
           input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); load(); } });
           load();
+          // G3.2: ranked candidates (VAT / CR / alias / similar name) shown for a human choice; nothing is linked automatically
+          var mp = matchPanel(function (cand) { pickClientOption(sel, cand); });
+          var grp = sel.closest('.form-group');
+          if (grp && grp.parentNode) grp.parentNode.insertBefore(mp.node, grp);
+          mp.run({ name: q.company || q.full_name || '', vat_number: q.vat_number || null, cr_number: q.cr_number || null });
         },
         onSubmit: function (form) {
           var branchId = fval(form, 'branch');
@@ -1226,6 +1437,227 @@
   }
 
   /* ------------------------------------------------------------------
+     G3.2 client matching — MarsaApi.matchClient(payload) ranks candidates:
+     strong (same VAT / CR), alias (known alias or same normalised name),
+     weak (similar words). It never links: the user picks, and conflicts
+     (several strong matches, or VAT and CR pointing at different clients)
+     are shown, not resolved.
+     ------------------------------------------------------------------ */
+  var MATCH_TONE = { strong: 'success', alias: 'brand', weak: 'warning' };
+  function matchRows(d) {
+    var rows = Array.isArray(d) ? d : (d && (d.candidates || d.rows || d.items)) || [];
+    return rows.filter(Boolean).map(function (x) {
+      var st = String(x.strength || x.match || x.level || 'weak');
+      if (!MATCH_TONE[st]) st = 'weak';
+      var rs = Array.isArray(x.reasons) ? x.reasons : (x.reasons ? [x.reasons] : (x.reason ? [x.reason] : []));
+      return { id: x.client_id || x.id, name_ar: x.name_ar || x.name || '', name_en: x.name_en || null, cr_number: x.cr_number || null,
+        vat_number: x.vat_number || null, is_active: x.is_active !== false, strength: st, score: x.score != null ? x.score : null,
+        reasons: rs.map(function (r) { return typeof r === 'object' && r ? (r.code || r.field || r.reason || JSON.stringify(r)) : String(r); }) };
+    }).filter(function (x) { return x.id && UUID_RE.test(x.id); });
+  }
+  function matchConflicts(d, rows) {
+    var out = [];
+    if (d && !Array.isArray(d) && Array.isArray(d.conflicts)) {
+      d.conflicts.forEach(function (c) { out.push(typeof c === 'string' ? c : (c && (c.message || c.code || c.field)) || ''); });
+    }
+    var strong = rows.filter(function (x) { return x.strength === 'strong'; });
+    if (strong.length > 1) out.push(t('match_conflict_strong', { n: strong.length }));
+    var differs = rows.filter(function (x) { return x.strength === 'strong' && x.reasons.some(function (r) { return /_differs$|_mismatch$/.test(r); }); });
+    if (differs.length) out.push(t('match_conflict_differs'));
+    // match_client's own verdict (boolean): several strong / alias hits, or a strong hit whose other number differs
+    if (d && d.conflict === true && !out.length) out.push(t('match_conflict_generic'));
+    return out.filter(Boolean);
+  }
+  function reasonText(r) { var k = 'match_reason_' + r, s = t(k); return s === k ? r : s; }
+  // → { node, run(payload) }; onPick(candidate) when the user chooses one
+  function matchPanel(onPick) {
+    var list = el('div', { class: 'adm-match-list', 'aria-live': 'polite' });
+    var node = el('div', { class: 'form-group adm-full adm-match' }, [
+      el('span', { class: 'form-label', text: t('match_title') }), list,
+      el('span', { class: 'form-hint', text: t('match_hint') })
+    ]);
+    var seq = 0;
+    function run(payload) {
+      var p = payload || {};
+      var mine = ++seq;
+      list.textContent = '';
+      if (!nn(p.name) && !nn(p.vat_number) && !nn(p.cr_number)) { list.appendChild(el('p', { class: 'text-sm text-muted', text: t('match_need_data') })); return; }
+      list.appendChild(el('p', { class: 'text-sm text-muted', text: t('loading') }));
+      call('matchClient', { name: nn(p.name), vat_number: nn(p.vat_number), cr_number: nn(p.cr_number) }).then(function (r) {
+        if (mine !== seq) return;
+        list.textContent = '';
+        if (r.error) { list.appendChild(dAlert('warning', t('match_failed', { e: apiErr(r.error) }))); return; }
+        var rows = matchRows(r.data), conflicts = matchConflicts(r.data, rows);
+        if (conflicts.length) list.appendChild(el('div', { class: 'alert alert-warning', role: 'status' }, [svgIcon('alert'),
+          el('div', null, [el('strong', { text: t('match_conflict') }), el('ul', { class: 'adm-list' }, conflicts.map(function (c) { return el('li', { text: c }); }))])]));
+        if (!rows.length) { list.appendChild(el('p', { class: 'text-sm text-muted', text: t('match_none') })); return; }
+        list.appendChild(el('ul', { class: 'adm-mini adm-match-rows' }, rows.slice(0, 8).map(function (x) {
+          var ids = [x.cr_number ? t('match_cr', { v: x.cr_number }) : null, x.vat_number ? t('match_vat', { v: x.vat_number }) : null].filter(Boolean).join(' · ');
+          return el('li', { class: 'adm-mini-row' }, [
+            el('span', { class: 'adm-mini-main' }, [
+              el('span', { class: 'adm-mini-title' }, [el('bdi', { text: x.name_ar || x.name_en || '' }), x.is_active ? null : [' ', pillNode('danger', t('inactive'))]]),
+              el('span', { class: 'adm-mini-sub', text: [ids, x.reasons.map(reasonText).join('، ')].filter(Boolean).join(' — ') })
+            ]),
+            el('span', { class: 'adm-mini-side' }, [pillNode(MATCH_TONE[x.strength], t('match_' + x.strength)), ' ',
+              dBtn(t('match_pick'), 'btn-secondary', function () { onPick(x); })])
+          ]);
+        })));
+      });
+    }
+    return { node: node, run: run };
+  }
+  // put a candidate into a client <select> (adding the option when the list does not hold it) and select it
+  function pickClientOption(sel, x) {
+    var has = Array.prototype.some.call(sel.options, function (o) { return o.value === x.id; });
+    if (!has) sel.appendChild(el('option', { value: x.id, text: (x.name_ar || x.name_en || '') + (x.cr_number ? ' — ' + t('match_cr', { v: x.cr_number }) : '') }));
+    sel.value = x.id;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    toast(t('match_picked', { n: x.name_ar || x.name_en || '' }), 'info');
+  }
+
+  /* ------------------------------------------------------------------
+     G3.4 new transaction from a B/L or partial data: branch + client +
+     operation/mode are enough; the B/L goes to the B/L register and is
+     linked as primary, container numbers become container visits.
+     ------------------------------------------------------------------ */
+  var CTR_RE = /^[A-Z]{4}[0-9]{7}$/;
+  var BL_TYPES = ['master', 'house', 'sea_waybill', 'awb', 'other'];
+  function parseContainers(text) {
+    var seen = {}, good = [], bad = [];
+    String(text || '').toUpperCase().split(/[\s,;،]+/).forEach(function (x) {
+      var v = x.replace(/-/g, '');
+      if (!v) return;
+      if (!CTR_RE.test(v)) { bad.push(x); return; }
+      if (!seen[v]) { seen[v] = true; good.push(v); }
+    });
+    return { good: good, bad: bad };
+  }
+  function txNew() {
+    var branches = branchesFor(R.opsWriter);
+    if (!branches.length) return toast(t('txnew_no_branch'), 'error');
+    var mp = null, clientSel = null;
+    openDialog({
+      title: t('txnew_title'), submit: t('txnew_submit'), wide: true, body: '',
+      onOpen: function (b) {
+        clientSel = el('select', { class: 'form-control', id: 'adg-client_id', name: 'client_id' }, [el('option', { value: '', text: t('txnew_client_choose') })]);
+        var nameIn, vatIn, crIn;
+        mp = matchPanel(function (x) { pickClientOption(clientSel, x); });
+        var matchBtn = dBtn(t('txnew_match'), 'btn-secondary', function () { mp.run({ name: nameIn.value, vat_number: vatIn.value, cr_number: crIn.value }); });
+        var grpName = dField({ name: 'client_name', label: t('txnew_client_name'), max: 160, hint: t('txnew_client_name_hint') });
+        var grpVat = dField({ name: 'client_vat', label: t('col_vat'), ltr: true, max: 15 });
+        var grpCr = dField({ name: 'client_cr', label: t('col_cr'), ltr: true, max: 10 });
+        nameIn = grpName.querySelector('input'); vatIn = grpVat.querySelector('input'); crIn = grpCr.querySelector('input');
+        append(b, [
+          dAlert('info', t('txnew_intro')),
+          dGrid([
+            dField({ name: 'branch_id', label: t('col_branch'), type: 'select', req: true, value: branches.length === 1 ? branches[0].id : '',
+              options: (branches.length > 1 ? [['', t('txnew_branch_choose')]] : []).concat(branches.map(function (x) { return [x.id, ((isEn() && x.name_en) || x.name_ar) + ' (' + x.code + ')']; })) }),
+            dField({ name: 'operation', label: t('col_operation'), type: 'select', req: true, value: 'import', options: [['import', lbl('direction', 'import')], ['export', lbl('direction', 'export')]] }),
+            dField({ name: 'mode', label: t('txnew_mode'), type: 'select', req: true, value: 'sea', options: [['sea', lbl('mode', 'sea')], ['air', lbl('mode', 'air')], ['land', lbl('mode', 'land')]] }),
+            el('h4', { class: 'adm-full adm-form-sep', text: t('txnew_client_sec') }),
+            grpName, grpVat, grpCr,
+            el('div', { class: 'form-group adm-full' }, matchBtn),
+            mp.node,
+            el('div', { class: 'form-group adm-full' }, [el('label', { class: 'form-label', for: 'adg-client_id', text: t('col_client') }), clientSel]),
+            dField({ name: 'new_client', label: t('txnew_new_client'), type: 'checkbox', full: true, hint: t('txnew_new_client_hint') }),
+            dField({ name: 'save_alias', label: t('txnew_save_alias'), type: 'checkbox', value: true, full: true, hint: t('txnew_save_alias_hint') }),
+            el('h4', { class: 'adm-full adm-form-sep', text: t('txnew_bl_sec') }),
+            dField({ name: 'bl_number', label: t('col_bl'), ltr: true, max: 40 }),
+            dField({ name: 'bl_type', label: t('txnew_bl_type'), type: 'select', value: 'master', options: BL_TYPES.map(function (k) { return [k, opsLabel('bl_type', k)]; }), hint: t('txnew_bl_type_hint') }),
+            dField({ name: 'shipping_line', label: t('txnew_shipping_line'), max: 80 }),
+            dField({ name: 'vessel', label: t('txnew_vessel'), max: 80 }),
+            dField({ name: 'voyage', label: t('txnew_voyage'), ltr: true, max: 40 }),
+            dField({ name: 'port_of_loading', label: t('txnew_pol'), max: 80 }),
+            dField({ name: 'port_of_discharge', label: t('col_port'), max: 80 }),
+            dField({ name: 'country', label: t('txnew_country'), max: 80 }),
+            dField({ name: 'eta', label: t('txnew_eta'), type: 'date' }),
+            dField({ name: 'goods_description', label: t('txnew_goods'), type: 'textarea', max: 1000, full: true }),
+            dField({ name: 'containers', label: t('col_containers'), type: 'textarea', rows: 3, full: true, ltr: true, hint: t('txnew_containers_hint') })
+          ])
+        ]);
+        // B/L type follows the mode (air → AWB) until the user picks a type by hand
+        var modeSel = b.querySelector('[name=mode]'), typeSel = b.querySelector('[name=bl_type]'), typeTouched = false;
+        if (modeSel && typeSel) {
+          typeSel.addEventListener('change', function () { typeTouched = true; });
+          modeSel.addEventListener('change', function () { if (!typeTouched) typeSel.value = modeSel.value === 'air' ? 'awb' : 'master'; });
+        }
+        clientSel.addEventListener('focus', function onFirst() {
+          clientSel.removeEventListener('focus', onFirst);
+          api.listClients({ orgId: S.orgId, limit: 100 }).then(function (cr) {
+            (cr.data || []).forEach(function (c) {
+              if (!Array.prototype.some.call(clientSel.options, function (o) { return o.value === c.id; })) clientSel.appendChild(el('option', { value: c.id, text: c.name_ar }));
+            });
+          });
+        });
+      },
+      onSubmit: function (form) {
+        var v = function (k) { return nn(fval(form, k)); };
+        var branchId = v('branch_id'), clientId = v('client_id'), name = v('client_name');
+        var western = function (x) { return x == null ? null : String(x).replace(/[٠-٩]/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'.indexOf(d); }).replace(/[\s-]/g, ''); };
+        var vat = western(v('client_vat')), cr = western(v('client_cr'));
+        if (!branchId) return t('txnew_branch_choose');
+        if (!clientId && !(fval(form, 'new_client') && name)) return t('txnew_need_client');
+        if (vat && !/^[0-9]{15}$/.test(vat)) return t('txnew_bad_vat');
+        if (cr && !/^[0-9]{10}$/.test(cr)) return t('txnew_bad_cr');
+        var ctr = parseContainers(fval(form, 'containers'));
+        if (ctr.bad.length) return t('txnew_bad_containers', { list: ctr.bad.slice(0, 5).join(', ') });
+        var bl = v('bl_number') ? v('bl_number').toUpperCase() : null;
+        var warn = [];
+        var clientP = clientId ? Promise.resolve({ data: { id: clientId } })
+          : api.createClient({ org_id: S.orgId, client_type: 'business', name_ar: name, vat_number: vat, cr_number: cr });
+        return clientP.then(function (cr0) {
+          if (cr0.error) return cr0.error.code === 'DUPLICATE' ? t('txnew_client_dup') : apiErr(cr0.error);
+          var cid = cr0.data.id;
+          var row = { org_id: S.orgId, branch_id: branchId, client_id: cid, operation: fval(form, 'operation'), mode: fval(form, 'mode'),
+            port_of_loading: v('port_of_loading'), port_of_discharge: v('port_of_discharge'), country: v('country'),
+            goods_description: v('goods_description'), shipping_line: v('shipping_line'), eta: v('eta'), container_count: ctr.good.length };
+          return api.createTransaction(row).then(function (tr) {
+            if (tr.error) return apiErr(tr.error);
+            var tx = tr.data;
+            var chain = Promise.resolve(null);
+            if (bl) {
+              // save_bl registers (or finds) the B/L and links it as primary in one server transaction
+              chain = call('saveBL', { bl_number: bl, bl_type: fval(form, 'bl_type') || 'master', carrier_name: v('shipping_line'), vessel: v('vessel'),
+                voyage: v('voyage'), port_of_loading: v('port_of_loading'), port_of_discharge: v('port_of_discharge'), goods_description: v('goods_description'),
+                transaction_id: tx.id, primary: true })
+                .then(function (br) {
+                  var blId = br.data && (br.data.id || br.data.bl_id);
+                  // not linked (e.g. bl_other_branch): the plain number is kept on the record; the server logs a 'conflict' B/L event
+                  if (br.error || !blId) { warn.push(br.error && errField(br.error) === 'bl_other_branch' ? t('txnew_warn_bl_branch') : t('txnew_warn_bl', { e: br.error ? apiErr(br.error) : '—' })); return api.updateTransaction(tx.id, { bl_number: bl }).then(function () { return null; }); }
+                  if (br.data.shared_with_other_client) warn.push(t('txnew_warn_bl_shared'));
+                  if (br.data.linked) return blId;
+                  return call('linkBL', tx.id, blId, true).then(function (lr) { if (lr.error) warn.push(t('txnew_warn_bl', { e: apiErr(lr.error) })); return lr.error ? null : blId; });
+                });
+            }
+            return chain.then(function (blId) {
+              // sequential: a repeated number inside one transaction is refused by the server (it may repeat across transactions)
+              return ctr.good.reduce(function (p, no) {
+                return p.then(function () {
+                  return api.addContainer(tx.id, blId ? { container_no: no, bl_id: blId } : { container_no: no }).then(function (r) { if (r.error) warn.push(no + ': ' + apiErr(r.error)); });
+                });
+              }, Promise.resolve());
+            }).then(function () {
+              if (!clientId || !name || !fval(form, 'save_alias')) return null;
+              return call('addClientAlias', clientId, name, bl ? 'bl' : 'manual').then(function (ar) {
+                if (!ar.error || !isAliasTaken(ar.error)) { if (ar.error) warn.push(t('txnew_warn_alias', { e: apiErr(ar.error) })); return null; }
+                // the server says "taken" (after normalization): silent when it is already this client's alias
+                return call('listClientAliases', clientId).then(function (lr) {
+                  var mine = (lr.data || []).some(function (a) { return aliasKey(a.alias) === aliasKey(name); });
+                  if (!mine) warn.push(t('txnew_warn_alias', { e: t('alias_duplicate') }));
+                });
+              });
+            }).then(function () {
+              toast(t('txnew_done', { ref: tx.ref || '' }) + (warn.length ? ' ' + t('txnew_with_warnings', { list: warn.join(' · ') }) : ''), warn.length ? 'warning' : 'success');
+              go('#tx/' + tx.id);
+              return true;
+            });
+          });
+        });
+      }
+    });
+  }
+
+  /* ------------------------------------------------------------------
      Transactions
      ------------------------------------------------------------------ */
   function branchOpts(selected, blank) {
@@ -1236,7 +1668,9 @@
   function renderTransactions() {
     var f = S.filters.transactions;
     return api.listTransactions({ orgId: S.orgId, status: f.status || null, branchId: f.branchId || null, search: f.search, limit: WINDOW, offset: f.offset }).then(function (r) {
-      var out = frag(dHead(viewLabel('transactions'), t('transactions_sub')));
+      var canNew = branchesFor(R.opsWriter).length > 0;
+      var out = frag(dHead(viewLabel('transactions'), t('transactions_sub'),
+        canNew ? [dBtn([svgIcon('plus'), t('txnew_btn')], 'btn-primary', function () { txNew(); })] : null));
       var multi = S.branches.length > 1;
       var tools = [filterSelect('transactions', 'status', t('col_op_status'), statusOptions('operational_status'))];
       if (multi) tools.push(filterSelect('transactions', 'branchId', t('col_branch'), [['', t('all_branches')]].concat(S.branches.map(function (b) { return [b.id, (isEn() && b.name_en) || b.name_ar]; }))));
@@ -1364,7 +1798,14 @@
             '<button class="btn btn-sm btn-primary" type="submit">إضافة إلى السجل</button></form>';
         }
         html += card('سجل الأحداث', '<p class="form-hint">السجل للإضافة فقط: لا يُعدّل ولا يُحذف. للتصحيح أضف ملاحظة جديدة توضّح السبب.</p>' + evHtml);
-        return html;
+        // G3 sections (MarsaOps.txSections) are DOM nodes: the escaped markup above becomes a fragment first
+        var tpl = document.createElement('template');
+        tpl.innerHTML = html;
+        var out = tpl.content;
+        var sections = el('div', { class: 'ops-tx-sections' });
+        out.appendChild(sections);
+        renderTxSections(sections, t);
+        return out;
       });
     });
   }
@@ -1435,7 +1876,8 @@
     var t = c.tx;
     openDialog({
       title: 'تعديل بيانات المعاملة ' + t.ref, wide: true,
-      body: alertBox('info', 'المرجع والحالات لا تُعدّل من هنا. كل تعديل يُحفظ في سجل التدقيق.') + grid(
+      body: alertBox('info', 'المرجع والحالات لا تُعدّل من هنا. كل تعديل يُحفظ في سجل التدقيق.') +
+        alertBox('info', 'البيان الجمركي (إضافة / تصحيح / إلغاء واستبدال) يُدار من قسم «البيانات الجمركية»، والبوالص الإضافية من قسم «بوالص الشحن» في صفحة المعاملة. لا يُرسَل هنا إلا ما غيّرته.') + grid(
         field({ name: 'service', label: 'الخدمة', type: 'select', options: opts('service', t.service, 'غير محدد') }) +
         field({ name: 'country', label: 'البلد', value: t.country, attrs: ' maxlength="80"' }) +
         field({ name: 'port_of_loading', label: 'ميناء الشحن', value: t.port_of_loading, attrs: ' maxlength="80"' }) +
@@ -1443,10 +1885,7 @@
         field({ name: 'goods_description', label: 'وصف البضاعة', type: 'textarea', rows: 2, value: t.goods_description, attrs: ' maxlength="1000"', full: true }) +
         field({ name: 'hs_code', label: 'رمز HS', value: t.hs_code, ltr: true, attrs: ' inputmode="numeric" maxlength="12"', hint: '4 إلى 12 رقمًا' }) +
         field({ name: 'shipping_line', label: 'الخط الملاحي', value: t.shipping_line, attrs: ' maxlength="80"' }) +
-        field({ name: 'bl_number', label: 'رقم البوليصة', value: t.bl_number, ltr: true, attrs: ' maxlength="40"' }) +
-        field({ name: 'declaration_no', label: 'رقم البيان الجمركي', value: t.declaration_no, ltr: true, attrs: ' maxlength="30"', hint: 'رقم البيان فريد لكل معاملة.' }) +
-        field({ name: 'declaration_date', label: 'تاريخ البيان', type: 'date', value: t.declaration_date }) +
-        field({ name: 'declaration_type', label: 'نوع البيان', value: t.declaration_type, attrs: ' maxlength="40"' }) +
+        field({ name: 'bl_number', label: 'رقم البوليصة الرئيسية', value: t.bl_number, ltr: true, attrs: ' maxlength="40"', hint: 'تغييره يجعل البوليصة الجديدة رئيسية وتبقى السابقة مرتبطة.' }) +
         field({ name: 'container_count', label: 'عدد الحاويات', type: 'number', value: t.container_count, attrs: ' min="0" step="1"' }) +
         field({ name: 'package_count', label: 'عدد الطرود', type: 'number', value: t.package_count, attrs: ' min="0" step="1"' }) +
         field({ name: 'eta', label: 'تاريخ الوصول المتوقع', type: 'date', value: t.eta }) +
@@ -1454,14 +1893,25 @@
       ),
       onSubmit: function (form) {
         var patch = {};
+        // declaration_no / date / type are not sent from here: the declarations section owns them
+        // (correct / cancel + replace with a reason). The server refuses a renumber or a clear through the record.
         ['service', 'country', 'port_of_loading', 'port_of_discharge', 'goods_description', 'hs_code', 'shipping_line', 'bl_number',
-          'declaration_no', 'declaration_date', 'declaration_type', 'eta', 'notes'].forEach(function (k) { patch[k] = nn(fval(form, k)); });
+          'eta', 'notes'].forEach(function (k) { patch[k] = nn(fval(form, k)); });
         if (patch.hs_code && !/^[0-9]{4,12}$/.test(patch.hs_code)) return 'رمز HS يجب أن يكون من 4 إلى 12 رقمًا.';
         if (patch.bl_number) patch.bl_number = patch.bl_number.toUpperCase();
         var cc = nn(fval(form, 'container_count')), pc = nn(fval(form, 'package_count'));
         patch.container_count = cc == null ? 0 : parseInt(cc, 10);
         patch.package_count = pc == null ? null : parseInt(pc, 10);
         if (isNaN(patch.container_count) || patch.container_count < 0 || (patch.package_count != null && (isNaN(patch.package_count) || patch.package_count < 0))) return 'الأعداد يجب أن تكون أرقامًا صحيحة موجبة.';
+        // only the keys the user changed against the values the form opened with: a form opened before
+        // another change (e.g. a new primary B/L) never writes the older value back
+        Object.keys(patch).forEach(function (k) {
+          var was = t[k] == null || t[k] === '' ? null : String(t[k]);
+          var now = patch[k] == null ? null : String(patch[k]);
+          if (k === 'bl_number' && was) was = was.toUpperCase();
+          if (was === now) delete patch[k];
+        });
+        if (!Object.keys(patch).length) { toast(T.common.saved, 'success'); return true; }
         return api.updateTransaction(id, patch).then(function (r) {
           if (r.error) return errText(r.error);
           toast(T.common.saved, 'success'); rerender(); return true;
@@ -1687,7 +2137,7 @@
   }
   var CLIENT_CACHE = {};
   function renderClient(id) {
-    return Promise.all([api.getClient(id), api.listTransactions({ orgId: S.orgId, clientId: id, limit: 50 })]).then(function (res) {
+    return Promise.all([api.getClient(id), api.listTransactions({ orgId: S.orgId, clientId: id, limit: 50 }), call('listClientAliases', id)]).then(function (res) {
       var r = res[0], c = r.data;
       if (r.error) return head('عميل', '', '', '#clients') + alertBox('danger', errText(r.error));
       if (!c) return head('عميل', '', '', '#clients') + alertBox('warning', 'العميل غير موجود أو لا تملك صلاحية عرضه.');
@@ -1710,8 +2160,63 @@
         return '<tr><td>' + ltr(t.ref) + '</td><td>' + esc(t.branches && t.branches.name_ar) + '</td><td>' + esc(lbl('direction', t.operation)) + ' · ' + esc(lbl('mode', t.mode)) + '</td><td>' +
           badge('operational_status', t.operational_status) + '</td><td>' + fmtDate(t.created_at) + '</td><td><a class="btn btn-sm btn-ghost" href="#tx/' + esc(t.id) + '">' + T.common.view + '</a></td></tr>';
       })) + '<p class="form-hint">تظهر فقط معاملات الفروع المسموح لك بها.</p>');
-      return html;
+      var tpl = document.createElement('template');
+      tpl.innerHTML = html;
+      var out = tpl.content;
+      out.appendChild(aliasesCard(c, res[2]));
+      return out;
     });
+  }
+  // G3.2 client identity: other spellings of the client's name (B/L, invoice, OCR) used by matchClient.
+  // An alias belongs to one client per org (unique alias_norm); removing one never touches transactions.
+  var ALIAS_SOURCES = ['manual', 'bl', 'invoice', 'ocr'];
+  function aliasesCard(c, ar) {
+    var canW = canAny(R.opsWriter);
+    var rows = ar && !ar.error ? rowsOf(ar.data) : [];
+    var body = [];
+    if (ar && ar.error) body.push(dAlert('danger', apiErr(ar.error)));
+    else {
+      body.push(dTable([t('alias_col'), t('alias_source'), t('alias_added'), ''], rows.map(function (a) {
+        return el('tr', null, [
+          el('td', null, el('bdi', { text: a.alias || '' })),
+          el('td', { text: t('alias_src_' + a.source) !== 'alias_src_' + a.source ? t('alias_src_' + a.source) : (a.source || T.common.none) }),
+          el('td', null, [fmtWhen(a.created_at), a.created_by ? el('span', { class: 'adm-sub', text: who(a.created_by) }) : null]),
+          el('td', null, canW ? dBtn(t('alias_remove'), 'btn-ghost adm-text-danger', function (b) {
+            askConfirm({ title: t('alias_remove'), text: t('alias_remove_q', { a: a.alias || '' }), okText: t('alias_remove'), danger: true }).then(function (yes) {
+              if (!yes) return;
+              b.disabled = true;
+              api.removeClientAlias(a.id).then(function (r) {
+                b.disabled = false;
+                if (r.error) return toast(apiErr(r.error), 'error');
+                toast(t('alias_removed'), 'success'); rerender();
+              });
+            });
+          }) : null)
+        ]);
+      }), t('alias_empty')));
+    }
+    if (canW && !(ar && ar.error)) {
+      var input = el('input', { class: 'form-control', type: 'text', maxlength: 200, 'aria-label': t('alias_col'), placeholder: t('alias_ph'), autocomplete: 'off' });
+      var src = el('select', { class: 'form-control adm-select', 'aria-label': t('alias_source') },
+        ALIAS_SOURCES.map(function (k) { return el('option', { value: k, text: t('alias_src_' + k) }); }));
+      var add = el('button', { class: 'btn btn-sm btn-primary', type: 'submit', text: t('alias_add') });
+      var form = el('form', { class: 'adm-inline-row adm-alias-form', novalidate: true }, [input, src, add]);
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        e.stopPropagation();   // not one of the view's [data-form] forms
+        var v = nn(input.value);
+        if (!v) { input.focus(); return toast(T.common.required, 'warning'); }
+        add.disabled = true;
+        api.addClientAlias(c.id, v, src.value).then(function (r) {
+          add.disabled = false;
+          if (r.error) return toast(isAliasTaken(r.error) ? t('alias_duplicate') : apiErr(r.error), 'error');
+          toast(t('alias_added_ok'), 'success'); rerender();
+        });
+      });
+      body.push(form);
+    }
+    body.push(el('p', { class: 'form-hint', text: t('alias_hint') }));
+    return dCard(t('alias_title'), body);
   }
   function clientDialog(id) {
     var c = id ? CLIENT_CACHE[id] : { client_type: 'business', is_active: true, national_address: {} };
@@ -1943,7 +2448,13 @@
   }
   // same as t(); for scopes where a local `t` (a transaction row) shadows the helper
   function tl(k, vars) { return t(k, vars); }
-  function viewLabel(id) { var k = 'view_' + id, s = t(k); return s === k ? (T.views[id] || id) : s; }
+  function viewLabel(id) {
+    var k = 'view_' + id, s = t(k);
+    if (s !== k) return s;
+    var ov = !T.views[id] && opsView(id), I = window.MarsaI18n;
+    if (ov && ov.titleKey && I && typeof I.t === 'function') { var x = I.t(ov.titleKey); if (x && x !== ov.titleKey) return x; }
+    return T.views[id] || id;
+  }
   function isEn() { var I = window.MarsaI18n; return !!(I && typeof I.lang === 'function' && I.lang() === 'en'); }
   function roleLabel(code) { var k = 'role_' + code, s = t(k); return isEn() && s !== k ? s : lbl('role', code); }
   function branchName(id) {
@@ -1986,16 +2497,15 @@
     return b;
   }
   function dHead(title, sub, actions) {
-    var refresh = el('button', { class: 'btn btn-sm btn-ghost btn-icon adm-icon-btn', type: 'button', 'data-act': 'refresh', 'aria-label': t('refresh'), title: t('refresh') }, svgIcon('refresh'));
-    return el('header', { class: 'app-page-head adm-head' }, [
-      el('div', { class: 'adm-head-main' }, [el('h2', { class: 'adm-title', text: title }), sub ? el('p', { class: 'app-page-sub adm-head-sub', text: sub }) : null]),
-      el('div', { class: 'app-page-actions adm-head-actions' }, [actions && actions.length ? actions : null, refresh])
+    return el('div', { class: 'adm-head' }, [
+      el('div', { class: 'adm-head-title' }, el('div', null, [el('h2', { class: 'adm-title', text: title }), sub ? el('p', { class: 'text-sm text-muted', text: sub }) : null])),
+      actions && actions.length ? el('div', { class: 'btn-group adm-head-actions' }, actions) : null
     ]);
   }
   function dCard(title, body, actions, cls) {
-    return el('section', { class: 'app-card adm-card' + (cls ? ' ' + cls : '') }, [
-      el('header', { class: 'app-card-head adm-card-head' }, [el('h3', { class: 'app-card-title', text: title }), actions && actions.length ? el('div', { class: 'adm-card-actions' }, actions) : null]),
-      el('div', { class: 'app-card-body adm-card-body' }, body)
+    return el('div', { class: 'card card-flush adm-card' + (cls ? ' ' + cls : '') }, [
+      el('div', { class: 'card-header' }, [el('h3', { text: title }), actions && actions.length ? el('div', { class: 'btn-group' }, actions) : null]),
+      el('div', { class: 'card-body' }, body)
     ]);
   }
   function dAlert(type, text) {
@@ -2010,9 +2520,8 @@
     }));
   }
   function dTable(headers, rows, emptyText) {
-    var body = el('tbody', null, rows.length ? rows : el('tr', { class: 'adm-empty-row' }, el('td', { colspan: headers.length },
-      emptyState('inbox', emptyText || T.common.empty))));
-    return el('div', { class: 'data-table-wrap adm-table-wrap' }, el('table', { class: 'data-table adm-dt' }, [
+    var body = el('tbody', null, rows.length ? rows : el('tr', null, el('td', { colspan: headers.length, class: 'adm-empty', text: emptyText || T.common.empty })));
+    return el('div', { class: 'table-wrap' }, el('table', { class: 'table table-striped adm-table' }, [
       el('thead', null, el('tr', null, headers.map(function (h) { return el('th', { scope: 'col', text: h }); }))), body
     ]));
   }
@@ -2070,6 +2579,14 @@
     return /^MRS_[A-Z_]+$/.test(m || '') ? m : (e.code || null);
   }
   function errField(e) { return e ? (e.field || (e.raw && (e.raw.details || e.raw.detail)) || null) : null; }
+  // client_aliases: the trigger refuses a taken alias as MRS_INVALID 'alias_taken' (the unique index → DUPLICATE)
+  function isAliasTaken(e) { return errCode(e) === 'DUPLICATE' || (errCode(e) === 'MRS_INVALID' && errField(e) === 'alias_taken'); }
+  // rough client-side form of app.norm_name (letters / digits, Arabic letter variants folded) — only to tell
+  // "already this client's alias" apart from "another client's"; the server stays the authority
+  function aliasKey(v) {
+    return String(v == null ? '' : v).toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي')
+      .replace(/[^0-9a-z\u0621-\u064a]+/g, '');
+  }
   function isForbidden(e) { var c = errCode(e); return c === 'MRS_FORBIDDEN' || c === 'RLS' || c === 'MRS_RLS' || c === '42501'; }
   function apiErr(e) {
     var c = errCode(e);
@@ -2503,7 +3020,7 @@
       })));
       tableSel.value = f.table || '';
       var grp = function (id, label, ctl, grow) { return el('div', { class: 'form-group' + (grow ? ' adm-grow' : '') }, [el('label', { class: 'form-label', for: id, text: label }), ctl]); };
-      var filt = el('form', { class: 'toolbar adm-toolbar adm-filters', novalidate: true }, [
+      var filt = el('form', { class: 'adm-filters card', novalidate: true }, [
         grp('adg-a-table', t('col_table'), tableSel),
         grp('adg-a-actor', t('col_actor'), actorCtl),
         grp('adg-a-from', t('f_from'), el('input', { class: 'form-control', type: 'date', id: 'adg-a-from', name: 'from', value: f.from })),
@@ -2523,7 +3040,7 @@
 
       var tbody = el('tbody'), more = el('div', { class: 'adm-pager' });
       var status = el('p', { class: 'adm-count text-xs text-muted' });
-      out.appendChild(el('div', { class: 'data-table-wrap is-scroll adm-table-wrap' }, el('table', { class: 'data-table adm-dt' }, [
+      out.appendChild(el('div', { class: 'table-wrap' }, el('table', { class: 'table table-striped adm-table' }, [
         el('thead', null, el('tr', null, [t('col_time'), t('col_table'), t('col_action'), t('col_row'), t('col_actor'), t('col_changed'), ''].map(function (h) { return el('th', { scope: 'col', text: h }); }))),
         tbody
       ])));
@@ -2550,7 +3067,7 @@
             return;
           }
           var list = rowsOf(r.data);
-          if (!total && !list.length) tbody.appendChild(el('tr', null, el('td', { colspan: 7 }, emptyState('inbox', T.common.empty))));
+          if (!total && !list.length) tbody.appendChild(el('tr', null, el('td', { colspan: 7, class: 'adm-empty', text: T.common.empty })));
           list.forEach(function (row) { tbody.appendChild(auditRow(row)); });
           total += list.length;
           if (list.length) lastId = list[list.length - 1].id;
@@ -2651,9 +3168,10 @@
     Object.keys(CLIENT_CACHE).forEach(function (k) { delete CLIENT_CACHE[k]; });
     IDEM = {};
   }
-  window.addEventListener('marsa:orgchange', function (e) {
-    var id = e && e.detail && e.detail.orgId;
-    if (!S.ctx || (id && id === S.orgId)) return;   // first boot reads the active org itself
+  var orgPending = null;   // org id being loaded after a switch
+  function onOrgChange(id) {
+    if (!S.ctx || (id && (id === S.orgId || id === orgPending))) return;   // first boot reads the active org itself
+    orgPending = id || null;
     if (dlg && dlg.open) closeDialog();
     resetOrgState();
     // detail routes point at the previous org's rows → back to the overview (no extra hashchange render)
@@ -2662,12 +3180,12 @@
     // memberships of every org are already in my_context; refetch it so roles are current
     api.myContext(true).then(function (c) {
       return withContext(c.error ? S.ctx : (c.data || S.ctx));
-    }).then(null, function (err) { showGate('error', errText(err)); });
-  });
+    }).then(function () { orgPending = null; }, function (err) { orgPending = null; showGate('error', errText(err)); });
+  }
+  window.addEventListener('marsa:orgchange', function (e) { onOrgChange(e && e.detail && e.detail.orgId); });
   window.addEventListener('marsa:langchange', function () {
     if (app.hidden) return;
-    if (!SH) buildNav();
-    route(true);
+    fillMe(); buildNav(); fillOrgSwitch(); route(true);
   });
 
   /* ------------------------------------------------------------------
@@ -2709,6 +3227,30 @@
       if (note) note.required = !!(opt && opt.getAttribute('data-back'));
     }
   });
+  // G3.10 manager override of the document gate (reason required; logged as a docs_override event).
+  // The override is explicit (p_docs_override) and sent only from here: a typed status note never bypasses the gate.
+  function docsOverride(txId, st, kindText, prefill) {
+    opsModal({
+      title: t('docs_override_title'), submitText: t('docs_override_submit'), danger: true,
+      body: [
+        dAlert('warning', t('docs_missing_block', { kinds: kindText })),
+        el('p', { class: 'form-hint', text: t('docs_override_lead') }),
+        el('div', { class: 'form-group' }, [
+          el('label', { class: 'form-label', for: 'adf-override-reason', text: t('docs_override_reason') }),
+          el('textarea', { class: 'form-control', id: 'adf-override-reason', name: 'reason', rows: 3, maxlength: 2000, required: true, text: prefill || '' })
+        ])
+      ],
+      onSubmit: function (form) {
+        var why = nn(fval(form, 'reason'));
+        if (!why) return t('docs_override_reason_req');
+        return api.setTransactionStatus(txId, st, why, undefined, { docsOverride: true }).then(function (r) {
+          if (r.error) return errText(r.error);
+          toast(t('docs_override_done', { s: lbl('operational_status', st) }), 'warning'); rerender();
+          return true;
+        });
+      }
+    });
+  }
   view.addEventListener('submit', function (e) {
     var form = e.target.closest('[data-form]');
     if (!form) return;
@@ -2726,10 +3268,23 @@
       if (opt && opt.getAttribute('data-back') && !note) { done(); return toast(api.i18n.ar.errors.MRS_NOTE_REQUIRED, 'warning'); }
       api.setTransactionStatus(id, st, note).then(function (r) {
         done();
+        if (r.error && errCode(r.error) === 'MRS_DOCS_MISSING') {
+          // G3.10: only this move is blocked; the detail lists the missing document kinds
+          var kinds = String(errField(r.error) || '').split(/[,\s{}"]+/).filter(Boolean).map(function (k) { return lbl('document_kind', k); });
+          var kindText = kinds.join(isEn() ? ', ' : '، ') || T.common.none;
+          // senior roles (app.senior_ops_roles) may override: the same move again, explicitly (p_docs_override)
+          // with a mandatory reason; a typed note only pre-fills it. Branch scope is decided by the server.
+          if (canAny(R.backward)) return docsOverride(id, st, kindText, note);
+          return toast(t('docs_missing_block', { kinds: kindText }), 'error');
+        }
         if (r.error) return toast(errText(r.error), 'error');
         // the remembered key of an earlier unknown result was replayed: that earlier change is what applied
         if (r.replayedEarlier) { toast('هذا التغيير طُبّق في محاولة سابقة لم يصل ردّها. حدّثنا العرض — تحقّق من الحالة الحالية.', 'warning'); rerender(); return; }
-        toast('تم تغيير الحالة إلى «' + lbl('operational_status', st) + '».', 'success'); rerender();
+        // defensive: an override the server applied is never reported as a plain success
+        var ov = r.data && Array.isArray(r.data.docs_override) ? r.data.docs_override : [];
+        if (ov.length) toast(t('docs_override_done', { s: lbl('operational_status', st) }) + ' (' + ov.map(function (k) { return lbl('document_kind', k); }).join(isEn() ? ', ' : '، ') + ')', 'warning');
+        else toast('تم تغيير الحالة إلى «' + lbl('operational_status', st) + '».', 'success');
+        rerender();
       });
     } else if (kind === 'tx-note') {
       var n = nn(form.elements.note.value);

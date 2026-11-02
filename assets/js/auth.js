@@ -2,9 +2,11 @@
    مرسى | MARSA — login.html (STAGING)
    Client / staff sign-in, client sign-up, forgot + reset password, sign-out,
    sign-out of all devices, and invitations (login.html?invite=<token>).
-   App sign-in screen of the PWA (manifest start_url = login.html?source=pwa); not an
-   app-shell page, but it loads app.css (tokens) and has its own language + theme toggles.
-   Load order: config.js → i18n.js → assets/i18n/login.js → main.js → supa.js → pwa.js → auth.js
+   Classic marketing page (site header, page hero, footer — main.js drives the header,
+   drawer, demo banner and language toggle). Also the PWA start page
+   (manifest start_url = login.html?source=pwa). No theme switching.
+   Load order: config.js → i18n.js → assets/i18n/login.js → assets/i18n/app.js → main.js
+               → supa.js → pwa.js → auth.js
                (plain <script defer>)
 
    * Demo mode (config empty): the credential forms stay hidden; a notice
@@ -15,8 +17,6 @@
      else → portal.html. Roles are NEVER read from signup data.
    * ?source=pwa (installed app start): an existing session is routed at once.
    * ?signedout=1|all: notice after a sign-out started on another page.
-   * Theme: localStorage 'marsa_theme' = light | dark | (unset = system); the
-     toggle cycles system → light → dark and sets html[data-theme="dark"].
    * Recovery: resetPassword() redirects back to login.html?mode=reset;
      supabase-js reads the token from the URL (type=recovery) and fires
      PASSWORD_RECOVERY; we then show the "new password" form.
@@ -69,8 +69,6 @@
     inviteUnconfirmed: 'يلزم تأكيد بريدك الإلكتروني أولًا من الرسالة المرسلة إليك، ثم اضغط «قبول الدعوة».',
     inviteRetry: 'تعذّر التحقق من الدعوة الآن. تحقّق من اتصالك ثم أعد تحميل الصفحة.',
     inviteDismissed: 'تم تجاهل الدعوة في هذه النافذة. يمكنك فتح رابطها من جديد لاحقًا.',
-    themeAria: 'المظهر: {mode} — اضغط للتغيير',
-    theme_system: 'تلقائي حسب النظام', theme_light: 'فاتح', theme_dark: 'داكن',
     roleFallback: { admin: 'مدير المؤسسة', branch_manager: 'مدير الفرع', supervisor: 'مشرف', operations_manager: 'مدير العمليات',
       accounts_manager: 'مدير الحسابات', accountant: 'محاسب', clearance_staff: 'موظف تخليص', transport_staff: 'موظف نقل', client: 'عميل (بوابة العميل)' }
   };
@@ -87,44 +85,14 @@
   }
   function lang() { return I && typeof I.lang === 'function' ? I.lang() : 'ar'; }
 
-  /* ---- theme toggle (works in demo mode too) ---- */
-  var THEME_KEY = 'marsa_theme';
-  var THEMES = ['system', 'light', 'dark'];
-  var darkMq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
-  function themePref() {
-    try { var v = localStorage.getItem(THEME_KEY); return v === 'light' || v === 'dark' ? v : 'system'; } catch (e) { return 'system'; }
+  /* ---- document title follows the language (the original hero title + brand) ---- */
+  document.documentElement.removeAttribute('data-theme');   // no dark theme any more
+  function setDocTitle() {
+    var v = tr('pageTitle');
+    if (v && v !== 'pageTitle') document.title = v + (lang() === 'en' ? ' | MARSA' : ' | مرسى MARSA');
   }
-  function applyTheme() {
-    var pref = themePref();
-    var dark = pref === 'dark' || (pref === 'system' && !!(darkMq && darkMq.matches));
-    var root = document.documentElement;
-    if (dark) root.setAttribute('data-theme', 'dark'); else root.removeAttribute('data-theme');
-    var meta = $('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', dark ? '#0B1220' : '#0B3A6E');
-    $$('[data-theme-toggle]').forEach(function (b) {
-      $$('[data-theme-icon]', b).forEach(function (ic) { ic.hidden = ic.getAttribute('data-theme-icon') !== pref; });
-      var label = tr('themeAria', { mode: tr('theme_' + pref) });
-      b.setAttribute('aria-label', label);
-      b.title = label;
-    });
-  }
-  $$('[data-theme-toggle]').forEach(function (b) {
-    b.addEventListener('click', function () {
-      var next = THEMES[(THEMES.indexOf(themePref()) + 1) % THEMES.length];
-      try { if (next === 'system') localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, next); } catch (e) { /* storage blocked */ }
-      applyTheme();
-    });
-  });
-  if (darkMq) {
-    var onScheme = function () { if (themePref() === 'system') applyTheme(); };
-    if (darkMq.addEventListener) darkMq.addEventListener('change', onScheme); else if (darkMq.addListener) darkMq.addListener(onScheme);
-  }
-  window.addEventListener('marsa:langchange', function () { applyTheme(); setDocTitle(); });
-  function setDocTitle() { var v = tr('docTitle'); if (v && v !== 'docTitle') document.title = v; }
+  window.addEventListener('marsa:langchange', setDocTitle);
   setDocTitle();
-  window.addEventListener('storage', function (e) { if (e.key === THEME_KEY) applyTheme(); });
-  applyTheme();
-  $$('[data-year]').forEach(function (el) { el.textContent = String(new Date().getFullYear()); });
 
   var hashAtLoad = location.hash || '';
   var searchAtLoad = location.search || '';
@@ -195,7 +163,7 @@
   var msgBox = $('[data-auth-msg]');
   function showMsg(text, type) {
     if (!msgBox) return;
-    msgBox.className = 'alert auth-alert alert-' + (type || 'info');
+    msgBox.className = 'alert alert-' + (type || 'info') + ' mb-3';
     msgBox.querySelector('[data-auth-msg-text]').textContent = text;
     msgBox.hidden = false;
     try { msgBox.focus({ preventScroll: false }); } catch (e) { msgBox.focus(); }
@@ -209,10 +177,8 @@
       if (el) el.hidden = v !== name;
     });
   }
-  function showClientSub(name) {   // signin | signup (sign-up hides the tab header via CSS)
+  function showClientSub(name) {   // signin | signup
     $$('[data-client-sub]').forEach(function (el) { el.hidden = el.getAttribute('data-client-sub') !== name; });
-    var tabs = $('[data-auth-view="tabs"]');
-    if (tabs) tabs.setAttribute('data-client-mode', name);
   }
   function showInviteSub(name) {   // accept | signin | signup | none
     $$('[data-invite-sub]').forEach(function (el) { el.hidden = el.getAttribute('data-invite-sub') !== name; });

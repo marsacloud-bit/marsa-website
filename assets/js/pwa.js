@@ -1,20 +1,23 @@
 /* ==========================================================================
-   مرساة كلاود | Marsa Cloud — pwa.js (STAGING)
-   Contract: docs/online/APP_UI_SPEC.md §PWA. Load (defer) after app-shell.js on app
-   pages and after supa.js on login.html / offline.html; works without either.
+   مرسى | MARSA — pwa.js (STAGING)
+   Load (defer) after app-shell.js on the signed-in pages and after supa.js on
+   login.html / offline.html; works without either.
 
    * Registers ./sw.js with scope './' (http(s) secure contexts only; file:// and
      old browsers simply skip it).
-   * Install: 'beforeinstallprompt' is kept and an «تثبيت التطبيق» button is placed
-     in every [data-pwa-install] slot (topbar of the shell, header of login.html).
-     iOS Safari has no prompt → the same button shows the "Share → Add to Home
-     Screen" hint as a toast. Nothing is shown when already running standalone
-     (html.is-standalone is set for CSS).
+   * Install: 'beforeinstallprompt' is kept and an «تثبيت التطبيق» button
+     (.btn.btn-sm.btn-ghost.pwa-btn — the original style.css button) is placed in
+     every [data-pwa-install] slot the page provides (e.g. inside the original
+     .site-header .header-actions or the .topbar links). The slot is hidden while
+     there is nothing to show. iOS Safari has no prompt → the same button shows the
+     "Share → Add to Home Screen" hint as a toast. Nothing is shown when already
+     running standalone (html.is-standalone is set for CSS).
    * Update: when a new worker is waiting (and this page is already controlled),
-     MarsaShell.toast (or Marsa.toast) announces it and the slot gets an «تحديث»
-     button; reloading posts {type:'SKIP_WAITING'} and the page reloads once on
-     'controllerchange'.
-   * window.MarsaPwa = { install(), applyUpdate(), isStandalone(), registration(), render() }.
+     MarsaShell.toast (or Marsa.toast) announces it with a «إعادة التحميل» action and
+     the slot gets an «تحديث» button; reloading posts {type:'SKIP_WAITING'} and the
+     page reloads once on 'controllerchange'.
+   * window.MarsaPwa = { install(), applyUpdate(), isStandalone(), registration(), render() }
+     — call render() after adding a [data-pwa-install] slot dynamically.
    Strings: namespace 'pwa' (ar + en) registered here; DOM built with createElement.
    ========================================================================== */
 (function () {
@@ -24,7 +27,7 @@
   var STR = {
     ar: {
       install: 'تثبيت التطبيق',
-      installAria: 'تثبيت مرساة كلاود على هذا الجهاز',
+      installAria: 'تثبيت تطبيق مرسى على هذا الجهاز',
       iosHint: 'لتثبيت التطبيق على iPhone أو iPad: اضغط زر «مشاركة» في Safari ثم اختر «إضافة إلى الشاشة الرئيسية».',
       installed: 'تم تثبيت التطبيق.',
       update: 'تحديث',
@@ -34,7 +37,7 @@
     },
     en: {
       install: 'Install app',
-      installAria: 'Install Marsa Cloud on this device',
+      installAria: 'Install the MARSA app on this device',
       iosHint: 'To install on iPhone or iPad: tap “Share” in Safari, then “Add to Home Screen”.',
       installed: 'The app has been installed.',
       update: 'Update',
@@ -185,7 +188,8 @@
 
   window.addEventListener('marsa:langchange', render);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', render); else render();
-  function onLoad() { render(); register(); }   // render again: the shell may build its topbar late
+  window.addEventListener('marsa:shellready', render);   // a page may add its slot after its own boot
+  function onLoad() { render(); register(); }
   if (document.readyState === 'complete') onLoad(); else window.addEventListener('load', onLoad);
 
   window.MarsaPwa = {
@@ -193,6 +197,6 @@
     applyUpdate: applyUpdate,
     isStandalone: isStandalone,
     registration: function () { return reg; },
-    render: render   // the shell may call this after it (re)builds a [data-pwa-install] slot
+    render: render   // call after adding a [data-pwa-install] slot
   };
 })();

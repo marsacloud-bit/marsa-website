@@ -8,12 +8,11 @@
    - Type "items": one row = one invoice line → CIF / duty / VAT 15% estimate,
      export to .xlsx / .csv, optional hand-off to request.html via
      "marsa_calc_draft".
-   - App page (app-shell.js → window.MarsaShell): the shell draws the sidebar /
-     topbar around <main id="app-main"> (a minimal sidebar when signed out —
-     preview / validation / local save keep working for visitors and in demo
-     mode). Toasts / confirmations go through Shell.toast / Shell.confirm
-     (Marsa.toast / window.confirm without the shell). The staff check for
-     online upload follows the active organization (marsa:orgchange).
+   - Classic page (original site header / hero / footer, main.js). The
+     optional helper app-shell.js (window.MarsaShell) only adds: the Ctrl/⌘K
+     palette + header search button, the [data-shell-org] switcher, toasts and
+     the confirm dialog (Marsa.toast / window.confirm without it). The staff
+     check and the import batch follow the active organization (marsa:orgchange).
    ===================================================================== */
 (function () {
   'use strict';
@@ -39,10 +38,6 @@
     }
     // shell strings in assets/i18n/bulk.js ('bulk.*'); Arabic fallback when missing
     function tr(k, fb) { var key = 'bulk.' + k, v = I18 && typeof I18.t === 'function' ? I18.t(key) : key; return v === key ? fb : v; }
-    if (Shell) {
-      if (typeof Shell.setTitle === 'function') Shell.setTitle(tr('title', 'الرفع الجماعي'), [{ label: tr('crumb', 'العمل اليومي') }]);
-      if (typeof Shell.setActive === 'function') Shell.setActive('bulk');
-    }
     var fmtNum = M.formatNum || function (n, d) { return (Number(n) || 0).toFixed(d == null ? 2 : d); };
     var fmtSAR = M.formatSAR || function (n) { return fmtNum(n, 2) + ' ر.س'; };
 
@@ -927,9 +922,9 @@
       return state.rows;
     }
     function statusBadge(s) {
-      if (s === 'error') return '<span class="pill pill-danger">خطأ</span>';
-      if (s === 'warn') return '<span class="pill pill-warning">تحذير</span>';
-      return '<span class="pill pill-success">صالح</span>';
+      if (s === 'error') return '<span class="badge badge-danger">خطأ</span>';
+      if (s === 'warn') return '<span class="badge badge-warning">تحذير</span>';
+      return '<span class="badge badge-success">صالح</span>';
     }
     function notesHtml(row) {
       var out = '';
@@ -1364,12 +1359,6 @@
       showSuccess();
     }
 
-    // the app shell may scroll <main> instead of the window: scrollIntoView works for both
-    function scrollToEl(el) {
-      if (!el || !el.scrollIntoView) return;
-      var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      try { el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' }); } catch (e) { el.scrollIntoView(true); }
-    }
     function refsRows() {
       var b = state.lastBatch;
       return [['الرقم المرجعي', 'اسم العميل', 'الشركة', 'رقم الجوال', 'منفذ الوصول', 'وصف البضاعة', 'القيمة', 'العملة', 'الملف', 'رقم الصف', 'رقم الدفعة', 'الحالة']].concat(b.records.map(function (r) {
@@ -1395,7 +1384,8 @@
         var href = 'tracking.html?id=' + encodeURIComponent(r.ref);
         return '<tr><td class="num fw-bold">' + esc(r.ref) + '</td><td>' + esc(r.client.company || r.client.fullName) + '</td><td>' + esc(r.shipment.port) + '</td><td class="text-muted">' + esc(r.sourceFile) + ' · ص ' + r.sourceRow + '</td><td><a class="link-arrow" href="' + href + '">تتبع</a></td></tr>';
       }).join('');
-      scrollToEl(s);
+      var top = card.getBoundingClientRect().top + window.pageYOffset - 100;
+      window.scrollTo({ top: top, behavior: 'smooth' });
       setTimeout(function () { s.focus({ preventScroll: true }); }, 80);
       toast('تم الحفظ محليًا على هذا الجهاز (نسخة عرض تجريبية) — لم يُرسل إلى أي جهة. ' + plural(b.records.length, 'طلب واحد', 'طلبان', 'طلبات', 'طلبًا') + ' — رقم الدفعة ' + b.meta.batchId, 'success');
     }
@@ -1545,7 +1535,7 @@
       var fp;
       return API.util.sha256Hex(f.file).then(function (hash) {
         fp = hash;
-        // org = the one the shell header shows (explicit, so another tab's org switch cannot redirect it)
+        // org = the active one MarsaShell shows in the switcher (explicit, so another tab's org switch cannot redirect it)
         var shellOrg = null;
         try { shellOrg = Shell && typeof Shell.orgId === 'function' ? Shell.orgId() : null; } catch (e) { /* no shell */ }
         return API.createImportBatch({ fingerprint: fp, fileName: f.name, fileSize: f.size, sheetNames: sheetName ? [sheetName] : [], orgId: typeof shellOrg === 'string' && shellOrg ? shellOrg : undefined });
@@ -1694,7 +1684,8 @@
         var href = 'tracking.html?id=' + encodeURIComponent(r.ref);   // reference only; never the token
         return '<tr><td class="num fw-bold" dir="ltr">' + esc(r.ref) + '</td><td>' + esc(r.client) + '</td><td>' + esc(r.port) + '</td><td class="text-muted">' + esc(r.sourceFile) + ' · ص ' + esc(r.sourceRow) + '</td><td><a class="link-arrow" href="' + href + '">تتبع</a></td></tr>';
       }).join('');
-      scrollToEl(s);
+      var top = card.getBoundingClientRect().top + window.pageYOffset - 100;
+      window.scrollTo({ top: top, behavior: 'smooth' });
       setTimeout(function () { s.focus({ preventScroll: true }); }, 80);
       toast(OSTR.done + $('success-sub').textContent, c ? 'success' : 'warning');
     }
@@ -1724,7 +1715,7 @@
     if (ONLINE) {
       refreshAuth();
       API.onAuth(function () { refreshAuth(); });
-      // org switcher (app shell): the staff check is per active organization
+      // org switcher ([data-shell-org] / another tab): the staff check is per active organization
       window.addEventListener('marsa:orgchange', function () { auth.checked = false; renderAuthNote(); refreshAuth(); });
     }
 
