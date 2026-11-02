@@ -146,7 +146,7 @@
 - [x] (2026-11-03: Site URL = `https://marsacloud.com/login.html`، و6 Redirect URLs: قائمة G2 §3.4 + `login.html?mode=reset` لنموذج «نسيت كلمة المرور»؛ Confirm email مفعّل) Authentication → URL Configuration للنطاق `marsacloud.com` (Site URL وRedirect URLs كما في `G2_REPORT_AR.md` §3.4)، و**Confirm email** مفعّل.
 - [x] (2026-11-03) تعيين مدير المنصة (`supabase/make_platform_admin.sql` ببريد المالك).
 - [x] (2026-11-03) SMTP خاص: صندوق Hostinger `no-reply@marsacloud.com` (`smtp.hostinger.com:465`، اسم المرسل «مرسى MARSA»)، حد الإرسال صار 30 / ساعة. اختبار `POST /auth/v1/recover` إلى حساب المالك مع `redirect_to=https://marsacloud.com/login.html?mode=reset` → 200 وحدث `user_recovery_requested` في سجل Auth؛ أكّد المالك وصول الرسالة وأن الرابط فتح `login.html` على marsacloud.com. **ملاحظة:** بريد Hostinger «Starter Business Email Free Trial» ينتهي 2026-12-03 والتجديد التلقائي مفعّل (قرار المالك).
-- [ ] قرار MFA لـ `admin` ومدير المنصة قبل أي بيانات حقيقية.
+- [x] (2026-11-03، قرار المالك) MFA **مؤجَّل**: التجربة على بيانات تدريب بلا MFA؛ **يُبنى ويُفرض على `admin` ومدير المنصة قبل إدخال أي بيانات عملاء حقيقية** (TOTP مفعّل في الخادم، ولا واجهة تسجيل في الموقع بعد).
 
 ### 4.5 نشر الواجهة (Hostinger)
 - [x] (2026-11-03، `marsa-release-g7-8dd4e05.zip`) تجهيز الإصدار من الفرع بعد الالتزام وفق `ENVIRONMENTS_AR.md` §4 مع الاحتفاظ بالـ zip السابق و`.htaccess`.
