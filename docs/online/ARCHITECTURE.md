@@ -16,6 +16,8 @@
   ├─ assets/js/main.js     ← window.Marsa (مساعدات الواجهة الحالية)
   ├─ assets/js/supa.js     ← window.MarsaApi (طبقة البيانات: أونلاين أو محلي)
   ├─ assets/js/ops/*.js    ← G3: window.MarsaOps (شاشات العمليات وأقسام المعاملة، تُحمَّل قبل admin.js)
+  ├─ assets/js/fin/*.js    ← G4: شاشات المالية التشغيلية وأقسامها في المعاملة (عبر MarsaOps نفسه)
+  ├─ assets/js/bill/*.js   ← G5: الفوترة ودفترة (#billing، #daftra، قسم bill-invoices) — لا تستدعي دفترة أبدًا
   └─ assets/js/<page>.js   ← منطق الصفحة يستدعي MarsaApi فقط
             │  HTTPS (anon/publishable key + JWT المستخدم)
             ▼
@@ -23,7 +25,9 @@ Supabase (مشروع Staging واحد)
   ├─ Auth            ← تسجيل الدخول بالبريد وكلمة المرور، استعادة كلمة المرور
   ├─ PostgREST       ← الجداول في schema public + RPCs (Row Level Security على كل جدول)
   ├─ PostgreSQL 15+  ← schema app (دوال مساعدة وتريغرات، غير مكشوفة عبر API)
-  └─ Storage         ← bucket خاص "documents" (سياسات مرتبطة بجدول documents)
+  ├─ Storage         ← bucket خاص "documents" (سياسات مرتبطة بجدول documents)
+  └─ Edge Functions  ← G5: daftra-sync (مصدر فقط، غير منشورة). العامل الوحيد الذي يكلّم دفترة،
+                       بمفتاح service_role عبر دوال daftra_* فقط؛ في G5 عبر محاكي دفترة وحده (لا شبكة ولا مفتاح)
 ```
 
 - **وضعان للواجهة:** إذا كان `supabaseUrl` و`supabaseAnonKey` فارغين، يبقى الموقع كما هو الآن: localStorage وشريط «نسخة عرض تجريبية»، ولا يُحمَّل أي سكربت خارجي. إذا امتلآ، يحمّل `supa.js` مكتبة supabase-js v2.45.4 (UMD) من jsDelivr عند الحاجة، ويحوّل نص الشريط إلى «بيئة تجريبية متصلة (Staging) — بيانات اختبار فقط».
@@ -141,6 +145,18 @@ erDiagram
   transactions |o--o{ cost_adjustments : "G4: fees / adjustments"
   supplier_invoices |o--o{ cost_adjustments : "invoice / related"
   finance_documents |o--o{ cost_adjustments : "evidence"
+  organizations ||--o| daftra_connections : "G5: one Daftra account per org"
+  clients ||--o{ daftra_client_links : "G5: MRSC-<id> (one live link)"
+  transactions ||--o{ billing_intents : "G5: one per purpose + currency"
+  clients ||--o{ billing_intents : "billed client (fixed)"
+  billing_intents ||--o{ billing_intent_lines : "MRSL-<hex> line refs"
+  client_charges ||--o{ billing_intent_lines : "one live line per charge"
+  billing_intents |o--o{ billing_sync_jobs : "outbox (invoice_push / pull)"
+  daftra_client_links |o--o{ billing_sync_jobs : "client_*"
+  daftra_item_links |o--o{ billing_sync_jobs : "item_ensure"
+  billing_sync_jobs ||--o{ billing_sync_attempts : "append-only log"
+  billing_intents ||--o{ billing_review_items : "late / mismatch / cancelled"
+  client_charges |o--o{ billing_review_items : "late charge"
 ```
 
 `schema_versions` (G2) جدول مستقل بلا علاقات: صف لكل ملف ترحيل.
@@ -152,6 +168,12 @@ erDiagram
 - **الكتابة:** عبر دوال SECURITY DEFINER فقط. لا DELETE في أي جدول، و«الحذف» إلغاء (`void` / `rejected` / `reversed`) بسبب، والصف يبقى.
 - **المال والعملة:** المال `numeric(14,2)` موجب دائمًا (الإشارة من نوع المستند)، والكمية `numeric(14,3)`، والعملة `char(3)` افتراضيًا `SAR`، والضريبة عمود منفصل. لا تحويل عملات.
 - **التدقيق والمراجع:** `trg_audit` على الجداول العشرة، ومراجع الأب مركّبة `(x_id, org_id)` أو `(x_id, transaction_id)`، فكل هدف تخصيص داخل المعاملة نفسها.
+
+جداول G5 التسعة (`20261105000100`، العقد في `G5_SPEC.md`) تتبع القواعد نفسها، ويُضاف إليها:
+- **القراءة:** SELECT فقط لأدوار `fin_read_roles`؛ صفوف المعاملة بنطاق فرعها، وصفوف المؤسسة (الاتصال، الربط، المهام على مستوى المؤسسة) بـ `app.has_role(org, fin_read)`. `daftra_mock_accounts` بلا سياسة ولا صلاحية API.
+- **الكتابة:** دوال الموظفين ودوال العامل (`service_role`) فقط. لا DELETE؛ الحذف تغيير حالة بسبب. `billing_sync_attempts` إضافة فقط (تريغر يرفض كل تعديل إلا إغلاق المحاولة المفتوحة مرة واحدة، ويرفض الحذف).
+- **المال:** `numeric(14,2)` والكمية `numeric(14,3)` والضريبة `numeric(5,2)` والعملة `char(3)`. أرقام دفترة الرسمية (`remote_*`) منفصلة عن مجاميع مرسى (`lines_*`) ولا تُخلط. بصمة المحتوى يحسبها العامل (SHA-256)، وSQL يخزّنها ويقارنها فقط.
+- **التدقيق:** `trg_audit` على سبعة جداول (لا على `billing_sync_attempts` ولا على `daftra_mock_accounts`)، ومراجع مركّبة `(x_id, org_id)` أو `(x_id, transaction_id)`، فبند الفاتورة لا يشير أبدًا إلى مبلغ من معاملة أخرى.
 
 **قواعد عامة:**
 - كل جدول تشغيلي يحمل `org_id`، ويرتبط بالأب عبر **مفتاح أجنبي مركّب `(parent_id, org_id)`**؛ لذلك يستحيل ربط معاملة في مؤسسة بعميل أو فرع من مؤسسة أخرى حتى لو أُدخل المعرّف يدويًا.
@@ -202,6 +224,15 @@ erDiagram
 | `charge_collections` (G4) | أدلة التحصيل من العميل، إضافة فقط | `charge_id` (معتمد)، `amount`، `collected_at`، `method`، `reference` أو دليل، `status` (recorded/void). Σ ≤ إجمالي المبلغ المحمّل. ليست سند قبض |
 | `demurrage_cases` (G4) | الأرضيات والغرامات | `kind` (storage/demurrage/detention)، `container_id`، `operator_id`، `exception_id` (G3)، `free_until`، `charged_until`، `days`، `estimated_amount` (يزامن استحقاق `source='demurrage'`)، `currency`، `status` (open/closed/waived/void). أربعة أرقام محسوبة: المحمّل، والمحصَّل، والمدفوع للمشغّل، والمتبقي |
 | `cost_adjustments` (G4) | الرسوم الاستثنائية والتسويات | `kind` (late_cost/empty_fee/washing/repair/amendment/duplicate_invoice/other)، المعاملة أو الفاتورة، `related_invoice_id`، `exception_id`، `amount`، `reason` إلزامي، ربط إلزامي بمستند (CHECK)، `status` (proposed/approved/rejected)، `accrual_id` عند الاعتماد |
+| `daftra_connections` (G5) | اتصال المؤسسة بدفترة (واحد لكل مؤسسة) | `mode` (mock/live_pending)، `status` (not_connected/connected/error/disabled)، `subdomain` نص بديل فقط بفهرس فريد على `lower(subdomain)` (حساب دفترة واحد لكل مؤسسة)، `sync_enabled`، `capabilities` (17 مفتاحًا، `supported` + `evidence`)، `capabilities_source`، `last_check_*`، إعدادات الضريبة (`default_service_vat_rate`، `allowed_vat_rates`، `reimbursable_tax_code`، `invoice_notes`). **لا عمود سرّي** (مختبر) |
+| `daftra_client_links` (G5) | ربط عميل مرسى بعميل دفترة | `client_ref` = `MRSC-<client_id>` (ثابت)، `external_id` فريد داخل المؤسسة بين غير المفكوكة، `status` (pending/linked/drift/needs_review/error/unlinked)، `pushed_snapshot` و`remote_snapshot`، `drift[]` (`local:<field>` / `remote:<field>`)، `candidates`. لا كتابة تلقائية في أي اتجاه |
+| `daftra_item_links` (G5) | ربط مفتاح الخدمة بصنف دفترة | `item_key` = `<kind>:<service_code\|none>`، `product_code` = `MRS-<kind>-<code>` (ثابت)، `name_ar/en`، `default_vat_rate`، `tax_code` (standard/zero/exempt/out_of_scope)، `external_product_id`، `status` (pending/linked/needs_review/error/retired). فهرسان فريدان: مفتاح ↔ صنف في الاتجاهين |
+| `billing_intents` (G5) | «غرض الفوترة» (فاتورة تشغيلية) | `transaction_id`، `client_id` (ثابت)، `purpose` (final/interim/supplementary) + `purpose_key` (F/I1/S1…)، `currency`، `operational_ref` فريد لكل مؤسسة عبر كل الصفوف، `status` (open/draft/issued/cancelled)، `sync_state` (idle/pending/in_flight/synced/unknown/conflict/error)، مرآة دفترة (`external_invoice_id` فريد، `daftra_number`، `daftra_status`، `remote_*`، `payment_status`، `paid_amount`)، `pushed_hash`/`remote_hash`، `lines_*` (تريغر)، `conflict`. فريد `(transaction_id, currency, purpose_key)` بين غير الملغاة |
+| `billing_intent_lines` (G5) | بنود الغرض من المبالغ المعتمدة | `intent_id` + `charge_id` بمفاتيح `(…, transaction_id)`، `line_ref` = `MRSL-<16 hex>` فريد، لقطة ثابتة (الوصف والكمية والسعر والضريبة والمجاميع)، `state` (pending_add/synced/pending_remove/removed)، `pushed`، `remote_line_id`، `remote_override`. `UNIQUE (charge_id) WHERE state <> 'removed'` (لا فوترة مزدوجة) |
+| `billing_sync_jobs` (G5) | صندوق الصادر (outbox) للمزامنة | `kind` (probe/client_ensure/client_refresh/client_push/item_ensure/invoice_push/invoice_pull)، الهدف (intent/client_link/item_link)، `dedupe_key` فريد بين الحية، `options`، `status` (queued/running/unknown/done/conflict/failed/dead/cancelled)، `attempts`/`max_attempts`، `next_run_at`، `locked_by/until`، `expected_hash`، `last_error_*` |
+| `billing_sync_attempts` (G5) | سجل الطلب والرد، إضافة فقط | `job_id`، `attempt_no`، `worker`، `outcome` (ok/retry/failed/unknown/conflict/frozen/abandoned/lease_lost)، `adapter_mode`، `calls` (≤ 50، ≤ 256 KiB، محجوبة الأسرار)، `error`. يُغلق مرة واحدة؛ لا تدقيق عليه (هو السجل نفسه) |
+| `billing_review_items` (G5) | طابور المراجعة والتسوية | `kind` (late_charge/issued_mismatch/issued_cancelled)، `charge_id`، `details` (فروق ومعرّفات، محجوبة ومحدودة بـ 256 KiB)، `status` (open/resolved/dismissed)، `resolution`، `resolved_intent_id` |
+| `daftra_mock_accounts` (G5) | حساب دفترة المحاكى (Staging فقط) | `org_id` مفتاح أساسي، `state jsonb`، `version`. بلا سياسة، وبلا أي صلاحية API (service_role وحده عبر `daftra_mock_load/save`) |
 
 ## 4. الأدوار ومصفوفة الصلاحيات (Role matrix)
 
@@ -259,6 +290,8 @@ erDiagram
 | operational_alerts (G3) | — | R · RPC | R · RPC | R · RPC | R · RPC | R · RPC | R · RPC | R · RPC | R · RPC |
 | جداول G4 العشرة (finance_documents … cost_adjustments) | — | — | — | R · RPC (إنشاء) | R · RPC (إنشاء + اعتماد) | — | R · RPC (إنشاء + اعتماد، فرعه) | R | R · RPC (إنشاء + اعتماد) |
 | أعمدة parties المالية (G4) | — | R | R | R · RPC | R · RPC | R | R · RPC | R | R · RPC |
+| جداول G5 الثمانية (daftra_connections … billing_review_items) | — | — | — | R · RPC (إنشاء وإرسال) | R · RPC (إنشاء + اعتماد + إعداد دفترة) | — | R · RPC (إنشاء + اعتماد، فرعه) | R | R · RPC (إنشاء + اعتماد + إعداد دفترة) |
+| daftra_mock_accounts (G5) | — | — | — | — | — | — | — | — | — (service_role فقط) |
 
 \* تعديل المستند يقتصر على التصنيف والظهور والإلغاء؛ الأصل (المسار، البصمة، الاسم، الحجم) لا يتغير أبدًا. لا يوجد DELETE لأي مستند أو حدث أو سجل تدقيق.
 
@@ -273,6 +306,14 @@ erDiagram
 - **العينان الأربع:** المعتمِد غير منشئ الصف، إلا `admin` (`MRS_FORBIDDEN 'self_approval'`). الاعتماد في فرع **المعاملة** (`app.fin_can_decide`)، والقراءات تعيد لكل صف `branch_id` و`can_approve` / `can_review`، فلا تعتمد الواجهة على «دور في أي فرع».
 - **المشرف على مستوى المؤسسة إلزاميًا:** القيدان `memberships_supervisor_no_branch` و`invitations_supervisor_no_branch`، لأن `audit_log` يعرض عليه مبالغ G4 في كل الفروع.
 - **خارج المالية:** `operations_manager` (يبقى له `trip_finance` من G3)، و`clearance_staff`، و`transport_staff`، والعميل: صفر صفوف، و`MRS_FORBIDDEN` / `MRS_NOT_FOUND` من كل دالة مالية.
+
+**G5 — أدوار الفوترة ودفترة** (تعيد استعمال أدوار G4، ومرآتها `R.finRead/finWrite/finApprove/billAdmin` في `admin.js` و`app-shell.js`، و`billAdmin` ضمن `OPS_SETS`):
+- **القراءة `fin_read_roles`:** كل صفوف G5 في النطاق. صفوف المعاملة (الأغراض والبنود ومهامها والمراجعة) بنطاق فرع المعاملة (`app.has_tx_role`)، وصفوف المؤسسة (الاتصال، ربط العملاء والأصناف، المهام على مستوى المؤسسة) بـ `app.has_role(org, fin_read)`.
+- **الإنشاء `fin_write_roles`:** إنشاء غرض الفوترة، وإضافة البنود وحذفها (بسبب)، وربط العملاء، وطلب الإرسال والسحب وإعادة المحاولة.
+- **الاعتماد `fin_approve_roles`:** حل التعارضات، وحل عناصر المراجعة، وإلغاء الغرض، وقرار اختلاف بيانات العميل (`push_local` …)، كلها بملاحظة إلزامية.
+- **جديد `app.bill_admin_roles()` = accounts_manager، admin** (على مستوى المؤسسة): إعداد الاتصال، وفحص الإمكانات (وإعادة مهمة `probe` / `item_ensure`)، وكتالوج الأصناف والضريبة، وفك ربط العميل.
+- **العامل:** دوال `daftra_*` لـ `service_role` وحده (`MRS_FORBIDDEN 'service_only'` لغيره، ولا EXECUTE للموظفين). دوال الموظفين تعيد للعامل `MRS_AUTH_REQUIRED`.
+- **خارج الفوترة:** العميل، و`operations_manager`، و`clearance_staff`، و`transport_staff`: صفر صفوف ولا نتيجة دالة (G5-6). منذ G5 صار `transactions.financial_status` عمودًا مخفيًا عن أدوار الـ API (منح SELECT على مستوى الأعمدة بدونه)، والموظفون يقرؤونه عبر `staff_internal_fields('transactions')`.
 
 لا يكتب أي دور الحقول `ref` و`org_id` و`operational_status` و`financial_status` و`tracking_token_hash` مباشرة؛ تريغرات الحماية ترفض ذلك (`MRS_IMMUTABLE`) وتمر التغييرات عبر RPC.
 
@@ -315,7 +356,7 @@ erDiagram
 
 المرحلتان 8 و9 تبقيان معالم في المسار كما في الرؤية، لكن لا يحرّكهما إلا أدوار المالية، ولا تعنيان إصدار فاتورة ضريبية داخل النظام.
 
-**الحالة المالية `financial_status`** — **مؤقتة (Placeholder) إلى G5** (لا يغيّرها G4، القرار G4-9)، ومستقلة تمامًا عن التشغيلية، ولا تظهر للعميل: `not_started` لم تبدأ، `estimate_only` تقدير غير ضريبي فقط، `draft_pending` مسودة قيد الإعداد، `invoiced` صدرت الفاتورة (خارج النظام)، `settled` مسددة.
+**الحالة المالية `financial_status`** — كانت مؤقتة حتى G4 (القرار G4-9)؛ **منذ G5 يحرّكها G5 للأمام فقط** (G5-7)، ومستقلة تمامًا عن التشغيلية، ولا تظهر للعميل (عمود مخفي عن أدوار الـ API منذ G5؛ الموظفون يقرؤونه عبر `staff_internal_fields`): `not_started` لم تبدأ، `estimate_only` تقدير غير ضريبي فقط، `draft_pending` مسودة قيد الإعداد، `invoiced` صدرت الفاتورة (خارج النظام)، `settled` مسددة.
 
 **حالات أخرى:** الطلب `request_status` (new، under_review، converted، rejected). إرجاع الحاوية `container_return_status` (pending، evidence_submitted، returned_verified، disputed، waived). تصنيف المستند `classification_status` (unreviewed، confirmed، reclassified، ambiguous). الرسالة `contact_status`. صف الاستيراد `import_row_status`.
 
@@ -389,6 +430,7 @@ sequenceDiagram
 - **ما يراه العميل من أحداث G3:** حالة البيان، والحاوية (`operational_state` والإرجاع)، والموعد المؤكد. حدث الموعد يحمل الوقت والنافذة ورقم الحاوية و`appointment_ref` معتمًا، ثم `withdrawn` أو `completed` عند خروج الموعد من «مؤكد».
 - **ما يبقى داخليًا:** أحداث البوليصة (ومنها `conflict`)، والرحلات، والاستثناءات، و`docs_override`.
 - **G4:** نوع جديد `finance`، أُعيد إنشاء `transaction_events_event_type_check` ليشمل قائمة G3 كاملة + `'finance'`. هذه الأحداث `visible_to_client = false` دائمًا، و**لا تحمل مبالغ أبدًا**: الحمولة `{op, entity, id, …ids}`. أمثلة `op`: `allocation_proposed/approved/rejected/reversed`، `late_cost`، `accrual_created/reviewed/voided`، `charge_created`، `charge_status`، `collection_recorded/voided`، `demurrage_created/updated/status`، `adjustment_created/reviewed`. مزامنة استحقاق الرحلة أو الحالة لا تكتب أحداثًا. المبالغ قبل وبعد تبقى في `audit_log` وحده.
+- **G5:** نوع جديد `billing`، والقيد `transaction_events_event_type_check` أُعيد إنشاؤه ليشمل قائمة G4 كاملة + `'billing'`. الأحداث `visible_to_client = false`، والحمولة `{op, entity, id, …ids}` **بلا مبالغ ولا أجسام طلبات أو ردود ولا مجاميع دفترة**. أمثلة `op`: `intent_created`، `lines_added`، `line_removed`، `push_requested`، `draft_synced`، `conflict`، `conflict_resolved`، `issued`، `paid`، `sync_failed`، `review_resolved`، `intent_cancelled`، `late_write`. أحداث العامل `actor` فيها فارغ. تغيير `financial_status` من G5 يكتب حدث `financial_status` كالعادة. الطلبات والردود تبقى في `billing_sync_attempts` وحده (محجوبة)، ولا تُنسخ إلى `audit_log`.
 
 الإضافة تأتي من RPC وتريغرات الخادم. المستخدم يضيف مباشرة نوع `note` فقط، ويُختم بـ`auth.uid()`.
 - **`audit_log`** أثر تقني عام لكل INSERT/UPDATE/DELETE على: organizations، branches، memberships، clients، client_users، service_requests، transactions، containers، documents، import_batches، contact_messages، و(منذ G2) invitations وplatform_admins (صفوف الأخيرة `org_id` فيها فارغ، فلا يراها إلا من SQL Editor). يحفظ القيم قبل وبعد (jsonb)، والحقول المتغيرة، و`actor` و`actor_role`. التحديث الذي لا يغير شيئًا لا يُسجَّل. `import_rows` مستثنى لأنه كثيف، وتصحيحاته محفوظة داخله في `corrections`. منذ G3 وG4 يشمل التدقيق جداولهما أيضًا: الجداول المالية العشرة كلها، و`parties` ومعها الأعمدة المالية. الاستحقاقات المرحَّلة عند تطبيق G4 لها صف INSERT، لأن التريغر يُركَّب قبل الترحيل.
@@ -420,7 +462,7 @@ sequenceDiagram
 
 - المحاسبة: دفتر الأستاذ، القيود، سندات القبض والصرف، العهد (G5+). ~~الأرضيات، الربحية~~ **أُنجزت تحليليًا في G4**: متابعة الأرضيات، والتكاليف، والهامش التحليلي (ليس ربحًا محاسبيًا)، دون دفتر حسابات ثانٍ (`G4_REPORT_AR.md`).
 - G4 أيضًا خارج نطاقه: تحويل العملات، وقواعد الإضافة الآلية، واستخراج بنود الفاتورة آليًا (OCR)، وأي رقم مالي في بوابة العميل، وتغيير `financial_status`.
-- تكامل دفترة والإصدار الضريبي ZATCA/فاتورة، وأي فاتورة ضريبية داخل النظام. `financial_status` مجرد مؤشر مؤقت.
+- ~~تكامل دفترة~~ **أُنجز في G5 على محاكي دفترة فقط** (مسودات ومزامنة بلا ازدواج، `G5_REPORT_AR.md`). ما زال خارج النطاق: أي اتصال بدفترة الحقيقية أو مفتاح أو نشر للعامل؛ والإصدار الضريبي ZATCA/فاتورة وأي فاتورة ضريبية داخل النظام (المحاسب يصدر داخل دفترة)؛ والإشعارات الدائنة عبر API؛ وتجميع الفترة لكل عميل؛ وتحويل العملات؛ والإنشاء التلقائي للفواتير؛ وعرض الفاتورة في البوابة؛ ومطابقة تحصيل G4 مع سداد دفترة.
 - كتالوج البنود والضرائب والتسعير لكل مؤسسة. تقدير الحاسبة يُحفظ في `estimate` ويُوسم `is_tax_document = false`.
 - تكاملات فسح/سابر الحكومية، والإشعارات (واتساب/بريد)، وRealtime. **إرسال الدعوات بالبريد غير موصول:** الرابط يظهر مرة واحدة ويُنسخ يدويًا.
 - ~~الواجهة الإنجليزية الكاملة ومبدّل اللغة~~ **جزئيًا في G2:** `i18n.js` ومبدّل اللغة والقواميس جاهزة للواجهة المشتركة (الرأس والتذييل ورسائل الأخطاء) ولصفحات index وlogin وadmin وplatform. بقية الصفحات (request وtracking وportal وcontact وغيرها) تُعرض بالعربية وحدها، وبلا زر لغة، حتى تُكتب قواميسها.
@@ -463,6 +505,13 @@ sequenceDiagram
     - المشرف على مستوى المؤسسة؛ و`operations_manager` خارج المالية؛
     - منع رسوم الخدمة على تكلفة دفعها العميل مباشرة (يحتاج تأكيدًا)؛
     - حدود الإشعار الدائن؛ والربط التلقائي بالاستحقاق؛ وتطبيع رقم الفاتورة.
+17. **G5 (G0 لم يُغلق):** القرارات G5-1 إلى G5-13 في `G5_REPORT_AR.md` §5، والافتراض مطبَّق في كل منها:
+    - الغرض يدوي ولا ربط بإعادة الفارغ؛ فاتورة لكل معاملة وعملة، والمتأخر إلى فاتورة إضافية؛
+    - ضريبة البند من G4، والمسترد `out_of_scope` (يحتاج تأكيد مختص)؛
+    - المحاسب يصدر داخل دفترة، ومرسى ينشئ المسودات فقط؛ ودفترة مصدر الحقيقة؛
+    - العميل لا يرى شيئًا؛ و`financial_status` للأمام فقط؛ ولا تحويل عملات؛
+    - حساب دفترة واحد لكل مؤسسة؛ واختلاف بيانات العميل يُعرض ولا يُكتب تلقائيًا؛ والتحصيل مسموح على المفوتر.
+    - **مفتوح:** إثبات إمكانات دفترة الحقيقية (الخطة G5 الخطوة ٢)، ومكان المفتاح (Vault أو أسرار Edge)، ونشر العامل وجدولته.
 
 ## 14. الربط بمبادئ G0
 
@@ -580,7 +629,24 @@ sequenceDiagram
 
 المساعدات الداخلية (`app.fin_*`، ومنها `fin_cost_items`، `fin_invoice_payable`، `fin_client_share`، `fin_can_decide`، `fin_check_findoc`، `fin_norm_no`، `fin_possible_duplicates`، `sync_trip_accrual`) بلا EXECUTE لأي دور API، ما عدا مساعدَي السياسات `app.fin_read_roles` و`app.fin_can_read_invoice` (authenticated).
 
-المجموع الآن: **6** دوال لـ anon و**98** لـ authenticated (56 + 42 في G4)، ويتحقق `rls-tests.js` من القائمتين حرفيًا (لا زائد ولا ناقص).
+المجموع بعد G4: **6** دوال لـ anon و**98** لـ authenticated (56 + 42 في G4).
+
+**RPCs في G5** (`20261105000100`، التفاصيل في `G5_SPEC.md` «Staff RPC list» و«Worker RPC contract»). القواعد نفسها: `SECURITY DEFINER`، `search_path = ''`، التحقق من الهوية أولًا، `REVOKE … FROM PUBLIC, anon, authenticated` ثم `GRANT` إلى authenticated (الموظفون) أو `service_role` وحده (العامل). دوال الإنشاء والطلب idempotent (`p_idem_key`). «@المعاملة» = الدور في فرع المعاملة؛ «المؤسسة» = `app.has_role(org, …)`.
+
+| المجموعة | الدوال | الدور | ملاحظات |
+|---|---|---|---|
+| الاتصال | `get_daftra_connection(p_org)`، `save_daftra_connection(p_org, p_payload)`، `request_daftra_probe(p_org, p_idem_key)` | قراءة / bill_admin / bill_admin | `push_ready` و`missing_capabilities[]`؛ `subdomain_taken`؛ الحالة يكتبها إكمال الفحص فقط |
+| العملاء | `list_daftra_client_links(p_org, p_filters)`، `link_daftra_client(p_client, p_external_id, p_idem_key)`، `refresh_daftra_client(p_link)`، `resolve_client_drift(p_link, p_decision, p_note, p_external_id)`، `unlink_daftra_client(p_link, p_reason)` | قراءة / إنشاء / إنشاء / اعتماد / bill_admin | `unlinked[]` = عملاء بمبالغ معتمدة بلا ربط مع `approved_count` من الفروع المقروءة فقط؛ `external_id_taken`؛ `in_use` |
+| الأصناف | `list_daftra_items(p_org)`، `save_daftra_item(p_org, p_item_key, p_payload)` | قراءة / bill_admin | كل مفتاح ممكن بالقيم الافتراضية؛ المعرّف اليدوي ← مهمة `item_ensure` للتحقق |
+| أغراض الفوترة | `create_billing_intent(p_payload, p_idem_key)`، `add_billing_lines(p_intent, p_charge_ids, p_idem_key)` (≤ 200؛ NULL = كل المؤهل)، `remove_billing_line(p_line, p_reason)`، `cancel_billing_intent(p_intent, p_reason)` | إنشاء @المعاملة / اعتماد للإلغاء | `intent_taken`، `no_issued_final`، `final_issued`، `not_eligible`، `remote_draft_exists`، `sync_in_flight`، `conflict_open`، `unreconciled_remote` |
+| المزامنة | `request_billing_push(p_intent, p_idem_key)`، `request_billing_pull(p_intent)`، `retry_billing_job(p_job)`، `resolve_billing_conflict(p_intent, p_decision, p_note)` | إنشاء @المعاملة (bill_admin لإعادة `probe` / `item_ensure`) / اعتماد للتعارض | الضغط المزدوج يعيد المهمة الحية (`deduplicated`)؛ بوابة `not_connected` / `capability` / `tax_rate_unmapped` / `intent_issued`؛ القرارات `keep_remote` / `overwrite_remote` / `recreate` / `release` |
+| المراجعة | `billing_review_queue(p_org, p_filters)`، `resolve_billing_review(p_id, p_decision, p_note, p_intent)` | قراءة / اعتماد @المعاملة | `supplementary` / `dismiss` / `accept` / `credit_note_in_daftra` / `release_charges` |
+| القراءة | `list_billing_intents(p_org, p_filters)`، `get_billing_intent(p_id)`، `list_billing_jobs(p_org, p_filters)`، `get_billing_job(p_id)`، `tx_billing(p_tx)` | قراءة | `get_billing_intent` يعيد `checks` و`can`؛ `tx_billing` بلا دور مالي ← `MRS_FORBIDDEN 'finance'`؛ المحاولات بطلبات وردود محجوبة |
+| العامل (service_role فقط) | `daftra_claim_jobs(p_worker, p_limit)`، `daftra_complete_job(p_attempt, p_result)`، `daftra_renew_lease(p_attempt)`، `daftra_schedule_pulls(p_limit)`، `daftra_mock_load(p_org)`، `daftra_mock_save(p_org, p_state, p_version)` | `service_role` | مهمة جارية واحدة لكل مؤسسة، إيجار 5 دقائق، سياج كتابة قبل كل كتابة، `lease_lost` لا يطبّق شيئًا، `mock_version` |
+
+أُعيد أيضًا إنشاء `staff_internal_fields` (يعيد `financial_status` للموظفين). المساعدات الداخلية `app.bill_*` (ومنها `bill_redact`، `bill_scrub_text`، `bill_secret_key`، `bill_error`، `bill_event`، `bill_mark_issued`، `bill_tx_financial`، `bill_unreconciled`، `bill_job_unreconciled`، `bill_charge_held`، `bill_bound_details`، `bill_diff_cap`) بلا EXECUTE لأي دور API، ما عدا مساعد السياسات `app.bill_can_read_job` (authenticated).
+
+المجموع الآن: **6** دوال لـ anon و**123** لـ authenticated (98 + 25 في G5)، و6 دوال `daftra_*` لـ `service_role` وحده، ويتحقق `rls-tests.js` من القوائم الثلاث حرفيًا (لا زائد ولا ناقص).
 
 **طبقة MarsaApi (G2):** `newIdemKey`، والأغلفة idempotent تعيد المحاولة مرتين بالمفتاح نفسه عند انقطاع الشبكة أو المهلة أو أي 5xx بلا رمز PG، ثم تعيد `MRS_UNKNOWN_RESULT`. المفتاح المحفوظ يُنسى بعد دقيقتين أو عند أي جواب قاطع، و`issue_tracking_token` لا يعيد استخدام مفتاح محفوظ. الإعادة على مفتاح محفوظ تعيد `replayedEarlier:true`. الدوال الجديدة: `platformListOrgs`، `platformCreateOrg`، `platformSetOrgActive`، `platformReissueAdminInvitation`، `platformRecentErrors`، `updateOrg`، `createBranch`، `updateBranch`، `invite`، `listInvitations`، `revokeInvitation`، `reissueInvitation`، `invitationPreview`، `acceptInvitation`، `auditLog`، `recentErrors`، `healthCheck`، `setMyLocale`، `signOutEverywhere`، `activeOrgId`، `setActiveOrg`. دوال القوائم تقبل `orgId` اختياريًا. `addMembership` باقية للتوافق، وتعيد `MRS_FORBIDDEN` دون اتصال.
 
@@ -601,6 +667,15 @@ sequenceDiagram
 - **الرفع:** `uploadFinanceDocument({file, branchId, kind})` يحسب SHA-256 في المتصفح، ثم يستدعي `register_finance_document`، ثم يرفع إلى `storage.from('finance')`.
 - **الحمولات:** ترسل مفاتيح الخادم فقط (`G4_SPEC.md` «As built»). لا `currency` في السداد والتحصيل، ولا `note` في الاستحقاق اليدوي، و`costReport` يحذف `limit` و`offset`.
 - **وحدات الواجهة:** `assets/js/fin/{invoices,payables,margins,demurrage,tx-fin}.js` بعد `ops/*.js` وقبل `admin.js`، عبر `MarsaOps` نفسه. المسارات `#costs` و`#costs/review` و`#costs/<id>` و`#payables` و`#margins` و`#demurrage` (`allow: 'finRead'`)، ومجموعة القائمة «المالية التشغيلية» بين العمليات والإدارة. قسما المعاملة `fin-costs` (80) و`fin-margin` (85). القواميس `fin` في `assets/i18n/fin.js`، و`fintx` داخل `tx-fin.js`، والأنماط في `assets/css/pages/fin.css`. البوابة لا تحمّل أي ملف مالي.
+
+**طبقة MarsaApi (G5):** 25 اسمًا ثابتًا في `G5_SPEC.md` «Front end»، كلها `{data, error}`، وفي وضع العرض `MRS_DEMO_MODE`، و`p_org` = المؤسسة النشطة. دوال الإنشاء والطلب عبر `idemRpc`. دوال العامل `daftra_*` **غير مكشوفة أبدًا** في MarsaApi.
+- **الأسماء:**
+  - الاتصال والربط: `getDaftraConnection`، `saveDaftraConnection`، `requestDaftraProbe`، `listDaftraClientLinks`، `linkDaftraClient`، `refreshDaftraClient`، `resolveClientDrift`، `unlinkDaftraClient`، `listDaftraItems`، `saveDaftraItem`.
+  - الأغراض والبنود: `createBillingIntent`، `listBillingIntents`، `getBillingIntent`، `addBillingLines`، `removeBillingLine`، `requestBillingPush`، `requestBillingPull`، `resolveBillingConflict`، `cancelBillingIntent`.
+  - الطابور والمراجعة: `listBillingJobs`، `getBillingJob`، `retryBillingJob`، `billingReviewQueue`، `resolveBillingReview`، `txBilling`.
+- **`addBillingLines(intentId, chargeIds)`:** `null` = كل المؤهل؛ المصفوفة تُرسل كما هي (`[]` ← `MRS_REQUIRED 'lines'`، ومعرّف غير صالح ← `MRS_INVALID 'charge_ids'`).
+- **`financial_status`:** لم يعد في `TX_COLS`؛ يُقرأ عبر `withInternal` (`staff_internal_fields`)، ومرشح `financialStatus` في `listTransactions` يعمل على الصفحة المحمّلة.
+- **وحدات الواجهة:** `assets/js/bill/{billing,daftra,tx-bill}.js` بعد `fin/*.js` وقبل `admin.js`. المسارات `#billing` و`#billing/<id>` و`#billing/queue` و`#daftra` (`allow: 'finRead'`؛ أزرار الإنشاء لـ `finWrite`، والاعتماد لـ `finApprove`، والإعداد لـ `billAdmin`)، وعنصرا القائمة `billing` (أيقونة `sync`) و`daftra` (أيقونة `link`) في مجموعة المالية بعد `demurrage`. قسم المعاملة `bill-invoices` (90) لا يُرسم بلا `finRead`. القاموس `bill` في `assets/i18n/bill.js` و`billtx` داخل `tx-bill.js`، والأنماط في `assets/css/pages/bill.css`. شريط ثابت «وضع المحاكاة — لا اتصال بدفترة حقيقية». البوابة لا تحمّل أي ملف من G5.
 
 **مفاتيح `payload` لطلب الخدمة** (هي أسماء حقول `request.html`): `fullName company phone email clientType taxId crNumber contactPref direction service mode country port goods hsCode declarationNo needAci value currency weight containerType containerNumbers count blNumber shippingLine eta docsLater notes documents[] calc terms branchCode orgSlug`. يقبل `MarsaApi.submitServiceRequest` السجل الحالي الذي يبنيه `request.js` (بالكائنين `client` و`shipment`) ويحوّله بنفسه.
 
@@ -631,6 +706,14 @@ sequenceDiagram
 - **الإشعار الدائن:** `credit_exceeds_invoice`، `credit_target`، `credit_note_link`، `credit_allocated`.
 - **العملة والحالة:** `currency`، `currency_in_use`، `invoice_locked`، `invoice_approved`، `has_payments`، `has_approved_allocations`، `in_use`، `allocated`، `g5_only`، `line_<status>`.
 
+**رموز G5:** **لا رمز خادم جديد.** تفاصيل `DETAIL` الجديدة:
+- **الحالة والبوابة (`MRS_BAD_TRANSITION`):** `not_connected`، `capability` (HINT = المفاتيح الناقصة)، `intent_issued`، `in_invoice`، `sync_in_flight`، `conflict_open`، `remote_draft_exists`، `unreconciled_remote`، `no_issued_final`، `final_issued`، `in_use`، `mock_version`، `lease_lost`، `no_conflict`، `conflict_reason`، `unlinked`، و`g5_only` (من G4، ما زال للموظفين).
+- **التكرار والقيم (`MRS_INVALID`):** `intent_taken`، `external_id_taken`، `subdomain_taken`، `not_eligible`، `currency`، `tax_rate_unmapped`، `item_key`، `charge_ids`، `link_exists`.
+- **الناقص (`MRS_REQUIRED`):** `lines`، `client` (معاملة بلا عميل)، `client_review`، `item_review`.
+- **الصلاحية (`MRS_FORBIDDEN`):** `service_only` (دوال العامل)، `role`، `finance`.
+
+لكل تفصيل رسالة بالعربية والإنجليزية في `supa.js` و`assets/i18n/bill.js`.
+
 المعرّف الموجود (للتكرار) وأرقام البنود (للبوابة) ومعرّفات الاستحقاقات المرشحة تصل في **HINT** الخاص بـ Postgres. `normalizeError` في `supa.js` يقرؤها إلى `refId` و`extra`، ولكل تفصيل رسالة بالعربية والإنجليزية.
 
 **قواعد للمطورين:**
@@ -639,7 +722,7 @@ sequenceDiagram
 - في وضع العرض: `submitServiceRequest` و`submitContactMessage` و`publicTrack` تحفظ وتقرأ من localStorage كما الآن (`publicTrack` يعيد السجل المحلي في `data.local`). بقية الدوال تعيد `MRS_DEMO_MODE`، فاعرض للمستخدم رسالة `error.message`.
 - `tracking_token` يظهر مرة واحدة فقط: اعرضه مع رابط `tracking.html?ref=…&t=…`، ونبّه المستخدم إلى حفظه. لا تحفظه في localStorage إلا بموافقة صريحة.
 - نص الفوتر عن «البيانات تبقى على جهازك» يجب أن يتغير في الوضع المتصل؛ العنصر `<html data-marsa-mode="online|demo">` متاح لذلك.
-- الاختبار المحلي: `cd /tmp/pgtest && NODE_PATH=/tmp/pgtest/node_modules node supabase/tests/<file>.js --quiet` للملفات `rls-tests` و`g2-tests` و`g2-ops-tests` و`restore-drill` و`g3-tests` و`g3-cycle-tests` و`g4-tests` و`g4-cycle-tests` (يحمّل shim ثم كل الترحيلات ثم البذرة). الأرقام الحالية في `G4_REPORT_AR.md` (1123 / 222 / 110 / 22 / 578 / 70 / 300 / 87، بلا فشل، وتحذير واحد قديم في `rls-tests`).
+- الاختبار المحلي: `cd /tmp/pgtest && NODE_PATH=/tmp/pgtest/node_modules node supabase/tests/<file>.js --quiet` للملفات `rls-tests` و`g2-tests` و`g2-ops-tests` و`restore-drill` و`g3-tests` و`g3-cycle-tests` و`g4-tests` و`g4-cycle-tests` و`g5-tests` و`g5-cycle-tests` و`g5-review-tests` (يحمّل shim ثم كل الترحيلات ثم البذرة). الأرقام الحالية في `G5_REPORT_AR.md` (1432 / 222 / 110 / 24 / 578 / 70 / 300 / 87 / 318 / 177 / 78، بلا فشل، وتحذير واحد قديم في `rls-tests`).
 
 ## Security review (2026-10-31, staging)
 
@@ -722,3 +805,19 @@ Migration `20261104000100_g4_costs.sql` (spec: `G4_SPEC.md`). Paste-ready file f
   - Backfilled trip accruals get their `audit_log` INSERT row (the audit trigger is attached before the backfill).
 
 Still open (G4): not exercised against the real PostgREST / Supabase Storage or a real browser; payload whitelists were checked against the SQL `app.only_keys` lists in jsdom only.
+
+### G5 additions (2026-11-02, staging)
+Migration `20261105000100_g5_daftra.sql` (spec: `G5_SPEC.md`, incl. both "As built" sections; report: `G5_REPORT_AR.md`). Paste-ready file for the live staging SQL Editor: **`g5_apply.sql` (the G5 file alone, after G4)**; `supabase/all_migrations.sql` stays for an empty database only.
+- **No real Daftra.** No account, no network call, no API key anywhere. Every Daftra call goes through the provider adapter in `supabase/functions/daftra-sync/`; G5 runs only the deterministic mock (`mock-adapter.js`). `createRealAdapter` throws `not_configured` from every method and lists `REAL_ENDPOINTS_TO_VERIFY` (data only). The Edge Function is source only, **not deployed and not precached**; staging jobs stay `queued` until the owner deploys it.
+- **Secrets.** No G5 column is named like a key / secret / token / password (tested). The connection row holds status, mode and capabilities only. A future live key lives in Supabase Vault (`daftra_api_key:<org_id>`) or Edge Function secrets and is read only by the worker. `app.bill_redact` / `app.bill_scrub_text` (mirrored in `worker.js`) strip secret-like keys and scrub secret-like string values (URL query strings, `name=value`, Bearer / Basic) in every stored request, response, error and capability evidence.
+- **Nine tables:** eight tenant tables (`daftra_connections`, `daftra_client_links`, `daftra_item_links`, `billing_intents`, `billing_intent_lines`, `billing_sync_jobs`, `billing_sync_attempts`, `billing_review_items`) with RLS, SELECT-only grants, composite tenant FKs, branch scope through the parent transaction, and `trg_audit` on seven (not on `billing_sync_attempts`, which is the append-only history itself); plus `daftra_mock_accounts` (no policy, no API grant, `NO_API_TABLES`).
+- **Outbox + worker.** Staff RPCs enqueue `billing_sync_jobs`; the worker claims through `daftra_claim_jobs` (one running job per org, 5-minute lease, `FOR UPDATE SKIP LOCKED`), fences every write with `daftra_renew_lease`, caps each adapter call at 60 s, and completes through `daftra_complete_job`. A lost response is `unknown`, never `failed`; the next run reconciles by `operational_ref` before any create, and «possibly applied» stays sticky through retry / failed / dead.
+- **No duplicates / no blind overwrite.** One live intent per tx + currency + purpose; one live line per charge; one Daftra account per org (unique `lower(subdomain)`); adoption by reference only for the same Daftra client and currency; read-before-update with a content hash, so an accountant edit is a `remote_edited` conflict and nothing is sent; issued invoices are frozen (review items, never edited).
+- **Client privacy (G5-6).** Clients and non-finance staff read 0 G5 rows and get nothing from G5 RPCs; `transactions.financial_status` joins the 0700 hidden columns (column-level SELECT grant without it, fail closed); staff read it through `staff_internal_fields('transactions')`. `billing` events carry no amounts and are never client-visible.
+- **G4 changes made by G5.** `client_charges.status='invoiced'` is set only by the completion path (`marsa.bill_invoiced` flag); a charge on a live line cannot leave `approved` (`in_invoice`); `app.tg_collection_check` accepts collections on `approved` or `invoiced` charges.
+- **Catalog.** anon still executes exactly 6 functions; authenticated exactly 123 (98 + 25); the 6 `daftra_*` RPCs are executable by `service_role` only. Only `app.bill_can_read_job` is granted to authenticated (policy helper).
+- **Migration safety.** Preflight stops before any DDL unless G4 (`20261104000100`) is applied, and (first run only) if any charge is already `invoiced`. It stops loudly if two orgs already share a subdomain. Applying `g5_apply.sql` three times on G4 data changes no count; it also applies twice over an older G5 build.
+  - **After G5, never re-paste `g4_apply.sql` or `g3_apply.sql` alone.** They recreate `transaction_events_event_type_check` without `'billing'` (every G5 write RPC then fails) and restore the G4 collection check (no collection on an invoiced charge). If one was refused, nothing changed; if one succeeded, paste `g5_apply.sql` straight after.
+- **Integration fixes** (found by running the real views on real captured responses): a client refresh on an already linked link keeps its baseline, so a rename inside Daftra shows as `remote:<field>`; the probe's capability record is rebuilt from the fixed key list (redaction had dropped `invoices.version_token`); `list_daftra_client_links` unlinked rows carry `approved_count` and `tx_billing` intents carry `job_status`; review items read `charge.description` / `charge.currency`.
+
+Still open (G5): real Daftra capabilities unproven (plan G5 step ٢, every `REAL_ENDPOINTS_TO_VERIFY` item); live key storage is design only; the Edge Function is not deployed or scheduled and `index.ts` was never run under Deno; the 2-minute reconcile delay is an assumption; lock-order / deadlock handling is checked only by source (PGlite has one connection); probe call logs still drop `invoices.version_token` (key-name redaction); product adoption by code does not compare name / tax; nothing was exercised against the real Supabase project or a browser.

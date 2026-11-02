@@ -54,12 +54,18 @@ const U = {
 };
 const KEY_REQ = '0d0d0000-0000-4000-8000-000000000001';
 const KEY_INV = '0d0d0000-0000-4000-8000-00000000000a';   // G4 supplier invoice (replay after restore)
+const KEY_PUSH = '0d0d0000-0000-4000-8000-00000000000b';  // G5 push request (replay after restore)
+const KEY_INTENT = '0d0d0000-0000-4000-8000-00000000000c'; // G5 billing intent
+const G5_TABLES = ['daftra_connections', 'daftra_client_links', 'daftra_item_links', 'billing_intents', 'billing_intent_lines',
+  'billing_sync_jobs', 'billing_sync_attempts', 'billing_review_items'];
 
 /* ------------------------------------------------------------------ helpers */
 let db;
 async function asRole(who, fn) {
   if (who === 'anon') {
     await db.exec(`SET ROLE anon; SELECT set_config('request.jwt.claims', '{"role":"anon"}', false);`);
+  } else if (who === 'service') {
+    await db.exec(`SET ROLE service_role; SELECT set_config('request.jwt.claims', '{"role":"service_role"}', false);`);
   } else {
     await db.exec(`SET ROLE authenticated; SELECT set_config('request.jwt.claims', '{"sub":"${U[who]}","role":"authenticated"}', false);`);
   }
@@ -165,6 +171,26 @@ async function buildSample() {
   await rpc('adminA', `SELECT public.create_demurrage_case($1) r`, [{ transaction_id: TX1, kind: 'storage', estimated_amount: 250 }]);
   await rpc('adminA', `SELECT public.create_cost_adjustment($1) r`, [{ kind: 'amendment', supplier_invoice_id: inv.id, reason: 'تعديل (اختبار الاستعادة)' }]);
   r1.g4 = { inv: inv.id };
+  // G5 (20261105000100): a row in every billing table — mock connection, probe completed by the worker identity,
+  // a final intent on TX1 with the approved charge, a push request (client / item links + queued job), a review item
+  // (owner insert: the natural path needs an issued invoice) and a persisted mock account.
+  await rpc('adminA', `SELECT public.save_daftra_connection($1, $2) r`, [A, { mode: 'mock', subdomain: 'marsa-restore', sync_enabled: true }]);
+  await rpc('adminA', `SELECT public.request_daftra_probe($1, NULL) r`, [A]);
+  const caps = {};
+  ['clients.search_by_ref', 'clients.read', 'clients.create', 'clients.update', 'products.search_by_code', 'products.search_by_name',
+    'products.create', 'invoices.create_draft', 'invoices.read', 'invoices.search_by_reference', 'invoices.update_draft',
+    'invoices.line_reference_field', 'invoices.version_token', 'invoices.multi_currency', 'invoices.issue', 'payments.read',
+    'credit_notes.create'].forEach(k => { caps[k] = { supported: !['invoices.issue', 'credit_notes.create'].includes(k), evidence: 'mock' }; });
+  const ctx = (await rpc('service', `SELECT public.daftra_claim_jobs('restore-worker', 5) r`)).find(c => c.job.kind === 'probe');
+  await rpc('service', `SELECT public.daftra_complete_job($1, $2) r`, [ctx.attempt_id, { outcome: 'ok',
+    effects: { capabilities: caps, account: { currency: 'SAR' } },
+    calls: [{ op: 'probe', at: '2026-11-02T08:00:00Z', ms: 3, request: {}, response: { ok: true }, error: null, applied: 'yes' }] }]);
+  const intent = await rpc('adminA', `SELECT public.create_billing_intent($1, $2) r`, [{ transaction_id: TX1, purpose: 'final', currency: 'SAR' }, KEY_INTENT]);
+  const intentId = intent.id || intent.intent.id;
+  const push = await rpc('adminA', `SELECT public.request_billing_push($1, $2) r`, [intentId, KEY_PUSH]);
+  await q(`INSERT INTO public.billing_review_items (org_id, transaction_id, intent_id, kind, details) VALUES ($1, $2, $3, 'issued_mismatch', '{"drill":true}')`, [A, TX1, intentId]);
+  await rpc('service', `SELECT public.daftra_mock_save($1, $2, 0) r`, [A, { clients: [{ id: 'c-1', reference: 'MRSC-drill' }] }]);
+  r1.g5 = { intent: intentId, job: push.job.id };
   return r1;
 }
 
@@ -222,7 +248,9 @@ async function main() {
     // G4
     'public.finance_documents', 'public.supplier_invoices', 'public.supplier_invoice_lines', 'public.cost_allocations',
     'public.cost_accruals', 'public.supplier_payments', 'public.client_charges', 'public.charge_collections',
-    'public.demurrage_cases', 'public.cost_adjustments']
+    'public.demurrage_cases', 'public.cost_adjustments',
+    // G5
+    ...G5_TABLES.map(t => 'public.' + t), 'public.daftra_mock_accounts']
     .filter(k => !before[k] || before[k].n === 0);
   await check('source has rows in the key tables (drill is not vacuous)', () => empty.length === 0 || 'empty: ' + empty.join(', '));
   await check('both orgs present in the source', async () =>
@@ -353,6 +381,30 @@ async function main() {
       catch (e) { if (!/MRS_FORBIDDEN|MRS_NOT_FOUND/.test(errText(e))) return fn + ': ' + errText(e); }
     }
     return true;
+  });
+  await check('G5 after restore: staffB / staffA / clientA see no billing rows of org A; nobody but the service role reads the mock account', async () => {
+    for (const t of G5_TABLES) {
+      for (const who of ['staffB', 'staffA', 'clientA']) {
+        const r = await denied(who, `SELECT 1 FROM public.${t} WHERE org_id = $1`, [A]);
+        if (r !== true) return who + ' ' + t + ': ' + r;
+      }
+      if (!(await as('adminA', `SELECT 1 FROM public.${t} WHERE org_id = $1 LIMIT 1`, [A])).length) return 'adminA lost ' + t;
+    }
+    try { await as('adminA', `SELECT 1 FROM public.daftra_mock_accounts`); return 'adminA reads daftra_mock_accounts'; }
+    catch (e) { if (!/permission denied/.test(errText(e))) return errText(e); }
+    const m = await rpc('service', `SELECT public.daftra_mock_load($1) r`, [A]);
+    return (m.version === 1 && m.state.clients[0].id === 'c-1') || JSON.stringify(m);
+  });
+  await check('G5 after restore: push replay returns the same live job; the worker claims it once; staff cannot call worker RPCs', async () => {
+    const again = await rpc('adminA', `SELECT public.request_billing_push($1, $2) r`, [r1.g5.intent, KEY_PUSH]);
+    const dup = await rpc('adminA', `SELECT public.request_billing_push($1, NULL) r`, [r1.g5.intent]);
+    const jobs = (await q(`SELECT count(*)::int n FROM public.billing_sync_jobs WHERE intent_id = $1`, [r1.g5.intent]))[0].n;
+    const claimed = await rpc('service', `SELECT public.daftra_claim_jobs('restore-worker-2', 5) r`);
+    const pushCtx = claimed.find(c => c.job.id === r1.g5.job);
+    try { await as('adminA', `SELECT public.daftra_claim_jobs('x', 1)`); return 'adminA executed daftra_claim_jobs'; }
+    catch (e) { if (!/permission denied/.test(errText(e))) return errText(e); }
+    return (again.job.id === r1.g5.job && dup.job.id === r1.g5.job && dup.deduplicated === true && jobs === 1 && !!pushCtx
+            && pushCtx.intent.lines.length === 1) || JSON.stringify({ again: again.job.id, dup: dup.job.id, jobs, claimed: claimed.length });
   });
   await check('writes work after restore (new request gets the next ref)', async () => {
     const r = await rpc('anon', `SELECT public.submit_service_request($1) r`, [reqPayload('0559000099', {})]);

@@ -87,7 +87,7 @@
 
 ### 3.2 لصق الترحيل في Supabase SQL Editor
 الملف: `/private/tmp/claude-501/-Users-apple/3164bcee-2188-447c-b713-54d9e847dd13/scratchpad/g4_apply.sql` (نحو 283 KB). فيه الرأس وحارس الترميز ثم الترحيل `20261104000100_g4_costs.sql` وحده، **بعد** `g3_apply.sql`.
-1. SQL Editor → New query → الصق **كامل** المحتوى → Run. إعادة لصق `g4_apply.sql` نفسه آمنة (مختبرة: لا يتغير أي عدد).
+1. SQL Editor → New query → الصق **كامل** المحتوى → Run. إعادة لصق `g4_apply.sql` نفسه آمنة (مختبرة: لا يتغير أي عدد) **قبل G5 فقط**. بعد تطبيق G5 لا تُعِد لصق `g4_apply.sql` وحده: يحذف `'billing'` من `transaction_events_event_type_check` ويعيد فحص التحصيل القديم؛ إن فعلت فالصق `g5_apply.sql` فورًا بعده.
 2. إذا رفض المحرر لصقًا بهذا الحجم: شغّل `supabase/migrations/20261104000100_g4_costs.sql` في استعلام مستقل.
 3. **لا تلصق `supabase/all_migrations.sql` على Staging.** هو لقاعدة فارغة فقط: يعيد تشغيل G3 A، فيفشل بمجرد وجود حدث `finance` واحد.
 4. **بعد G4 لا تُعِد لصق `g3_apply.sql` (أو G3 A) وحده.** إن رُفض بسبب `transaction_events_event_type_check` فلم يتغير شيء، فالصق `g4_apply.sql` بدلًا منه. وإن نجح فقد حذف `'finance'` من القيد بصمت، فالصق `g4_apply.sql` فورًا بعده، وإلا تفشل كل دوال G4 التي تكتب حدثًا.

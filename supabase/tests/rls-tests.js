@@ -85,6 +85,9 @@ let db;
 async function asRole(who, fn) {
   if (who === 'anon') {
     await db.exec(`SET ROLE anon; SELECT set_config('request.jwt.claims', '{"role":"anon"}', false);`);
+  } else if (who === 'service') {
+    // G5 worker (Edge Function) identity: service_role, no user
+    await db.exec(`SET ROLE service_role; SELECT set_config('request.jwt.claims', '{"role":"service_role"}', false);`);
   } else {
     if (!U[who]) throw new Error('unknown user ' + who);
     await db.exec(`SET ROLE authenticated; SELECT set_config('request.jwt.claims', '{"sub":"${U[who]}","role":"authenticated"}', false);`);
@@ -273,6 +276,52 @@ async function g4Fixtures() {
   return out;
 }
 
+// G5 (20261105000100): one row per org in every billing table. Staff steps go through the real staff RPCs
+// (org A: adminA on TX3; org B: finB on B_TX, both bill_admin + fin_write); the worker side (probe completion,
+// mock account) through the service-role RPCs; one review item per org is inserted by the owner (superuser),
+// because the natural path needs an issued Daftra invoice. Returns { A: {...ids}, B: {...ids} }.
+const G5_TABLES = ['daftra_connections', 'daftra_client_links', 'daftra_item_links', 'billing_intents', 'billing_intent_lines',
+  'billing_sync_jobs', 'billing_sync_attempts', 'billing_review_items'];
+const G5_AUDITED = G5_TABLES.filter(t => t !== 'billing_sync_attempts');
+const G5_CAPS = ['clients.search_by_ref', 'clients.read', 'clients.create', 'clients.update', 'products.search_by_code',
+  'products.search_by_name', 'products.create', 'invoices.create_draft', 'invoices.read', 'invoices.search_by_reference',
+  'invoices.update_draft', 'invoices.line_reference_field', 'invoices.version_token', 'invoices.multi_currency',
+  'invoices.issue', 'payments.read', 'credit_notes.create'];
+const G5_STAFF_RPCS = ['get_daftra_connection', 'save_daftra_connection', 'request_daftra_probe', 'list_daftra_client_links',
+  'link_daftra_client', 'refresh_daftra_client', 'resolve_client_drift', 'unlink_daftra_client', 'list_daftra_items',
+  'save_daftra_item', 'create_billing_intent', 'add_billing_lines', 'remove_billing_line', 'request_billing_push',
+  'request_billing_pull', 'resolve_billing_conflict', 'cancel_billing_intent', 'retry_billing_job', 'list_billing_intents',
+  'get_billing_intent', 'list_billing_jobs', 'get_billing_job', 'billing_review_queue', 'resolve_billing_review', 'tx_billing'];
+const G5_WORKER_RPCS = ['daftra_claim_jobs', 'daftra_complete_job', 'daftra_schedule_pulls', 'daftra_mock_load', 'daftra_mock_save', 'daftra_renew_lease'];
+async function g5Fixtures(G4) {
+  const rpcAs = async (who, sql, params) => (await as(who, sql, params))[0].r;
+  const caps = {};
+  G5_CAPS.forEach(k => { caps[k] = { supported: !['invoices.issue', 'credit_notes.create'].includes(k), evidence: 'mock' }; });
+  const out = {};
+  let n = 0;
+  const key = () => 'a5a50000-0000-4000-8000-' + String(++n).padStart(12, '0');
+  for (const [who, org, tag] of [['adminA', A, 'A'], ['finB', B, 'B']]) {
+    const tx = G4[tag].tx;
+    const conn = await rpcAs(who, `SELECT public.save_daftra_connection($1, $2) r`, [org, { mode: 'mock', subdomain: 'marsa-rls-' + tag.toLowerCase(), sync_enabled: true }]);
+    const probe = await rpcAs(who, `SELECT public.request_daftra_probe($1, $2) r`, [org, key()]);
+    // worker: claim the probe (one job per org per call) and complete it as the mock would
+    const ctxs = await rpcAs('service', `SELECT public.daftra_claim_jobs($1, 5) r`, ['rls-worker']);
+    const ctx = ctxs.find(c => c.job.org_id === org && c.job.kind === 'probe');
+    if (!ctx) throw new Error('probe job of org ' + tag + ' not claimed');
+    await rpcAs('service', `SELECT public.daftra_complete_job($1, $2) r`, [ctx.attempt_id, { outcome: 'ok',
+      effects: { capabilities: caps, account: { currency: 'SAR' } },
+      calls: [{ op: 'probe', at: new Date().toISOString(), ms: 1, request: { api_key: 'NEVER-STORED' }, response: { ok: true }, error: null, applied: 'yes' }] }]);
+    const intent = await rpcAs(who, `SELECT public.create_billing_intent($1, $2) r`, [{ transaction_id: tx, purpose: 'final', currency: 'SAR' }, key()]);
+    const intentId = intent.id || (intent.intent && intent.intent.id);
+    const push = await rpcAs(who, `SELECT public.request_billing_push($1, $2) r`, [intentId, key()]);
+    const review = (await q(`INSERT INTO public.billing_review_items (org_id, transaction_id, intent_id, kind, details)
+                             VALUES ($1, $2, $3, 'issued_mismatch', '{"fixture":true}') RETURNING id`, [org, tx, intentId]))[0].id;
+    await rpcAs('service', `SELECT public.daftra_mock_save($1, $2, 0) r`, [org, { clients: [], fixture: tag }]);
+    out[tag] = { org, tx, conn, probe, intent: intentId, push, review, attempt: ctx.attempt_id };
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ tests */
 // every tenant table: [table, owner-side sample SQL returning {id}, filter column for "by id", update clause]
 const TENANT_TABLES = [
@@ -309,10 +358,14 @@ const TENANT_TABLES = [
   ['operational_exceptions', `SELECT id::text id FROM public.operational_exceptions WHERE org_id = $1 LIMIT 1`, 'id::text', 'status = status'],
   ['operational_alerts', `SELECT id::text id FROM public.operational_alerts WHERE org_id = $1 LIMIT 1`, 'id::text',  'status = status'],
   // G4 suppliers & operating costs (20261104000100): read by finance roles only, written only through RPCs
-  ...G4_TABLES.map(t => [t, `SELECT id::text id FROM public.${t} WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'])
+  ...G4_TABLES.map(t => [t, `SELECT id::text id FROM public.${t} WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id']),
+  // G5 Daftra integration & invoicing (20261105000100): read by finance roles only, written only through RPCs
+  ...G5_TABLES.map(t => [t, `SELECT id::text id FROM public.${t} WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'])
 ];
 // G2 internal tables: no API grant at all (written/read only through SECURITY DEFINER RPCs)
-const NO_API_TABLES = ['idempotency_keys', 'platform_admins', 'schema_versions', 'client_errors', 'operational_alert_runs'];
+// G5: daftra_mock_accounts (fake Daftra account state) is service-role only, like the G2 internal tables
+const NO_API_TABLES = ['idempotency_keys', 'platform_admins', 'schema_versions', 'client_errors', 'operational_alert_runs',
+  'daftra_mock_accounts'];
 const ALL_PUBLIC_TABLES = TENANT_TABLES.map(t => t[0]).concat(['status_labels'], NO_API_TABLES);
 
 async function isolationSweep(who, targetOrg, memberUser, label) {
@@ -347,6 +400,9 @@ async function main() {
   let G4;
   try { G4 = await g4Fixtures(); pass('G4 fixtures: a row per org in every finance table (documents … adjustments)'); }
   catch (e) { fail('G4 fixtures', errText(e)); return finish(); }
+  let G5;
+  try { G5 = await g5Fixtures(G4); pass('G5 fixtures: a row per org in every billing table (connection … review items, mock account)'); }
+  catch (e) { fail('G5 fixtures', errText(e)); return finish(); }
 
   /* ---------------------------------------------------------------- catalog */
   section('catalog: RLS, grants, function privileges');
@@ -392,7 +448,7 @@ async function main() {
   });
   await check('anon has no USAGE on schema app', async () =>
     (await q(`SELECT has_schema_privilege('anon', 'app', 'USAGE') u`))[0].u === false);
-  await check('authenticated can execute only the 98 documented public RPCs', async () => {
+  await check('authenticated can execute only the 123 documented public RPCs', async () => {
     const r = await q(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                         WHERE n.nspname = 'public' AND has_function_privilege('authenticated', p.oid, 'EXECUTE') ORDER BY 1`);
     const exp = ['admin_list_members', 'admin_set_member_active', 'convert_request_to_transaction', 'import_commit', 'issue_tracking_token', 'my_context', 'public_track',
@@ -418,9 +474,11 @@ async function main() {
       'list_supplier_payments', 'create_client_charge', 'update_client_charge', 'set_charge_status', 'list_client_charges',
       'suggest_client_charges', 'record_charge_collection', 'void_charge_collection', 'create_demurrage_case',
       'update_demurrage_case', 'set_demurrage_status', 'list_demurrage', 'create_cost_adjustment', 'review_cost_adjustment',
-      'list_cost_adjustments', 'tx_costs', 'tx_margin', 'margin_report', 'cost_report'];
+      'list_cost_adjustments', 'tx_costs', 'tx_margin', 'margin_report', 'cost_report',
+      // G5 Daftra integration & invoicing (20261105000100): 25 staff RPCs; the 5 daftra_* worker RPCs are NOT here
+      ...G5_STAFF_RPCS];
     const got = r.map(x => x.proname);
-    if (exp.length !== 98) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 123) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');
@@ -468,6 +526,57 @@ async function main() {
   });
   await check('G4 dictionaries are never client-visible (status_labels fin_*)', async () =>
     (await q(`SELECT count(*)::int n FROM public.status_labels WHERE domain LIKE 'fin\\_%' AND client_visible`))[0].n === 0);
+  await check('G5 worker RPCs (daftra_*): service_role only — not authenticated, not anon, not PUBLIC; SECURITY DEFINER', async () => {
+    const r = await q(`SELECT p.proname, has_function_privilege('authenticated', p.oid, 'EXECUTE') a, has_function_privilege('anon', p.oid, 'EXECUTE') n,
+                              has_function_privilege('service_role', p.oid, 'EXECUTE') s, p.prosecdef d,
+                              coalesce(array_to_string(p.proacl, ','), '') acl
+                         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname LIKE 'daftra\\_%'`);
+    const names = r.map(x => x.proname).sort().join(',');
+    if (names !== [...G5_WORKER_RPCS].sort().join(',')) return 'daftra_* functions: ' + names;
+    const bad = r.filter(x => x.a || x.n || !x.s || !x.d || /(^|,)=X/.test(x.acl));
+    return bad.length === 0 || bad.map(x => x.proname + ' ' + JSON.stringify(x)).join('; ');
+  });
+  await check('G5 staff RPCs: authenticated + SECURITY DEFINER, never anon', async () => {
+    const r = await q(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = ANY($1)
+                          AND (NOT p.prosecdef OR has_function_privilege('anon', p.oid, 'EXECUTE') OR NOT has_function_privilege('authenticated', p.oid, 'EXECUTE'))`, [G5_STAFF_RPCS]);
+    const all = (await q(`SELECT count(DISTINCT p.proname)::int n FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = ANY($1)`, [G5_STAFF_RPCS]))[0].n;
+    return (r.length === 0 && all === 25) || 'bad: ' + r.map(x => x.proname).join(',') + ' found ' + all;
+  });
+  await check('G5 tables: authenticated holds SELECT only (no INSERT / UPDATE / DELETE grant)', async () => {
+    const r = await q(`SELECT table_name, privilege_type FROM information_schema.role_table_grants
+                        WHERE grantee = 'authenticated' AND table_schema = 'public' AND table_name = ANY($1) AND privilege_type <> 'SELECT'`, [G5_TABLES]);
+    return r.length === 0 || r.map(x => x.table_name + ':' + x.privilege_type).join(', ');
+  });
+  await check('G5 tables carry the audit trigger, except the append-only attempt log and the mock account', async () => {
+    const r = await q(`SELECT c.relname FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid WHERE t.tgname = 'trg_audit'
+                         AND c.relname = ANY($1) ORDER BY 1`, [G5_TABLES.concat(['daftra_mock_accounts'])]);
+    return r.map(x => x.relname).join(',') === [...G5_AUDITED].sort().join(',') || 'audited: ' + r.map(x => x.relname).join(',');
+  });
+  await check('G5 policies: SELECT only, to authenticated only, none on daftra_mock_accounts', async () => {
+    const r = await q(`SELECT tablename, policyname, cmd, roles::text roles FROM pg_policies WHERE schemaname = 'public' AND tablename = ANY($1)`,
+      [G5_TABLES.concat(['daftra_mock_accounts'])]);
+    const bad = r.filter(x => x.cmd !== 'SELECT' || x.roles !== '{authenticated}' || x.tablename === 'daftra_mock_accounts');
+    const covered = new Set(r.map(x => x.tablename));
+    const missing = G5_TABLES.filter(t => !covered.has(t));
+    return (bad.length === 0 && missing.length === 0) || 'bad: ' + bad.map(x => x.tablename + '.' + x.policyname).join(',') + ' missing: ' + missing.join(',');
+  });
+  await check('G5 dictionaries are never client-visible (status_labels daftra_* / bill_*)', async () => {
+    const r = (await q(`SELECT count(*)::int n, count(*) FILTER (WHERE client_visible)::int v FROM public.status_labels
+                         WHERE domain LIKE 'daftra\\_%' OR domain LIKE 'bill\\_%'`))[0];
+    return (r.n > 0 && r.v === 0) || JSON.stringify(r);
+  });
+  await check('G5 tables hold no secret-like column (api key / secret / token / password / credential)', async () => {
+    const r = await q(`SELECT table_name || '.' || column_name c FROM information_schema.columns WHERE table_schema = 'public'
+                         AND table_name = ANY($1) AND column_name ~* '(api_?key|secret|token|password|passwd|credential|authorization|cookie)'`,
+      [G5_TABLES.concat(['daftra_mock_accounts'])]);
+    return r.length === 0 || r.map(x => x.c).join(', ');
+  });
+  await check('G5 app.bill_* helpers: none executable by anon / authenticated except the RLS helper bill_can_read_job', async () => {
+    const r = await q(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'app'
+                         AND (p.proname LIKE 'bill\\_%' OR p.proname LIKE 'tg\\_bill\\_%') AND p.proname <> 'bill_can_read_job'
+                         AND (has_function_privilege('authenticated', p.oid, 'EXECUTE') OR has_function_privilege('anon', p.oid, 'EXECUTE'))`);
+    return r.length === 0 || 'callable: ' + r.map(x => x.proname).join(', ');
+  });
 
   /* ---------------------------------------------------------------- anon */
   section('anon: no direct table access');
@@ -519,7 +628,16 @@ async function main() {
     ['margin_report', `SELECT public.margin_report('${A}', '{}')`],
     ['cost_report', `SELECT public.cost_report('${A}', '{"group_by":"transaction"}')`],
     ['list_demurrage', `SELECT public.list_demurrage('${A}', '{}')`],
-    ['app.fin_cost_items', `SELECT * FROM app.fin_cost_items('${A}')`]
+    ['app.fin_cost_items', `SELECT * FROM app.fin_cost_items('${A}')`],
+    // G5
+    ['get_daftra_connection', `SELECT public.get_daftra_connection('${A}')`],
+    ['list_billing_intents', `SELECT public.list_billing_intents('${A}', '{}')`],
+    ['tx_billing', `SELECT public.tx_billing('${TX3}')`],
+    ['create_billing_intent', `SELECT public.create_billing_intent('{}')`],
+    ['daftra_claim_jobs', `SELECT public.daftra_claim_jobs('anon', 1)`],
+    ['daftra_complete_job', `SELECT public.daftra_complete_job(gen_random_uuid(), '{}')`],
+    ['daftra_mock_load', `SELECT public.daftra_mock_load('${A}')`],
+    ['app.bill_redact', `SELECT app.bill_redact('{}'::jsonb)`]
   ]) await expectErr(`anon cannot call ${fn}`, () => as('anon', sql), /permission denied/);
 
   /* ---------------------------------------------------------------- tenant isolation */
@@ -865,9 +983,10 @@ async function main() {
   await expectErr('direct UPDATE service_requests.status blocked', () => as('adminA', `UPDATE public.service_requests SET status = 'converted' WHERE org_id = '${A}' AND status = 'new'`), /MRS_IMMUTABLE.*status/);
   await expectErr('direct UPDATE service_requests.ref blocked', () => as('adminA', `UPDATE public.service_requests SET ref = 'REQ-0000-000000' WHERE org_id = '${A}'`), /MRS_IMMUTABLE.*ref/);
   await check('API INSERT cannot preset status/ref/token on a transaction', async () => {
+    // financial_status and tracking_token_hash are not API-selectable (0700 + G5 column grants): read back as superuser
     const r = (await as('staffA', `INSERT INTO public.transactions (org_id, branch_id, client_id, operation, mode, ref, operational_status, financial_status, tracking_token_hash)
-      VALUES ($1, $2, $3, 'import', 'sea', 'HACK-1', 'closed', 'settled', $4) RETURNING id, ref, operational_status, financial_status`, [A, JED, CL101, hex('a')]))[0];
-    r.tracking_token_hash = (await q(`SELECT tracking_token_hash FROM public.transactions WHERE id = $1`, [r.id]))[0].tracking_token_hash;
+      VALUES ($1, $2, $3, 'import', 'sea', 'HACK-1', 'closed', 'settled', $4) RETURNING id, ref, operational_status`, [A, JED, CL101, hex('a')]))[0];
+    Object.assign(r, (await q(`SELECT tracking_token_hash, financial_status FROM public.transactions WHERE id = $1`, [r.id]))[0]);
     delete r.id;
     return (/^MRS-\d{4}-\d{6}$/.test(r.ref) && r.operational_status === 'new' && r.financial_status === 'not_started' && r.tracking_token_hash === null) || JSON.stringify(r);
   });
@@ -1226,6 +1345,122 @@ async function main() {
   }
   await expectErr('staffA cannot change a party finance column directly (guard trigger)', () => as('staffA',
     `UPDATE public.parties SET iban_last4 = '9999' WHERE id = $1`, [G4.A.inv.supplier_id]), /MRS_FORBIDDEN|permission denied|row-level security/);
+
+  /* ---------------------------------------------------------------- G5 */
+  section('G5 billing / Daftra: clients and non-finance staff see no billing internals; worker RPCs service-role only');
+  // the fixtures are real: both orgs have a row in every billing table, so "0 rows" below is not vacuous
+  for (const t of G5_TABLES) {
+    await check(`G5 fixture: adminA reads its own org-A ${t}`, async () =>
+      (await as('adminA', `SELECT count(*)::int n FROM public.${t} WHERE org_id = $1`, [A]))[0].n > 0 || 'no visible row');
+    await check(`G5 fixture: finB reads its own org-B ${t} and nothing of org A`, async () => {
+      const own = (await as('finB', `SELECT count(*)::int n FROM public.${t} WHERE org_id = $1`, [B]))[0].n;
+      const other = (await as('finB', `SELECT count(*)::int n FROM public.${t} WHERE org_id = $1`, [A]))[0].n;
+      return (own > 0 && other === 0) || JSON.stringify({ own, other });
+    });
+    for (const who of ['clientA', 'clientA2', 'staffA']) {
+      await check(`${who} reads 0 rows of ${t} (own org)`, () => denied(who, `SELECT 1 FROM public.${t}`), `RLS ${t}_select: fin_read_roles only`);
+    }
+  }
+  await check('G5 fixture: daftra_mock_accounts holds a row per org (owner view)', async () =>
+    (await q(`SELECT count(DISTINCT org_id)::int n FROM public.daftra_mock_accounts WHERE org_id = ANY($1)`, [[A, B]]))[0].n === 2);
+  for (const who of ['adminA', 'finB', 'clientA']) {
+    await expectErr(`${who} cannot SELECT daftra_mock_accounts`, () => as(who, `SELECT 1 FROM public.daftra_mock_accounts`), /permission denied/);
+  }
+  await check('logged probe request kept no api_key (redacted before insert)', async () => {
+    const r = (await q(`SELECT calls::text c FROM public.billing_sync_attempts WHERE id = $1`, [G5.A.attempt]))[0];
+    return (!!r && !/NEVER-STORED|api_key/i.test(r.c)) || (r ? r.c : 'no attempt');
+  });
+  // as G4 'finance' events: internal (staff timelines show the op label only), never client-visible, never amounts
+  await check('billing events are internal, carry no amounts / bodies, and no client user sees one', async () => {
+    const n = (await q(`SELECT count(*)::int n FROM public.transaction_events WHERE event_type = 'billing'`))[0].n;
+    if (n === 0) return 'no billing event in the fixture — check would be vacuous';
+    const leak = (await q(`SELECT count(*)::int n FROM public.transaction_events WHERE event_type = 'billing'
+                            AND (visible_to_client OR payload::text ~ '"(amount|net_amount|vat_amount|total_amount|unit_price|lines_total|remote_total|paid_amount|calls|request|response)"')`))[0].n;
+    if (leak) return leak + ' leaking billing events';
+    for (const who of ['clientA', 'clientA2', 'clientB']) {
+      const d = await denied(who, `SELECT 1 FROM public.transaction_events WHERE event_type = 'billing'`);
+      if (d !== true) return who + ': ' + d;
+    }
+    return true;
+  });
+  await check('G5 rows never reach audit_log readers outside finance: staffA / clientA see no G5 audit row', async () => {
+    const n = (await q(`SELECT count(*)::int n FROM public.audit_log WHERE table_name = ANY($1)`, [G5_AUDITED]))[0].n;
+    if (n === 0) return 'no G5 audit row — vacuous';
+    const att = (await q(`SELECT count(*)::int n FROM public.audit_log WHERE table_name IN ('billing_sync_attempts','daftra_mock_accounts')`))[0].n;
+    if (att) return att + ' audit rows for attempts / mock accounts';
+    for (const who of ['clientA', 'staffA']) {
+      const d = await denied(who, `SELECT 1 FROM public.audit_log WHERE table_name = ANY($1)`, [G5_AUDITED]);
+      if (d !== true) return who + ': ' + d;
+    }
+    return true;
+  });
+  const g5Readers = [
+    ['get_daftra_connection', `SELECT public.get_daftra_connection($1)`, [A]],
+    ['list_daftra_client_links', `SELECT public.list_daftra_client_links($1, '{}')`, [A]],
+    ['list_daftra_items', `SELECT public.list_daftra_items($1)`, [A]],
+    ['list_billing_intents', `SELECT public.list_billing_intents($1, '{}')`, [A]],
+    ['get_billing_intent', `SELECT public.get_billing_intent($1)`, [G5.A.intent]],
+    ['list_billing_jobs', `SELECT public.list_billing_jobs($1, '{}')`, [A]],
+    ['get_billing_job', `SELECT public.get_billing_job($1)`, [G5.A.probe.id]],
+    ['billing_review_queue', `SELECT public.billing_review_queue($1, '{}')`, [A]],
+    ['tx_billing', `SELECT public.tx_billing($1)`, [TX3]]
+  ];
+  for (const [fn, sql, params] of g5Readers) {
+    for (const who of ['clientA', 'staffA']) {
+      await expectErr(`${who} gets no result from ${fn} (own org)`, () => as(who, sql, params), /MRS_FORBIDDEN|MRS_NOT_FOUND/);
+    }
+    await expectErr(`staffB gets no result from ${fn} (org A)`, () => as('staffB', sql, params), /MRS_FORBIDDEN|MRS_NOT_FOUND/);
+    await expectErr(`finB (org-B finance) gets no result from ${fn} (org A)`, () => as('finB', sql, params), /MRS_FORBIDDEN|MRS_NOT_FOUND/);
+  }
+  await check('positive control: adminA reads tx_billing / get_billing_intent of TX3', async () => {
+    const t = (await as('adminA', `SELECT public.tx_billing($1) r`, [TX3]))[0].r;
+    const g = (await as('adminA', `SELECT public.get_billing_intent($1) r`, [G5.A.intent]))[0].r;
+    return (t.intents.length === 1 && g.intent.id === G5.A.intent && g.lines.length >= 1) || JSON.stringify({ t: t.intents.length, g: Object.keys(g) });
+  });
+  for (const [fn, sql, params] of [
+    ['save_daftra_connection', `SELECT public.save_daftra_connection($1, $2)`, [A, { sync_enabled: false }]],
+    ['request_daftra_probe', `SELECT public.request_daftra_probe($1, NULL)`, [A]],
+    ['link_daftra_client', `SELECT public.link_daftra_client($1, NULL, NULL)`, [CL101]],
+    ['save_daftra_item', `SELECT public.save_daftra_item($1, 'service:none', '{"name_ar":"خدمات"}')`, [A]],
+    ['create_billing_intent', `SELECT public.create_billing_intent($1, NULL)`, [{ transaction_id: TX3, purpose: 'interim', currency: 'SAR' }]],
+    ['add_billing_lines', `SELECT public.add_billing_lines($1, NULL, NULL)`, [G5.A.intent]],
+    ['request_billing_push', `SELECT public.request_billing_push($1, NULL)`, [G5.A.intent]],
+    ['request_billing_pull', `SELECT public.request_billing_pull($1)`, [G5.A.intent]],
+    ['cancel_billing_intent', `SELECT public.cancel_billing_intent($1, 'x')`, [G5.A.intent]],
+    ['resolve_billing_review', `SELECT public.resolve_billing_review($1, 'accept', 'note', NULL)`, [G5.A.review]]
+  ]) {
+    for (const who of ['clientA', 'staffA', 'staffB', 'finB']) {
+      await expectErr(`${who} cannot call ${fn} on org A`, () => as(who, sql, params), /MRS_FORBIDDEN|MRS_NOT_FOUND/);
+    }
+  }
+  const g5Worker = [
+    ['daftra_claim_jobs', `SELECT public.daftra_claim_jobs('evil', 5)`, []],
+    ['daftra_complete_job', `SELECT public.daftra_complete_job($1, '{"outcome":"ok"}')`, [G5.A.attempt]],
+    ['daftra_schedule_pulls', `SELECT public.daftra_schedule_pulls(5)`, []],
+    ['daftra_mock_load', `SELECT public.daftra_mock_load($1)`, [A]],
+    ['daftra_mock_save', `SELECT public.daftra_mock_save($1, '{}', 1)`, [A]],
+    ['daftra_renew_lease', `SELECT public.daftra_renew_lease($1)`, [G5.A.attempt]]
+  ];
+  for (const [fn, sql, params] of g5Worker) {
+    for (const who of ['adminA', 'finB', 'staffA', 'clientA']) {
+      await expectErr(`${who} cannot execute worker RPC ${fn}`, () => as(who, sql, params), /permission denied/);
+    }
+  }
+  await check('worker identity cannot use staff RPCs: service_role → MRS_AUTH_REQUIRED (no user)', async () => {
+    for (const [fn, sql, params] of [['tx_billing', `SELECT public.tx_billing($1)`, [TX3]],
+      ['request_billing_push', `SELECT public.request_billing_push($1, NULL)`, [G5.A.intent]],
+      ['list_billing_intents', `SELECT public.list_billing_intents($1, '{}')`, [A]]]) {
+      try { await as('service', sql, params); return fn + ' answered for service_role'; }
+      catch (e) { if (!/MRS_AUTH_REQUIRED/.test(errText(e))) return fn + ': ' + errText(e); }
+    }
+    return true;
+  });
+  await check('the forged worker lane: finB cannot read org-A attempts / jobs and the fixture lease is untouched', async () => {
+    const d = await denied('finB', `SELECT 1 FROM public.billing_sync_attempts WHERE org_id = $1`, [A]);
+    if (d !== true) return d;
+    const j = await denied('finB', `SELECT 1 FROM public.billing_sync_jobs WHERE org_id = $1`, [A]);
+    return j;
+  });
 
   return finish();
 }

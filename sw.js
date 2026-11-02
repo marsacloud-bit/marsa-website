@@ -31,7 +31,7 @@
    ========================================================================== */
 'use strict';
 
-var VERSION = '2026-11-04.1';   // G4: supplier invoices / payables / margins / demurrage (fin/*.js, fin.js, fin.css)
+var VERSION = '2026-11-05.1';   // G5: billing & Daftra (bill/*.js, bill.js, bill.css); G4 fin/* kept
 var CACHE = 'marsa-app-' + VERSION;
 var OFFLINE_URL = 'offline.html';
 
@@ -42,7 +42,8 @@ var PRECACHE = [
   'manifest.json',
   // styles: the original design system + shared components + page sheets
   'assets/css/style.css', 'assets/css/app.css',
-  'assets/css/pages/login.css', 'assets/css/pages/admin.css', 'assets/css/pages/ops.css', 'assets/css/pages/fin.css', 'assets/css/pages/platform.css',
+  'assets/css/pages/login.css', 'assets/css/pages/admin.css', 'assets/css/pages/ops.css', 'assets/css/pages/fin.css', 'assets/css/pages/bill.css',
+  'assets/css/pages/platform.css',
   'assets/css/pages/portal.css', 'assets/css/pages/ocr.css', 'assets/css/pages/bulk-upload.css',
   // scripts
   'assets/js/config.js', 'assets/js/i18n.js', 'assets/js/main.js', 'assets/js/supa.js',
@@ -53,8 +54,10 @@ var PRECACHE = [
   'assets/js/ops/exceptions.js', 'assets/js/ops/requirements.js', 'assets/js/ops/tx-sections.js',
   'assets/js/fin/invoices.js', 'assets/js/fin/payables.js', 'assets/js/fin/margins.js',
   'assets/js/fin/demurrage.js', 'assets/js/fin/tx-fin.js',
+  'assets/js/bill/billing.js', 'assets/js/bill/daftra.js', 'assets/js/bill/tx-bill.js',
   // dictionaries (a missing optional file never blocks the install)
-  'assets/i18n/app.js', 'assets/i18n/login.js', 'assets/i18n/admin.js', 'assets/i18n/ops.js', 'assets/i18n/fin.js', 'assets/i18n/platform.js',
+  'assets/i18n/app.js', 'assets/i18n/login.js', 'assets/i18n/admin.js', 'assets/i18n/ops.js', 'assets/i18n/fin.js', 'assets/i18n/bill.js',
+  'assets/i18n/platform.js',
   'assets/i18n/ocr.js', 'assets/i18n/bulk.js', 'assets/i18n/portal.js',
   // images: header logo (site-header / drawer / footer), favicon, PWA icons
   'assets/img/logo-header.png', 'assets/img/favicon.png', 'assets/img/logo.png',

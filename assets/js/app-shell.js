@@ -116,7 +116,9 @@
     // G4 (docs/online/G4_SPEC.md §Roles) — mirrors app.fin_read_roles / fin_write_roles / fin_approve_roles
     finRead: ['accountant', 'accounts_manager', 'branch_manager', 'supervisor', 'admin'],
     finWrite: ['accountant', 'accounts_manager', 'branch_manager', 'admin'],
-    finApprove: ['accounts_manager', 'branch_manager', 'admin']
+    finApprove: ['accounts_manager', 'branch_manager', 'admin'],
+    // G5 (docs/online/G5_SPEC.md §Roles) — mirrors app.bill_admin_roles (Daftra connection / catalog / tax settings)
+    billAdmin: ['accounts_manager', 'admin']
   };
   var ROLE_RANK = ['client', 'clearance_staff', 'transport_staff', 'accountant', 'accounts_manager', 'operations_manager', 'branch_manager', 'supervisor', 'admin'];
 
@@ -147,7 +149,10 @@
       { id: 'costs', key: 'fin.nav_costs', href: 'admin.html#costs', icon: 'receipt', allow: R.finRead },
       { id: 'payables', key: 'fin.nav_payables', href: 'admin.html#payables', icon: 'wallet', allow: R.finRead },
       { id: 'margins', key: 'fin.nav_margins', href: 'admin.html#margins', icon: 'chart', allow: R.finRead },
-      { id: 'demurrage', key: 'fin.nav_demurrage', href: 'admin.html#demurrage', icon: 'clock', allow: R.finRead }
+      { id: 'demurrage', key: 'fin.nav_demurrage', href: 'admin.html#demurrage', icon: 'clock', allow: R.finRead },
+      // G5 billing & Daftra (assets/js/bill/*.js views, allow 'finRead')
+      { id: 'billing', key: 'bill.nav_billing', href: 'admin.html#billing', icon: 'sync', allow: R.finRead },
+      { id: 'daftra', key: 'bill.nav_daftra', href: 'admin.html#daftra', icon: 'link', allow: R.finRead }
     ] },
     { id: 'manage', label: 'grp_manage', items: [
       { id: 'org', href: 'admin.html#org', icon: 'building', allow: R.orgAdmin },
@@ -173,11 +178,13 @@
     ar: { 'ops.nav_group': 'العمليات', 'ops.nav_alerts': 'التنبيهات', 'ops.nav_schedule': 'الجدول اليومي', 'ops.nav_exceptions': 'الاستثناءات',
       'ops.nav_parties': 'الجهات والناقلون', 'ops.nav_requirements': 'قواعد المستندات', 'ops.nav_alerts_badge': 'التنبيهات المفتوحة: {n}',
       'fin.nav_group': 'المالية التشغيلية', 'fin.nav_costs': 'فواتير الموردين', 'fin.nav_payables': 'المستحقات والمدفوعات',
-      'fin.nav_margins': 'الهامش والتكاليف', 'fin.nav_demurrage': 'الأرضيات والغرامات' },
+      'fin.nav_margins': 'الهامش والتكاليف', 'fin.nav_demurrage': 'الأرضيات والغرامات',
+      'bill.nav_billing': 'الفوترة ودفترة', 'bill.nav_daftra': 'إعداد دفترة' },
     en: { 'ops.nav_group': 'Operations', 'ops.nav_alerts': 'Alerts', 'ops.nav_schedule': 'Daily schedule', 'ops.nav_exceptions': 'Exceptions',
       'ops.nav_parties': 'Parties & carriers', 'ops.nav_requirements': 'Document rules', 'ops.nav_alerts_badge': 'Open alerts: {n}',
       'fin.nav_group': 'Operating finance', 'fin.nav_costs': 'Supplier invoices', 'fin.nav_payables': 'Payables & payments',
-      'fin.nav_margins': 'Margins & costs', 'fin.nav_demurrage': 'Storage & demurrage' }
+      'fin.nav_margins': 'Margins & costs', 'fin.nav_demurrage': 'Storage & demurrage',
+      'bill.nav_billing': 'Billing & Daftra', 'bill.nav_daftra': 'Daftra settings' }
   };
   var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -235,7 +242,10 @@
     receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
     wallet: '<path d="M4 7a2 2 0 0 1 2-2h12v4"/><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M16 13.5h2"/>',
     chart: '<path d="M4 20V4M4 20h16"/><path d="M8 16v-4M12 16V8M16 16v-6"/>',
-    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    // G5 billing & Daftra
+    sync: '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 3v5h5"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 21v-5h-5"/>',
+    link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/>'
   };
   function icon(name, cls) {
     var s = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');

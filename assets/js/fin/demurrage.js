@@ -223,7 +223,7 @@
       U.call(api, 'listClientCharges', x.transaction_id).then(function (r) {
         if (!sc.alive()) return;
         if (r.error) { F.toastErr(api, r); return; }
-        var charges = U.rowsOf(r.data).filter(function (c) { return c.demurrage_case_id === x.id && c.status === 'approved'; });
+        var charges = U.rowsOf(r.data).filter(function (c) { return c.demurrage_case_id === x.id && (c.status === 'approved' || c.status === 'invoiced'); });
         if (!charges.length) {
           U.formModal({ title: t('dm_collect'), size: 'sm', intro: el('div', null, [el('p', { text: t('dm_no_charge') }), el('a', { href: '#tx/' + x.transaction_id, text: U.t('open_tx') })]),
             fields: [], submitText: U.t('close'), submit: function () { return Promise.resolve({ data: true, error: null }); } });

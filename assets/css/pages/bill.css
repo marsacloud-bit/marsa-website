@@ -1,0 +1,120 @@
+/* =====================================================================
+   مرسى | MARSA — G5 billing & Daftra views inside admin.html (#billing,
+   #billing/<id>, #billing/queue, #daftra) and the transaction section
+   «الفواتير ودفترة». Loaded after fin.css.
+   Tiles, badges, tables, tabs, alerts and dialogs are the original
+   style.css / admin.css / ops.css / fin.css classes (.card-stat.adm-tile,
+   .badge-<tone>, .table.adm-table, .tab-list/.tab, .alert-*, the ops form
+   modal). This file only adds: the sync-state marker on the original
+   badges, the mock banner, the diff tint (Marsa pushed vs Daftra), LTR
+   reference cells, the checks list and the <pre> call log — with the
+   style.css tokens only (original look). Logical properties. Prefix: bill-.
+   ===================================================================== */
+
+/* ---- references (operational ref, line ref, Daftra ids): always LTR, monospace digits ---- */
+.bill-ref { direction: ltr; unicode-bidi: isolate; font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; white-space: nowrap; }
+a.bill-ref, .ops-ref.bill-ref { font-weight: 700; }
+.bill-ref-lg { font-size: var(--fs-md); font-weight: 800; color: var(--navy-dark); }
+
+/* ---- sync-state badges: the original .badge-<tone> plus a state marker ---- */
+.bill-st { white-space: nowrap; }
+.bill-sync { display: inline-flex; align-items: center; gap: 6px; }
+.bill-sync::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.bill-sync-idle::before { background: transparent; border: 2px solid currentColor; width: 6px; height: 6px; }
+.bill-sync-pending::before { background: transparent; border: 2px dashed currentColor; width: 6px; height: 6px; }
+.bill-sync-in_flight::before { animation: bill-pulse 1.4s var(--ease) infinite; }
+.bill-sync-unknown::before { content: "?"; width: auto; height: auto; background: none; font-weight: 800; line-height: 1; }
+.bill-sync-conflict::before, .bill-sync-error::before { content: "!"; width: auto; height: auto; background: none; font-weight: 800; line-height: 1; }
+@keyframes bill-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .bill-sync-in_flight::before { animation: none; } }
+
+/* list rows: start-edge marker for conflicts / unknown results */
+.bill-row-conflict td:first-child, .bill-row-error td:first-child { box-shadow: inset 4px 0 0 var(--danger); }
+.bill-row-unknown td:first-child, .bill-row-pending td:first-child { box-shadow: inset 4px 0 0 var(--warning); }
+html[dir="rtl"] .bill-row-conflict td:first-child, html[dir="rtl"] .bill-row-error td:first-child { box-shadow: inset -4px 0 0 var(--danger); }
+html[dir="rtl"] .bill-row-unknown td:first-child, html[dir="rtl"] .bill-row-pending td:first-child { box-shadow: inset -4px 0 0 var(--warning); }
+
+/* ---- banners ---- */
+.bill-banners { display: grid; gap: 10px; }
+.bill-mock-banner, .bill-no-key, .bill-cap-note { margin: 0; }
+.bill-mock-banner > div, .bill-no-key > div, .bill-cap-note > div { flex: 1; min-width: 0; }
+.bill-mock-banner strong, .bill-no-key strong { font-weight: 800; }
+.bill-mock-banner { border-inline-start: 4px solid var(--warning); }
+.bill-mock-sub { font-weight: 500; }
+
+/* ---- detail ---- */
+.bill-detail .app-card + .app-card, .bill-daftra .app-card + .app-card { margin-block-start: 0; }
+.bill-actions-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bill-why { margin: 0; color: var(--muted); }
+.bill-truth { margin: 6px 0 0; }
+.bill-figures .table-wrap { max-width: 560px; }
+.bill-fig-off td { background: var(--warning-bg); }
+.bill-fig-off td:first-child { box-shadow: inset 4px 0 0 var(--warning); font-weight: 700; }
+html[dir="rtl"] .bill-fig-off td:first-child { box-shadow: inset -4px 0 0 var(--warning); }
+
+/* checks panel */
+.bill-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.bill-check { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-sm); background: #fff; font-size: var(--fs-sm); }
+.bill-check-danger { border-color: rgba(200, 50, 60, .3); background: var(--danger-bg); }
+.bill-check-warning { border-color: rgba(201, 138, 11, .3); background: var(--warning-bg); }
+.bill-check-text { flex: 1; min-width: 200px; }
+
+/* lines */
+.bill-line td:first-child { box-shadow: inset 4px 0 0 transparent; }
+.bill-line-pending_add td:first-child, .bill-line-pending_remove td:first-child { box-shadow: inset 4px 0 0 var(--warning); }
+html[dir="rtl"] .bill-line-pending_add td:first-child, html[dir="rtl"] .bill-line-pending_remove td:first-child { box-shadow: inset -4px 0 0 var(--warning); }
+.bill-line-pending_remove .cell-main, .bill-line-removed .cell-main { text-decoration: line-through; text-decoration-color: var(--border-strong); }
+.bill-override { color: #9A6905; }
+
+/* ---- diff tint: Marsa (pushed / local) vs Daftra (remote) ---- */
+.bill-diff-row td { vertical-align: top; }
+.bill-diff-pushed, .bill-diff-local, .bill-diff-remote { display: inline-block; padding: 2px 8px; border-radius: var(--r-sm); overflow-wrap: anywhere; font-size: var(--fs-xs); }
+.bill-diff-pushed { background: var(--info-bg); color: var(--blue); }
+.bill-diff-local { background: rgba(20, 163, 168, .1); color: #0E7F84; }
+.bill-diff-remote { background: var(--warning-bg); color: #9A6905; font-weight: 700; }
+.bill-conflict { border-color: rgba(200, 50, 60, .35); }
+.bill-conflict .ops-alert { margin: 0 0 10px; }
+.bill-conflict-actions { margin-block-start: 12px; }
+.bill-drift { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+
+/* ---- jobs + attempts: the <pre> call log ---- */
+.bill-job-detail:empty { display: none; }
+.bill-job-detail { margin-block-start: 12px; }
+.bill-job-failed td:first-child, .bill-job-dead td:first-child, .bill-job-conflict td:first-child { box-shadow: inset 4px 0 0 var(--danger); }
+html[dir="rtl"] .bill-job-failed td:first-child, html[dir="rtl"] .bill-job-dead td:first-child, html[dir="rtl"] .bill-job-conflict td:first-child { box-shadow: inset -4px 0 0 var(--danger); }
+.bill-attempts { display: grid; gap: 12px; }
+.bill-attempt { padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--r); background: #fff; display: grid; gap: 8px; }
+.bill-attempt-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.bill-attempt-err { margin: 0; }
+.bill-calls { display: grid; gap: 6px; }
+.bill-call { border: 1px solid var(--border); border-radius: var(--r-sm); background: #FAFCFE; padding: 6px 10px; }
+.bill-call.is-error { border-color: rgba(200, 50, 60, .3); }
+.bill-call summary { cursor: pointer; font-size: var(--fs-sm); }
+.bill-call-body { display: grid; gap: 4px; margin-block-start: 6px; }
+.bill-call-body p { margin: 0; }
+.bill-pre { margin: 0; padding: 8px 10px; max-height: 280px; overflow: auto; background: #fff; border: 1px solid var(--border); border-radius: var(--r-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; color: var(--text); }
+
+/* ---- queue sections ---- */
+.bill-q-title { margin-block-start: 18px; }
+.bill-q-section.is-empty .app-card-body p { margin: 0; }
+
+/* ---- #daftra ---- */
+.bill-caps .table-wrap { margin-block-start: 0; }
+.bill-cap-note { margin: 0 0 10px; }
+.bill-cap-missing td { background: var(--danger-bg); }
+.bill-policy li { font-size: var(--fs-sm); }
+.bill-policy .icon { color: var(--blue); }
+.bill-toolbar-check { align-self: center; }
+.bill-tx-info:empty { display: none; }
+.bill-tx-info p { margin: 0; }
+.bill-tx-info { display: grid; gap: 4px; }
+
+@media (max-width: 767.98px) {
+  .bill-check-text { min-width: 0; }
+  .bill-pre { max-height: 200px; }
+}
+@media print {
+  .bill-actions, .bill-job-detail, .bill-call { display: none !important; }
+  .bill-fig-off td, .bill-check { background: none !important; }
+}

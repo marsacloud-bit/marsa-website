@@ -129,7 +129,14 @@
       payment_terms_days: 'مدة السداد (أيام)', default_currency: 'العملة الافتراضية', group_by: 'التجميع حسب', size_bytes: 'حجم الملف',
       storage_path: 'مسار الملف', decision: 'القرار', basis: 'أساس التقدير', line_excluded: 'بند مستبعد', line_overhead: 'بند مصروف عام',
       line_pending_review: 'بند بانتظار المراجعة', line_disputed: 'بند متنازع عليه', share_total: 'مجموع النسب (أكثر من 100%)',
-      stage_skip: 'تخطي مرحلة', unknown_key: 'حقل غير معروف', operational_state: 'الحالة التشغيلية للحاوية', gross_weight_kg: 'الوزن الإجمالي'
+      stage_skip: 'تخطي مرحلة', unknown_key: 'حقل غير معروف', operational_state: 'الحالة التشغيلية للحاوية', gross_weight_kg: 'الوزن الإجمالي',
+      // G5 fields
+      purpose: 'غرض الفوترة', item_key: 'الصنف', external_id: 'رقم العميل في دفترة', external_product_id: 'رقم المنتج في دفترة',
+      subdomain: 'النطاق الفرعي لدفترة', mode: 'وضع الاتصال', allowed_vat_rates: 'نسب الضريبة المسموحة',
+      default_service_vat_rate: 'نسبة ضريبة الخدمات', reimbursable_tax_code: 'تصنيف ضريبة المبالغ المستردة', tax_code: 'التصنيف الضريبي',
+      invoice_notes: 'ملاحظات الفاتورة', intent_id: 'غرض الفوترة', charge_ids: 'المبالغ', link_id: 'ربط العميل', job_id: 'مهمة المزامنة',
+      name_ar: 'الاسم بالعربية', name_en: 'الاسم بالإنجليزية', default_vat_rate: 'نسبة الضريبة الافتراضية',
+      intent: 'غرض الفوترة', external_invoice_id: 'رقم الفاتورة في دفترة'
     },
     // G4 detail-specific messages (error.field = the detail code); they replace the code's generic text
     details: {
@@ -160,7 +167,32 @@
       credit_note_link: 'الإشعار الدائن لا يُطابق رحلة أو أرضيات أو تكلفة متوقعة؛ خصّصه على المعاملة فقط.',
       credit_allocated: 'إشعار دائن يخفّض هذه المعاملة؛ اعكس توزيع الإشعار أولًا.',
       currency_in_use: 'لا تُغيَّر عملة الملف وعليه توزيعات أو مبالغ محمّلة.',
-      no_accrual: '«بلا مطابقة» لا يجتمع مع رحلة أو ملف أرضيات.'
+      no_accrual: '«بلا مطابقة» لا يجتمع مع رحلة أو ملف أرضيات.',
+      // G5 billing & Daftra (docs/online/G5_SPEC.md)
+      service_only: 'هذا الإجراء خاص بعامل المزامنة على الخادم ولا يُستدعى من حساب موظف.',
+      not_connected: 'الاتصال بدفترة غير جاهز (غير متصل أو المزامنة موقوفة). افحص الاتصال من «إعداد دفترة» أولًا.',
+      capability: 'إمكانات دفترة اللازمة للإرسال غير مثبتة على هذا الحساب ({x}). أعد فحص الإمكانات من «إعداد دفترة».',
+      intent_issued: 'الفاتورة صادرة في دفترة ومجمّدة؛ لا تُعدَّل من مرسى. المبالغ اللاحقة تذهب إلى فاتورة إضافية.',
+      in_invoice: 'هذا المبلغ على بند فاتورة قائمة؛ احذفه من الفاتورة أولًا قبل تغيير حالته.',
+      sync_in_flight: 'عملية مزامنة مع دفترة قيد التنفيذ أو نتيجتها غير معروفة بعد؛ انتظر المطابقة ثم أعد المحاولة.',
+      conflict_open: 'يوجد تعارض مفتوح مع دفترة (عُدّلت المسودة هناك)؛ عالج التعارض أولًا.',
+      remote_draft_exists: 'توجد مسودة لهذه الفاتورة في دفترة؛ لا يُلغى الغرض مباشرة.',
+      no_issued_final: 'الفاتورة الإضافية تتطلب فاتورة نهائية صادرة للمعاملة نفسها والعملة نفسها.',
+      final_issued: 'صدرت الفاتورة النهائية؛ لا تُنشأ فاتورة مرحلية بعدها. استخدم فاتورة إضافية.',
+      intent_taken: 'يوجد غرض فوترة قائم لهذه المعاملة والعملة والغرض. افتحه بدلًا من إنشاء نسخة ثانية.',
+      external_id_taken: 'عميل دفترة هذا مربوط بعميل آخر في مرسى؛ لا يُربط عميل دفترة واحد بعميلين.',
+      not_eligible: 'أحد المبالغ غير مؤهل للفوترة (غير معتمد، أو بعملة أخرى، أو على فاتورة أخرى، أو من معاملة أخرى).',
+      tax_rate_unmapped: 'نسبة الضريبة لبعض البنود غير مسموحة في إعداد دفترة ({x}).',
+      client_review: 'ربط العميل بدفترة يحتاج مراجعة (وُجد أكثر من عميل محتمل). اختر العميل الصحيح من «إعداد دفترة».',
+      item_review: 'بعض الأصناف تحتاج مراجعة في دفترة (منتج بالاسم نفسه برمز آخر). اربطها يدويًا من «إعداد دفترة».',
+      client_in_use: 'لا يُفك ربط العميل وله فاتورة قائمة في دفترة.',
+      mock_version: 'تغيّر حساب المحاكاة أثناء الحفظ؛ أعد المحاولة.',
+      link_exists: 'هذا العميل مربوط بدفترة من قبل؛ افتح الربط القائم بدلًا من إنشاء ربط ثانٍ.',
+      no_conflict: 'لا يوجد تعارض مفتوح على هذه الفاتورة؛ حدّث الصفحة.',
+      conflict_reason: 'هذا القرار لا يناسب نوع التعارض ({x}).',
+      unlinked: 'ربط العميل مفكوك؛ اربطه من جديد من «إعداد دفترة».',
+      unreconciled_remote: 'قد يكون إنشاء الفاتورة وصل إلى دفترة دون تأكيد؛ أعد محاولة المزامنة لتتم المطابقة بالمرجع قبل الإلغاء أو الحذف.',
+      subdomain_taken: 'حساب دفترة هذا مربوط بمؤسسة أخرى؛ لكل مؤسسة حساب دفترة خاص بها.'
     },
     banner: {
       staging: 'بيئة تجريبية (Staging) — البيانات للاختبار فقط'
@@ -202,7 +234,32 @@
         detail_credit_note_link: 'A credit note is not matched to a trip, storage case or expected cost; allocate it to the transaction only.',
         detail_credit_allocated: 'A credit note reduces this transaction; reverse the credit allocation first.',
         detail_currency_in_use: 'The case currency cannot change while allocations or charges are linked to it.',
-        detail_no_accrual: '"No match" cannot be combined with a trip or storage case.'
+        detail_no_accrual: '"No match" cannot be combined with a trip or storage case.',
+        // G5 billing & Daftra
+        detail_service_only: 'This action belongs to the server-side sync worker and cannot be called from a staff account.',
+        detail_not_connected: 'The Daftra connection is not ready (not connected or sync disabled). Check the connection in "Daftra settings" first.',
+        detail_capability: 'The Daftra capabilities needed to push are not proven on this account ({x}). Re-run the capability check in "Daftra settings".',
+        detail_intent_issued: 'The invoice is issued in Daftra and frozen; Marsa never edits it. Later charges go to a supplementary invoice.',
+        detail_in_invoice: 'This charge is on an invoice line; remove it from the invoice before changing its status.',
+        detail_sync_in_flight: 'A Daftra sync is running or its result is still unknown; wait for reconciliation and try again.',
+        detail_conflict_open: 'There is an open conflict with Daftra (the draft was edited there); resolve it first.',
+        detail_remote_draft_exists: 'A draft of this invoice exists in Daftra; the intent cannot be cancelled directly.',
+        detail_no_issued_final: 'A supplementary invoice needs an issued final invoice for the same transaction and currency.',
+        detail_final_issued: 'The final invoice is issued; no interim invoice after it. Use a supplementary invoice.',
+        detail_intent_taken: 'A billing intent already exists for this transaction, currency and purpose. Open it instead of creating a second one.',
+        detail_external_id_taken: 'This Daftra client is linked to another Marsa client; one Daftra client never maps to two.',
+        detail_not_eligible: 'A charge is not eligible for billing (not approved, another currency, already on an invoice, or another transaction).',
+        detail_tax_rate_unmapped: 'Some lines have a VAT rate that is not allowed in the Daftra settings ({x}).',
+        detail_client_review: 'The Daftra client link needs review (several possible clients were found). Choose the right one in "Daftra settings".',
+        detail_item_review: 'Some items need review in Daftra (a product with the same name and another code). Map them manually in "Daftra settings".',
+        detail_client_in_use: 'The client cannot be unlinked while it has an invoice in Daftra.',
+        detail_mock_version: 'The mock account changed while saving; try again.',
+        detail_link_exists: 'This client is already linked to Daftra; open the existing link instead of creating a second one.',
+        detail_no_conflict: 'There is no open conflict on this invoice; refresh the page.',
+        detail_conflict_reason: 'This decision does not fit the conflict type ({x}).',
+        detail_unlinked: 'The client link is unlinked; link the client again in "Daftra settings".',
+        detail_unreconciled_remote: 'The invoice create may have reached Daftra without confirmation; retry the sync so it is reconciled by reference before cancelling or removing.',
+        detail_subdomain_taken: 'This Daftra account is linked to another organisation; each organisation has its own Daftra account.'
       } });
       I.register('field', { en: {
         supplier_id: 'Supplier', invoice_number: 'Invoice number', invoice_date: 'Invoice date', due_date: 'Due date',
@@ -216,7 +273,14 @@
         estimated_amount: 'Estimated amount', related_invoice_id: 'Original invoice', iban_last4: 'IBAN last 4 digits', bank_name: 'Bank',
         payment_terms_days: 'Payment terms (days)', default_currency: 'Default currency', group_by: 'Group by', size_bytes: 'File size',
         storage_path: 'File path', decision: 'Decision', basis: 'Estimate basis', line_excluded: 'Excluded line', line_overhead: 'Overhead line',
-        line_pending_review: 'Line pending review', line_disputed: 'Disputed line', share_total: 'Share total (over 100%)'
+        line_pending_review: 'Line pending review', line_disputed: 'Disputed line', share_total: 'Share total (over 100%)',
+        // G5
+        purpose: 'Billing purpose', item_key: 'Item', external_id: 'Daftra client id', external_product_id: 'Daftra product id',
+        subdomain: 'Daftra subdomain', mode: 'Connection mode', allowed_vat_rates: 'Allowed VAT rates',
+        default_service_vat_rate: 'Service VAT rate', reimbursable_tax_code: 'Reimbursable tax code', tax_code: 'Tax code',
+        invoice_notes: 'Invoice notes', intent_id: 'Billing intent', charge_ids: 'Charges', link_id: 'Client link', job_id: 'Sync job',
+        name_ar: 'Arabic name', name_en: 'English name', default_vat_rate: 'Default VAT rate',
+        intent: 'Billing intent', external_invoice_id: 'Daftra invoice id'
       } });
     } catch (e) { /* Arabic messages stay */ }
   })();
@@ -983,7 +1047,7 @@
      ------------------------------------------------------------------ */
   var TX_COLS = 'id,org_id,branch_id,client_id,request_id,ref,operation,mode,service,port_of_loading,port_of_discharge,country,' +
     'goods_description,hs_code,shipping_line,bl_number,declaration_no,declaration_date,declaration_type,container_count,' +
-    'package_count,eta,responsible_user_id,operational_status,financial_status,status_changed_at,created_at,updated_at';   // notes: withInternal()
+    'package_count,eta,responsible_user_id,operational_status,status_changed_at,created_at,updated_at';   // notes, financial_status: withInternal() (G5 column grant)
   function listTransactions(o) {
     o = o || {};
     return online(function (c) {
@@ -991,12 +1055,16 @@
         .order('created_at', { ascending: false });
       if (o.orgId) q = q.eq('org_id', o.orgId);
       if (o.status) q = q.eq('operational_status', o.status);
-      if (o.financialStatus) q = q.eq('financial_status', o.financialStatus);
       if (o.branchId) q = q.eq('branch_id', o.branchId);
       if (o.clientId) q = q.eq('client_id', o.clientId);
       if (o.search) { var s = likeSafe(o.search); if (s) q = q.or('ref.ilike.%' + s + '%,bl_number.ilike.%' + s + '%,declaration_no.ilike.%' + s + '%'); }
       return range(q, o);
-    }).then(function (r) { return withInternal('transactions', r); });
+    }).then(function (r) { return withInternal('transactions', r); }).then(function (r) {
+      // financial_status is not API-selectable since G5 (clients must not read it): filtered on the merged staff field
+      if (!o.financialStatus || !r || r.error || !Array.isArray(r.data)) return r;
+      var kept = r.data.filter(function (x) { return x && x.financial_status === o.financialStatus; });
+      return Object.assign({}, r, { data: kept, count: kept.length });
+    });
   }
   function getTransaction(id) {
     return online(function (c) {
@@ -1972,6 +2040,164 @@
   }
 
   /* ------------------------------------------------------------------
+     G5 — Daftra integration & invoicing (docs/online/G5_SPEC.md)
+     Marsa prepares invoice DRAFTS in Daftra from approved G4 client charges and pulls their
+     status back; the accountant issues inside Daftra (G5-4). Staff RPCs only: they write rows
+     and queue outbox jobs (billing_sync_jobs); the server-side worker (supabase/functions/
+     daftra-sync, service role) runs them. The worker RPCs (daftra_*) are NEVER exposed here,
+     and no Daftra key / secret ever reaches the browser. Until the worker is deployed, queued
+     jobs stay 'queued'. Org-level calls take the active org (or f.orgId / opts.orgId) as p_org.
+     ------------------------------------------------------------------ */
+  function billOrg(explicit, fn) { return inActiveOrg(explicit, fn); }
+  // a malformed id never reaches the server (callers check demo mode first)
+  function billId(id, field) { return isUuid(id) ? null : Promise.resolve(fail('MRS_INVALID', field)); }
+  function billText(v) { return v == null ? null : String(v); }
+
+  /* connection & capability probe (bill_admin writes; fin_read reads) */
+  // → { connection (or defaults, exists:false), counts:{jobs_by_status, links_by_status, items_by_status}, push_ready, missing_capabilities[] }
+  function getDaftraConnection(o) { o = o || {}; return billOrg(o.orgId, function (oid) { return rpc('get_daftra_connection', { p_org: oid }); }); }
+  // p = { mode: 'mock'|'live_pending', subdomain, sync_enabled, default_service_vat_rate, allowed_vat_rates[], reimbursable_tax_code, invoice_notes }
+  function saveDaftraConnection(p, o) {
+    o = o || {};
+    p = Object.assign({}, p || {}); delete p.orgId;
+    return billOrg(o.orgId, function (oid) { return rpc('save_daftra_connection', { p_org: oid, p_payload: p }); });
+  }
+  // → job (probe); idempotent
+  function requestDaftraProbe(opts) {
+    opts = opts || {};
+    return billOrg(opts.orgId, function (oid) {
+      return idemRpc('request_daftra_probe', opts.idemKey, function (k) { return { p_org: oid, p_idem_key: k }; });
+    });
+  }
+
+  /* client links (one Marsa client ↔ one Daftra client per org; drift is shown, never auto-overwritten) */
+  // f = { status, q, billable_only, limit ≤ 200, offset, orgId } → { items, unlinked, total, counts }
+  function listDaftraClientLinks(f) { return finOrgRpc('list_daftra_client_links', f); }
+  // externalId null → search by our reference / create (worker); set → manual link, verified by a client_refresh job → { link, job }
+  function linkDaftraClient(clientId, externalId, opts) {
+    if (!configured) return demoOnly();
+    opts = opts || {};
+    var bad = billId(clientId, 'client_id'); if (bad) return bad;
+    var ext = externalId == null || externalId === '' ? null : String(externalId).trim();
+    return idemRpc('link_daftra_client', opts.idemKey, function (k) { return { p_client: clientId, p_external_id: ext, p_idem_key: k }; });
+  }
+  function refreshDaftraClient(linkId) {
+    if (!configured) return demoOnly();
+    var bad = billId(linkId, 'link_id'); if (bad) return bad;
+    return rpc('refresh_daftra_client', { p_link: linkId });
+  }
+  // decision push_local | acknowledge | choose (externalId ∈ candidates) | create_new; note required
+  function resolveClientDrift(linkId, decision, note, externalId) {
+    if (!configured) return demoOnly();
+    var bad = billId(linkId, 'link_id'); if (bad) return bad;
+    return rpc('resolve_client_drift', { p_link: linkId, p_decision: decision, p_note: billText(note), p_external_id: externalId == null || externalId === '' ? null : String(externalId) });
+  }
+  function unlinkDaftraClient(linkId, reason) {
+    if (!configured) return demoOnly();
+    var bad = billId(linkId, 'link_id'); if (bad) return bad;
+    return rpc('unlink_daftra_client', { p_link: linkId, p_reason: billText(reason) }).then(function (r) {
+      // 'in_use' is a shared detail word (G4: document in use); here it means the client has a Daftra invoice
+      if (r && r.error && r.error.field === 'in_use') {
+        var e = mkErr(r.error.code, 'client_in_use', r.error.raw);
+        if (r.error.refId) e.refId = r.error.refId;
+        return { data: null, error: e };
+      }
+      return r;
+    });
+  }
+
+  /* item / service catalog (every possible key, mapped or with defaults) */
+  function listDaftraItems(o) { o = o || {}; return billOrg(o.orgId, function (oid) { return rpc('list_daftra_items', { p_org: oid }); }); }
+  // p = { name_ar, name_en, default_vat_rate, tax_code, external_product_id, retire }
+  function saveDaftraItem(itemKey, p, o) {
+    o = o || {};
+    p = Object.assign({}, p || {}); delete p.orgId;
+    return billOrg(o.orgId, function (oid) { return rpc('save_daftra_item', { p_org: oid, p_item_key: billText(itemKey), p_payload: p }); });
+  }
+
+  /* billing intents «غرض الفوترة» + lines */
+  // p = { transaction_id, purpose: final|interim|supplementary, currency, note, add_eligible (default true) } → intent (+ lines)
+  function createBillingIntent(p, opts) { return finCreate('create_billing_intent', p, opts); }
+  // f = { status, sync_state, transaction_id, client_id, branch_id, payment_status, q, limit ≤ 200, offset, orgId }
+  function listBillingIntents(f) { return finOrgRpc('list_billing_intents', f); }
+  // → { intent, transaction, client, lines[], eligible_charges[], jobs[], review_items[], checks, can }
+  function getBillingIntent(id) {
+    if (!configured) return demoOnly();
+    var bad = billId(id, 'intent_id'); if (bad) return bad;
+    return rpc('get_billing_intent', { p_id: id });
+  }
+  // chargeIds null / undefined = every eligible approved charge (same tx + currency); an array = exactly these
+  // (never filtered or widened: [] → MRS_REQUIRED 'lines', a malformed id → MRS_INVALID 'charge_ids') → { intent, added[] }
+  function addBillingLines(intentId, chargeIds, opts) {
+    if (!configured) return demoOnly();
+    opts = opts || {};
+    var bad = billId(intentId, 'intent_id'); if (bad) return bad;
+    var ids = null;
+    if (chargeIds !== null && chargeIds !== undefined) {
+      if (!Array.isArray(chargeIds) || !chargeIds.every(isUuid)) return Promise.resolve(fail('MRS_INVALID', 'charge_ids'));
+      if (!chargeIds.length) return Promise.resolve(fail('MRS_REQUIRED', 'lines'));
+      ids = chargeIds.slice();
+    }
+    if (ids && ids.length > 200) return Promise.resolve(fail('MRS_TOO_LONG', 'charge_ids'));
+    return idemRpc('add_billing_lines', opts.idemKey, function (k) { return { p_intent: intentId, p_charge_ids: ids, p_idem_key: k }; });
+  }
+  // never-pushed line → removed at once; pushed line → pending_remove (the worker removes only that line_ref)
+  function removeBillingLine(lineId, reason) {
+    if (!configured) return demoOnly();
+    var bad = billId(lineId, 'line_id'); if (bad) return bad;
+    return rpc('remove_billing_line', { p_line: lineId, p_reason: billText(reason) });
+  }
+  // → { intent, job, deduplicated } (a double click returns the same live job)
+  function requestBillingPush(intentId, opts) {
+    if (!configured) return demoOnly();
+    opts = opts || {};
+    var bad = billId(intentId, 'intent_id'); if (bad) return bad;
+    return idemRpc('request_billing_push', opts.idemKey, function (k) { return { p_intent: intentId, p_idem_key: k }; });
+  }
+  function requestBillingPull(intentId) {
+    if (!configured) return demoOnly();
+    var bad = billId(intentId, 'intent_id'); if (bad) return bad;
+    return rpc('request_billing_pull', { p_intent: intentId });
+  }
+  // decision keep_remote | overwrite_remote | recreate | release (note required; fin_approve)
+  function resolveBillingConflict(intentId, decision, note) {
+    if (!configured) return demoOnly();
+    var bad = billId(intentId, 'intent_id'); if (bad) return bad;
+    return rpc('resolve_billing_conflict', { p_intent: intentId, p_decision: decision, p_note: billText(note) });
+  }
+  function cancelBillingIntent(intentId, reason) {
+    if (!configured) return demoOnly();
+    var bad = billId(intentId, 'intent_id'); if (bad) return bad;
+    return rpc('cancel_billing_intent', { p_intent: intentId, p_reason: billText(reason) });
+  }
+
+  /* sync queue & review */
+  // f = { status, kind, intent_id, limit ≤ 200, offset, orgId } → { items, total, counts }
+  function listBillingJobs(f) { return finOrgRpc('list_billing_jobs', f); }
+  // → { job, attempts[] (calls redacted by the server) }
+  function getBillingJob(id) {
+    if (!configured) return demoOnly();
+    var bad = billId(id, 'job_id'); if (bad) return bad;
+    return rpc('get_billing_job', { p_id: id });
+  }
+  // failed | dead → queued
+  function retryBillingJob(jobId) {
+    if (!configured) return demoOnly();
+    var bad = billId(jobId, 'job_id'); if (bad) return bad;
+    return rpc('retry_billing_job', { p_job: jobId });
+  }
+  // f = { branch_id, kind, orgId } → { late_charges, issued_mismatch, issued_cancelled, conflicts, unknown, failed_jobs, client_drift, client_review, item_review, counts }
+  function billingReviewQueue(f) { return finOrgRpc('billing_review_queue', f); }
+  // late_charge: supplementary (intentId) | dismiss · issued_mismatch: accept | credit_note_in_daftra · issued_cancelled: release_charges | dismiss
+  function resolveBillingReview(id, decision, note, intentId) {
+    if (!configured) return demoOnly();
+    var bad = billId(id, 'id'); if (bad) return bad;
+    return rpc('resolve_billing_review', { p_id: id, p_decision: decision, p_note: billText(note), p_intent: isUuid(intentId) ? intentId : null });
+  }
+  // → { intents[] (+ lines), eligible_charges[], review_items[], financial_status, connection:{status, mode, sync_enabled} }
+  function txBilling(txId) { return txRpc('tx_billing', txId); }
+
+  /* ------------------------------------------------------------------
      App shell: global search (command palette) + dashboard counters.
      Plain RLS-scoped PostgREST reads, limited to the active org (or o.orgId).
      ------------------------------------------------------------------ */
@@ -2229,6 +2455,16 @@
     setDemurrageStatus: setDemurrageStatus,
     listCostAdjustments: listCostAdjustments, createCostAdjustment: createCostAdjustment, reviewCostAdjustment: reviewCostAdjustment,
     txCosts: txCosts, txMargin: txMargin, marginReport: marginReport, costReport: costReport,
+    // G5 Daftra integration & invoicing (docs/online/G5_SPEC.md) — staff RPCs only, never the daftra_* worker RPCs
+    getDaftraConnection: getDaftraConnection, saveDaftraConnection: saveDaftraConnection, requestDaftraProbe: requestDaftraProbe,
+    listDaftraClientLinks: listDaftraClientLinks, linkDaftraClient: linkDaftraClient, refreshDaftraClient: refreshDaftraClient,
+    resolveClientDrift: resolveClientDrift, unlinkDaftraClient: unlinkDaftraClient,
+    listDaftraItems: listDaftraItems, saveDaftraItem: saveDaftraItem,
+    createBillingIntent: createBillingIntent, listBillingIntents: listBillingIntents, getBillingIntent: getBillingIntent,
+    addBillingLines: addBillingLines, removeBillingLine: removeBillingLine, requestBillingPush: requestBillingPush,
+    requestBillingPull: requestBillingPull, resolveBillingConflict: resolveBillingConflict, cancelBillingIntent: cancelBillingIntent,
+    listBillingJobs: listBillingJobs, getBillingJob: getBillingJob, retryBillingJob: retryBillingJob,
+    billingReviewQueue: billingReviewQueue, resolveBillingReview: resolveBillingReview, txBilling: txBilling,
     // app shell
     globalSearch: globalSearch, dashboardStats: dashboardStats,
     // utils

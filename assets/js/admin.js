@@ -103,7 +103,9 @@
       // G3 (transaction children)
       declaration: 'البيان الجمركي', bill_of_lading: 'بوليصة الشحن', bl: 'بوليصة الشحن', container: 'حاوية', container_state: 'الحالة التشغيلية للحاوية', appointment: 'موعد الميناء', trip: 'رحلة نقل', exception: 'استثناء تشغيلي', override: 'تجاوز قاعدة المستندات', docs_override: 'تجاوز قاعدة المستندات',
       // G4 (finance events never carry amounts: payload {op, entity, id, …ids})
-      finance: 'المالية التشغيلية' },
+      finance: 'المالية التشغيلية',
+      // G5 (billing events never carry amounts, Daftra totals or request / response bodies)
+      billing: 'الفوترة ودفترة' },
     // G4 finance event payload.op
     fin_event_op: {
       allocation_proposed: 'اقتراح توزيع تكلفة', allocation_approved: 'اعتماد توزيع تكلفة', late_cost: 'تكلفة متأخرة بعد الفوترة',
@@ -113,6 +115,14 @@
       collection_recorded: 'تسجيل تحصيل من العميل', collection_voided: 'إلغاء تحصيل من العميل',
       demurrage_created: 'فتح ملف أرضيات / غرامات', demurrage_updated: 'تحديث ملف أرضيات / غرامات', demurrage_status: 'تغيير حالة ملف أرضيات / غرامات',
       adjustment_created: 'تسجيل رسوم / تسوية استثنائية', adjustment_reviewed: 'مراجعة رسوم / تسوية استثنائية'
+    },
+    // G5 billing event payload.op (docs/online/G5_SPEC.md: staff RPC events + worker completion events)
+    bill_event_op: {
+      intent_created: 'إنشاء غرض فوترة', lines_added: 'إضافة بنود إلى الفاتورة', line_removed: 'حذف بند من الفاتورة',
+      push_requested: 'طلب إرسال إلى دفترة', conflict_resolved: 'معالجة تعارض مع دفترة', intent_cancelled: 'إلغاء غرض فوترة',
+      review_resolved: 'معالجة بند مراجعة فوترة', draft_synced: 'مزامنة المسودة مع دفترة', conflict: 'تعارض مع دفترة',
+      issued: 'صدرت الفاتورة في دفترة', paid: 'تحديث السداد من دفترة', sync_failed: 'تعذّرت المزامنة مع دفترة',
+      late_write: 'كتابة متأخرة إلى دفترة بعد انتهاء المهلة (تُطابق بالمرجع)'
     }
   };
   // English for the G4 labels above (admin namespace, read by lbl() as 'lbl_<domain>_<code>')
@@ -130,7 +140,16 @@
         lbl_fin_event_op_collection_recorded: 'Client collection recorded', lbl_fin_event_op_collection_voided: 'Client collection voided',
         lbl_fin_event_op_demurrage_created: 'Storage / demurrage case opened', lbl_fin_event_op_demurrage_updated: 'Storage / demurrage case updated',
         lbl_fin_event_op_demurrage_status: 'Storage / demurrage case status', lbl_fin_event_op_adjustment_created: 'Exceptional fee / adjustment recorded',
-        lbl_fin_event_op_adjustment_reviewed: 'Exceptional fee / adjustment reviewed'
+        lbl_fin_event_op_adjustment_reviewed: 'Exceptional fee / adjustment reviewed',
+        // G5
+        lbl_event_type_billing: 'Billing & Daftra',
+        lbl_bill_event_op_intent_created: 'Billing intent created', lbl_bill_event_op_lines_added: 'Lines added to the invoice',
+        lbl_bill_event_op_line_removed: 'Line removed from the invoice', lbl_bill_event_op_push_requested: 'Push to Daftra requested',
+        lbl_bill_event_op_conflict_resolved: 'Daftra conflict resolved', lbl_bill_event_op_intent_cancelled: 'Billing intent cancelled',
+        lbl_bill_event_op_review_resolved: 'Billing review item resolved', lbl_bill_event_op_draft_synced: 'Draft synced with Daftra',
+        lbl_bill_event_op_conflict: 'Conflict with Daftra', lbl_bill_event_op_issued: 'Invoice issued in Daftra',
+        lbl_bill_event_op_paid: 'Payment updated from Daftra', lbl_bill_event_op_sync_failed: 'Daftra sync failed',
+        lbl_bill_event_op_late_write: 'Late write to Daftra after a lost lease (reconciled by reference)'
       } });
     } catch (e) { /* Arabic labels stay */ }
   })();
@@ -160,6 +179,8 @@
     finRead: ['accountant', 'accounts_manager', 'branch_manager', 'supervisor', 'admin'],
     finWrite: ['accountant', 'accounts_manager', 'branch_manager', 'admin'],
     finApprove: ['accounts_manager', 'branch_manager', 'admin'],
+    // G5 (docs/online/G5_SPEC.md §Roles) — mirrors app.bill_admin_roles (Daftra connection / catalog / tax settings, org-level)
+    billAdmin: ['accounts_manager', 'admin'],
     backward: ['operations_manager', 'branch_manager', 'supervisor', 'admin']
   };
   var STATUS_ROLES = {
@@ -659,13 +680,13 @@
   ];
   /* ------------------------------------------------------------------
      G3 module hook — assets/js/ops/*.js load before admin.js and register
-       MarsaOps.views.<id>  = { allow: 'staff'|'opsWriter'|'transportWriter'|'orgAdmin'|'finance'|'finRead'|'finWrite'|'finApprove' (or a role list),
+       MarsaOps.views.<id>  = { allow: 'staff'|'opsWriter'|'transportWriter'|'orgAdmin'|'finance'|'finRead'|'finWrite'|'finApprove'|'billAdmin' (or a role list),
                                 titleKey, render(root, opsApi, param) }   → route #<id> / #<id>/<param>
        MarsaOps.txSections  = [{ id, order, render(root, tx, opsApi) }] → inside #tx/<id>, after admin.js' own cards
      The hook is read on every route, so a module that registers late still shows up.
      ------------------------------------------------------------------ */
   var OPS = window.MarsaOps = window.MarsaOps || { views: {}, txSections: [] };
-  var OPS_SETS = ['staff', 'opsWriter', 'transportWriter', 'orgAdmin', 'finance', 'finRead', 'finWrite', 'finApprove'];
+  var OPS_SETS = ['staff', 'opsWriter', 'transportWriter', 'orgAdmin', 'finance', 'finRead', 'finWrite', 'finApprove', 'billAdmin'];
   function opsRoleSet(allow) {
     if (Array.isArray(allow)) return allow;
     return OPS_SETS.indexOf(allow) !== -1 ? R[allow] : R.staff;
@@ -780,9 +801,9 @@
   // views), then the staff pages elsewhere (bulk upload, OCR, platform) from MarsaShell.navItems().
   // Each link carries data-nav-id so MarsaShell.setActive / setBadge('alerts') find it.
   var NAV_EXTERNAL = ['bulk', 'ocr', 'platform'];
-  // daily work → G3 operations → G4 operating finance → management (unknown module views go last, stable)
+  // daily work → G3 operations → G4 operating finance → G5 billing → management (unknown module views go last, stable)
   var NAV_ORDER = ['dashboard', 'requests', 'transactions', 'clients', 'messages', 'imports', 'alerts', 'schedule', 'exceptions', 'parties',
-    'costs', 'payables', 'margins', 'demurrage',
+    'costs', 'payables', 'margins', 'demurrage', 'billing', 'daftra',
     'org', 'branches', 'members', 'requirements', 'audit', 'errors'];
   function buildNav() {
     if (!nav) return;
@@ -1211,6 +1232,7 @@
     else if (e.event_type === 'financial_status') s += ': ' + lbl('financial_status', e.from_status) + arrow + lbl('financial_status', e.to_status);
     else if (e.event_type === 'container_return') s += (p.container_no ? ' ' + p.container_no : '') + ': ' + lbl('container_return_status', e.to_status);
     else if (e.event_type === 'finance' && p.op) s += ': ' + lbl('fin_event_op', p.op);
+    else if (e.event_type === 'billing' && p.op) s += ': ' + lbl('bill_event_op', p.op);
     return s;
   }
   // G3 KPI counts: alerts by severity (status open / acknowledged) and today's appointments (not cancelled /
@@ -1900,6 +1922,8 @@
         title += ' ' + ltr(p.request_ref) + (p.client_created ? ' (ملف عميل جديد)' : '');
       } else if (e.event_type === 'finance') {
         if (p.op) title += ': ' + esc(lbl('fin_event_op', p.op));   // no amounts in finance events
+      } else if (e.event_type === 'billing') {
+        if (p.op) title += ': ' + esc(lbl('bill_event_op', p.op));  // no amounts / Daftra bodies in billing events
       } else if (e.event_type === 'tracking_token') {
         title += p.reissued ? ' (إعادة إصدار؛ الرمز السابق لم يعد صالحًا)' : '';
       }

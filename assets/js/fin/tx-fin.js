@@ -820,7 +820,7 @@
             canA && c.status === 'draft' && mayApprove(api, c) ? k.btn(k.t('ch_approve'), 'btn-primary', function () { chargeStatus(c, 'approved'); }) : null,
             canA && c.status === 'draft' && !mayApprove(api, c) ? el('span', { class: 'form-hint', text: k.t('four_eyes') }) : null,
             canW && c.status === 'draft' ? k.btn(k.t('ch_edit'), 'btn-ghost', function () { chargeDialog(c); }) : null,
-            canW && c.status === 'approved' ? k.btn(k.t('ch_collect'), 'btn-secondary', function () { collectionDialog(Object.assign({}, c, { collected_amount: collected })); }) : null,
+            canW && (c.status === 'approved' || c.status === 'invoiced') ? k.btn(k.t('ch_collect'), 'btn-secondary', function () { collectionDialog(Object.assign({}, c, { collected_amount: collected })); }) : null,   // G5: still recordable once invoiced
             canA && c.status === 'approved' ? k.btn(k.t('ch_to_draft'), 'btn-ghost', function () { chargeStatus(c, 'draft'); }) : null,
             canA && (c.status === 'draft' || c.status === 'approved') ? k.btn(k.t('ch_void'), 'btn-ghost', function () { chargeStatus(c, 'void'); }) : null
           ]))
