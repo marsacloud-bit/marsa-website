@@ -105,7 +105,9 @@
       // G4 (finance events never carry amounts: payload {op, entity, id, …ids})
       finance: 'المالية التشغيلية',
       // G5 (billing events never carry amounts, Daftra totals or request / response bodies)
-      billing: 'الفوترة ودفترة' },
+      billing: 'الفوترة ودفترة',
+      // G6b (message events never carry a body, subject, address, file name or extracted value: payload {op, entity, id, thread_id, …})
+      message: 'المراسلات' },
     // G4 finance event payload.op
     fin_event_op: {
       allocation_proposed: 'اقتراح توزيع تكلفة', allocation_approved: 'اعتماد توزيع تكلفة', late_cost: 'تكلفة متأخرة بعد الفوترة',
@@ -123,6 +125,13 @@
       review_resolved: 'معالجة بند مراجعة فوترة', draft_synced: 'مزامنة المسودة مع دفترة', conflict: 'تعارض مع دفترة',
       issued: 'صدرت الفاتورة في دفترة', paid: 'تحديث السداد من دفترة', sync_failed: 'تعذّرت المزامنة مع دفترة',
       late_write: 'كتابة متأخرة إلى دفترة بعد انتهاء المهلة (تُطابق بالمرجع)'
+    },
+    // G6b message event payload.op (docs/online/G6B_SPEC.md "Events")
+    msg_event_op: {
+      thread_linked: 'ربط محادثة بالمعاملة', thread_unlinked: 'فك ربط محادثة عن المعاملة',
+      reply_approved: 'اعتماد رد', reply_rejected: 'رفض رد', reply_send_requested: 'طلب إرسال رد معتمد',
+      reply_sent: 'قبِل مزود الخدمة الرد (لم يثبت الاستلام)', reply_failed: 'فشل إرسال رد', reply_delivered: 'تم تسليم الرد',
+      send_resolved: 'حسم نتيجة إرسال غير معروفة', late_write: 'كتابة متأخرة من عامل المراسلات بعد انتهاء المهلة (نتيجة الإرسال غير معروفة)'
     }
   };
   // English for the G4 labels above (admin namespace, read by lbl() as 'lbl_<domain>_<code>')
@@ -149,7 +158,18 @@
         lbl_bill_event_op_review_resolved: 'Billing review item resolved', lbl_bill_event_op_draft_synced: 'Draft synced with Daftra',
         lbl_bill_event_op_conflict: 'Conflict with Daftra', lbl_bill_event_op_issued: 'Invoice issued in Daftra',
         lbl_bill_event_op_paid: 'Payment updated from Daftra', lbl_bill_event_op_sync_failed: 'Daftra sync failed',
-        lbl_bill_event_op_late_write: 'Late write to Daftra after a lost lease (reconciled by reference)'
+        lbl_bill_event_op_late_write: 'Late write to Daftra after a lost lease (reconciled by reference)',
+        // G6b
+        lbl_event_type_message: 'Messaging',
+        lbl_msg_event_op_thread_linked: 'Conversation linked to the transaction', lbl_msg_event_op_thread_unlinked: 'Conversation unlinked from the transaction',
+        lbl_msg_event_op_reply_approved: 'Reply approved', lbl_msg_event_op_reply_rejected: 'Reply rejected',
+        lbl_msg_event_op_reply_send_requested: 'Send of an approved reply requested',
+        lbl_msg_event_op_reply_sent: 'Reply accepted by the provider (delivery not proven)', lbl_msg_event_op_reply_failed: 'Reply send failed',
+        lbl_msg_event_op_reply_delivered: 'Reply delivered', lbl_msg_event_op_send_resolved: 'Unknown send result settled',
+        lbl_msg_event_op_late_write: 'Late write by the messaging worker after a lost lease (send result unknown)',
+        // G6b-1 cross-link from the G2 contact-form inbox
+        messages_inbox_note: 'Website contact-form messages are listed here. E-mail and WhatsApp conversations are in the unified inbox.',
+        messages_inbox_link: 'Unified inbox'
       } });
     } catch (e) { /* Arabic labels stay */ }
   })();
@@ -184,6 +204,13 @@
     // G6a (docs/online/G6A_SPEC.md §Roles) — mirrors app.mgmt_roles / app.trip_finance_roles
     mgmt: ['admin', 'supervisor', 'branch_manager'],
     tripFin: ['accountant', 'accounts_manager', 'operations_manager', 'branch_manager', 'supervisor', 'admin'],
+    // G6b (docs/online/G6B_SPEC.md §Roles) — mirrors app.msg_read_roles / msg_triage / msg_approve / msg_send / msg_lib / msg_admin
+    msgRead: ['clearance_staff', 'transport_staff', 'accountant', 'accounts_manager', 'operations_manager', 'branch_manager', 'supervisor', 'admin'],
+    msgTriage: ['clearance_staff', 'transport_staff', 'accountant', 'accounts_manager', 'operations_manager', 'branch_manager', 'admin'],
+    msgApprove: ['operations_manager', 'branch_manager', 'supervisor', 'admin'],
+    msgSend: ['clearance_staff', 'operations_manager', 'branch_manager', 'admin'],
+    msgLib: ['admin', 'operations_manager'],
+    msgAdmin: ['admin'],
     backward: ['operations_manager', 'branch_manager', 'supervisor', 'admin']
   };
   var STATUS_ROLES = {
@@ -683,13 +710,15 @@
   ];
   /* ------------------------------------------------------------------
      G3 module hook — assets/js/ops/*.js load before admin.js and register
-       MarsaOps.views.<id>  = { allow: 'staff'|'opsWriter'|'transportWriter'|'orgAdmin'|'finance'|'finRead'|'finWrite'|'finApprove'|'billAdmin' (or a role list),
+       MarsaOps.views.<id>  = { allow: 'staff'|'opsWriter'|'transportWriter'|'orgAdmin'|'finance'|'finRead'|'finWrite'|'finApprove'|'billAdmin'|'mgmt'|'tripFin'
+                                       |'msgRead'|'msgTriage'|'msgApprove'|'msgSend'|'msgLib'|'msgAdmin' (or a role list),
                                 titleKey, render(root, opsApi, param) }   → route #<id> / #<id>/<param>
        MarsaOps.txSections  = [{ id, order, render(root, tx, opsApi) }] → inside #tx/<id>, after admin.js' own cards
      The hook is read on every route, so a module that registers late still shows up.
      ------------------------------------------------------------------ */
   var OPS = window.MarsaOps = window.MarsaOps || { views: {}, txSections: [] };
-  var OPS_SETS = ['staff', 'opsWriter', 'transportWriter', 'orgAdmin', 'finance', 'finRead', 'finWrite', 'finApprove', 'billAdmin', 'mgmt', 'tripFin'];
+  var OPS_SETS = ['staff', 'opsWriter', 'transportWriter', 'orgAdmin', 'finance', 'finRead', 'finWrite', 'finApprove', 'billAdmin', 'mgmt', 'tripFin',
+    'msgRead', 'msgTriage', 'msgApprove', 'msgSend', 'msgLib', 'msgAdmin'];
   function opsRoleSet(allow) {
     if (Array.isArray(allow)) return allow;
     return OPS_SETS.indexOf(allow) !== -1 ? R[allow] : R.staff;
@@ -820,9 +849,10 @@
   // views), then the staff pages elsewhere (bulk upload, OCR, platform) from MarsaShell.navItems().
   // Each link carries data-nav-id so MarsaShell.setActive / setBadge('alerts') find it.
   var NAV_EXTERNAL = ['bulk', 'ocr', 'platform'];
-  // daily work → G3 operations → G6a reports & search → G4 operating finance → G5 billing → management (unknown module views go last, stable)
+  // daily work → G3 operations → G6a reports & search → G6b messaging → G4 operating finance → G5 billing → management (unknown module views go last, stable)
   var NAV_ORDER = ['dashboard', 'requests', 'transactions', 'clients', 'messages', 'imports', 'alerts', 'schedule', 'exceptions', 'parties',
     'search', 'reports',
+    'inbox', 'contacts', 'templates', 'channels',
     'costs', 'payables', 'margins', 'demurrage', 'billing', 'daftra',
     'org', 'branches', 'members', 'requirements', 'audit', 'errors'];
   function buildNav() {
@@ -837,7 +867,7 @@
     items.filter(function (n) { return n && !n.local && NAV_EXTERNAL.indexOf(n.id) !== -1 && /^[a-z-]+\.html$/.test(n.page || ''); }).forEach(function (n) {
       nav.appendChild(el('li', { class: 'adm-nav-ext' }, el('a', { class: 'adm-nav-link', href: n.href, 'data-nav-id': n.id, text: n.label })));
     });
-    if (SH && typeof SH.setBadge === 'function') { try { SH.setBadge('alerts'); } catch (e) { /* helper optional */ } }
+    if (SH && typeof SH.setBadge === 'function') { try { SH.setBadge('alerts'); SH.setBadge('inbox'); } catch (e) { /* helper optional */ } }
   }
   var orgWrap = document.getElementById('adm-org-switch-wrap');
   var orgSel = document.getElementById('adm-org-switch');
@@ -1256,6 +1286,7 @@
     else if (e.event_type === 'container_return') s += (p.container_no ? ' ' + p.container_no : '') + ': ' + lbl('container_return_status', e.to_status);
     else if (e.event_type === 'finance' && p.op) s += ': ' + lbl('fin_event_op', p.op);
     else if (e.event_type === 'billing' && p.op) s += ': ' + lbl('bill_event_op', p.op);
+    else if (e.event_type === 'message' && p.op) s += ': ' + lbl('msg_event_op', p.op);
     return s;
   }
   // G3 KPI counts: alerts by severity (status open / acknowledged) and today's appointments (not cancelled /
@@ -2007,6 +2038,8 @@
         if (p.op) title += ': ' + esc(lbl('fin_event_op', p.op));   // no amounts in finance events
       } else if (e.event_type === 'billing') {
         if (p.op) title += ': ' + esc(lbl('bill_event_op', p.op));  // no amounts / Daftra bodies in billing events
+      } else if (e.event_type === 'message') {
+        if (p.op) title += ': ' + esc(lbl('msg_event_op', p.op));   // no body / subject / address in message events
       } else if (e.event_type === 'tracking_token') {
         title += p.reissued ? ' (إعادة إصدار؛ الرمز السابق لم يعد صالحًا)' : '';
       }
@@ -2433,6 +2466,13 @@
     var f = S.filters.messages;
     return api.listContactMessages({ orgId: S.orgId, status: f.status || null, limit: WINDOW, offset: f.offset }).then(function (r) {
       var out = frag(dHead(viewLabel('messages'), t('messages_sub')));
+      // G6b-1: the contact-form leads stay separate from the unified inbox (msg_*); a note link only, for msgRead roles
+      if (canAny(R.msgRead) && opsView('inbox')) {
+        out.appendChild(el('p', { class: 'text-sm text-muted adm-msg-inbox-note', 'data-msg-crosslink': 'inbox' }, [
+          tx2('messages_inbox_note', 'هنا رسائل نموذج التواصل في الموقع. مراسلات البريد الإلكتروني وواتساب في صندوق المراسلات الموحد.'), ' ',
+          el('a', { href: '#inbox', class: 'btn btn-sm btn-ghost', text: tx2('messages_inbox_link', 'صندوق المراسلات الموحد') })
+        ]));
+      }
       (r.data || []).forEach(function (m) { MSG_CACHE[m.id] = m; });
       out.appendChild(listView({
         key: 'messages', rows: r.data || [], total: r.count, error: r.error,

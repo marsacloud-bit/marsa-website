@@ -16,6 +16,7 @@
     mkdir -p /tmp/pgtest && cd /tmp/pgtest && npm i @electric-sql/pglite      # once
     NODE_PATH=/tmp/pgtest/node_modules node supabase/tests/rls-tests.js [/path/to/marsa-website] [--strict] [--quiet]
     (default site path: /Users/apple/Downloads/marsa-website)
+  G6b adds: adminB (admin, org B), clrJED (clearance_staff, JED only), clrDMM (clearance_staff, DMM only) for the inbox branch checks.
   When a new public table or RPC is added, the catalog checks FAIL until it is added to
   TENANT_TABLES / the expected RPC lists below — that is intentional.
 */
@@ -336,6 +337,126 @@ async function g6aFixtures() {
   return { A: a.id, B: b.id };
 }
 
+// G6b (20261107000100): the unified inbox. One row per org in every msg_* table, through the real staff RPCs
+// (org A: staffA writes / sends, adminA approves; org B: staffB writes / sends, adminB approves) and the
+// service-role worker RPCs with a handcrafted mock worker (as G5). The message edit event and one storage
+// object per org in the private 'messages' bucket are inserted by the owner (the live worker's job).
+// Branch users for the A1 / A2 separation: clrJED (clearance, JED only), clrDMM (clearance, DMM only).
+const G6B_TABLES = ['msg_settings', 'msg_channels', 'msg_contacts', 'msg_contact_addresses', 'msg_contact_authorizations', 'msg_threads',
+  'msg_messages', 'msg_message_events', 'msg_attachments', 'msg_replies', 'msg_ai_runs', 'msg_extractions', 'msg_classifications',
+  'msg_summaries', 'msg_thread_links', 'msg_instructions', 'msg_templates', 'msg_reply_versions', 'msg_reply_approvals', 'msg_outbound',
+  'msg_delivery_events', 'msg_auto_reply_policies', 'msg_jobs', 'msg_job_attempts'];
+const G6B_AUDITED = ['msg_settings', 'msg_channels', 'msg_contacts', 'msg_contact_addresses', 'msg_contact_authorizations', 'msg_threads',
+  'msg_instructions', 'msg_templates', 'msg_replies', 'msg_jobs', 'msg_auto_reply_policies'];
+// thread-scoped tables (inherit the thread branch): the rest are org-level (msg_read roles) or admin-only (channel jobs)
+const G6B_THREAD_TABLES = ['msg_threads', 'msg_messages', 'msg_message_events', 'msg_attachments', 'msg_extractions', 'msg_classifications',
+  'msg_summaries', 'msg_thread_links', 'msg_replies', 'msg_reply_versions', 'msg_reply_approvals', 'msg_outbound', 'msg_delivery_events'];
+const G6B_STAFF_RPCS = ['get_msg_settings', 'save_msg_settings', 'list_msg_channels', 'save_msg_channel', 'request_msg_channel_probe',
+  'list_msg_contacts', 'get_msg_contact', 'save_msg_contact', 'add_msg_contact_address', 'retire_msg_contact_address',
+  'verify_msg_contact_address', 'grant_msg_authorization', 'revoke_msg_authorization', 'list_msg_threads', 'get_msg_thread',
+  'update_msg_thread', 'link_msg_thread', 'unlink_msg_thread', 'mark_msg_not_related', 'review_msg_extraction',
+  'correct_msg_classification', 'accept_msg_summary', 'request_msg_draft', 'save_msg_reply', 'msg_attachment_suggestions',
+  'set_msg_reply_attachments', 'submit_msg_reply', 'cancel_msg_reply', 'decide_msg_reply', 'send_msg_reply', 'retry_msg_send',
+  'resolve_msg_send_unknown', 'list_msg_instructions', 'save_msg_instruction', 'review_msg_instruction', 'list_msg_templates',
+  'save_msg_template', 'review_msg_template', 'seed_msg_templates', 'list_msg_auto_reply_policies', 'save_msg_auto_reply_policy',
+  'tx_messages', 'list_msg_jobs', 'retry_msg_job', 'msg_retention_preview', 'msg_ai_usage'];
+const G6B_WORKER_RPCS = ['msg_ingest_messages', 'msg_record_delivery', 'msg_claim_jobs', 'msg_complete_job', 'msg_renew_lease',
+  'msg_schedule', 'msg_mock_load', 'msg_mock_save'];
+const G6B_RLS_HELPERS = ['msg_can_read_thread', 'msg_can_read_message', 'msg_can_read_job'];
+async function g6bFixtures() {
+  U.adminB = 'aaaa0000-0000-4000-8000-000000000008';
+  U.clrJED = 'aaaa0000-0000-4000-8000-000000000009';
+  U.clrDMM = 'aaaa0000-0000-4000-8000-00000000000a';
+  await q(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES ($1, 'adminb@example.com', '{"full_name":"مدير ب"}'),
+             ($2, 'clrjed@example.com', '{"full_name":"مخلص جدة"}'), ($3, 'clrdmm@example.com', '{"full_name":"مخلص الدمام"}')`, [U.adminB, U.clrJED, U.clrDMM]);
+  await q(`INSERT INTO public.memberships (user_id, org_id, branch_id, role) VALUES ($1, $2, NULL, 'admin'),
+             ($3, $4, $5, 'clearance_staff'), ($6, $4, $7, 'clearance_staff')`, [U.adminB, B, U.clrJED, A, JED, U.clrDMM, DMM]);
+  const rpcAs = async (who, sql, params) => (await as(who, sql, params))[0].r;
+  const svc = async (sql, params) => (await as('service', sql, params))[0].r;
+  const cpIdx = (s, i) => Array.from(s.slice(0, i)).length;
+  const sha = s => require('crypto').createHash('sha256').update(s, 'utf8').digest('hex');
+  let n = 0;
+  const key = () => 'a6b60000-0000-4000-8000-' + String(++n).padStart(12, '0');
+  // the handcrafted mock worker: claim + complete until nothing is due
+  const work = async () => {
+    for (let round = 0; round < 10; round++) {
+      const ctxs = await svc(`SELECT public.msg_claim_jobs('rls-worker', 20) r`);
+      if (!ctxs.length) return;
+      for (const c of ctxs) {
+        let res;
+        if (c.job.kind === 'probe') {
+          res = { outcome: 'ok', effects: { capabilities: { send: { supported: true, evidence: 'mock' }, lookup_send: { supported: true, evidence: 'mock' } },
+            account: { address: c.channel.address_norm } }, calls: [{ op: 'probe', applied: 'no', request: { password: 'NEVER-STORED' } }] };
+        } else if (c.job.kind === 'process') {
+          const m = c.message, body = m.body_text, cn = body.match(/[A-Z]{4}\d{7}/);
+          const ex = cn ? [{ kind: 'container_no', raw: cn[0], normalized: cn[0], valid: true, confidence: 0.9, detail: {},
+            span: { source: 'body', start: cpIdx(body, cn.index), end: cpIdx(body, cn.index) + cn[0].length } }] : [];
+          res = { outcome: 'ok', calls: [{ op: 'process' }], effects: { message_id: m.id, extractions: ex,
+            classification: { category: 'general_inquiry', confidence: 0.5, rules: [] },
+            summary: { summary_ar: 'استفسار عام', summary_en: 'General inquiry', action_code: 'answer_inquiry', suggested_role: 'clearance_staff', deadline: null, risks: [] },
+            risk_flags: [],
+            ai_run: { provider: 'rule_mock', provider_version: 'rls-1', input_sha256: sha(body), input_chars: Array.from(body).length, output_chars: 10,
+              est_input_tokens: 10, est_output_tokens: 3, est_cost_usd: 0 } } };
+        } else if (c.job.kind === 'send') {
+          res = { outcome: 'ok', calls: [{ op: 'send', applied: 'yes', request: { body_text: c.send.body_text, to: c.send.to } }],
+            effects: { outbound_id: c.send.outbound_id, provider_message_id: 'prov-' + c.send.provider_request_id, status: 'accepted', found_by: 'sent' } };
+        } else if (c.job.kind === 'poll') {
+          res = { outcome: 'ok', effects: { messages: [], next_cursor: 'c1' } };
+        } else {
+          res = { outcome: 'ok', effects: { events: [], next_cursor: 's1' } };
+        }
+        await svc(`SELECT public.msg_complete_job($1, $2) r`, [c.attempt_id, JSON.stringify(res)]);
+      }
+    }
+  };
+  const out = {};
+  for (const [admin, staff, org, tx, cl, tag] of [['adminA', 'staffA', A, TX3, CL101, 'A'], ['adminB', 'staffB', B, B_TX, B_CL, 'B']]) {
+    const t = tag.toLowerCase();
+    const chAddr = `inbox@rls-${t}.example`, sender = `agent@sender-${t}.example`;
+    const settings = await rpcAs(admin, `SELECT public.save_msg_settings($1, $2) r`, [org, { retention_days: 730 }]);
+    const ch = await rpcAs(admin, `SELECT public.save_msg_channel($1, $2, $3) r`, [org, { kind: 'email', name: 'Inbox ' + tag, address: chAddr,
+      ingest_enabled: true, send_enabled: true, provider_terms_ack: true }, key()]);
+    const probe = await rpcAs(admin, `SELECT public.request_msg_channel_probe($1, $2) r`, [ch.id, key()]);
+    await work();
+    const contact = await rpcAs(staff, `SELECT public.save_msg_contact($1, $2, $3) r`, [org, { display_name: 'عميل ' + tag, entity_type: 'client', client_id: cl }, key()]);
+    const addr = await rpcAs(staff, `SELECT public.add_msg_contact_address($1, $2, $3) r`, [contact.id, { kind: 'email', address: sender }, key()]);
+    await rpcAs(admin, `SELECT public.verify_msg_contact_address($1, 'callback', 'اتصال هاتفي للتحقق') r`, [addr.id]);
+    const auth = await rpcAs(admin, `SELECT public.grant_msg_authorization($1, $2, 'تفويض اختبار') r`, [contact.id,
+      { scope_type: 'client', client_id: cl, may_receive_kinds: ['delivery_order'], may_discuss: [] }]);
+    const SECRET_BODY = 'RLS-BODY-' + tag + ' please confirm container ' + (tag === 'A' ? 'MSCU1234565' : 'TGHU1122334') + ' status';
+    const ing = await svc(`SELECT public.msg_ingest_messages($1, $2) r`, [ch.id, JSON.stringify([{ provider_message_id: 'rls-em-' + t, kind: 'email',
+      from: { address: sender, name: 'Agent ' + tag }, to: [{ address: chAddr }], cc: [], sent_at: new Date().toISOString(),
+      subject: 'RLS-SUBJECT-' + tag, body_text: SECRET_BODY, headers: { message_id: '<rls-' + t + '@sender.example>' },
+      auth: { spf: 'pass', dkim: 'pass', dmarc: 'pass' },
+      attachments: [{ provider_attachment_id: 'att-' + t, file_name: 'rls-' + t + '.pdf', mime_type: 'application/pdf', size_bytes: 100, extracted_text: 'x' }],
+      raw: { provider: 'mock' } }])]);
+    const item = ing.items[0];
+    await work();
+    const thread = item.thread_id;
+    await rpcAs(staff, `SELECT public.link_msg_thread($1, $2, $3) r`, [thread, tx, 'ربط اختبار العزل']);
+    const att = (await q(`SELECT id::text id, storage_path FROM public.msg_attachments WHERE message_id = $1`, [item.message_id]))[0];
+    await q(`INSERT INTO storage.objects (bucket_id, name) VALUES ('messages', $1)`, [att.storage_path]);
+    await q(`INSERT INTO public.msg_message_events (org_id, message_id, event, provider_event_id, payload) VALUES ($1, $2, 'reaction', 'rls-ev-' || $3, '{}')`, [org, item.message_id, t]);
+    const reply = await rpcAs(staff, `SELECT public.save_msg_reply(NULL, $1, $2) r`, [{ thread_id: thread, reply_to_message_id: item.message_id, lang: 'ar',
+      subject: 'Re: RLS', body_text: 'شكرًا، تم استلام رسالتكم.', to: [sender] }, key()]);
+    const replyId = reply.id || (reply.reply && reply.reply.id);
+    const sub = await rpcAs(staff, `SELECT public.submit_msg_reply($1) r`, [replyId]);
+    await rpcAs(admin, `SELECT public.decide_msg_reply($1, $2, 'approve', 'مراجعة', false) r`, [replyId, sub.current_version_id]);
+    const send = await rpcAs(staff, `SELECT public.send_msg_reply($1, $2) r`, [replyId, key()]);
+    await work();
+    await svc(`SELECT public.msg_record_delivery($1, $2) r`, [ch.id, JSON.stringify([{ provider_event_id: 'rls-d-' + t,
+      provider_request_id: send.outbound.provider_request_id, status: 'delivered', at: new Date().toISOString() }])]);
+    await rpcAs(admin, `SELECT public.save_msg_instruction($1, $2, $3) r`, [org, { instruction_key: 'lvl.telex', kind: 'approval_level',
+      params: { category: 'telex_release', level: 'standard' } }, key()]);
+    await rpcAs(admin, `SELECT public.seed_msg_templates($1) r`, [org]);
+    await rpcAs(admin, `SELECT public.save_msg_auto_reply_policy($1, $2) r`, [org, { kind: 'ack_receipt', enabled: false }]);
+    await svc(`SELECT public.msg_mock_save($1, $2, 0) r`, [ch.id, { inbound: [], sent: [], fixture: tag }]);
+    out[tag] = { org, tx, settings, ch: ch.id, probe: probe.id, contact: contact.id, addr: addr.id, auth: auth.id, thread, message: item.message_id,
+      attachment: att.id, storagePath: att.storage_path, reply: replyId, outbound: send.outbound.id, sendJob: send.job.id, body: SECRET_BODY, sender };
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ tests */
 // every tenant table: [table, owner-side sample SQL returning {id}, filter column for "by id", update clause]
 const TENANT_TABLES = [
@@ -376,12 +497,18 @@ const TENANT_TABLES = [
   // G5 Daftra integration & invoicing (20261105000100): read by finance roles only, written only through RPCs
   ...G5_TABLES.map(t => [t, `SELECT id::text id FROM public.${t} WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id']),
   // G6a export log (20261106000100): SELECT only (own rows / auditors), append-only, written only by log_report_export
-  ['report_exports',     `SELECT id::text id FROM public.report_exports WHERE org_id = $1 LIMIT 1`,     'id::text',  'row_count = row_count']
+  ['report_exports',     `SELECT id::text id FROM public.report_exports WHERE org_id = $1 LIMIT 1`,     'id::text',  'row_count = row_count'],
+  // G6b unified inbox (20261107000100): read by staff (thread scope / org), written only through RPCs; no client branch
+  ...G6B_TABLES.map(t => t === 'msg_settings'
+    ? [t, `SELECT org_id::text id FROM public.msg_settings WHERE org_id = $1 LIMIT 1`, 'org_id::text', 'retention_days = retention_days']
+    : [t, `SELECT id::text id FROM public.${t} WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'])
 ];
 // G2 internal tables: no API grant at all (written/read only through SECURITY DEFINER RPCs)
 // G5: daftra_mock_accounts (fake Daftra account state) is service-role only, like the G2 internal tables
 const NO_API_TABLES = ['idempotency_keys', 'platform_admins', 'schema_versions', 'client_errors', 'operational_alert_runs',
-  'daftra_mock_accounts'];
+  'daftra_mock_accounts',
+  // G6b: msg_mock_mailboxes (fake mailbox / WhatsApp state) is service-role only (RLS on, no policy, nothing granted)
+  'msg_mock_mailboxes'];
 const ALL_PUBLIC_TABLES = TENANT_TABLES.map(t => t[0]).concat(['status_labels'], NO_API_TABLES);
 
 async function isolationSweep(who, targetOrg, memberUser, label) {
@@ -422,6 +549,9 @@ async function main() {
   let G6A;
   try { G6A = await g6aFixtures(); pass('G6a fixtures: a report_exports row per org (log_report_export)'); }
   catch (e) { fail('G6a fixtures', errText(e)); return finish(); }
+  let G6B;
+  try { G6B = await g6bFixtures(); pass('G6b fixtures: a row per org in every msg_* table (channel … delivery, mock mailbox)'); }
+  catch (e) { fail('G6b fixtures', errText(e)); return finish(); }
 
   /* ---------------------------------------------------------------- catalog */
   section('catalog: RLS, grants, function privileges');
@@ -467,7 +597,7 @@ async function main() {
   });
   await check('anon has no USAGE on schema app', async () =>
     (await q(`SELECT has_schema_privilege('anon', 'app', 'USAGE') u`))[0].u === false);
-  await check('authenticated can execute only the 133 documented public RPCs', async () => {
+  await check('authenticated can execute only the 179 documented public RPCs', async () => {
     const r = await q(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                         WHERE n.nspname = 'public' AND has_function_privilege('authenticated', p.oid, 'EXECUTE') ORDER BY 1`);
     const exp = ['admin_list_members', 'admin_set_member_active', 'convert_request_to_transaction', 'import_commit', 'issue_tracking_token', 'my_context', 'public_track',
@@ -497,9 +627,11 @@ async function main() {
       // G5 Daftra integration & invoicing (20261105000100): 25 staff RPCs; the 5 daftra_* worker RPCs are NOT here
       ...G5_STAFF_RPCS,
       // G6a portal / reports (20261106000100): 10 read-side RPCs (log_report_export is the only writer, append-only)
-      ...G6A_RPCS];
+      ...G6A_RPCS,
+      // G6b unified inbox (20261107000100): 46 staff RPCs; the 8 msg_* worker / ingest RPCs are NOT here (service_role only)
+      ...G6B_STAFF_RPCS];
     const got = r.map(x => x.proname);
-    if (exp.length !== 133) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 179) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');
@@ -1609,6 +1741,263 @@ async function main() {
   }
   await expectErr('owner UPDATE of report_exports refused by the trigger (MRS_APPEND_ONLY)', () => q(`UPDATE public.report_exports SET row_count = 0 WHERE id = $1`, [G6A.A]), /MRS_APPEND_ONLY/);
   await expectErr('owner DELETE of report_exports refused by the trigger (MRS_APPEND_ONLY)', () => q(`DELETE FROM public.report_exports WHERE id = $1`, [G6A.B]), /MRS_APPEND_ONLY/);
+
+  /* ---------------------------------------------------------------- G6b */
+  section('G6b inbox: catalog, worker RPCs service-role only, clients see nothing, org + branch separation');
+  await check('G6b staff RPCs: SECURITY DEFINER, search_path pinned, EXECUTE for authenticated only (not PUBLIC / anon / service-only)', async () => {
+    const r = await q(`SELECT p.proname, p.prosecdef d, has_function_privilege('anon', p.oid, 'EXECUTE') n,
+                              has_function_privilege('authenticated', p.oid, 'EXECUTE') a, coalesce(array_to_string(p.proacl, ','), '') acl,
+                              EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig, '{}')) c WHERE c = 'search_path=""') sp
+                         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = ANY($1)`, [G6B_STAFF_RPCS]);
+    const bad = r.filter(x => !x.d || x.n || !x.a || !x.sp || /(^|,)=X/.test(x.acl));
+    return (G6B_STAFF_RPCS.length === 46 && r.length === 46 && bad.length === 0) || 'found ' + r.length + ' bad: ' + bad.map(x => x.proname + ' ' + JSON.stringify(x)).join('; ');
+  });
+  await check('G6b worker / ingest RPCs (msg_ingest … msg_mock_save): service_role only — not authenticated, anon or PUBLIC; SECURITY DEFINER, search_path pinned', async () => {
+    const r = await q(`SELECT p.proname, has_function_privilege('authenticated', p.oid, 'EXECUTE') a, has_function_privilege('anon', p.oid, 'EXECUTE') n,
+                              has_function_privilege('service_role', p.oid, 'EXECUTE') s, p.prosecdef d, coalesce(array_to_string(p.proacl, ','), '') acl,
+                              EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig, '{}')) c WHERE c = 'search_path=""') sp
+                         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = ANY($1)`, [G6B_WORKER_RPCS]);
+    const bad = r.filter(x => x.a || x.n || !x.s || !x.d || !x.sp || /(^|,)=X/.test(x.acl));
+    return (r.length === 8 && bad.length === 0) || 'found ' + r.length + ' bad: ' + bad.map(x => x.proname + ' ' + JSON.stringify(x)).join('; ');
+  });
+  await check('G6b public functions: exactly the 46 staff + 8 worker RPCs (no stray msg function)', async () => {
+    const r = await q(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'
+                         AND (p.proname LIKE '%msg%' OR p.proname = 'tx_messages') ORDER BY 1`);
+    const exp = G6B_STAFF_RPCS.concat(G6B_WORKER_RPCS).sort();
+    return JSON.stringify(r.map(x => x.proname).sort()) === JSON.stringify(exp) || 'got: ' + r.map(x => x.proname).join(',');
+  });
+  await check('G6b app.msg_* helpers: none executable by anon / authenticated except the 3 RLS helpers', async () => {
+    const r = await q(`SELECT p.proname, has_function_privilege('authenticated', p.oid, 'EXECUTE') a, has_function_privilege('anon', p.oid, 'EXECUTE') n
+                         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'app'
+                          AND (p.proname LIKE 'msg\\_%' OR p.proname LIKE 'tg\\_msg\\_%')`);
+    const bad = r.filter(x => x.n || (x.a && !G6B_RLS_HELPERS.includes(x.proname)));
+    const helpers = r.filter(x => G6B_RLS_HELPERS.includes(x.proname) && x.a).length;
+    return (r.length >= 20 && bad.length === 0 && helpers === 3) || 'helpers ' + r.length + ' rls ' + helpers + ' callable: ' + bad.map(x => x.proname).join(', ');
+  });
+  await check('G6b tables: RLS on, authenticated holds SELECT only, anon nothing, no column grant beyond SELECT', async () => {
+    const all = G6B_TABLES.concat(['msg_mock_mailboxes']);
+    const rls = await q(`SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = ANY($1) AND c.relrowsecurity`, [all]);
+    const g = await q(`SELECT table_name, grantee, privilege_type FROM information_schema.role_table_grants
+                        WHERE grantee IN ('anon','authenticated') AND table_schema = 'public' AND table_name = ANY($1)`, [all]);
+    const bad = g.filter(x => x.grantee === 'anon' || x.privilege_type !== 'SELECT' || x.table_name === 'msg_mock_mailboxes');
+    const withSel = new Set(g.filter(x => x.privilege_type === 'SELECT').map(x => x.table_name));
+    // G6b review fix: msg_channels / msg_messages / msg_threads hold fail-closed COLUMN-level SELECT grants (hidden fields)
+    const colSel = await q(`SELECT DISTINCT table_name FROM information_schema.column_privileges WHERE grantee = 'authenticated'
+                             AND table_schema = 'public' AND privilege_type = 'SELECT' AND table_name = ANY($1)`, [['msg_channels', 'msg_messages', 'msg_threads']]);
+    for (const x of colSel) withSel.add(x.table_name);
+    const c = await q(`SELECT table_name, column_name FROM information_schema.column_privileges WHERE grantee IN ('anon','authenticated')
+                        AND table_schema = 'public' AND table_name = ANY($1) AND privilege_type <> 'SELECT'`, [all]);
+    return (rls.length === all.length && bad.length === 0 && G6B_TABLES.every(t => withSel.has(t)) && c.length === 0)
+      || JSON.stringify({ rls: rls.length, bad, missingSelect: G6B_TABLES.filter(t => !withSel.has(t)), c });
+  });
+  await check('G6b policies: SELECT only, to authenticated only, none on msg_mock_mailboxes, every table covered', async () => {
+    const r = await q(`SELECT tablename, policyname, cmd, roles::text roles FROM pg_policies WHERE schemaname = 'public' AND tablename LIKE 'msg\\_%'`);
+    const bad = r.filter(x => x.cmd !== 'SELECT' || x.roles !== '{authenticated}' || x.tablename === 'msg_mock_mailboxes');
+    const covered = new Set(r.map(x => x.tablename));
+    const missing = G6B_TABLES.filter(t => !covered.has(t));
+    return (bad.length === 0 && missing.length === 0) || 'bad: ' + bad.map(x => x.tablename + '.' + x.policyname).join(',') + ' missing: ' + missing.join(',');
+  });
+  await check('G6b policies never reference client membership (no my_client_ids / client_users branch)', async () => {
+    const r = await q(`SELECT tablename, policyname FROM pg_policies WHERE schemaname IN ('public','storage')
+                         AND (tablename LIKE 'msg\\_%' OR policyname = 'marsa_messages_read') AND (qual ~* 'my_client_ids|client_users|portal')`);
+    return r.length === 0 || r.map(x => x.tablename + '.' + x.policyname).join(', ');
+  });
+  await check('G6b mutable tables carry the audit trigger; append-only logs and the mock mailbox do not', async () => {
+    const r = await q(`SELECT c.relname FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid WHERE t.tgname = 'trg_audit' AND c.relname LIKE 'msg\\_%' ORDER BY 1`);
+    return r.map(x => x.relname).join(',') === [...G6B_AUDITED].sort().join(',') || 'audited: ' + r.map(x => x.relname).join(',');
+  });
+  await check('G6b tables hold no secret-like column (key / secret / token / password / credential)', async () => {
+    const r = await q(`SELECT table_name || '.' || column_name c FROM information_schema.columns WHERE table_schema = 'public'
+                         AND table_name LIKE 'msg\\_%' AND column_name ~* '(key|secret|token|password|passwd|credential|cookie)'
+                         AND column_name NOT IN ('dedupe_key','instruction_key','template_key','idem_key','est_input_tokens','est_output_tokens')`);
+    return r.length === 0 || r.map(x => x.c).join(', ');
+  });
+  await check('G6b dictionaries (status_labels msg_*) are never client-visible', async () => {
+    const r = (await q(`SELECT count(*)::int n, count(*) FILTER (WHERE client_visible)::int v, count(DISTINCT domain)::int d
+                          FROM public.status_labels WHERE domain LIKE 'msg\\_%'`))[0];
+    return (r.n > 0 && r.v === 0 && r.d >= 19) || JSON.stringify(r);
+  });
+  await check('storage bucket "messages" is private with exactly one policy (SELECT, authenticated, marsa_messages_read)', async () => {
+    const b = (await q(`SELECT public FROM storage.buckets WHERE id = 'messages'`))[0];
+    const p = await q(`SELECT policyname, cmd, roles::text roles FROM pg_policies WHERE schemaname = 'storage' AND (qual ~ '''messages''' OR with_check ~ '''messages''')`);
+    return (b && b.public === false && p.length === 1 && p[0].policyname === 'marsa_messages_read' && p[0].cmd === 'SELECT' && p[0].roles === '{authenticated}')
+      || JSON.stringify({ b, p });
+  });
+  // fixture positive controls: the rows exist, each org reads its own and nothing of the other
+  for (const t of G6B_TABLES) {
+    await check(`G6b fixture: adminA reads its own org-A ${t}; adminB reads its own org-B ${t} and nothing of org A`, async () => {
+      const a = (await as('adminA', `SELECT count(*)::int n FROM public.${t} WHERE org_id = $1`, [A]))[0].n;
+      const own = (await as('adminB', `SELECT count(*)::int n FROM public.${t} WHERE org_id = $1`, [B]))[0].n;
+      const other = (await as('adminB', `SELECT count(*)::int n FROM public.${t} WHERE org_id = $1`, [A]))[0].n;
+      return (a > 0 && own > 0 && other === 0) || JSON.stringify({ a, own, other });
+    });
+    for (const who of ['clientA', 'clientA2', 'clientB']) {
+      await check(`${who} reads 0 rows of ${t} (own org included)`, () => denied(who, `SELECT 1 FROM public.${t}`), `RLS ${t}: staff roles only, no client branch`);
+    }
+  }
+  await check('G6b fixture: msg_mock_mailboxes holds a row per org (owner view)', async () =>
+    (await q(`SELECT count(DISTINCT org_id)::int n FROM public.msg_mock_mailboxes WHERE org_id = ANY($1)`, [[A, B]]))[0].n === 2);
+  for (const who of ['adminA', 'adminB', 'staffA', 'clientA']) {
+    await expectErr(`${who} cannot SELECT msg_mock_mailboxes`, () => as(who, `SELECT 1 FROM public.msg_mock_mailboxes`), /permission denied/);
+  }
+  for (const who of ['adminA', 'staffA', 'clientA']) {
+    await expectErr(`${who} cannot INSERT a thread directly`, () => as(who,
+      `INSERT INTO public.msg_threads (org_id, channel_id, kind, subject) VALUES ($1, $2, 'email', 'x')`, [A, G6B.A.ch]), /permission denied|row-level security/);
+    await expectErr(`${who} cannot UPDATE a reply directly`, () => as(who, `UPDATE public.msg_replies SET status = 'approved' WHERE id = $1 RETURNING 1`, [G6B.A.reply]), /permission denied/);
+    await expectErr(`${who} cannot DELETE a message directly`, () => as(who, `DELETE FROM public.msg_messages WHERE id = $1 RETURNING 1`, [G6B.A.message]), /permission denied/);
+  }
+  await expectErr('owner UPDATE of msg_messages refused by the trigger (MRS_APPEND_ONLY)', () => q(`UPDATE public.msg_messages SET body_text = 'x' WHERE id = $1`, [G6B.A.message]), /MRS_APPEND_ONLY/);
+  await expectErr('owner DELETE of msg_outbound refused (append-only facts)', () => q(`DELETE FROM public.msg_outbound WHERE id = $1`, [G6B.B.outbound]), /MRS_APPEND_ONLY/);
+  // anon: no EXECUTE on any G6b RPC
+  const g6bAnon = [
+    ['get_msg_settings', `SELECT public.get_msg_settings('${A}')`], ['list_msg_channels', `SELECT public.list_msg_channels('${A}')`],
+    ['list_msg_threads', `SELECT public.list_msg_threads('${A}', '{}')`], ['get_msg_thread', `SELECT public.get_msg_thread('${G6B.A.thread}')`],
+    ['list_msg_contacts', `SELECT public.list_msg_contacts('${A}', '{}')`], ['tx_messages', `SELECT public.tx_messages('${TX3}')`],
+    ['save_msg_reply', `SELECT public.save_msg_reply(NULL, '{}', NULL)`], ['send_msg_reply', `SELECT public.send_msg_reply('${G6B.A.reply}', NULL)`],
+    ['decide_msg_reply', `SELECT public.decide_msg_reply('${G6B.A.reply}', gen_random_uuid(), 'approve', 'x', false)`],
+    ['list_msg_templates', `SELECT public.list_msg_templates('${A}', '{}')`], ['save_msg_auto_reply_policy', `SELECT public.save_msg_auto_reply_policy('${A}', '{}')`],
+    ['msg_ingest_messages', `SELECT public.msg_ingest_messages('${G6B.A.ch}', '[]')`], ['msg_claim_jobs', `SELECT public.msg_claim_jobs('anon', 1)`],
+    ['msg_mock_load', `SELECT public.msg_mock_load('${G6B.A.ch}')`], ['app.msg_redact', `SELECT app.msg_redact('{}'::jsonb)`],
+    ['app.msg_can_read_thread', `SELECT app.msg_can_read_thread('${G6B.A.thread}')`]
+  ];
+  for (const [fn, sql] of g6bAnon) await expectErr(`anon cannot call ${fn}`, () => as('anon', sql), /permission denied/);
+  // clients (own org and other org) and org-B staff: every G6b reader on org A → MRS_FORBIDDEN / MRS_NOT_FOUND, never an empty success
+  const g6bReaders = [
+    ['get_msg_settings', `SELECT public.get_msg_settings($1)`, [A]], ['list_msg_channels', `SELECT public.list_msg_channels($1)`, [A]],
+    ['list_msg_contacts', `SELECT public.list_msg_contacts($1, '{}')`, [A]], ['get_msg_contact', `SELECT public.get_msg_contact($1)`, [G6B.A.contact]],
+    ['list_msg_threads', `SELECT public.list_msg_threads($1, '{}')`, [A]], ['get_msg_thread', `SELECT public.get_msg_thread($1)`, [G6B.A.thread]],
+    ['msg_attachment_suggestions', `SELECT public.msg_attachment_suggestions($1)`, [G6B.A.reply]],
+    ['list_msg_instructions', `SELECT public.list_msg_instructions($1, '{}')`, [A]], ['list_msg_templates', `SELECT public.list_msg_templates($1, '{}')`, [A]],
+    ['list_msg_auto_reply_policies', `SELECT public.list_msg_auto_reply_policies($1)`, [A]], ['tx_messages', `SELECT public.tx_messages($1)`, [TX3]],
+    ['list_msg_jobs', `SELECT public.list_msg_jobs($1, '{}')`, [A]], ['msg_retention_preview', `SELECT public.msg_retention_preview($1)`, [A]],
+    ['msg_ai_usage', `SELECT public.msg_ai_usage($1, '{}')`, [A]]
+  ];
+  for (const [fn, sql, params] of g6bReaders) {
+    for (const who of ['clientA', 'clientA2', 'clientB', 'staffB', 'adminB']) {
+      await expectErr(`${who} gets no result from ${fn} (org A)`, () => as(who, sql, params), /MRS_FORBIDDEN|MRS_NOT_FOUND/);
+    }
+  }
+  await expectErr('clientB gets no result from list_msg_threads(own org B)', () => as('clientB', `SELECT public.list_msg_threads($1, '{}')`, [B]), /MRS_FORBIDDEN/);
+  await expectErr('clientB gets no result from tx_messages(own tx)', () => as('clientB', `SELECT public.tx_messages($1)`, [B_TX]), /MRS_FORBIDDEN|MRS_NOT_FOUND/);
+  for (const [fn, sql, params] of [
+    ['save_msg_channel', `SELECT public.save_msg_channel($1, $2, NULL)`, [A, { kind: 'email', name: 'x', address: 'evil@rls.example' }]],
+    ['save_msg_contact', `SELECT public.save_msg_contact($1, $2, NULL)`, [A, { display_name: 'x', entity_type: 'other' }]],
+    ['update_msg_thread', `SELECT public.update_msg_thread($1, '{"priority":"low"}')`, [G6B.A.thread]],
+    ['link_msg_thread', `SELECT public.link_msg_thread($1, $2, 'x')`, [G6B.A.thread, TX1]],
+    ['save_msg_reply', `SELECT public.save_msg_reply($1, '{"body_text":"x"}', NULL)`, [G6B.A.reply]],
+    ['decide_msg_reply', `SELECT public.decide_msg_reply($1, gen_random_uuid(), 'reject', 'x', false)`, [G6B.A.reply]],
+    ['send_msg_reply', `SELECT public.send_msg_reply($1, NULL)`, [G6B.A.reply]],
+    ['retry_msg_send', `SELECT public.retry_msg_send($1)`, [G6B.A.outbound]],
+    ['grant_msg_authorization', `SELECT public.grant_msg_authorization($1, '{"scope_type":"client"}', 'x')`, [G6B.A.contact]],
+    ['save_msg_settings', `SELECT public.save_msg_settings($1, '{"retention_days":90}')`, [A]],
+    ['seed_msg_templates', `SELECT public.seed_msg_templates($1)`, [A]]
+  ]) {
+    for (const who of ['clientA', 'staffB', 'adminB']) {
+      await expectErr(`${who} cannot call ${fn} on org A`, () => as(who, sql, params), /MRS_FORBIDDEN|MRS_NOT_FOUND|MRS_INVALID/);
+    }
+  }
+  const g6bWorker = [
+    ['msg_ingest_messages', `SELECT public.msg_ingest_messages($1, '[]')`, [G6B.A.ch]],
+    ['msg_record_delivery', `SELECT public.msg_record_delivery($1, '[]')`, [G6B.A.ch]],
+    ['msg_claim_jobs', `SELECT public.msg_claim_jobs('evil', 5)`, []],
+    ['msg_complete_job', `SELECT public.msg_complete_job(gen_random_uuid(), '{"outcome":"ok"}')`, []],
+    ['msg_renew_lease', `SELECT public.msg_renew_lease(gen_random_uuid())`, []],
+    ['msg_schedule', `SELECT public.msg_schedule(5)`, []],
+    ['msg_mock_load', `SELECT public.msg_mock_load($1)`, [G6B.A.ch]],
+    ['msg_mock_save', `SELECT public.msg_mock_save($1, '{}', 1)`, [G6B.A.ch]]
+  ];
+  for (const [fn, sql, params] of g6bWorker) {
+    for (const who of ['adminA', 'adminB', 'staffA', 'clientA']) {
+      await expectErr(`${who} cannot execute worker RPC ${fn}`, () => as(who, sql, params), /permission denied/);
+    }
+  }
+  await check('worker identity cannot use G6b staff RPCs: service_role → MRS_AUTH_REQUIRED (no user)', async () => {
+    for (const [fn, sql, params] of [['list_msg_threads', `SELECT public.list_msg_threads($1, '{}')`, [A]],
+      ['send_msg_reply', `SELECT public.send_msg_reply($1, NULL)`, [G6B.A.reply]],
+      ['decide_msg_reply', `SELECT public.decide_msg_reply($1, gen_random_uuid(), 'approve', 'x', false)`, [G6B.A.reply]]]) {
+      try { await as('service', sql, params); return fn + ' answered for service_role'; }
+      catch (e) { if (!/MRS_AUTH_REQUIRED/.test(errText(e))) return fn + ': ' + errText(e); }
+    }
+    return true;
+  });
+  // branch separation (G6b-7): the org-A thread is linked to TX3 (JED) → JED staff read it, DMM staff read nothing of it
+  await check('branch scope: the linked org-A thread sits on the transaction branch (JED)', async () =>
+    (await q(`SELECT branch_id::text b FROM public.msg_threads WHERE id = $1`, [G6B.A.thread]))[0].b === JED);
+  for (const t of G6B_THREAD_TABLES) {
+    await check(`branch scope: clrJED (JED) reads org-A ${t}; clrDMM (DMM) reads 0 rows`, async () => {
+      const j = (await as('clrJED', `SELECT count(*)::int n FROM public.${t} WHERE org_id = $1`, [A]))[0].n;
+      const d = (await as('clrDMM', `SELECT count(*)::int n FROM public.${t} WHERE org_id = $1`, [A]))[0].n;
+      return (j > 0 && d === 0) || JSON.stringify({ j, d });
+    });
+  }
+  await check('branch scope: clrDMM gets MRS_NOT_FOUND from get_msg_thread / tx_messages(TX3) and an empty list_msg_threads', async () => {
+    const e1 = await (async () => { try { await as('clrDMM', `SELECT public.get_msg_thread($1)`, [G6B.A.thread]); return 'answered'; } catch (e) { return errText(e); } })();
+    const e2 = await (async () => { try { await as('clrDMM', `SELECT public.tx_messages($1)`, [TX3]); return 'answered'; } catch (e) { return errText(e); } })();
+    const l = (await as('clrDMM', `SELECT public.list_msg_threads($1, '{}') r`, [A]))[0].r;
+    const lj = (await as('clrJED', `SELECT public.list_msg_threads($1, '{}') r`, [A]))[0].r;
+    return (/MRS_NOT_FOUND/.test(e1) && /MRS_NOT_FOUND/.test(e2) && l.total === 0 && lj.total >= 1) || JSON.stringify({ e1, e2, l: l.total, lj: lj.total });
+  });
+  await check('branch scope: clrJED reads tx_messages(TX3) with the linked thread', async () => {
+    const r = (await as('clrJED', `SELECT public.tx_messages($1) r`, [TX3]))[0].r;
+    return (r.threads.length === 1 && r.threads[0].id === G6B.A.thread) || JSON.stringify(r);
+  });
+  await check('messages bucket: the attachment object is visible to clrJED only — not clrDMM, org-B staff, clients or anon', async () => {
+    const sql = `SELECT name FROM storage.objects WHERE bucket_id = 'messages' AND name = $1`;
+    const j = (await as('clrJED', sql, [G6B.A.storagePath])).length;
+    for (const who of ['clrDMM', 'staffB', 'adminB', 'clientA', 'clientA2', 'clientB', 'anon']) {
+      const d = await denied(who, sql, [G6B.A.storagePath]);
+      if (d !== true) return who + ': ' + d;
+    }
+    return j === 1 || 'clrJED sees ' + j;
+  });
+  for (const who of ['adminA', 'staffA', 'clientA']) {
+    await expectErr(`${who} cannot upload into the messages bucket`, () => as(who, `INSERT INTO storage.objects (bucket_id, name) VALUES ('messages', $1)`,
+      [`${A}/${G6B.A.ch}/x/y/z.pdf`]), /row-level security|permission denied/);
+  }
+  // privacy: events / audit / attempts carry no body, subject or address; clients never see message events
+  await check('message events: internal, no body / subject / address / file name in the payload; clients see none', async () => {
+    const n = (await q(`SELECT count(*)::int n FROM public.transaction_events WHERE event_type = 'message'`))[0].n;
+    if (n === 0) return 'no message event in the fixture — vacuous';
+    const leak = (await q(`SELECT count(*)::int n FROM public.transaction_events WHERE event_type = 'message'
+                            AND (visible_to_client OR payload::text ~ 'RLS-BODY|RLS-SUBJECT|@sender-|rls-[ab]\\.pdf|inbox@rls-')`))[0].n;
+    if (leak) return leak + ' leaking message events';
+    for (const who of ['clientA', 'clientA2', 'clientB']) {
+      const d = await denied(who, `SELECT 1 FROM public.transaction_events WHERE event_type = 'message'`);
+      if (d !== true) return who + ': ' + d;
+    }
+    return true;
+  });
+  await check('audit_log holds no message body; clients see no G6b audit row', async () => {
+    const n = (await q(`SELECT count(*)::int n FROM public.audit_log WHERE table_name = ANY($1)`, [G6B_AUDITED]))[0].n;
+    if (n === 0) return 'no G6b audit row — vacuous';
+    const body = (await q(`SELECT count(*)::int n FROM public.audit_log WHERE coalesce(old_data::text, '') || coalesce(new_data::text, '') ~ 'RLS-BODY'`))[0].n;
+    const logs = (await q(`SELECT count(*)::int n FROM public.audit_log WHERE table_name IN ('msg_messages','msg_job_attempts','msg_mock_mailboxes','msg_reply_versions')`))[0].n;
+    if (body || logs) return JSON.stringify({ body, logs });
+    for (const who of ['clientA', 'clientB']) {
+      const d = await denied(who, `SELECT 1 FROM public.audit_log WHERE table_name = ANY($1)`, [G6B_AUDITED]);
+      if (d !== true) return who + ': ' + d;
+    }
+    return true;
+  });
+  await check('logged worker calls kept no password and no message body (masked to {chars, sha256})', async () => {
+    const r = (await q(`SELECT string_agg(calls::text, ' ') c FROM public.msg_job_attempts WHERE org_id = ANY($1)`, [[A, B]]))[0].c || '';
+    return (r.length > 0 && !/NEVER-STORED|RLS-BODY|شكرًا، تم استلام/.test(r)) || r.slice(0, 400);
+  });
+  await check('auto-reply policies: all disabled; enabling refused (RPC and CHECK)', async () => {
+    const on = (await q(`SELECT count(*)::int n FROM public.msg_auto_reply_policies WHERE enabled`))[0].n;
+    const e1 = await (async () => { try { await as('adminA', `SELECT public.save_msg_auto_reply_policy($1, '{"kind":"ack_receipt","enabled":true}')`, [A]); return 'ok'; } catch (e) { return errText(e); } })();
+    const e2 = await (async () => { try { await q(`UPDATE public.msg_auto_reply_policies SET enabled = true WHERE org_id = $1`, [A]); return 'ok'; } catch (e) { return errText(e); } })();
+    return (on === 0 && /auto_reply_disabled_v1/.test(e1) && /check|violates/i.test(e2)) || JSON.stringify({ on, e1, e2 });
+  });
+  await check('every accepted / delivered outbound has an approval by another user than the author / submitter (four-eyes)', async () => {
+    const r = await q(`SELECT o.id FROM public.msg_outbound o JOIN public.msg_replies r ON r.id = o.reply_id
+                         WHERE o.state IN ('accepted','delivered','read') AND NOT EXISTS (
+                           SELECT 1 FROM public.msg_reply_approvals a JOIN public.msg_reply_versions v ON v.id = a.version_id
+                            WHERE a.version_id = o.reply_version_id AND a.decision = 'approve' AND a.actor <> coalesce(v.author_id, v.requested_by)
+                              AND a.actor <> r.submitted_by)`);
+    const n = (await q(`SELECT count(*)::int n FROM public.msg_outbound WHERE state IN ('accepted','delivered','read')`))[0].n;
+    return (n === 2 && r.length === 0) || JSON.stringify({ n, bad: r });
+  });
 
   return finish();
 }

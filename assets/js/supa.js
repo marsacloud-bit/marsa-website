@@ -141,7 +141,21 @@
       intent: 'غرض الفوترة', external_invoice_id: 'رقم الفاتورة في دفترة',
       // G6a search / reports / export (docs/online/G6A_SPEC.md §6)
       q: 'نص البحث', date_field: 'نوع التاريخ', sort: 'الترتيب', return_status: 'حالة إرجاع الحاوية', trip_status: 'حالة الرحلة',
-      report: 'نوع التقرير', format: 'صيغة التصدير'
+      report: 'نوع التقرير', format: 'صيغة التصدير',
+      // G6b messaging (docs/online/G6B_SPEC.md)
+      thread: 'المحادثة', reply: 'الرد', contact: 'جهة الاتصال', channel: 'القناة', channel_id: 'القناة', channel_kind: 'نوع القناة',
+      recipient: 'المستلم', owner: 'المسؤول', owner_id: 'المسؤول', category: 'التصنيف', template_key: 'القالب', extraction: 'المرجع المستخرج',
+      body_text: 'نص الرسالة', lang: 'اللغة', address: 'العنوان أو الرقم', display_name: 'اسم جهة الاتصال', entity_type: 'نوع الجهة',
+      party_id: 'الجهة', role_label: 'الدور لدى الجهة', verification_method: 'طريقة التوثيق', scope_type: 'نطاق التفويض',
+      may_receive_kinds: 'المستندات المسموح باستلامها', may_discuss: 'المواضيع المسموح بها', valid_from: 'ساري من', valid_until: 'ساري حتى',
+      due_at: 'موعد المتابعة', priority: 'الأولوية', match_status: 'حالة الربط', ai_provider: 'مزود المعالجة الآلية',
+      ai_monthly_budget_usd: 'الميزانية الشهرية للمعالجة الآلية', retention_days: 'مدة الاحتفاظ (أيام)', violation_repeat_days: 'نافذة تكرار المخالفة (أيام)',
+      default_lang: 'اللغة الافتراضية', signature_ar: 'التوقيع بالعربية', signature_en: 'التوقيع بالإنجليزية', instruction_key: 'مفتاح التعليمة',
+      params: 'إعدادات التعليمة', placeholders: 'متغيرات القالب', party_kinds: 'أنواع الجهات', operation: 'نوع العملية',
+      subject_tpl: 'قالب الموضوع', body_tpl: 'قالب النص', conditions: 'الشروط', allowed_categories: 'التصنيفات المسموحة',
+      provider_terms_ack: 'إقرار شروط مزود الخدمة', ingest_enabled: 'الاستقبال', send_enabled: 'الإرسال', default_branch_id: 'الفرع الافتراضي',
+      box: 'الصندوق', document_ids: 'مرفقات الرد', version_id: 'نسخة الرد', outbound_id: 'عملية الإرسال', summary_id: 'الملخص',
+      message_id: 'الرسالة', reply_to_message_id: 'الرسالة المردود عليها', signed_url: 'رابط التنزيل'
     },
     // G4 detail-specific messages (error.field = the detail code); they replace the code's generic text
     details: {
@@ -206,7 +220,47 @@
       data_changed: 'تغيّرت البيانات أثناء التصدير، أعد المحاولة.',
       too_many_rows: 'عدد الصفوف أكبر من المسموح للتصدير. ضيّق الفلاتر.',
       audit_failed: 'تعذّر تسجيل عملية التصدير في السجل، فلم يُنشأ الملف. أعد المحاولة.',
-      no_rows: 'لا توجد صفوف للتصدير بهذه الفلاتر.'
+      no_rows: 'لا توجد صفوف للتصدير بهذه الفلاتر.',
+      // G6b messaging (docs/online/G6B_SPEC.md) — detail words used only by the msg_* RPCs
+      recipient_not_authorized: 'المستلم غير موثق أو غير مفوض لهذا المستند. يُرفق المستند فقط لعنوان موثق لديه تفويض ساري يشمل نوعه.',
+      sensitive_ack: 'الرد يحمل مستندًا حساسًا: أكّد الاطلاع على حساسيته واكتب ملاحظة قبل الاعتماد.',
+      address_taken: 'هذا العنوان أو الرقم مستخدم من قبل (قناة مسجّلة أو جهة اتصال نشطة أخرى).',
+      reply_exists: 'يوجد رد قائم لهذه المحادثة (مسودة أو بانتظار الاعتماد أو الإرسال)؛ افتحه بدلًا من إنشاء رد ثانٍ.',
+      span: 'موضع النص المستخرج لا يطابق النص الأصلي للرسالة.',
+      placeholder: 'القالب يحتوي متغيرًا غير مسموح. استخدم المتغيرات المعروضة في القائمة فقط.',
+      provider_terms: 'سجّل أولًا أن الحساب رسمي مملوك للمؤسسة وفق شروط مزود الخدمة قبل تفعيل الاستقبال أو الإرسال.',
+      not_approved: 'لا يمكن الإرسال قبل الاعتماد.',
+      approval_stale: 'تغيّر النص بعد الاعتماد — يلزم اعتماد جديد.',
+      four_eyes: 'لا يجوز أن يعتمد كاتب الرد رده (ولا من قدّمه للاعتماد). يعتمده مسؤول آخر.',
+      already_sent: 'أُرسل هذا الرد من قبل؛ لا يُرسل مرة ثانية.',
+      send_unknown: 'نتيجة إرسال سابق غير معروفة؛ لا يُعاد الإرسال قبل حسمها بالمطابقة أو بقرار مسؤول.',
+      not_retryable: 'لا تُعاد هذه المحاولة: ربما استلم المزود الطلب، أو أن الخطأ نهائي.',
+      wa_window_closed: 'انتهت نافذة الـ ٢٤ ساعة في واتساب منذ آخر رسالة من هذا الرقم؛ لا يُرسل رد حر.',
+      channel_not_connected: 'القناة غير متصلة. افحص القناة من «القنوات والإعدادات» أولًا.',
+      channel_disabled: 'الإرسال موقوف على هذه القناة.',
+      auto_reply_disabled_v1: 'الردود الآلية غير مفعلة في الإصدار الأول.',
+      reply_locked: 'الرد قيد الإرسال أو أُرسل؛ لا يُعدّل.',
+      not_draft: 'هذا الإجراء متاح للمسودات فقط.',
+      ai_budget: 'تجاوز التقدير الشهري لتكلفة المعالجة الآلية الميزانية المحددة.',
+      not_configured: 'الحساب الحقيقي غير مُعدّ في هذه البيئة (وضع المحاكاة فقط).',
+      attachment_not_stored: 'المرفق لم يُحفظ في التخزين بعد (في وضع المحاكاة تُحفظ بياناته الوصفية فقط)، فلا يمكن تنزيله.'
+    },
+    // G6b: messages for a detail word under one code only ('CODE:detail'); checked before details / the code text
+    codeDetails: {
+      'MRS_NOT_FOUND:thread': 'المحادثة غير موجودة أو لا تملك صلاحية عرضها (المراسلات مفصولة حسب المؤسسة والفرع).',
+      'MRS_NOT_FOUND:message': 'الرسالة غير موجودة أو لا تملك صلاحية عرضها.',
+      'MRS_NOT_FOUND:reply': 'الرد غير موجود أو لا تملك صلاحية عرضه.',
+      'MRS_NOT_FOUND:contact': 'جهة الاتصال غير موجودة في دليل مؤسستك.',
+      'MRS_NOT_FOUND:channel': 'القناة غير موجودة أو لا تخص مؤسستك.',
+      'MRS_NOT_FOUND:document': 'المستند غير موجود أو لا تملك صلاحية عرضه.',
+      'MRS_INVALID:recipient': 'المستلم ليس عنوانًا نشطًا في دليل جهات الاتصال ولا مشاركًا في المحادثة. أضفه إلى الدليل أولًا.',
+      'MRS_REQUIRED:recipient': 'حدّد مستلمًا واحدًا على الأقل للرد.',
+      'MRS_INVALID:address': 'العنوان أو الرقم غير صحيح (بريد إلكتروني، أو رقم جوال دولي مثل ‎+9665XXXXXXXX).',
+      'MRS_INVALID:owner': 'المسؤول المختار لا يملك صلاحية المتابعة في فرع المحادثة.',
+      'MRS_INVALID:document': 'المستند لا يخص المعاملة المربوطة بالمحادثة أو أنه ملغى.',
+      'MRS_INVALID:extraction': 'القيمة لا تطابق صيغة هذا النوع من المراجع.',
+      'MRS_REQUIRED:transaction': 'اربط المحادثة بمعاملة أولًا.',
+      'MRS_REQUIRED:body': 'اكتب نص الرد.'
     },
     banner: {
       staging: 'بيئة تجريبية (Staging) — البيانات للاختبار فقط'
@@ -282,7 +336,44 @@
         detail_conflict_reason: 'This decision does not fit the conflict type ({x}).',
         detail_unlinked: 'The client link is unlinked; link the client again in "Daftra settings".',
         detail_unreconciled_remote: 'The invoice create may have reached Daftra without confirmation; retry the sync so it is reconciled by reference before cancelling or removing.',
-        detail_subdomain_taken: 'This Daftra account is linked to another organisation; each organisation has its own Daftra account.'
+        detail_subdomain_taken: 'This Daftra account is linked to another organisation; each organisation has its own Daftra account.',
+        // G6b messaging
+        detail_recipient_not_authorized: 'The recipient is not verified or not authorized for this document. A document is attached only for a verified address holding a valid authorization that covers its kind.',
+        detail_sensitive_ack: 'The reply carries a sensitive document: acknowledge its sensitivity and write a note before approving.',
+        detail_address_taken: 'This address or number is already in use (a registered channel or another active contact).',
+        detail_reply_exists: 'This conversation already has a live reply (draft, pending approval or sending); open it instead of starting a second one.',
+        detail_span: 'The position of the extracted text does not match the original message text.',
+        detail_placeholder: 'The template uses a placeholder that is not allowed. Use only the placeholders in the list.',
+        detail_provider_terms: 'First record that the account is the organisation\'s own official account under the provider\'s terms before enabling receiving or sending.',
+        detail_not_approved: 'A reply cannot be sent before it is approved.',
+        detail_approval_stale: 'The text changed after approval — a new approval is required.',
+        detail_four_eyes: 'The author of a reply (or the user who submitted it) cannot approve it. Another approver must do it.',
+        detail_already_sent: 'This reply was already sent; it is never sent twice.',
+        detail_send_unknown: 'The result of an earlier send is unknown; nothing is re-sent until it is settled by reconciliation or by a manager decision.',
+        detail_not_retryable: 'This attempt cannot be retried: the provider may have received it, or the error is final.',
+        detail_wa_window_closed: 'The WhatsApp 24-hour window since the last message from this number has closed; a free-form reply cannot be sent.',
+        detail_channel_not_connected: 'The channel is not connected. Check it in "Channels & settings" first.',
+        detail_channel_disabled: 'Sending is disabled on this channel.',
+        detail_auto_reply_disabled_v1: 'Automatic replies are not enabled in the first release.',
+        detail_reply_locked: 'The reply is being sent or was sent; it cannot be edited.',
+        detail_not_draft: 'This action is available for drafts only.',
+        detail_ai_budget: 'The month\'s estimated automated-processing cost would exceed the set budget.',
+        detail_not_configured: 'The real account is not configured in this environment (mock mode only).',
+        detail_attachment_not_stored: 'The attachment is not stored yet (in mock mode only its metadata is kept), so it cannot be downloaded.',
+        'cdetail_MRS_NOT_FOUND_thread': 'The conversation does not exist or you may not view it (messaging is separated by organisation and branch).',
+        'cdetail_MRS_NOT_FOUND_message': 'The message does not exist or you may not view it.',
+        'cdetail_MRS_NOT_FOUND_reply': 'The reply does not exist or you may not view it.',
+        'cdetail_MRS_NOT_FOUND_contact': 'The contact is not in your organisation\'s directory.',
+        'cdetail_MRS_NOT_FOUND_channel': 'The channel does not exist or does not belong to your organisation.',
+        'cdetail_MRS_NOT_FOUND_document': 'The document does not exist or you may not view it.',
+        'cdetail_MRS_INVALID_recipient': 'The recipient is neither an active address in the contacts directory nor a participant of the conversation. Add it to the directory first.',
+        'cdetail_MRS_REQUIRED_recipient': 'Choose at least one recipient for the reply.',
+        'cdetail_MRS_INVALID_address': 'Invalid address or number (an e-mail address, or an international mobile number such as +9665XXXXXXXX).',
+        'cdetail_MRS_INVALID_owner': 'The chosen owner has no follow-up access at the conversation\'s branch.',
+        'cdetail_MRS_INVALID_document': 'The document does not belong to the transaction linked to the conversation, or it is void.',
+        'cdetail_MRS_INVALID_extraction': 'The value does not match the format of this reference kind.',
+        'cdetail_MRS_REQUIRED_transaction': 'Link the conversation to a transaction first.',
+        'cdetail_MRS_REQUIRED_body': 'Write the reply text.'
       } });
       I.register('field', { en: {
         supplier_id: 'Supplier', invoice_number: 'Invoice number', invoice_date: 'Invoice date', due_date: 'Due date',
@@ -306,7 +397,21 @@
         intent: 'Billing intent', external_invoice_id: 'Daftra invoice id',
         // G6a
         q: 'Search text', date_field: 'Date type', sort: 'Sort order', return_status: 'Container return status', trip_status: 'Trip status',
-        report: 'Report type', format: 'Export format'
+        report: 'Report type', format: 'Export format',
+        // G6b
+        thread: 'Conversation', reply: 'Reply', contact: 'Contact', channel: 'Channel', channel_id: 'Channel', channel_kind: 'Channel kind',
+        recipient: 'Recipient', owner: 'Owner', owner_id: 'Owner', category: 'Category', template_key: 'Template', extraction: 'Extracted reference',
+        body_text: 'Message text', lang: 'Language', address: 'Address or number', display_name: 'Contact name', entity_type: 'Entity type',
+        party_id: 'Party', role_label: 'Role at the party', verification_method: 'Verification method', scope_type: 'Authorization scope',
+        may_receive_kinds: 'Documents it may receive', may_discuss: 'Topics it may discuss', valid_from: 'Valid from', valid_until: 'Valid until',
+        due_at: 'Follow-up date', priority: 'Priority', match_status: 'Link status', ai_provider: 'Automated-processing provider',
+        ai_monthly_budget_usd: 'Monthly automated-processing budget', retention_days: 'Retention (days)', violation_repeat_days: 'Repeated-violation window (days)',
+        default_lang: 'Default language', signature_ar: 'Arabic signature', signature_en: 'English signature', instruction_key: 'Instruction key',
+        params: 'Instruction settings', placeholders: 'Template placeholders', party_kinds: 'Party kinds', operation: 'Operation',
+        subject_tpl: 'Subject template', body_tpl: 'Body template', conditions: 'Conditions', allowed_categories: 'Allowed categories',
+        provider_terms_ack: 'Provider terms acknowledgement', ingest_enabled: 'Receiving', send_enabled: 'Sending', default_branch_id: 'Default branch',
+        box: 'Box', document_ids: 'Reply attachments', version_id: 'Reply version', outbound_id: 'Send', summary_id: 'Summary',
+        message_id: 'Message', reply_to_message_id: 'Message replied to', signed_url: 'Download link'
       } });
     } catch (e) { /* Arabic messages stay */ }
   })();
@@ -356,8 +461,10 @@
   }
   function mkErr(code, field, raw, extra) {
     var tpl = null;
+    // G6b: a detail word with its own message under this code only (MRS_NOT_FOUND 'thread', MRS_INVALID 'recipient', …)
+    if (field && Object.prototype.hasOwnProperty.call(AR.codeDetails, code + ':' + field)) tpl = i18nStr('err.cdetail_' + code + '_' + field) || AR.codeDetails[code + ':' + field];
     // G4: a detail code with its own message ({x} = the extra part, e.g. line numbers)
-    if (field && Object.prototype.hasOwnProperty.call(AR.details, field)) tpl = i18nStr('err.detail_' + field) || AR.details[field];
+    if (!tpl && field && Object.prototype.hasOwnProperty.call(AR.details, field)) tpl = i18nStr('err.detail_' + field) || AR.details[field];
     if (!tpl) tpl = i18nStr('err.' + code) || AR.errors[code] || i18nStr('err.UNKNOWN') || AR.errors.UNKNOWN;
     var msg = fmt(tpl, field).replace(/\{x\}/g, extra == null ? '' : String(extra)).replace(/\s*\(\)/g, '');
     return { code: code, field: field || null, message: msg, raw: raw || null };
@@ -369,7 +476,8 @@
     var out = { field: det || null, ref: null, extra: null, remaining: null };
     if (!det) return out;
     var m = /^([a-z][a-z0-9_]*)\s*[:=\s]\s*(.+)$/.exec(det);
-    if (m && (Object.prototype.hasOwnProperty.call(AR.details, m[1]) || Object.prototype.hasOwnProperty.call(AR.fields, m[1]))) {
+    if (m && (Object.prototype.hasOwnProperty.call(AR.details, m[1]) || Object.prototype.hasOwnProperty.call(AR.fields, m[1])
+        || Object.prototype.hasOwnProperty.call(AR.codeDetails, code + ':' + m[1]))) {
       out.field = m[1];
       var rest = m[2].trim();
       if (UUID_DETAIL.test(rest)) out.ref = rest; else out.extra = rest.replace(/^\{|\}$/g, '');
@@ -2426,6 +2534,230 @@
     return rpc('portal_invoices', { p_tx: txId ? String(txId) : null });
   }
 
+  /* ------------------------------------------------------------------
+     G6b — official channels, unified inbox, matching & approved replies
+     (docs/online/G6B_SPEC.md "Front end → MarsaApi"). Staff RPCs only: the
+     service RPCs (msg_ingest_messages, msg_record_delivery, msg_claim_jobs,
+     msg_complete_job, msg_renew_lease, msg_schedule, msg_mock_load,
+     msg_mock_save) are NEVER exposed here. No mailbox / WhatsApp credential
+     ever reaches the browser; channels hold mode + status only. Approval and
+     send are two separate calls (decideMsgReply, then sendMsgReply by a send
+     role); the server decides every gate. Org-level calls take the active org
+     (or f.orgId / opts.orgId) as p_org. A malformed id never reaches the server.
+     Message bodies / subjects / addresses returned here are untrusted DATA:
+     callers render them with textContent only.
+     ------------------------------------------------------------------ */
+  function msgId(id, field) { return isUuid(id) ? null : Promise.resolve(fail('MRS_INVALID', field)); }
+  function msgText(v) { return v == null ? null : String(v); }
+  // payload copy: orgId / idempotencyKey / functions / undefined never travel; null stays (explicit clear)
+  function msgPayload(p) {
+    var out = {};
+    Object.keys(p && typeof p === 'object' && !Array.isArray(p) ? p : {}).forEach(function (k) {
+      var v = p[k];
+      if (k === 'orgId' || k === 'idempotencyKey' || v === undefined || typeof v === 'function') return;
+      out[k] = v;
+    });
+    return out;
+  }
+  function msgOrgRpc(name, o) { o = o || {}; return inActiveOrg(o.orgId, function (oid) { return rpc(name, { p_org: oid }); }); }
+  function msgListRpc(name, f, maxLimit) { return rptRpc(name, f, maxLimit); }
+  function msgOrgPayload(name, p, o) {
+    o = o || {};
+    var org = o.orgId || (p && p.orgId) || null;
+    return inActiveOrg(org, function (oid) { return rpc(name, { p_org: oid, p_payload: msgPayload(p) }); });
+  }
+  function msgOrgIdem(name, p, opts) {
+    opts = opts || {};
+    var org = opts.orgId || (p && p.orgId) || null;
+    var payload = msgPayload(p);
+    return inActiveOrg(org, function (oid) {
+      return idemRpc(name, opts.idemKey || (p && p.idempotencyKey), function (k) { return { p_org: oid, p_payload: payload, p_idem_key: k }; });
+    });
+  }
+  function msgCall(name, idField, id, args) {
+    if (!configured) return demoOnly();
+    var bad = msgId(id, idField); if (bad) return bad;
+    return rpc(name, args);
+  }
+  function msgDecision(d, allowed) { return allowed.indexOf(d) === -1 ? Promise.resolve(fail('MRS_INVALID', 'decision')) : null; }
+
+  /* settings & channels (msg_admin writes; msg_read reads) */
+  // → { settings (or defaults, exists:false) }
+  function getMsgSettings(o) { return msgOrgRpc('get_msg_settings', o); }
+  // p = { ai_provider: 'rule_mock'|'llm_pending', ai_monthly_budget_usd, auto_link_enabled, retention_days, violation_repeat_days,
+  //       default_lang, signature_ar, signature_en }  (require_four_eyes / purge_enabled are fixed in v1)
+  function saveMsgSettings(p, o) { return msgOrgPayload('save_msg_settings', p, o); }
+  // → { items:[channel + counts{threads_open, jobs_by_status}], mock }
+  function listMsgChannels(o) { return msgOrgRpc('list_msg_channels', o); }
+  // p = { id?, kind, name, address, default_branch_id, mode: 'mock'|'live_pending', ingest_enabled, send_enabled, provider_terms_ack } — no secret field exists
+  function saveMsgChannel(p, opts) { return msgOrgIdem('save_msg_channel', p, opts); }
+  function requestMsgChannelProbe(channelId, opts) {
+    if (!configured) return demoOnly();
+    opts = opts || {};
+    var bad = msgId(channelId, 'channel_id'); if (bad) return bad;
+    return idemRpc('request_msg_channel_probe', opts.idemKey, function (k) { return { p_channel: channelId, p_idem_key: k }; });
+  }
+  // f = { status, kind, channel_id, limit ≤ 200, offset, orgId } → { items, total, counts }
+  function listMsgJobs(f) { return msgListRpc('list_msg_jobs', f, 200); }
+  // failed | dead → queued (refused for send jobs: retryMsgSend)
+  function retryMsgJob(jobId) { return msgCall('retry_msg_job', 'job_id', jobId, { p_job: jobId }); }
+  // → { retention_days, older_than, messages, attachments, threads } (counts only; no purge exists)
+  function msgRetentionPreview(o) { return msgOrgRpc('msg_retention_preview', o); }
+  // f = { from, to, orgId } → { runs, by_provider, budget_usd, month_to_date_usd }
+  function msgAiUsage(f) { return msgListRpc('msg_ai_usage', f, 0); }
+
+  /* contacts directory — «العنوان ليس تفويضًا» */
+  // f = { q, entity_type, client_id, party_id, verified, limit ≤ 200, offset, orgId } → { items, total }
+  function listMsgContacts(f) { return msgListRpc('list_msg_contacts', f, 200); }
+  // → { contact, addresses, authorizations, recent_threads }
+  function getMsgContact(id) { return msgCall('get_msg_contact', 'contact', id, { p_id: id }); }
+  // p = { id?, display_name, entity_type, client_id, party_id, role_label, lang, notes, is_active }
+  function saveMsgContact(p, opts) { return msgOrgIdem('save_msg_contact', p, opts); }
+  // p = { kind: 'email'|'whatsapp', address }
+  function addMsgContactAddress(contactId, p, opts) {
+    if (!configured) return demoOnly();
+    opts = opts || {};
+    var bad = msgId(contactId, 'contact'); if (bad) return bad;
+    var payload = msgPayload(p);
+    return idemRpc('add_msg_contact_address', opts.idemKey, function (k) { return { p_contact: contactId, p_payload: payload, p_idem_key: k }; });
+  }
+  function retireMsgContactAddress(addressId, reason) {
+    return msgCall('retire_msg_contact_address', 'address', addressId, { p_address: addressId, p_reason: msgText(reason) });
+  }
+  // method callback | known_domain | in_person | signed_document | provider_verified; note required
+  function verifyMsgContactAddress(addressId, method, note) {
+    return msgCall('verify_msg_contact_address', 'address', addressId, { p_address: addressId, p_method: msgText(method), p_note: msgText(note) });
+  }
+  // p = { scope_type: 'client'|'party'|'transaction', client_id | party_id | transaction_id, may_receive_kinds[], may_discuss[], valid_from, valid_until }
+  function grantMsgAuthorization(contactId, p, note) {
+    return msgCall('grant_msg_authorization', 'contact', contactId, { p_contact: contactId, p_payload: msgPayload(p), p_note: msgText(note) });
+  }
+  function revokeMsgAuthorization(id, reason) { return msgCall('revoke_msg_authorization', 'id', id, { p_id: id, p_reason: msgText(reason) }); }
+
+  /* unified inbox (thread scope = org + branch, decided by the server) */
+  // f = { box: all|mine|unassigned|review|approval|sent, status, priority, category, channel_id, branch_id, owner_id, match_status,
+  //       transaction_id, risk, q, from, to, limit ≤ 100, offset, orgId } → { items, total, counts:{by_box, by_status, by_priority} }
+  function listMsgThreads(f) { return msgListRpc('list_msg_threads', f, 100); }
+  // → { thread, messages, links, candidates, replies, suggestions, can } (marks inbound read for the caller)
+  function getMsgThread(id) { return msgCall('get_msg_thread', 'thread', id, { p_id: id }); }
+  // p = { status, priority, owner_id, due_at, branch_id } (only the keys given change)
+  function updateMsgThread(id, p) { return msgCall('update_msg_thread', 'thread', id, { p_id: id, p_payload: msgPayload(p) }); }
+  function linkMsgThread(threadId, txId, note) {
+    if (!configured) return demoOnly();
+    var bad = msgId(threadId, 'thread') || msgId(txId, 'transaction_id'); if (bad) return bad;
+    return rpc('link_msg_thread', { p_thread: threadId, p_tx: txId, p_note: msgText(note) });
+  }
+  function unlinkMsgThread(threadId, reason) { return msgCall('unlink_msg_thread', 'thread', threadId, { p_thread: threadId, p_reason: msgText(reason) }); }
+  function markMsgNotRelated(threadId, reason) { return msgCall('mark_msg_not_related', 'thread', threadId, { p_thread: threadId, p_reason: msgText(reason) }); }
+  // decision confirm | correct (value) | reject
+  function reviewMsgExtraction(id, decision, value, note) {
+    if (!configured) return demoOnly();
+    var bad = msgId(id, 'extraction') || msgDecision(decision, ['confirm', 'correct', 'reject']); if (bad) return bad;
+    return rpc('review_msg_extraction', { p_id: id, p_decision: decision, p_value: msgText(value), p_note: msgText(note) });
+  }
+  function correctMsgClassification(messageId, category, note) {
+    return msgCall('correct_msg_classification', 'message_id', messageId, { p_message: messageId, p_category: msgText(category), p_note: msgText(note) });
+  }
+  // p = { owner_id, set_due } (due_at is copied only from a spanned deadline)
+  function acceptMsgSummary(summaryId, p) { return msgCall('accept_msg_summary', 'summary_id', summaryId, { p_summary: summaryId, p_payload: msgPayload(p) }); }
+  // → { threads:[…], counts } (transaction-detail section)
+  function txMessages(txId) { return txRpc('tx_messages', txId); }
+  // signed URL of an inbound attachment in the private 'messages' bucket — only once the worker stored the bytes
+  function msgAttachmentUrl(att, seconds) {
+    if (!configured) return demoOnly();
+    var a = att && typeof att === 'object' ? att : null;
+    if (!a || a.storage_status !== 'stored') return Promise.resolve(fail('MRS_BAD_TRANSITION', 'attachment_not_stored'));
+    var p = a.storage_path;
+    if (typeof p !== 'string' || !/^[0-9a-f-]{36}\//i.test(p) || p.indexOf('..') !== -1 || (a.storage_bucket && a.storage_bucket !== 'messages')) {
+      return Promise.resolve(fail('MRS_INVALID', 'storage_path'));
+    }
+    var secs = Math.max(30, Math.min(600, parseInt(seconds, 10) || 120));
+    return online(function (c) { return c.storage.from('messages').createSignedUrl(p, secs); }).then(function (r) {
+      if (r.error) return r;
+      var u = r.data && r.data.signedUrl, base = '';
+      try { base = new URL(cfg.supabaseUrl).origin; if (new URL(u, base).origin !== base) u = null; } catch (e) { u = null; }
+      return u ? ok(u) : fail('MRS_INVALID', 'signed_url');
+    });
+  }
+
+  /* replies: draft → submit → approve (msg_approve + level, four-eyes) → send (msg_send) */
+  // p = { template_key, lang, reply_to_message_id } → { job, reply? } (a draft job; no reply is created automatically)
+  function requestMsgDraft(threadId, p, opts) {
+    if (!configured) return demoOnly();
+    opts = opts || {};
+    var bad = msgId(threadId, 'thread'); if (bad) return bad;
+    var payload = msgPayload(p);
+    return idemRpc('request_msg_draft', opts.idemKey, function (k) { return { p_thread: threadId, p_payload: payload, p_idem_key: k }; });
+  }
+  // replyId null → a new reply; p = { thread_id, reply_to_message_id, lang, subject, body_text, to[], cc[] } → reply + version
+  function saveMsgReply(replyId, p, opts) {
+    if (!configured) return demoOnly();
+    opts = opts || {};
+    var rid = replyId == null || replyId === '' ? null : replyId;
+    if (rid !== null) { var bad = msgId(rid, 'reply'); if (bad) return bad; }
+    var payload = msgPayload(p);
+    return idemRpc('save_msg_reply', opts.idemKey, function (k) { return { p_reply: rid, p_payload: payload, p_idem_key: k }; });
+  }
+  // → { items:[{document_id, kind, classification, name, sensitive, suggested_for, can_share, reasons[]}] } — nothing is attached
+  function msgAttachmentSuggestions(replyId) { return msgCall('msg_attachment_suggestions', 'reply', replyId, { p_reply: replyId }); }
+  // exactly these documents (≤ 10; [] clears); a document the recipients may not receive is refused by the server
+  function setMsgReplyAttachments(replyId, documentIds) {
+    if (!configured) return demoOnly();
+    var bad = msgId(replyId, 'reply'); if (bad) return bad;
+    if (!Array.isArray(documentIds) || !documentIds.every(isUuid)) return Promise.resolve(fail('MRS_INVALID', 'document_ids'));
+    if (documentIds.length > 10) return Promise.resolve(fail('MRS_TOO_LONG', 'document_ids'));
+    var ids = documentIds.filter(function (x, i, a) { return a.indexOf(x) === i; });
+    return rpc('set_msg_reply_attachments', { p_reply: replyId, p_document_ids: ids });
+  }
+  function submitMsgReply(replyId) { return msgCall('submit_msg_reply', 'reply', replyId, { p_reply: replyId }); }
+  function cancelMsgReply(replyId, reason) { return msgCall('cancel_msg_reply', 'reply', replyId, { p_reply: replyId, p_reason: msgText(reason) }); }
+  // decision approve | reject (note required for reject and for a sensitive ack); versionId = the version shown to the approver
+  function decideMsgReply(replyId, versionId, decision, note, sensitiveAck) {
+    if (!configured) return demoOnly();
+    var bad = msgId(replyId, 'reply') || msgId(versionId, 'version_id') || msgDecision(decision, ['approve', 'reject']); if (bad) return bad;
+    return rpc('decide_msg_reply', { p_reply: replyId, p_version: versionId, p_decision: decision, p_note: msgText(note), p_sensitive_ack: sensitiveAck === true });
+  }
+  // → { outbound, job, deduplicated } — one outbound per approved version (a double click returns the same row)
+  function sendMsgReply(replyId, opts) {
+    if (!configured) return demoOnly();
+    opts = opts || {};
+    var bad = msgId(replyId, 'reply'); if (bad) return bad;
+    return idemRpc('send_msg_reply', opts.idemKey, function (k) { return { p_reply: replyId, p_idem_key: k }; });
+  }
+  // failed (last attempt applied:'no') → queued, same provider request id
+  function retryMsgSend(outboundId) { return msgCall('retry_msg_send', 'outbound_id', outboundId, { p_outbound: outboundId }); }
+  // decision confirmed_sent | confirmed_not_sent; note required
+  function resolveMsgSendUnknown(outboundId, decision, note) {
+    if (!configured) return demoOnly();
+    var bad = msgId(outboundId, 'outbound_id') || msgDecision(decision, ['confirmed_sent', 'confirmed_not_sent']); if (bad) return bad;
+    return rpc('resolve_msg_send_unknown', { p_outbound: outboundId, p_decision: decision, p_note: msgText(note) });
+  }
+
+  /* library: instructions, templates, auto-reply policies (disabled in v1) */
+  function listMsgInstructions(f) { return msgListRpc('list_msg_instructions', f, 200); }
+  function saveMsgInstruction(p, opts) { return msgOrgIdem('save_msg_instruction', p, opts); }
+  function reviewMsgInstruction(id, decision, note) {
+    if (!configured) return demoOnly();
+    var bad = msgId(id, 'id') || msgDecision(decision, ['approve', 'retire']); if (bad) return bad;
+    return rpc('review_msg_instruction', { p_id: id, p_decision: decision, p_note: msgText(note) });
+  }
+  function listMsgTemplates(f) { return msgListRpc('list_msg_templates', f, 200); }
+  function saveMsgTemplate(p, opts) { return msgOrgIdem('save_msg_template', p, opts); }
+  function reviewMsgTemplate(id, decision, note) {
+    if (!configured) return demoOnly();
+    var bad = msgId(id, 'id') || msgDecision(decision, ['approve', 'retire']); if (bad) return bad;
+    return rpc('review_msg_template', { p_id: id, p_decision: decision, p_note: msgText(note) });
+  }
+  // → { inserted } (built-in defaults as draft versions; idempotent by key + language)
+  function seedMsgTemplates(o) { return msgOrgRpc('seed_msg_templates', o); }
+  function listMsgAutoReplyPolicies(o) { return msgOrgRpc('list_msg_auto_reply_policies', o); }
+  // enabled=true is refused here and by the server (G6b-11: auto-replies are not active in v1)
+  function saveMsgAutoReplyPolicy(p, o) {
+    if (!configured) return demoOnly();
+    if (p && p.enabled === true) return Promise.resolve(fail('MRS_BAD_TRANSITION', 'auto_reply_disabled_v1'));
+    return msgOrgPayload('save_msg_auto_reply_policy', p, o);
+  }
+
   var DASH_REQ = ['new', 'under_review', 'converted', 'rejected'];
   var DASH_TX = ['new', 'in_progress', 'customs_declaration', 'appointment', 'transport', 'empty_return',
     'operationally_complete', 'under_billing', 'billed', 'closed'];
@@ -2619,6 +2951,23 @@
     reportTransactions: reportTransactions, reportContainers: reportContainers, reportTrips: reportTrips,
     logReportExport: logReportExport, listReportExports: listReportExports,
     listMyContainers: listMyContainers, portalInvoices: portalInvoices,
+    // G6b channels, unified inbox, approved replies (docs/online/G6B_SPEC.md) — staff RPCs only, never the msg_* service RPCs
+    getMsgSettings: getMsgSettings, saveMsgSettings: saveMsgSettings, listMsgChannels: listMsgChannels, saveMsgChannel: saveMsgChannel,
+    requestMsgChannelProbe: requestMsgChannelProbe, listMsgJobs: listMsgJobs, retryMsgJob: retryMsgJob,
+    msgRetentionPreview: msgRetentionPreview, msgAiUsage: msgAiUsage,
+    listMsgContacts: listMsgContacts, getMsgContact: getMsgContact, saveMsgContact: saveMsgContact,
+    addMsgContactAddress: addMsgContactAddress, retireMsgContactAddress: retireMsgContactAddress,
+    verifyMsgContactAddress: verifyMsgContactAddress, grantMsgAuthorization: grantMsgAuthorization, revokeMsgAuthorization: revokeMsgAuthorization,
+    listMsgThreads: listMsgThreads, getMsgThread: getMsgThread, updateMsgThread: updateMsgThread,
+    linkMsgThread: linkMsgThread, unlinkMsgThread: unlinkMsgThread, markMsgNotRelated: markMsgNotRelated,
+    reviewMsgExtraction: reviewMsgExtraction, correctMsgClassification: correctMsgClassification, acceptMsgSummary: acceptMsgSummary,
+    txMessages: txMessages, msgAttachmentUrl: msgAttachmentUrl,
+    requestMsgDraft: requestMsgDraft, saveMsgReply: saveMsgReply, msgAttachmentSuggestions: msgAttachmentSuggestions,
+    setMsgReplyAttachments: setMsgReplyAttachments, submitMsgReply: submitMsgReply, cancelMsgReply: cancelMsgReply,
+    decideMsgReply: decideMsgReply, sendMsgReply: sendMsgReply, retryMsgSend: retryMsgSend, resolveMsgSendUnknown: resolveMsgSendUnknown,
+    listMsgInstructions: listMsgInstructions, saveMsgInstruction: saveMsgInstruction, reviewMsgInstruction: reviewMsgInstruction,
+    listMsgTemplates: listMsgTemplates, saveMsgTemplate: saveMsgTemplate, reviewMsgTemplate: reviewMsgTemplate, seedMsgTemplates: seedMsgTemplates,
+    listMsgAutoReplyPolicies: listMsgAutoReplyPolicies, saveMsgAutoReplyPolicy: saveMsgAutoReplyPolicy,
     // app shell
     globalSearch: globalSearch, dashboardStats: dashboardStats,
     // utils

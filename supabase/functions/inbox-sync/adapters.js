@@ -1,0 +1,317 @@
+/*
+  Marsa (مرسى) — G6b unified inbox: channel adapter contract (docs/online/G6B_SPEC.md § Edge Function, adapters.js).
+  STAGING ONLY. Plain classic script (no import / export, no require), ES2020, no dependencies:
+  node tests require() it, Deno loads it by side-effect import and reads globalThis.MarsaInbox.
+
+  This file defines:
+    - CHANNEL_METHODS / WRITE_METHODS / CAPABILITY_KEYS — the provider contract every channel adapter implements:
+        probe() → {capabilities, account:{address}}
+        fetchInbound({cursor, limit}) → {messages:[raw], next_cursor}
+        send({request_id, from, to, cc, subject, body_text, in_reply_to, references, attachments}) → {provider_message_id, status}
+        lookupSend(request_id) → {found, provider_message_id?, status?}   (or throws AdapterError validation 'unsupported')
+        fetchStatusEvents({cursor}) → {events, next_cursor}
+    - AdapterError — the only error type an adapter throws (kind + applied 'no' | 'unknown' | 'yes');
+    - normalizeInbound — raw provider message (mock e-mail / mock WhatsApp shapes) → the CANONICAL inbound message
+      that msg_ingest_messages / the poll completion accept (HTML is converted to plain text here, never stored);
+    - normalizeAddress — mirror of app.msg_norm_address;
+    - redact / scrubText — mirror of app.msg_redact / app.msg_scrub_text (= the G5 app.bill_redact rules);
+    - sha256Hex — lowercase hex SHA-256 of a UTF-8 string (globalThis.crypto.subtle);
+    - estimateAiCost / AI_PRICES — the AI cost-estimate hook (rule_mock = 0; llm_pending = null = unknown → refused);
+    - createLiveEmailAdapter / createLiveWhatsAppAdapter — documented stubs: every method throws
+      AdapterError('not_configured'). They never read a key and never call fetch;
+    - createLlmProvider — the AI provider interface whose every method throws not_configured (no LLM call in G6b);
+    - LIVE_ENDPOINTS_TO_VERIFY — data only. Nothing here is ever called.
+*/
+(function () {
+  'use strict';
+
+  const CHANNEL_METHODS = Object.freeze(['probe', 'fetchInbound', 'send', 'lookupSend', 'fetchStatusEvents']);
+  // a lost response on these is "unknown", never "failed"
+  const WRITE_METHODS = Object.freeze(['send']);
+  const CAPABILITY_KEYS = Object.freeze(['send', 'lookup_send', 'status_events', 'attachments', 'threading', 'templates']);
+  const AI_METHODS = Object.freeze(['extract', 'classify', 'summarize', 'draftReply', 'detectInjection']);
+
+  const ERROR_KINDS = Object.freeze(['timeout', 'network', 'http_5xx', 'rate_limited', 'validation', 'not_found', 'conflict', 'not_configured', 'window_closed']);
+  const RETRYABLE_KINDS = Object.freeze(['timeout', 'network', 'http_5xx', 'rate_limited']);
+  const APPLIED = Object.freeze(['no', 'unknown', 'yes']);
+
+  class AdapterError extends Error {
+    constructor(kind, message, opts) {
+      const o = opts || {};
+      super(message || kind);
+      this.name = 'AdapterError';
+      this.kind = ERROR_KINDS.includes(kind) ? kind : 'network';
+      this.code = o.code ? String(o.code).slice(0, 60) : this.kind;
+      this.http_status = Number.isInteger(o.http_status) ? o.http_status : null;
+      this.applied = APPLIED.includes(o.applied) ? o.applied : 'no';
+    }
+    toJSON() { return { kind: this.kind, code: this.code, message: String(this.message).slice(0, 500), http_status: this.http_status, applied: this.applied }; }
+  }
+  const isAdapterError = e => !!e && (e instanceof AdapterError || e.name === 'AdapterError') && typeof e.kind === 'string';
+
+  /* ---------------------------------------------------------------- limits (G6b binding rules) */
+  const LIMITS = Object.freeze({
+    subject: 500, body_text: 100000, name: 160, address: 254, attachments: 20, attachment_bytes: 26214400,
+    batch: 50, provider_id: 200, file_name: 255, mime_type: 120, recipients: 50, raw_bytes: 262144
+  });
+
+  /* ---------------------------------------------------------------- redaction (mirror of app.msg_redact) */
+  const SECRET_RE = /(api[_-]?key|secret|token|password|passwd|authorization|cookie|credential|access[_-]?key|private[_-]?key|jwt|session)/i;
+  const SECRET_EXACT_RE = /^\s*(pass|pwd|auth|bearer|x-auth)\s*$/i;
+  const isSecretKey = k => SECRET_RE.test(k) || SECRET_EXACT_RE.test(k);
+
+  function scrubText(t) {
+    if (typeof t !== 'string') return t;
+    return t
+      .replace(/(https?:\/\/[^\s?#"']+)\?[^\s#"']*/gi, '$1?[redacted]')
+      .replace(/(bearer|basic)\s+[^\s"',;]+/gi, '$1 [redacted]')
+      .replace(/([A-Za-z0-9_.-]*(?:api[_-]?key|secret|token|password|passwd|pwd|authorization|cookie|credential|access[_-]?key|private[_-]?key|jwt|session)[A-Za-z0-9_.-]*)(\s*[=:]\s*"?)[^\s&"',;]+/gi, '$1$2[redacted]');
+  }
+  function redact(x, depth) {
+    const d = depth || 0;
+    if (d > 20) return null;
+    if (Array.isArray(x)) {
+      if (x.length === 2 && typeof x[0] === 'string' && isSecretKey(x[0])) return [x[0], '[redacted]'];
+      return x.map(v => redact(v, d + 1));
+    }
+    if (x && typeof x === 'object') {
+      const o = {};
+      for (const k of Object.keys(x)) if (!isSecretKey(k) && x[k] !== undefined) o[k] = redact(x[k], d + 1);
+      return o;
+    }
+    if (typeof x === 'string') return scrubText(x).slice(0, 4000);
+    return x === undefined ? null : x;
+  }
+
+  /* ---------------------------------------------------------------- hashing */
+  function utf8(s) {
+    if (typeof TextEncoder === 'function') return new TextEncoder().encode(s);
+    // eslint-disable-next-line no-undef
+    return Uint8Array.from(Buffer.from(s, 'utf8'));
+  }
+  async function sha256Hex(s) {
+    const subtle = globalThis.crypto && globalThis.crypto.subtle;
+    if (!subtle) throw new Error('crypto.subtle unavailable');
+    const buf = await subtle.digest('SHA-256', utf8(String(s === null || s === undefined ? '' : s)));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+  // key-sorted JSON (stable across engines and key insertion order)
+  function stableStringify(x) {
+    if (x === null || x === undefined) return 'null';
+    if (Array.isArray(x)) return '[' + x.map(stableStringify).join(',') + ']';
+    if (typeof x === 'object') {
+      return '{' + Object.keys(x).filter(k => x[k] !== undefined).sort()
+        .map(k => JSON.stringify(k) + ':' + stableStringify(x[k])).join(',') + '}';
+    }
+    if (typeof x === 'number' && !Number.isFinite(x)) return 'null';
+    return JSON.stringify(x);
+  }
+  const cpLen = s => Array.from(String(s === null || s === undefined ? '' : s)).length;
+  const cpSlice = (s, n) => Array.from(String(s)).slice(0, n).join('');
+
+  /* ---------------------------------------------------------------- addresses (mirror of app.msg_norm_address) */
+  const ARABIC_DIGITS = '٠١٢٣٤٥٦٧٨٩';
+  const PERSIAN_DIGITS = '۰۱۲۳۴۵۶۷۸۹';
+  function foldDigitsStr(s) {
+    let out = '';
+    for (const ch of String(s)) {
+      const a = ARABIC_DIGITS.indexOf(ch);
+      const p = PERSIAN_DIGITS.indexOf(ch);
+      out += a >= 0 ? String(a) : p >= 0 ? String(p) : ch;
+    }
+    return out;
+  }
+  // → normalized address or null when invalid
+  function normalizeAddress(kind, text) {
+    if (text === null || text === undefined) return null;
+    if (kind === 'email') {
+      const s = String(text).trim().toLowerCase();
+      if (s.length < 3 || s.length > LIMITS.address) return null;
+      if (!/^[^\s@<>()",;]+@[^\s@<>()",;]+\.[^\s@<>()",;]+$/.test(s)) return null;
+      return s;
+    }
+    if (kind === 'whatsapp') {
+      let s = foldDigitsStr(String(text)).replace(/[\s\-() ]/g, '');
+      if (s.startsWith('00')) s = '+' + s.slice(2);
+      if (/^05\d{8}$/.test(s)) s = '+966' + s.slice(1);
+      return /^\+[1-9][0-9]{7,14}$/.test(s) ? s : null;
+    }
+    return null;
+  }
+
+  /* ---------------------------------------------------------------- inbound normalisation */
+  function invalid(field, msg) { return new AdapterError('validation', msg || ('invalid inbound ' + field), { applied: 'no', code: field }); }
+  function clip(s, n) { return s === null || s === undefined ? null : cpSlice(String(s), n); }
+  // HTML → plain text (the adapter converts; HTML is never stored nor rendered)
+  function htmlToText(html) {
+    return String(html)
+      .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, '')
+      .replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n')
+      .replace(/<[^>]*>/g, '')
+      .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+      .replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+  function iso(v) {
+    if (v === null || v === undefined || v === '') return null;
+    const n = typeof v === 'number' ? new Date(v < 1e12 ? v * 1000 : v) : new Date(String(/^\d+$/.test(String(v)) ? Number(v) * 1000 : v));
+    return Number.isNaN(n.getTime()) ? null : n.toISOString();
+  }
+  function addrList(kind, list) {
+    const arr = Array.isArray(list) ? list : (list ? [list] : []);
+    if (arr.length > LIMITS.recipients) throw invalid('to', 'too many recipients');
+    return arr.map(a => {
+      const address = typeof a === 'string' ? a : (a && (a.address || a.email || a.phone));
+      if (!normalizeAddress(kind, address)) throw invalid('address');
+      const o = { address: String(address).trim().slice(0, LIMITS.address) };
+      const name = typeof a === 'object' && a ? (a.name || null) : null;
+      if (name) o.name = clip(name, LIMITS.name);
+      return o;
+    });
+  }
+  function authVal(v) { const s = String(v || 'none').toLowerCase(); return ['pass', 'fail', 'none'].includes(s) ? s : 'none'; }
+  function normAttachments(list) {
+    const arr = Array.isArray(list) ? list : [];
+    if (arr.length > LIMITS.attachments) throw invalid('attachments', 'too many attachments');
+    const seen = new Set();
+    return arr.map((a, i) => {
+      const id = String((a && (a.provider_attachment_id || a.id)) || ('att-' + (i + 1))).slice(0, LIMITS.provider_id);
+      if (seen.has(id)) throw invalid('attachments', 'duplicate attachment id');
+      seen.add(id);
+      const size = Number(a && (a.size_bytes !== undefined ? a.size_bytes : a.size));
+      if (!Number.isInteger(size) || size < 0) throw invalid('attachments', 'attachment size');
+      const o = {
+        provider_attachment_id: id,
+        file_name: clip(String((a && (a.file_name || a.filename)) || 'attachment').replace(/[\u0000-\u001f\u007f]/g, ''), LIMITS.file_name) || 'attachment',
+        mime_type: clip(String((a && (a.mime_type || a.contentType || a.mime)) || 'application/octet-stream'), LIMITS.mime_type),
+        size_bytes: size
+      };
+      if (a && typeof a.sha256 === 'string' && /^[0-9a-f]{64}$/.test(a.sha256)) o.sha256 = a.sha256;
+      const t = a && (a.extracted_text !== undefined ? a.extracted_text : a.text);
+      if (typeof t === 'string' && t !== '') o.extracted_text = clip(t, LIMITS.body_text);
+      return o;
+    });
+  }
+  // raw is stored redacted and WITHOUT bodies (body_text is the stored copy; attachments keep metadata only)
+  function rawSummary(raw, provider) {
+    const r = raw || {};
+    const keep = {};
+    for (const k of Object.keys(r)) {
+      if (['text', 'html', 'body', 'body_text', 'attachments', 'extracted_text'].includes(k)) continue;
+      keep[k] = r[k];
+    }
+    const out = redact(Object.assign({ provider }, keep));
+    const s = JSON.stringify(out);
+    return s.length * 3 > LIMITS.raw_bytes ? { provider, truncated: true } : out;
+  }
+
+  // canonical inbound: {provider_message_id, provider_thread_id?, kind, from:{address, name?}, to, cc, sent_at, subject?,
+  //   body_text, headers?, wa_context?, auth?, attachments, raw}
+  function normalizeInbound(raw, opts) {
+    const o = opts || {};
+    const r = raw || {};
+    const kind = o.kind || r.kind || (r.messaging_product === 'whatsapp' ? 'whatsapp' : 'email');
+    if (kind !== 'email' && kind !== 'whatsapp') throw invalid('kind');
+    const pid = String(r.provider_message_id || r.id || '').trim();
+    if (!pid || pid.length > LIMITS.provider_id) throw invalid('provider_message_id');
+    const out = { provider_message_id: pid, kind };
+    if (kind === 'email') {
+      const from = r.from && typeof r.from === 'object' ? r.from : { address: r.from };
+      const fa = from.address || from.email;
+      if (!normalizeAddress('email', fa)) throw invalid('from');
+      out.from = { address: String(fa).trim() };
+      if (from.name) out.from.name = clip(from.name, LIMITS.name);
+      out.to = addrList('email', r.to);
+      out.cc = addrList('email', r.cc);
+      if (r.thread_id || r.threadId) out.provider_thread_id = String(r.thread_id || r.threadId).slice(0, LIMITS.provider_id);
+      out.subject = clip(r.subject === undefined || r.subject === null ? '' : r.subject, LIMITS.subject);
+      const text = typeof r.text === 'string' ? r.text : (typeof r.body_text === 'string' ? r.body_text : (typeof r.html === 'string' ? htmlToText(r.html) : ''));
+      if (cpLen(text) > LIMITS.body_text) throw invalid('body_text', 'body too long');
+      out.body_text = text;
+      const h = r.headers || {};
+      const refs = h.references || h.References;
+      out.headers = {
+        message_id: String(h.message_id || h['Message-ID'] || ('<' + pid + '@mock-mail.invalid>')).slice(0, 300),
+        in_reply_to: (h.in_reply_to || h['In-Reply-To']) ? String(h.in_reply_to || h['In-Reply-To']).slice(0, 300) : null,
+        references: (Array.isArray(refs) ? refs : (refs ? String(refs).split(/\s+/) : [])).filter(Boolean).slice(0, 20).map(x => String(x).slice(0, 300))
+      };
+      const au = r.auth || r.authResults || r.auth_results || {};
+      out.auth = { spf: authVal(au.spf), dkim: authVal(au.dkim), dmarc: authVal(au.dmarc) };
+    } else {
+      const fa = r.from && typeof r.from === 'object' ? (r.from.address || r.from.phone) : r.from;
+      if (!normalizeAddress('whatsapp', fa)) throw invalid('from');
+      out.from = { address: String(fa).trim() };
+      const pname = (r.profile && r.profile.name) || (r.from && r.from.name);
+      if (pname) out.from.name = clip(pname, LIMITS.name);
+      out.to = addrList('whatsapp', r.to);
+      out.cc = [];
+      out.subject = '';
+      const text = r.text && typeof r.text === 'object' ? String(r.text.body || '') : (typeof r.text === 'string' ? r.text : (typeof r.body_text === 'string' ? r.body_text : ''));
+      if (cpLen(text) > LIMITS.body_text) throw invalid('body_text', 'body too long');
+      out.body_text = text;
+      const ctx = r.context || r.wa_context || null;
+      out.wa_context = { reply_to_provider_id: ctx && (ctx.id || ctx.reply_to_provider_id) ? String(ctx.id || ctx.reply_to_provider_id).slice(0, LIMITS.provider_id) : null, type: String(r.type || 'text').slice(0, 30) };
+    }
+    out.sent_at = iso(r.sent_at || r.date || r.timestamp);
+    if (!out.sent_at) throw invalid('sent_at');
+    out.attachments = normAttachments(r.attachments || (r.document ? [r.document] : []));
+    out.raw = rawSummary(r, o.provider || (kind === 'email' ? 'mock-email' : 'mock-whatsapp'));
+    return out;
+  }
+
+  /* ---------------------------------------------------------------- AI cost estimate hook (§24) */
+  const AI_PRICES = Object.freeze({ rule_mock: 0, llm_pending: null });   // USD per 1k tokens; null = unknown → refused
+  function estimateAiCost(x) {
+    const o = x || {};
+    const inC = Math.max(0, Number(o.input_chars) || 0);
+    const outC = Math.max(0, Number(o.output_chars) || 0);
+    const est_input_tokens = Math.ceil(inC / 4);
+    const est_output_tokens = Math.ceil(outC / 4);
+    const price = Object.prototype.hasOwnProperty.call(AI_PRICES, o.provider) ? AI_PRICES[o.provider] : null;
+    const est_cost_usd = price === null ? null : Math.round(((est_input_tokens + est_output_tokens) / 1000) * price * 10000) / 10000;
+    return { est_input_tokens, est_output_tokens, est_cost_usd };
+  }
+
+  /* ---------------------------------------------------------------- live stubs (documented, never called) */
+  const LIVE_ENDPOINTS_TO_VERIFY = Object.freeze([
+    { channel: 'email', capability: 'provider', note: "the org's own provider: Microsoft Graph / Gmail API / IMAP + SMTP (choice per org)" },
+    { channel: 'email', capability: 'auth', note: 'delegated OAuth consent scoped to ONE mailbox; credential in Vault msg_email_credential:<channel_id>, read by the worker only' },
+    { channel: 'email', capability: 'send', note: 'Message-ID <MRSO-…@marsa.invalid> as the idempotency key' },
+    { channel: 'email', capability: 'lookup_send', note: 'sent-items lookup by Message-ID' },
+    { channel: 'email', capability: 'status_events', note: 'DSN / bounce handling' },
+    { channel: 'email', capability: 'attachments', note: 'attachment download into bucket messages + size limits' },
+    { channel: 'whatsapp', capability: 'account', note: 'WhatsApp Business Platform (Cloud API): phone-number id per org' },
+    { channel: 'whatsapp', capability: 'webhook', note: 'webhook verify token + X-Hub-Signature-256 (secret in Vault msg_webhook_secret:<channel_id>)' },
+    { channel: 'whatsapp', capability: 'status_events', note: 'message status webhooks sent / delivered / read / failed' },
+    { channel: 'whatsapp', capability: 'templates', note: '24 h customer-service window and provider-approved template messages' },
+    { channel: 'whatsapp', capability: 'attachments', note: 'media download' },
+    { channel: 'whatsapp', capability: 'lookup_send', note: 'no idempotency key on send → lookup by biz_opaque_callback_data = request id' },
+    { channel: 'whatsapp', capability: 'limits', note: 'rate limits and opt-in rules' }
+  ]);
+
+  function notConfigured(what) {
+    return new AdapterError('not_configured', what + ' not configured (G6b staging: mock only)', { applied: 'no', code: 'not_configured' });
+  }
+  function stub(kind) {
+    const a = { mode: 'live', kind };
+    for (const m of CHANNEL_METHODS) a[m] = async function () { throw notConfigured('live ' + kind + ' adapter'); };
+    return Object.freeze(a);
+  }
+  function createLiveEmailAdapter(config) { void config; return stub('email'); }
+  function createLiveWhatsAppAdapter(config) { void config; return stub('whatsapp'); }
+  function createLlmProvider(config) {
+    void config;
+    const p = { name: 'llm_pending', version: 'stub' };
+    for (const m of AI_METHODS) p[m] = function () { throw notConfigured('LLM provider'); };
+    return Object.freeze(p);
+  }
+
+  const API = {
+    CHANNEL_METHODS, WRITE_METHODS, CAPABILITY_KEYS, AI_METHODS, ERROR_KINDS, RETRYABLE_KINDS, LIMITS,
+    AdapterError, isAdapterError,
+    normalizeInbound, normalizeAddress, htmlToText, foldDigitsStr,
+    redact, scrubText, sha256Hex, stableStringify, cpLen,
+    estimateAiCost, AI_PRICES,
+    createLiveEmailAdapter, createLiveWhatsAppAdapter, createLlmProvider, LIVE_ENDPOINTS_TO_VERIFY
+  };
+  (typeof module === 'object' && module.exports) ? (module.exports = API) : (globalThis.MarsaInbox = Object.assign(globalThis.MarsaInbox || {}, API));
+})();

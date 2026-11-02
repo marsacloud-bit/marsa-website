@@ -121,7 +121,14 @@
     billAdmin: ['accounts_manager', 'admin'],
     // G6a (docs/online/G6A_SPEC.md §Roles) — mirrors app.mgmt_roles / app.trip_finance_roles
     mgmt: ['admin', 'supervisor', 'branch_manager'],
-    tripFin: ['accountant', 'accounts_manager', 'operations_manager', 'branch_manager', 'supervisor', 'admin']
+    tripFin: ['accountant', 'accounts_manager', 'operations_manager', 'branch_manager', 'supervisor', 'admin'],
+    // G6b (docs/online/G6B_SPEC.md §Roles) — mirrors app.msg_read_roles / msg_triage / msg_approve / msg_send / msg_lib / msg_admin
+    msgRead: ['clearance_staff', 'transport_staff', 'accountant', 'accounts_manager', 'operations_manager', 'branch_manager', 'supervisor', 'admin'],
+    msgTriage: ['clearance_staff', 'transport_staff', 'accountant', 'accounts_manager', 'operations_manager', 'branch_manager', 'admin'],
+    msgApprove: ['operations_manager', 'branch_manager', 'supervisor', 'admin'],
+    msgSend: ['clearance_staff', 'operations_manager', 'branch_manager', 'admin'],
+    msgLib: ['admin', 'operations_manager'],
+    msgAdmin: ['admin']
   };
   var ROLE_RANK = ['client', 'clearance_staff', 'transport_staff', 'accountant', 'accounts_manager', 'operations_manager', 'branch_manager', 'supervisor', 'admin'];
 
@@ -147,10 +154,18 @@
       { id: 'exceptions', key: 'ops.nav_exceptions', href: 'admin.html#exceptions', icon: 'flag', allow: R.staff },
       { id: 'parties', key: 'ops.nav_parties', href: 'admin.html#parties', icon: 'truck', allow: R.staff }
     ] },
-    // G6a reports & advanced search (assets/js/rpt/*.js views, allow 'staff'). Group id 'comms' is reserved for G6b messaging.
+    // G6a reports & advanced search (assets/js/rpt/*.js views, allow 'staff')
     { id: 'insight', key: 'rpt.nav_group', items: [
       { id: 'search', key: 'rpt.nav_search', href: 'admin.html#search', icon: 'search', allow: R.staff },
       { id: 'reports', key: 'rpt.nav_reports', href: 'admin.html#reports', icon: 'report', allow: R.staff }
+    ] },
+    // G6b messaging (assets/js/msg/*.js views, allow 'msgRead'). The G2 contact-form inbox ('messages') stays in 'work'.
+    // badge 'inbox' = unassigned + link-review threads (one listMsgThreads count read; hidden when it fails)
+    { id: 'comms', key: 'msg.nav_group', items: [
+      { id: 'inbox', key: 'msg.nav_inbox', href: 'admin.html#inbox', icon: 'chat', allow: R.msgRead, badge: 'inbox' },
+      { id: 'contacts', key: 'msg.nav_contacts', href: 'admin.html#contacts', icon: 'book', allow: R.msgRead },
+      { id: 'templates', key: 'msg.nav_templates', href: 'admin.html#templates', icon: 'template', allow: R.msgRead },
+      { id: 'channels', key: 'msg.nav_channels', href: 'admin.html#channels', icon: 'antenna', allow: R.msgRead }
     ] },
     // G4 operating finance (assets/js/fin/*.js views, allow 'finRead')
     { id: 'finance', key: 'fin.nav_group', items: [
@@ -189,14 +204,18 @@
       'fin.nav_margins': 'الهامش والتكاليف', 'fin.nav_demurrage': 'الأرضيات والغرامات',
       'bill.nav_billing': 'الفوترة ودفترة', 'bill.nav_daftra': 'إعداد دفترة',
       'rpt.nav_group': 'التقارير والبحث', 'rpt.nav_search': 'البحث المتقدم', 'rpt.nav_reports': 'التقارير',
-      'rpt.cmdk_advanced': 'بحث متقدم عن «{q}»…' },
+      'rpt.cmdk_advanced': 'بحث متقدم عن «{q}»…',
+      'msg.nav_group': 'المراسلات', 'msg.nav_inbox': 'صندوق المراسلات', 'msg.nav_contacts': 'جهات الاتصال',
+      'msg.nav_templates': 'القوالب والتعليمات', 'msg.nav_channels': 'القنوات', 'msg.nav_inbox_badge': 'محادثات غير مسندة أو تحتاج مراجعة ربط: {n}' },
     en: { 'ops.nav_group': 'Operations', 'ops.nav_alerts': 'Alerts', 'ops.nav_schedule': 'Daily schedule', 'ops.nav_exceptions': 'Exceptions',
       'ops.nav_parties': 'Parties & carriers', 'ops.nav_requirements': 'Document rules', 'ops.nav_alerts_badge': 'Open alerts: {n}',
       'fin.nav_group': 'Operating finance', 'fin.nav_costs': 'Supplier invoices', 'fin.nav_payables': 'Payables & payments',
       'fin.nav_margins': 'Margins & costs', 'fin.nav_demurrage': 'Storage & demurrage',
       'bill.nav_billing': 'Billing & Daftra', 'bill.nav_daftra': 'Daftra settings',
       'rpt.nav_group': 'Reports & search', 'rpt.nav_search': 'Advanced search', 'rpt.nav_reports': 'Reports',
-      'rpt.cmdk_advanced': 'Advanced search for "{q}"…' }
+      'rpt.cmdk_advanced': 'Advanced search for "{q}"…',
+      'msg.nav_group': 'Communications', 'msg.nav_inbox': 'Inbox', 'msg.nav_contacts': 'Contacts',
+      'msg.nav_templates': 'Templates & instructions', 'msg.nav_channels': 'Channels', 'msg.nav_inbox_badge': 'Unassigned or link-review conversations: {n}' }
   };
   var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -259,7 +278,12 @@
     sync: '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 3v5h5"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 21v-5h-5"/>',
     link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/>',
     // G6a reports
-    report: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 17v-3M12 17v-6M15 17v-2"/>'
+    report: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 17v-3M12 17v-6M15 17v-2"/>',
+    // G6b messaging
+    chat: '<path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5 4v-4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/><path d="M8 10h8M8 13h5"/>',
+    book: '<path d="M5 4h11a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2z"/><path d="M5 18a2 2 0 0 1 2-2h11"/><circle cx="11.5" cy="9" r="2"/><path d="M8.5 13.5a3 3 0 0 1 6 0"/>',
+    template: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 9v11M11 13h7M11 16h5"/>',
+    antenna: '<circle cx="12" cy="11" r="1.6"/><path d="M12 12.6V21M8.5 7.5a5 5 0 0 0 0 7M15.5 7.5a5 5 0 0 1 0 7M5.6 4.6a9 9 0 0 0 0 12.8M18.4 4.6a9 9 0 0 1 0 12.8"/>'
   };
   function icon(name, cls) {
     var s = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -534,7 +558,7 @@
       if (!b) { b = el('span', { class: 'badge badge-danger nav-count', 'aria-hidden': 'true' }); a.appendChild(b); }
       b.textContent = txt;
       if (label) {
-        var desc = id === 'alerts' ? keyLabel('ops.nav_alerts_badge', { n: n }) : t('badge_count', { n: n });
+        var desc = id === 'alerts' ? keyLabel('ops.nav_alerts_badge', { n: n }) : (id === 'inbox' ? keyLabel('msg.nav_inbox_badge', { n: n }) : t('badge_count', { n: n }));
         a.setAttribute('aria-label', label + ' — ' + desc);
         a.setAttribute('data-shell-badge-label', '');
       }
@@ -579,10 +603,39 @@
   }
   function armBadge() {
     if (alertPoll.timer) clearInterval(alertPoll.timer);
-    alertPoll.timer = setInterval(function () { if (!doc.hidden) refreshBadge(); }, BADGE_MS);
+    alertPoll.timer = setInterval(function () { if (!doc.hidden) { refreshBadge(); refreshInboxBadge(); } }, BADGE_MS);
   }
   window.addEventListener('marsa:alertschange', function () { refreshBadge(); });
-  doc.addEventListener('visibilitychange', function () { if (!doc.hidden && alertPoll.at && Date.now() - alertPoll.at >= BADGE_MS) refreshBadge(); });
+
+  /* G6b inbox badge (NAV item 'inbox'): unassigned + link-review threads of the active org, from ONE
+     MarsaApi.listMsgThreads({box:'unassigned', limit:1}) read (its counts.by_box) — on load, on org change,
+     on 'marsa:inboxchange' (dispatched by the msg views) and with the alerts poll. Hidden when the read
+     fails (e.g. the G6b migration is not applied yet) or the role has no msgRead. */
+  var inboxPoll = { seq: 0 };
+  function inboxCount(d) {
+    var b = d && d.counts && d.counts.by_box;
+    if (!b || typeof b !== 'object') return null;
+    // review fix: 'attention' counts a thread that is both unassigned and in link review ONCE (older servers: the sum)
+    if (b.attention != null && !isNaN(+b.attention)) return +b.attention;
+    var u = +b.unassigned, r = +b.review;
+    if (isNaN(u) && isNaN(r)) return null;
+    return (isNaN(u) ? 0 : u) + (isNaN(r) ? 0 : r);
+  }
+  function refreshInboxBadge() {
+    var seq = ++inboxPoll.seq, org = S.orgId;
+    var it = navItem('inbox');
+    if (S.status !== 'ready' || !org || !it || !itemVisible(it) || !api || typeof api.listMsgThreads !== 'function') {
+      setBadge('inbox', null, org); return Promise.resolve(null);
+    }
+    return call(function () { return api.listMsgThreads({ box: 'unassigned', limit: 1, orgId: org }); }).then(function (r) {
+      if (seq !== inboxPoll.seq || org !== S.orgId) return null;
+      var n = r.error ? null : inboxCount(r.data);
+      setBadge('inbox', n, org);
+      return n;
+    });
+  }
+  window.addEventListener('marsa:inboxchange', function () { refreshInboxBadge(); });
+  doc.addEventListener('visibilitychange', function () { if (!doc.hidden && alertPoll.at && Date.now() - alertPoll.at >= BADGE_MS) { refreshBadge(); refreshInboxBadge(); } });
 
   /* ------------------------------------------------------------------
      Title + breadcrumb (page-hero)
@@ -754,7 +807,7 @@
     renderSlots();
     markActive();
     Object.keys(counts).forEach(paintBadge);
-    refreshBadge();
+    refreshBadge(); refreshInboxBadge();
   });
   // another tab changed the active org: follow it here too (a removed key = sign-out elsewhere)
   window.addEventListener('storage', function (e) {
@@ -1126,7 +1179,7 @@
   function refresh() {
     return loadContext(true).then(function (ctx) {
       afterContext(ctx);
-      refreshBadge();
+      refreshBadge(); refreshInboxBadge();
       return ctx;
     }, function () { S.status = 'error'; afterContext(null); return null; });
   }
@@ -1152,7 +1205,7 @@
     afterContext(ctx);
     readyResolve(ctx);
     emit('marsa:shellready', { context: ctx });
-    refreshBadge();
+    refreshBadge(); refreshInboxBadge();
     armBadge();
   }, function () {
     S.status = 'error'; afterContext(null); readyResolve(null);
@@ -1170,7 +1223,7 @@
         if (event === 'SIGNED_OUT') {
           S.status = 'signedout'; S.ctx = null; S.session = null; S.roles = []; S.orgId = null;
           afterContext(null);
-          setBadge('alerts', null);
+          setBadge('alerts', null); setBadge('inbox', null);
         } else if (event === 'SIGNED_IN' && S.status !== 'ready' && S.status !== 'loading') {
           refresh();
         }

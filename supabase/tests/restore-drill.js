@@ -56,6 +56,12 @@ const KEY_REQ = '0d0d0000-0000-4000-8000-000000000001';
 const KEY_INV = '0d0d0000-0000-4000-8000-00000000000a';   // G4 supplier invoice (replay after restore)
 const KEY_PUSH = '0d0d0000-0000-4000-8000-00000000000b';  // G5 push request (replay after restore)
 const KEY_INTENT = '0d0d0000-0000-4000-8000-00000000000c'; // G5 billing intent
+const KEY_SEND = '0d0d0000-0000-4000-8000-00000000000d';   // G6b send request (replay after restore)
+const KEY_CH = '0d0d0000-0000-4000-8000-00000000000e';     // G6b channel
+const G6B_TABLES = ['msg_settings', 'msg_channels', 'msg_contacts', 'msg_contact_addresses', 'msg_contact_authorizations', 'msg_threads',
+  'msg_messages', 'msg_message_events', 'msg_attachments', 'msg_replies', 'msg_ai_runs', 'msg_extractions', 'msg_classifications',
+  'msg_summaries', 'msg_thread_links', 'msg_instructions', 'msg_templates', 'msg_reply_versions', 'msg_reply_approvals', 'msg_outbound',
+  'msg_delivery_events', 'msg_auto_reply_policies', 'msg_jobs', 'msg_job_attempts'];
 const G5_TABLES = ['daftra_connections', 'daftra_client_links', 'daftra_item_links', 'billing_intents', 'billing_intent_lines',
   'billing_sync_jobs', 'billing_sync_attempts', 'billing_review_items'];
 
@@ -194,6 +200,64 @@ async function buildSample() {
   // G6a: one export-log row (no row data, append-only)
   const exp = await rpc('adminA', `SELECT public.log_report_export($1, $2) r`, [A, { report: 'transactions', format: 'xlsx', filters: { from: '2026-10-01' }, row_count: 2 }]);
   r1.g6a = { export: exp.id };
+  // G6b (20261107000100): a row in every msg_* table — mock e-mail channel (probe by the worker identity), a verified +
+  // authorized contact, one inbound message with attachment metadata (processed by a handcrafted rule worker), a staff
+  // link to TX1, a reply written by staffA, approved by adminA (four-eyes), sent through the mock, delivered; library,
+  // auto-reply policy (disabled), mock mailbox state; the provider edit event by the owner (the live worker's job).
+  const work = async () => {
+    for (let round = 0; round < 10; round++) {
+      const ctxs = await rpc('service', `SELECT public.msg_claim_jobs('restore-worker', 20) r`);
+      if (!ctxs.length) return;
+      for (const c of ctxs) {
+        let res;
+        if (c.job.kind === 'probe') res = { outcome: 'ok', effects: { capabilities: { send: { supported: true, evidence: 'mock' } }, account: { address: c.channel.address_norm } } };
+        else if (c.job.kind === 'process') {
+          const b = c.message.body_text, i = b.indexOf('TGHU1122334');
+          res = { outcome: 'ok', effects: { message_id: c.message.id,
+            extractions: i < 0 ? [] : [{ kind: 'container_no', raw: 'TGHU1122334', normalized: 'TGHU1122334', valid: true, confidence: 0.9, detail: {},
+              span: { source: 'body', start: Array.from(b.slice(0, i)).length, end: Array.from(b.slice(0, i)).length + 11 } }],
+            classification: { category: 'general_inquiry', confidence: 0.5, rules: [] },
+            summary: { summary_ar: 'استفسار', summary_en: 'Inquiry', action_code: 'answer_inquiry', suggested_role: 'clearance_staff', deadline: null, risks: [] },
+            risk_flags: [], ai_run: { provider: 'rule_mock', provider_version: 'drill-1', input_sha256: 'a'.repeat(64), input_chars: 10, output_chars: 5,
+              est_input_tokens: 3, est_output_tokens: 1, est_cost_usd: 0 } } };
+        } else if (c.job.kind === 'send') res = { outcome: 'ok', calls: [{ op: 'send', applied: 'yes' }],
+          effects: { outbound_id: c.send.outbound_id, provider_message_id: 'prov-' + c.send.provider_request_id, status: 'accepted', found_by: 'sent' } };
+        else res = { outcome: 'ok', effects: c.job.kind === 'poll' ? { messages: [], next_cursor: 'c1' } : { events: [], next_cursor: 's1' } };
+        await rpc('service', `SELECT public.msg_complete_job($1, $2) r`, [c.attempt_id, JSON.stringify(res)]);
+      }
+    }
+  };
+  await rpc('adminA', `SELECT public.save_msg_settings($1, '{"retention_days":730}') r`, [A]);
+  const mch = await rpc('adminA', `SELECT public.save_msg_channel($1, $2, $3) r`, [A, { kind: 'email', name: 'Inbox', address: 'inbox@restore.example',
+    ingest_enabled: true, send_enabled: true, provider_terms_ack: true }, KEY_CH]);
+  await rpc('adminA', `SELECT public.request_msg_channel_probe($1, NULL) r`, [mch.id]);
+  await work();
+  const contact = await rpc('staffA', `SELECT public.save_msg_contact($1, $2, NULL) r`, [A, { display_name: 'عميل 101', entity_type: 'client', client_id: CL101 }]);
+  const addr = await rpc('staffA', `SELECT public.add_msg_contact_address($1, '{"kind":"email","address":"client@restore.example"}', NULL) r`, [contact.id]);
+  await rpc('adminA', `SELECT public.verify_msg_contact_address($1, 'callback', 'اتصال للتحقق') r`, [addr.id]);
+  await rpc('adminA', `SELECT public.grant_msg_authorization($1, $2, 'تفويض') r`, [contact.id, { scope_type: 'client', client_id: CL101, may_receive_kinds: ['delivery_order'], may_discuss: [] }]);
+  const inbound = { provider_message_id: 'drill-em-1', kind: 'email', from: { address: 'client@restore.example', name: 'Client' }, to: [{ address: 'inbox@restore.example' }],
+    cc: [], sent_at: '2026-11-02T08:00:00Z', subject: 'Container status', body_text: 'Please confirm container TGHU1122334 status.',
+    headers: { message_id: '<drill-1@restore.example>' }, auth: { spf: 'pass', dkim: 'pass', dmarc: 'pass' },
+    attachments: [{ provider_attachment_id: 'drill-att-1', file_name: 'note.pdf', mime_type: 'application/pdf', size_bytes: 10 }], raw: { provider: 'mock' } };
+  const ing = (await rpc('service', `SELECT public.msg_ingest_messages($1, $2) r`, [mch.id, JSON.stringify([inbound])])).items[0];
+  await work();
+  await rpc('staffA', `SELECT public.link_msg_thread($1, $2, 'ربط (اختبار الاستعادة)') r`, [ing.thread_id, TX1]);
+  await q(`INSERT INTO public.msg_message_events (org_id, message_id, event, provider_event_id, payload) VALUES ($1, $2, 'reaction', 'drill-ev-1', '{}')`, [A, ing.message_id]);
+  const rep = await rpc('staffA', `SELECT public.save_msg_reply(NULL, $1, NULL) r`, [{ thread_id: ing.thread_id, reply_to_message_id: ing.message_id, lang: 'ar',
+    subject: 'Re: Container status', body_text: 'تم استلام رسالتكم.', to: ['client@restore.example'] }]);
+  const replyId = rep.id || rep.reply.id;
+  const sub = await rpc('staffA', `SELECT public.submit_msg_reply($1) r`, [replyId]);
+  await rpc('adminA', `SELECT public.decide_msg_reply($1, $2, 'approve', 'مراجعة', false) r`, [replyId, sub.current_version_id]);
+  const send = await rpc('staffA', `SELECT public.send_msg_reply($1, $2) r`, [replyId, KEY_SEND]);
+  await work();
+  await rpc('service', `SELECT public.msg_record_delivery($1, $2) r`, [mch.id, JSON.stringify([{ provider_event_id: 'drill-d-1',
+    provider_request_id: send.outbound.provider_request_id, status: 'delivered', at: '2026-11-02T08:05:00Z' }])]);
+  await rpc('adminA', `SELECT public.save_msg_instruction($1, $2, NULL) r`, [A, { instruction_key: 'lvl.telex', kind: 'approval_level', params: { category: 'telex_release', level: 'standard' } }]);
+  await rpc('adminA', `SELECT public.seed_msg_templates($1) r`, [A]);
+  await rpc('adminA', `SELECT public.save_msg_auto_reply_policy($1, '{"kind":"ack_receipt","enabled":false}') r`, [A]);
+  await rpc('service', `SELECT public.msg_mock_save($1, $2, 0) r`, [mch.id, { sent: [{ request_id: send.outbound.provider_request_id }] }]);
+  r1.g6b = { ch: mch.id, inbound, message: ing.message_id, thread: ing.thread_id, reply: replyId, outbound: send.outbound.id };
   return r1;
 }
 
@@ -255,7 +319,9 @@ async function main() {
     // G5
     ...G5_TABLES.map(t => 'public.' + t), 'public.daftra_mock_accounts',
     // G6a
-    'public.report_exports']
+    'public.report_exports',
+    // G6b
+    ...G6B_TABLES.map(t => 'public.' + t), 'public.msg_mock_mailboxes']
     .filter(k => !before[k] || before[k].n === 0);
   await check('source has rows in the key tables (drill is not vacuous)', () => empty.length === 0 || 'empty: ' + empty.join(', '));
   await check('both orgs present in the source', async () =>
@@ -426,6 +492,40 @@ async function main() {
     try { await as('staffB', `SELECT public.search_records($1, '{}')`, [A]); return 'staffB searched org A'; }
     catch (e) { if (!/MRS_FORBIDDEN/.test(errText(e))) return errText(e); }
     return true;
+  });
+  await check('G6b after restore: staffB / clientA see no inbox rows of org A; adminA keeps every table; nobody but the service role reads the mock mailbox', async () => {
+    for (const t of G6B_TABLES) {
+      for (const who of ['staffB', 'adminB', 'clientA']) {
+        const r = await denied(who, `SELECT 1 FROM public.${t} WHERE org_id = $1`, [A]);
+        if (r !== true) return who + ' ' + t + ': ' + r;
+      }
+      if (!(await as('adminA', `SELECT 1 FROM public.${t} WHERE org_id = $1 LIMIT 1`, [A])).length) return 'adminA lost ' + t;
+    }
+    try { await as('adminA', `SELECT 1 FROM public.msg_mock_mailboxes`); return 'adminA reads msg_mock_mailboxes'; }
+    catch (e) { if (!/permission denied/.test(errText(e))) return errText(e); }
+    const m = await rpc('service', `SELECT public.msg_mock_load($1) r`, [r1.g6b.ch]);
+    return (m.version === 1 && m.state.sent.length === 1) || JSON.stringify(m);
+  });
+  await check('G6b after restore: re-delivered inbound is a duplicate; send replay / repeat returns the same outbound; no second send; staff cannot call worker RPCs', async () => {
+    const again = (await rpc('service', `SELECT public.msg_ingest_messages($1, $2) r`, [r1.g6b.ch, JSON.stringify([r1.g6b.inbound])])).items[0];
+    const msgs = (await q(`SELECT count(*)::int n FROM public.msg_messages WHERE provider_message_id = 'drill-em-1'`))[0].n;
+    const replay = await rpc('staffA', `SELECT public.send_msg_reply($1, $2) r`, [r1.g6b.reply, KEY_SEND]);
+    const repeat = await rpc('staffA', `SELECT public.send_msg_reply($1, NULL) r`, [r1.g6b.reply]);
+    const outs = (await q(`SELECT count(*)::int n, min(state) s FROM public.msg_outbound WHERE reply_id = $1`, [r1.g6b.reply]))[0];
+    const claimed = await rpc('service', `SELECT public.msg_claim_jobs('restore-worker-2', 5) r`);
+    try { await as('adminA', `SELECT public.msg_claim_jobs('x', 1)`); return 'adminA executed msg_claim_jobs'; }
+    catch (e) { if (!/permission denied/.test(errText(e))) return errText(e); }
+    return (again.duplicate === true && again.message_id === r1.g6b.message && msgs === 1 && replay.outbound.id === r1.g6b.outbound
+            && repeat.outbound.id === r1.g6b.outbound && outs.n === 1 && outs.s === 'delivered' && !claimed.some(c => c.job.kind === 'send'))
+      || JSON.stringify({ again, msgs, replay: replay.outbound && replay.outbound.id, repeat: repeat.deduplicated, outs, claimed: claimed.map(c => c.job.kind) });
+  });
+  await check('G6b after restore: get_msg_thread for org-A staff, MRS_NOT_FOUND for org B; append-only copies stay immutable', async () => {
+    const t = await rpc('staffA', `SELECT public.get_msg_thread($1) r`, [r1.g6b.thread]);
+    if (!(t.thread.id === r1.g6b.thread && t.messages.length >= 2)) return 'thread: ' + JSON.stringify(Object.keys(t));
+    try { await as('adminB', `SELECT public.get_msg_thread($1)`, [r1.g6b.thread]); return 'adminB read the org-A thread'; }
+    catch (e) { if (!/MRS_NOT_FOUND/.test(errText(e))) return errText(e); }
+    try { await q(`UPDATE public.msg_messages SET body_text = 'x' WHERE id = $1`, [r1.g6b.message]); return 'message updated'; }
+    catch (e) { return /MRS_APPEND_ONLY/.test(errText(e)) || errText(e); }
   });
   await check('writes work after restore (new request gets the next ref)', async () => {
     const r = await rpc('anon', `SELECT public.submit_service_request($1) r`, [reqPayload('0559000099', {})]);

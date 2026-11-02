@@ -31,7 +31,7 @@
    ========================================================================== */
 'use strict';
 
-var VERSION = '2026-11-06.2';   // G6a review fixes (rpt/*.js, i18n/rpt.js); G6a: search / reports / dashboards (rpt/*.js, rpt.js, rpt.css, dash.css) + portal tabs; G4 fin/*, G5 bill/* kept
+var VERSION = '2026-11-07.2';   // G6b review fixes (msg/inbox.js, kit.js, contacts.js, tx-msg.js, i18n/msg.js, app-shell.js); G6b: unified inbox (msg/*.js, i18n/msg.js, msg.css); G6a review fixes (rpt/*.js, i18n/rpt.js); G6a: search / reports / dashboards (rpt/*.js, rpt.js, rpt.css, dash.css) + portal tabs; G4 fin/*, G5 bill/* kept
 var CACHE = 'marsa-app-' + VERSION;
 var OFFLINE_URL = 'offline.html';
 
@@ -43,7 +43,7 @@ var PRECACHE = [
   // styles: the original design system + shared components + page sheets
   'assets/css/style.css', 'assets/css/app.css',
   'assets/css/pages/login.css', 'assets/css/pages/admin.css', 'assets/css/pages/ops.css', 'assets/css/pages/fin.css', 'assets/css/pages/bill.css',
-  'assets/css/pages/rpt.css', 'assets/css/pages/dash.css',
+  'assets/css/pages/rpt.css', 'assets/css/pages/dash.css', 'assets/css/pages/msg.css',
   'assets/css/pages/platform.css',
   'assets/css/pages/portal.css', 'assets/css/pages/ocr.css', 'assets/css/pages/bulk-upload.css',
   // scripts
@@ -57,8 +57,11 @@ var PRECACHE = [
   'assets/js/fin/demurrage.js', 'assets/js/fin/tx-fin.js',
   'assets/js/bill/billing.js', 'assets/js/bill/daftra.js', 'assets/js/bill/tx-bill.js',
   'assets/js/rpt/xlsx.js', 'assets/js/rpt/export.js', 'assets/js/rpt/search.js', 'assets/js/rpt/reports.js', 'assets/js/rpt/dashboards.js',
+  'assets/js/msg/kit.js', 'assets/js/msg/inbox.js', 'assets/js/msg/channels.js', 'assets/js/msg/contacts.js', 'assets/js/msg/templates.js',
+  'assets/js/msg/tx-msg.js',
+  // (supabase/functions/* — daftra-sync, inbox-sync — is server source: never precached, never served by the site)
   // dictionaries (a missing optional file never blocks the install)
-  'assets/i18n/app.js', 'assets/i18n/login.js', 'assets/i18n/admin.js', 'assets/i18n/ops.js', 'assets/i18n/fin.js', 'assets/i18n/bill.js', 'assets/i18n/rpt.js',
+  'assets/i18n/app.js', 'assets/i18n/login.js', 'assets/i18n/admin.js', 'assets/i18n/ops.js', 'assets/i18n/fin.js', 'assets/i18n/bill.js', 'assets/i18n/rpt.js', 'assets/i18n/msg.js',
   'assets/i18n/platform.js',
   'assets/i18n/ocr.js', 'assets/i18n/bulk.js', 'assets/i18n/portal.js',
   // images: header logo (site-header / drawer / footer), favicon, PWA icons
