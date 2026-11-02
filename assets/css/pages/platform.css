@@ -98,3 +98,48 @@
   .pf-search { max-width: none; flex-basis: 100%; }
   .pf-count { margin-inline-start: 0; }
 }
+
+/* =====================================================================
+   G7 plans / subscriptions / usage (docs/online/G7_SPEC.md §Front end)
+   The original admin.html dialog + table classes (assets/css/pages/admin.css
+   .adm-dialog*, .adm-form-grid, .adm-table): the needed subset is repeated
+   here so platform.html does not load the whole staff-console sheet.
+   ===================================================================== */
+.pf-tile[data-tone="warning"] .stat-value { color: #9A6905; }
+.pf-row-over { background: #FFFBF2; }
+.pf-unlimited { color: var(--muted); }
+.adm-table td { vertical-align: top; }
+.adm-table td, .adm-table th { padding: 12px 14px; }
+.adm-table th.num, .adm-table td.num { text-align: end; font-variant-numeric: tabular-nums; }
+.pf-table td.num .badge { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.adm-dialog { width: min(620px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 0; border-radius: var(--r-lg); box-shadow: var(--shadow-lg); color: var(--text); background: #fff; }
+.adm-dialog.adm-dialog-wide { width: min(900px, calc(100vw - 32px)); }
+.adm-dialog::backdrop { background: rgba(5, 30, 59, .55); }
+.adm-dialog[open] { display: flex; flex-direction: column; }
+.adm-dialog-form { display: flex; flex-direction: column; min-height: 0; max-height: calc(100vh - 32px); margin: 0; }
+.adm-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 22px; border-bottom: 1px solid var(--border); }
+.adm-dialog-head h2 { margin: 0; font-size: var(--fs-md); overflow-wrap: anywhere; }
+.adm-dialog-x { width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--border); background: #fff; display: grid; place-items: center; color: var(--navy); flex-shrink: 0; cursor: pointer; }
+.adm-dialog-x:hover { border-color: var(--teal); color: var(--teal); }
+.adm-dialog-x .icon { width: 18px; height: 18px; }
+.adm-dialog-body { padding: 18px 22px; overflow-y: auto; display: grid; gap: 14px; }
+.adm-dialog-body .alert { margin: 0; }
+.adm-dialog-error { margin: 0 22px; }
+.adm-dialog-error[hidden] { display: none; }
+.adm-dialog-foot { display: flex; flex-wrap: wrap; gap: 10px; padding: 16px 22px; border-top: 1px solid var(--border); background: #FAFCFE; border-radius: 0 0 var(--r-lg) var(--r-lg); }
+.adm-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; }
+.adm-form-grid .form-group { margin: 0; min-width: 0; }
+.adm-full { grid-column: 1 / -1; }
+.adm-dialog .pf-fieldset { display: grid; gap: 12px; padding-bottom: 14px; }
+.pf-usage { display: grid; gap: 12px; min-width: 0; }
+.pf-usage-h { font-size: var(--fs-base); margin: 6px 0 0; color: var(--navy-dark); }
+@media (max-width: 640px) {
+  .adm-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .adm-dialog-head, .adm-dialog-body, .adm-dialog-foot { padding-inline: 16px; }
+  .adm-dialog-error { margin-inline: 16px; }
+}
+
+/* G7 review fix: extra status badges next to the subscription status (paused org, ended trial) */
+[data-pf-paused],
+[data-pf-trial-ended] { margin-inline-start: 4px; }

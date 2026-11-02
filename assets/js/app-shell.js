@@ -192,11 +192,17 @@
       { id: 'portal', href: 'portal.html', icon: 'grid', client: true },
       { id: 'request', href: 'request.html', icon: 'filePlus', client: true },
       { id: 'tracking', href: 'tracking.html', icon: 'route', client: true }
+    ] },
+    // G7 user guides (help.html renders docs/guide/<lang>/<id>.md). One item for every audience:
+    // staff → the guide index, client → #client-portal, platform admin → #platform (first match wins, see itemHref)
+    { id: 'support', key: 'app.grp_support', items: [
+      { id: 'help', key: 'app.nav_help', href: 'help.html', icon: 'help',
+        audiences: [{ allow: R.staff, href: 'help.html' }, { client: true, href: 'help.html#client-portal' }, { platform: true, href: 'help.html#platform' }] }
     ] }
   ];
   // admin.js detail routes (#tx/<id> …) belong to their list view
   var ADMIN_ALIAS = { tx: 'transactions', request: 'requests', client: 'clients', import: 'imports' };
-  var PAGE_NAV = { platform: 'platform', ocr: 'ocr', bulk: 'bulk', portal: 'portal', offline: null };
+  var PAGE_NAV = { platform: 'platform', ocr: 'ocr', bulk: 'bulk', portal: 'portal', help: 'help', offline: null };
   var OPS_NAV = {
     ar: { 'ops.nav_group': 'العمليات', 'ops.nav_alerts': 'التنبيهات', 'ops.nav_schedule': 'الجدول اليومي', 'ops.nav_exceptions': 'الاستثناءات',
       'ops.nav_parties': 'الجهات والناقلون', 'ops.nav_requirements': 'قواعد المستندات', 'ops.nav_alerts_badge': 'التنبيهات المفتوحة: {n}',
@@ -206,7 +212,8 @@
       'rpt.nav_group': 'التقارير والبحث', 'rpt.nav_search': 'البحث المتقدم', 'rpt.nav_reports': 'التقارير',
       'rpt.cmdk_advanced': 'بحث متقدم عن «{q}»…',
       'msg.nav_group': 'المراسلات', 'msg.nav_inbox': 'صندوق المراسلات', 'msg.nav_contacts': 'جهات الاتصال',
-      'msg.nav_templates': 'القوالب والتعليمات', 'msg.nav_channels': 'القنوات', 'msg.nav_inbox_badge': 'محادثات غير مسندة أو تحتاج مراجعة ربط: {n}' },
+      'msg.nav_templates': 'القوالب والتعليمات', 'msg.nav_channels': 'القنوات', 'msg.nav_inbox_badge': 'محادثات غير مسندة أو تحتاج مراجعة ربط: {n}',
+      'app.grp_support': 'المساعدة', 'app.nav_help': 'دليل الاستخدام' },
     en: { 'ops.nav_group': 'Operations', 'ops.nav_alerts': 'Alerts', 'ops.nav_schedule': 'Daily schedule', 'ops.nav_exceptions': 'Exceptions',
       'ops.nav_parties': 'Parties & carriers', 'ops.nav_requirements': 'Document rules', 'ops.nav_alerts_badge': 'Open alerts: {n}',
       'fin.nav_group': 'Operating finance', 'fin.nav_costs': 'Supplier invoices', 'fin.nav_payables': 'Payables & payments',
@@ -215,14 +222,15 @@
       'rpt.nav_group': 'Reports & search', 'rpt.nav_search': 'Advanced search', 'rpt.nav_reports': 'Reports',
       'rpt.cmdk_advanced': 'Advanced search for "{q}"…',
       'msg.nav_group': 'Communications', 'msg.nav_inbox': 'Inbox', 'msg.nav_contacts': 'Contacts',
-      'msg.nav_templates': 'Templates & instructions', 'msg.nav_channels': 'Channels', 'msg.nav_inbox_badge': 'Unassigned or link-review conversations: {n}' }
+      'msg.nav_templates': 'Templates & instructions', 'msg.nav_channels': 'Channels', 'msg.nav_inbox_badge': 'Unassigned or link-review conversations: {n}',
+      'app.grp_support': 'Help', 'app.nav_help': 'User guide' }
   };
   var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   /* ------------------------------------------------------------------
      Page id
      ------------------------------------------------------------------ */
-  var PAGE_ALIAS = { 'bulk-upload': 'bulk', bulk: 'bulk', admin: 'admin', platform: 'platform', ocr: 'ocr', portal: 'portal', offline: 'offline', login: 'login' };
+  var PAGE_ALIAS = { 'bulk-upload': 'bulk', bulk: 'bulk', admin: 'admin', platform: 'platform', ocr: 'ocr', portal: 'portal', offline: 'offline', login: 'login', help: 'help' };
   function fileName() { return (location.pathname.split('/').pop() || 'index.html'); }
   var PAGE = (function () {
     var v = body ? (body.getAttribute('data-app-page') || body.getAttribute('data-page') || '') : '';
@@ -283,7 +291,9 @@
     chat: '<path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5 4v-4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/><path d="M8 10h8M8 13h5"/>',
     book: '<path d="M5 4h11a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2z"/><path d="M5 18a2 2 0 0 1 2-2h11"/><circle cx="11.5" cy="9" r="2"/><path d="M8.5 13.5a3 3 0 0 1 6 0"/>',
     template: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 9v11M11 13h7M11 16h5"/>',
-    antenna: '<circle cx="12" cy="11" r="1.6"/><path d="M12 12.6V21M8.5 7.5a5 5 0 0 0 0 7M15.5 7.5a5 5 0 0 1 0 7M5.6 4.6a9 9 0 0 0 0 12.8M18.4 4.6a9 9 0 0 1 0 12.8"/>'
+    antenna: '<circle cx="12" cy="11" r="1.6"/><path d="M12 12.6V21M8.5 7.5a5 5 0 0 0 0 7M15.5 7.5a5 5 0 0 1 0 7M5.6 4.6a9 9 0 0 0 0 12.8M18.4 4.6a9 9 0 0 1 0 12.8"/>',
+    // G7 help / user guide
+    help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 1c0 1.8-2.5 2.3-2.5 4"/><path d="M12 17.3h.01"/>'
   };
   function icon(name, cls) {
     var s = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -400,8 +410,18 @@
     var anyStaff = (S.ctx.memberships || []).some(function (m) { return R.staff.indexOf(m.role) !== -1; });
     return !anyStaff && !isPlatform();
   }
+  // G7: an item with audiences[] (help) is shown to the first audience that matches, with that audience's href
+  function audienceOf(it) {
+    var a = it.audiences || [];
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].platform ? isPlatform() : a[i].client ? isClient() : (a[i].allow ? canAny(a[i].allow) : false)) return a[i];
+    }
+    return null;
+  }
+  function itemHref(it) { var a = it.audiences ? audienceOf(it) : null; return a && a.href ? a.href : it.href; }
   function itemVisible(it) {
     if (S.status !== 'ready') return false;
+    if (it.audiences) return !!audienceOf(it);
     if (it.platform) return isPlatform();
     if (it.client) return isClient();
     return it.allow ? canAny(it.allow) : true;
@@ -422,9 +442,9 @@
       if (opts.group && opts.group !== g.id) return;
       var gl = groupLabel(g);
       g.items.forEach(function (it) {
-        var page = hrefPage(it.href), local = page === here;
+        var href = itemHref(it), page = hrefPage(href), local = page === here;
         if (opts.local && !local) return;
-        var row = { id: it.id, href: it.href, label: navLabel(it), group: g.id, groupLabel: gl, page: page, local: local, icon: it.icon };
+        var row = { id: it.id, href: href, label: navLabel(it), group: g.id, groupLabel: gl, page: page, local: local, icon: it.icon };
         if (it.badge) { row.badge = it.badge; row.count = badgeValue(it.id); }
         out.push(row);
       });
@@ -1028,7 +1048,7 @@
     visibleNav().forEach(function (g) {
       g.items.forEach(function (it) {
         var hay = [navLabel(it), navLabel(it, 'ar'), navLabel(it, 'en'), it.id].map(norm).join(' ');
-        if (!nq || hay.indexOf(nq) !== -1) out.push({ group: 'nav', title: navLabel(it), sub: groupLabel(g), icon: it.icon, href: it.href });
+        if (!nq || hay.indexOf(nq) !== -1) out.push({ group: 'nav', title: navLabel(it), sub: groupLabel(g), icon: it.icon, href: itemHref(it) });
       });
     });
     return out;

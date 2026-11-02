@@ -1,0 +1,50 @@
+/* =====================================================================
+   مرسى | MARSA — help.html user guides (loaded after style.css / app.css)
+   STAGING. Original design: page-hero, a .card list of guides, a .card
+   article. Design tokens from style.css only; logical properties so the
+   page works in RTL (ar) and LTR (en).
+   ===================================================================== */
+.help-hero h1 { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.help-env-badge { font-size: var(--fs-xs); vertical-align: middle; }
+.help-section { padding-top: 28px; }
+
+.help-layout { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.help-side { position: sticky; top: 96px; display: grid; gap: 12px; padding: 18px; }
+.help-side-title { font-size: var(--fs-md); margin: 0; }
+.help-nav { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.help-nav-link { display: grid; gap: 2px; padding: 10px 12px; border-radius: var(--r); text-decoration: none; color: var(--navy-dark); border: 1px solid transparent; transition: background .2s, border-color .2s; }
+.help-nav-link:hover { background: #F4F9FC; border-color: var(--border); }
+.help-nav-link.is-active { background: rgba(20, 163, 168, .1); border-color: rgba(20, 163, 168, .35); }
+.help-nav-link:focus-visible { outline: none; box-shadow: var(--ring); }
+.help-nav-title { font-weight: 800; font-size: var(--fs-sm); }
+.help-side-note { margin: 0; }
+
+.help-main { display: grid; gap: 12px; min-width: 0; }
+.help-status { margin: 0; }
+.help-status[hidden] { display: none; }
+.help-article { min-width: 0; padding: 26px 28px; line-height: 1.85; overflow-wrap: anywhere; }
+.help-article:focus { outline: none; }
+.help-article > :first-child { margin-top: 0; }
+.help-article > :last-child { margin-bottom: 0; }
+.help-article h2 { font-size: var(--fs-xl); margin: 0 0 14px; color: var(--navy-dark); }
+.help-article h3 { font-size: var(--fs-lg); margin: 26px 0 10px; color: var(--navy-dark); }
+.help-article h4 { font-size: var(--fs-md); margin: 20px 0 8px; color: var(--navy); }
+.help-article p { margin: 0 0 12px; }
+.help-article .help-list { margin: 0 0 14px; padding-inline-start: 24px; display: grid; gap: 6px; }
+.help-article code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .88em; background: #F2F7FB; border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
+.help-article .help-pre { margin: 0 0 14px; padding: 14px 16px; background: #F7FAFD; border: 1px solid var(--border); border-radius: var(--r); overflow: auto; text-align: left; }
+.help-article .help-pre code { background: none; border: 0; padding: 0; font-size: var(--fs-xs); white-space: pre; }
+.help-article .table-wrap { margin: 0 0 14px; }
+.help-table td, .help-table th { padding: 10px 14px; text-align: start; vertical-align: top; }
+.help-note { margin: 0 0 14px; padding: 14px 18px; border-inline-start: 4px solid var(--teal); background: #F4FBFB; box-shadow: none; }
+.help-note p:last-child { margin-bottom: 0; }
+.help-fail { display: grid; gap: 6px; margin: 0; }
+.help-fail code { word-break: break-all; }
+
+@media (max-width: 900px) {
+  .help-layout { grid-template-columns: minmax(0, 1fr); }
+  .help-side { position: static; }
+}
+@media (max-width: 640px) {
+  .help-article { padding: 18px 16px; }
+}

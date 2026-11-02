@@ -848,7 +848,7 @@
   // In-page section nav (original pill bar): the admin views this role may open (VIEWS + G3 module
   // views), then the staff pages elsewhere (bulk upload, OCR, platform) from MarsaShell.navItems().
   // Each link carries data-nav-id so MarsaShell.setActive / setBadge('alerts') find it.
-  var NAV_EXTERNAL = ['bulk', 'ocr', 'platform'];
+  var NAV_EXTERNAL = ['bulk', 'ocr', 'platform', 'help'];  // G7: help = the user guide (help.html), the "link from admin"
   // daily work → G3 operations → G6a reports & search → G6b messaging → G4 operating finance → G5 billing → management (unknown module views go last, stable)
   var NAV_ORDER = ['dashboard', 'requests', 'transactions', 'clients', 'messages', 'imports', 'alerts', 'schedule', 'exceptions', 'parties',
     'search', 'reports',

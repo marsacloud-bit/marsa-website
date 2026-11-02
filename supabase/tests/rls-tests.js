@@ -508,7 +508,9 @@ const TENANT_TABLES = [
 const NO_API_TABLES = ['idempotency_keys', 'platform_admins', 'schema_versions', 'client_errors', 'operational_alert_runs',
   'daftra_mock_accounts',
   // G6b: msg_mock_mailboxes (fake mailbox / WhatsApp state) is service-role only (RLS on, no policy, nothing granted)
-  'msg_mock_mailboxes'];
+  'msg_mock_mailboxes',
+  // G7: subscription plans / per-org subscriptions / events / usage cache — read through platform RPCs only
+  'plans', 'org_subscriptions', 'subscription_events', 'org_usage_counters'];
 const ALL_PUBLIC_TABLES = TENANT_TABLES.map(t => t[0]).concat(['status_labels'], NO_API_TABLES);
 
 async function isolationSweep(who, targetOrg, memberUser, label) {
@@ -597,7 +599,7 @@ async function main() {
   });
   await check('anon has no USAGE on schema app', async () =>
     (await q(`SELECT has_schema_privilege('anon', 'app', 'USAGE') u`))[0].u === false);
-  await check('authenticated can execute only the 179 documented public RPCs', async () => {
+  await check('authenticated can execute only the 188 documented public RPCs', async () => {
     const r = await q(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                         WHERE n.nspname = 'public' AND has_function_privilege('authenticated', p.oid, 'EXECUTE') ORDER BY 1`);
     const exp = ['admin_list_members', 'admin_set_member_active', 'convert_request_to_transaction', 'import_commit', 'issue_tracking_token', 'my_context', 'public_track',
@@ -629,9 +631,12 @@ async function main() {
       // G6a portal / reports (20261106000100): 10 read-side RPCs (log_report_export is the only writer, append-only)
       ...G6A_RPCS,
       // G6b unified inbox (20261107000100): 46 staff RPCs; the 8 msg_* worker / ingest RPCs are NOT here (service_role only)
-      ...G6B_STAFF_RPCS];
+      ...G6B_STAFF_RPCS,
+      // G7 subscriptions (20261108000100): 8 platform-admin RPCs + org_subscription (org admin)
+      'platform_list_plans', 'platform_save_plan', 'platform_list_subscriptions', 'platform_set_org_plan', 'platform_suspend_org',
+      'platform_activate_org', 'platform_org_usage', 'platform_recount_usage', 'org_subscription'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 179) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 188) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');
@@ -740,6 +745,29 @@ async function main() {
     await expectErr(`${who} cannot SELECT ${t} (G2 internal table)`, () => as(who, `SELECT 1 FROM public.${t} LIMIT 1`), /permission denied/, 'REVOKE ALL ... FROM anon, authenticated (G2)');
     await expectErr(`${who} cannot DELETE ${t} (G2 internal table)`, () => as(who, `DELETE FROM public.${t} RETURNING 1`), /permission denied/, 'REVOKE ALL ... FROM anon, authenticated (G2)');
   }
+  // G7 (20261108000100): platform-only subscription RPCs are unreachable for org members / clients; org_subscription = own org admin only
+  for (const [fn, sql] of [
+    ['platform_list_plans', `SELECT public.platform_list_plans()`],
+    ['platform_save_plan', `SELECT public.platform_save_plan('basic', '{"name_ar":"اختبار"}'::jsonb)`],
+    ['platform_list_subscriptions', `SELECT public.platform_list_subscriptions()`],
+    ['platform_set_org_plan', `SELECT public.platform_set_org_plan('${A}', '{"plan_code":"basic","status":"active","period_start":"2026-01-01","reason":"x"}'::jsonb)`],
+    ['platform_suspend_org', `SELECT public.platform_suspend_org('${A}', 'x')`],
+    ['platform_activate_org', `SELECT public.platform_activate_org('${A}', 'x')`],
+    ['platform_org_usage', `SELECT public.platform_org_usage('${A}')`],
+    ['platform_recount_usage', `SELECT public.platform_recount_usage('${A}')`]]) {
+    for (const who of ['adminA', 'staffA', 'clientA', 'staffB']) {
+      await expectErr(`${who} cannot call ${fn} (G7 platform-only)`, () => as(who, sql), /MRS_FORBIDDEN/, 'G7 app.is_platform_admin() check');
+    }
+    await expectErr(`anon cannot call ${fn} (G7)`, () => as('anon', sql), /permission denied/, 'G7 REVOKE ... FROM anon');
+  }
+  for (const who of ['staffA', 'clientA', 'staffB', 'clientB']) {
+    await expectErr(`${who} cannot read org_subscription of org A (G7 admin only)`, () => as(who, `SELECT public.org_subscription('${A}')`), /MRS_NOT_FOUND/, 'G7 app.has_role(p_org, admin)');
+  }
+  await check('adminA reads own org_subscription without a price (G7-11)', async () => {
+    const r = (await as('adminA', `SELECT public.org_subscription('${A}') s`))[0].s;
+    return (r && r.plan_code === 'pilot' && !JSON.stringify(r).includes('price')) || 'got ' + JSON.stringify(r);
+  });
+  await expectErr('anon cannot call org_subscription (G7)', () => as('anon', `SELECT public.org_subscription('${A}')`), /permission denied/);
   await expectErr('anon cannot INSERT service_requests', () => as('anon',
     `INSERT INTO public.service_requests (org_id, ref, tracking_token_hash, full_name, phone, direction, mode, port, goods)
      VALUES ($1, 'X', $2, 'abc', '0500000000', 'import', 'sea', 'p', 'goods')`, [A, hex('a')]), /permission denied/);

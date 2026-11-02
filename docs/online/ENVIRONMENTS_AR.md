@@ -87,9 +87,11 @@ STAMP=$(date +%Y%m%d-%H%M)
 rm -rf /tmp/marsa-export && mkdir -p /tmp/marsa-export
 git archive HEAD | tar -x -C /tmp/marsa-export            # tracked files only: no .env, no dumps
 # copy site files into the deploy copy; keep its .htaccess; skip repo-only material
+# G7-19: docs/guide/ (the help.html guides) IS published; every other docs/ path stays excluded (first matching rule wins)
 rsync -a --delete \
   --exclude '.htaccess' --exclude '.htpasswd' --exclude '_headers' --exclude 'robots.txt' \
-  --exclude 'supabase/' --exclude 'docs/' --exclude 'scripts/' --exclude '.github/' \
+  --include 'docs/' --include 'docs/guide/***' --exclude 'docs/**' \
+  --exclude 'supabase/' --exclude 'scripts/' --exclude '.github/' \
   --exclude 'CONTRIBUTING.md' --exclude 'README.md' --exclude '.gitignore' \
   --exclude 'assets/js/config.example.js' \
   /tmp/marsa-export/ ~/Downloads/marsa-deploy/
@@ -97,6 +99,13 @@ grep -rn "sb_secret_\|service_role" ~/Downloads/marsa-deploy/assets/js/config.js
 cd ~/Downloads/marsa-deploy && zip -r -X ~/Downloads/marsa-releases/marsa-release-$STAMP.zip . -x '.DS_Store'
 ```
 (أنشئ المجلد `~/Downloads/marsa-releases` مرة واحدة. ملفات الإصدار خارج المستودع، و`.gitignore` يمنع `marsa-release-*.zip` احتياطًا.)
+
+**منذ G7 (القرار G7-19):** المجلد `docs/guide/` (أدلة المستخدم `ar/` و`en/` التي تعرضها صفحة `help.html`) **يُنشر** مع الموقع، وبقية `docs/` (مثل `docs/online/` و`docs/import-templates/` و`docs/partials.md`) تبقى مستثناة. تحقق بعد `rsync`:
+```bash
+ls ~/Downloads/marsa-deploy/docs/            # guide only
+ls ~/Downloads/marsa-deploy/docs/guide/ar ~/Downloads/marsa-deploy/docs/guide/en   # index admin ops finance client-portal platform (.md)
+```
+إن قرر المالك لاحقًا عدم نشر أي شيء من `docs/` تُنقل الأدلة إلى `assets/guide/` (قرار مفتوح في `G7_SPEC.md`).
 
 ### 4.2 الرفع
 1. hPanel → Files → File Manager → `public_html` لنطاق `marsacloud.com`.

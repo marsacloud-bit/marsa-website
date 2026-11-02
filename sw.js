@@ -12,6 +12,8 @@
        navigations          network-first → cached page (stored by path, query
                             stripped) → offline.html
        .js / .css / .json   network-first → cache
+       docs/guide/(ar|en)/*.md  network-first → cache (G7 user guides, rendered by help.html;
+                            not precached, so a guide is offline only after it was opened once)
        images / fonts       stale-while-revalidate: the cached copy at once, refreshed
                             in the background (a same-name logo / icon updates on the
                             next load without a VERSION bump)
@@ -31,25 +33,25 @@
    ========================================================================== */
 'use strict';
 
-var VERSION = '2026-11-07.2';   // G6b review fixes (msg/inbox.js, kit.js, contacts.js, tx-msg.js, i18n/msg.js, app-shell.js); G6b: unified inbox (msg/*.js, i18n/msg.js, msg.css); G6a review fixes (rpt/*.js, i18n/rpt.js); G6a: search / reports / dashboards (rpt/*.js, rpt.js, rpt.css, dash.css) + portal tabs; G4 fin/*, G5 bill/* kept
+var VERSION = '2026-11-08.2';   // G7 review fixes (help.js skip link + phone scroll, platform.js paused / trial-ended badges, i18n/platform.js, platform.css); G7: plans / subscriptions / usage (platform.js, i18n/platform.js, platform.css, supa.js), help.html + help.js + i18n/help.js + help.css (guides network-first, not precached), app-shell.js help nav + admin.js help pill; G6b review fixes (msg/inbox.js, kit.js, contacts.js, tx-msg.js, i18n/msg.js, app-shell.js); G6b: unified inbox (msg/*.js, i18n/msg.js, msg.css); G6a review fixes (rpt/*.js, i18n/rpt.js); G6a: search / reports / dashboards (rpt/*.js, rpt.js, rpt.css, dash.css) + portal tabs; G4 fin/*, G5 bill/* kept
 var CACHE = 'marsa-app-' + VERSION;
 var OFFLINE_URL = 'offline.html';
 
 // relative to the worker's location (= the site root)
 var PRECACHE = [
   OFFLINE_URL,
-  'login.html', 'admin.html', 'platform.html', 'portal.html', 'ocr.html', 'bulk-upload.html',
+  'login.html', 'admin.html', 'platform.html', 'portal.html', 'ocr.html', 'bulk-upload.html', 'help.html',
   'manifest.json',
   // styles: the original design system + shared components + page sheets
   'assets/css/style.css', 'assets/css/app.css',
   'assets/css/pages/login.css', 'assets/css/pages/admin.css', 'assets/css/pages/ops.css', 'assets/css/pages/fin.css', 'assets/css/pages/bill.css',
   'assets/css/pages/rpt.css', 'assets/css/pages/dash.css', 'assets/css/pages/msg.css',
-  'assets/css/pages/platform.css',
+  'assets/css/pages/platform.css', 'assets/css/pages/help.css',
   'assets/css/pages/portal.css', 'assets/css/pages/ocr.css', 'assets/css/pages/bulk-upload.css',
   // scripts
   'assets/js/config.js', 'assets/js/i18n.js', 'assets/js/main.js', 'assets/js/supa.js',
   'assets/js/app-shell.js', 'assets/js/pwa.js', 'assets/js/auth.js',
-  'assets/js/admin.js', 'assets/js/platform.js', 'assets/js/portal.js',
+  'assets/js/admin.js', 'assets/js/platform.js', 'assets/js/portal.js', 'assets/js/help.js',
   'assets/js/ocr.js', 'assets/js/ocr-parse.js', 'assets/js/bulk-upload.js', 'assets/js/xlsx-lite.js',
   'assets/js/ops/alerts.js', 'assets/js/ops/schedule.js', 'assets/js/ops/parties.js',
   'assets/js/ops/exceptions.js', 'assets/js/ops/requirements.js', 'assets/js/ops/tx-sections.js',
@@ -62,7 +64,7 @@ var PRECACHE = [
   // (supabase/functions/* — daftra-sync, inbox-sync — is server source: never precached, never served by the site)
   // dictionaries (a missing optional file never blocks the install)
   'assets/i18n/app.js', 'assets/i18n/login.js', 'assets/i18n/admin.js', 'assets/i18n/ops.js', 'assets/i18n/fin.js', 'assets/i18n/bill.js', 'assets/i18n/rpt.js', 'assets/i18n/msg.js',
-  'assets/i18n/platform.js',
+  'assets/i18n/platform.js', 'assets/i18n/help.js',
   'assets/i18n/ocr.js', 'assets/i18n/bulk.js', 'assets/i18n/portal.js',
   // images: header logo (site-header / drawer / footer), favicon, PWA icons
   'assets/img/logo-header.png', 'assets/img/favicon.png', 'assets/img/logo.png',
@@ -176,6 +178,7 @@ self.addEventListener('fetch', function (event) {
 
   if (req.mode === 'navigate') { event.respondWith(networkFirstPage(req)); return; }
   if (/\.(?:js|css|json)$/i.test(url.pathname)) { event.respondWith(networkFirst(req)); return; }
+  if (/\/docs\/guide\/(?:ar|en)\/[a-z0-9-]+\.md$/i.test(url.pathname)) { event.respondWith(networkFirst(req)); return; }
   if (req.destination === 'image' || req.destination === 'font' ||
       /\.(?:png|jpe?g|webp|gif|svg|ico|woff2?|ttf|otf)$/i.test(url.pathname)) {
     event.respondWith(staleWhileRevalidate(event));

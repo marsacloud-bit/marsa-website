@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>لوحة المنصة | مرسى MARSA</title>
-  <meta name="description" content="لوحة مدير منصة مرسى (بيئة تجريبية): إنشاء المؤسسات وفروعها الأولى ودعوة مديريها، إيقاف المؤسسات وإعادة تفعيلها، أخطاء الواجهة وفحص صحة الخادم.">
+  <meta name="description" content="لوحة مدير منصة مرسى (بيئة تجريبية): إنشاء المؤسسات وفروعها الأولى ودعوة مديريها، إيقاف المؤسسات وإعادة تفعيلها، الباقات والاشتراكات والاستخدام، أخطاء الواجهة وفحص صحة الخادم.">
   <meta name="robots" content="noindex, nofollow">
   <meta name="theme-color" content="#0B3A6E">
   <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
@@ -118,7 +118,7 @@
           </ol>
         </nav>
         <h1 id="page-title"><span data-i18n="platform.title">لوحة المنصة</span> <span class="badge badge-warning pf-env-badge" data-i18n="platform.envBadge">بيئة تجريبية</span></h1>
-        <p class="lead" data-i18n="platform.lead">إدارة المؤسسات المستأجرة على منصة مرسى: إنشاء مؤسسة جديدة وفرعها الأول ودعوة مديرها، وإيقاف المؤسسات أو إعادة تفعيلها، ومتابعة أخطاء الواجهة وصحة الخادم. هذه اللوحة لا تعرض بيانات العمليات الخاصة بأي مؤسسة.</p>
+        <p class="lead" data-i18n="platform.lead">إدارة المؤسسات المستأجرة على منصة مرسى: إنشاء مؤسسة جديدة وفرعها الأول ودعوة مديرها، وإيقاف المؤسسات أو إعادة تفعيلها، والباقات والاشتراكات وأعداد الاستخدام، ومتابعة أخطاء الواجهة وصحة الخادم. هذه اللوحة لا تعرض بيانات العمليات الخاصة بأي مؤسسة.</p>
       </div>
       <svg class="page-hero-wave" viewBox="0 0 1440 120" preserveAspectRatio="none" aria-hidden="true">
         <path class="w-back" d="M0,40 C180,90 360,10 560,40 C760,70 900,20 1100,35 C1260,48 1360,70 1440,50 L1440,120 L0,120 Z"/>
@@ -193,6 +193,10 @@
             <div class="card card-stat pf-tile" role="listitem" data-tone="danger">
               <span class="stat-value num" data-pf-kpi="suspended">—</span>
               <span class="stat-label" data-i18n="platform.kpiSuspended">موقوفة</span>
+            </div>
+            <div class="card card-stat pf-tile" role="listitem" data-pf-kpi-over>
+              <span class="stat-value num" data-pf-kpi="over">—</span>
+              <span class="stat-label" data-i18n="platform.kpiOverLimit">تجاوز حدود الباقة</span>
             </div>
             <div class="card card-stat pf-tile" role="listitem" data-pf-kpi-health>
               <span class="stat-value" data-pf-kpi="health">—</span>
@@ -348,6 +352,70 @@
                   </tr>
                 </thead>
                 <tbody data-pf-orgs></tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- G7 subscriptions & usage (counts only; the server enforces the limits) -->
+          <section class="card pf-card" aria-labelledby="pf-subs-title" data-pf-subs-card>
+            <div class="pf-card-head">
+              <h2 id="pf-subs-title" data-i18n="platform.subsTitle">الاشتراكات والاستخدام</h2>
+              <button class="btn btn-sm btn-ghost" type="button" data-pf-subs-reload data-i18n="platform.refresh">تحديث</button>
+            </div>
+            <p class="text-muted text-sm" data-i18n="platform.subsLead">باقة كل مؤسسة وحالة اشتراكها وأعداد استخدامها في الشهر الحالي (المستخدم / الحد). الحدود يفرضها الخادم: عند بلوغ الحد يُرفض الإنشاء الجديد ولا يُحذف شيء. الرسائل الواردة ومعالجتها الآلية ومرفقاتها لا تُرفض أبدًا، فقد تظهر فوق الحد.</p>
+            <div class="table-wrap">
+              <table class="table table-striped adm-table pf-table">
+                <caption class="sr-only" data-i18n="platform.subsTitle">الاشتراكات والاستخدام</caption>
+                <thead>
+                  <tr>
+                    <th scope="col" data-i18n="platform.colOrg">المؤسسة</th>
+                    <th scope="col" data-i18n="platform.colPlan">الباقة</th>
+                    <th scope="col" data-i18n="platform.colSubStatus">حالة الاشتراك</th>
+                    <th scope="col" data-i18n="platform.colPeriod">الفترة</th>
+                    <th scope="col" class="num" data-i18n="platform.metric_users">المستخدمون</th>
+                    <th scope="col" class="num" data-i18n="platform.metric_branches">الفروع</th>
+                    <th scope="col" class="num" data-i18n="platform.metric_transactions_month">المعاملات / شهر</th>
+                    <th scope="col" class="num" data-i18n="platform.metric_storage_mb">التخزين</th>
+                    <th scope="col" class="num" data-i18n="platform.metric_messages_month">الرسائل / شهر</th>
+                    <th scope="col" class="num" data-i18n="platform.metric_ai_runs_month">المعالجة الآلية / شهر</th>
+                    <th scope="col" data-i18n="platform.colActions">الإجراء</th>
+                  </tr>
+                </thead>
+                <tbody data-pf-subs></tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- G7 plans (seed limits are placeholders the owner edits; no price is set) -->
+          <section class="card pf-card" aria-labelledby="pf-plans-title" data-pf-plans-card>
+            <div class="pf-card-head">
+              <h2 id="pf-plans-title" data-i18n="platform.plansTitle">الباقات</h2>
+              <div class="pf-row-actions">
+                <button class="btn btn-sm btn-primary" type="button" data-pf-plan-new data-i18n="platform.planNew">باقة جديدة</button>
+                <button class="btn btn-sm btn-ghost" type="button" data-pf-plans-reload data-i18n="platform.refresh">تحديث</button>
+              </div>
+            </div>
+            <p class="text-muted text-sm" data-i18n="platform.plansLead">حدود كل باقة (فارغ = غير محدود). القيم الحالية مبدئية — قرار المالك، والأسعار لم تُحدَّد بعد. الفوترة الإلكترونية للاشتراكات مؤجلة.</p>
+            <div class="table-wrap">
+              <table class="table table-striped adm-table pf-table">
+                <caption class="sr-only" data-i18n="platform.plansTitle">الباقات</caption>
+                <thead>
+                  <tr>
+                    <th scope="col" data-i18n="platform.colCode">الرمز</th>
+                    <th scope="col" data-i18n="platform.colPlanName">الاسم</th>
+                    <th scope="col" class="num" data-i18n="platform.metric_users">المستخدمون</th>
+                    <th scope="col" class="num" data-i18n="platform.metric_branches">الفروع</th>
+                    <th scope="col" class="num" data-i18n="platform.metric_transactions_month">المعاملات / شهر</th>
+                    <th scope="col" class="num" data-i18n="platform.metric_storage_mb">التخزين</th>
+                    <th scope="col" class="num" data-i18n="platform.metric_messages_month">الرسائل / شهر</th>
+                    <th scope="col" class="num" data-i18n="platform.metric_ai_runs_month">المعالجة الآلية / شهر</th>
+                    <th scope="col" data-i18n="platform.colPrice">السعر الشهري</th>
+                    <th scope="col" class="num" data-i18n="platform.colPlanOrgs">المؤسسات</th>
+                    <th scope="col" data-i18n="platform.colStatus">الحالة</th>
+                    <th scope="col" data-i18n="platform.colActions">الإجراء</th>
+                  </tr>
+                </thead>
+                <tbody data-pf-plans></tbody>
               </table>
             </div>
           </section>

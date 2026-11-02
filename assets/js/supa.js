@@ -69,6 +69,9 @@
       MRS_OVERPAID: 'المبلغ يتجاوز المتبقي من الإجمالي (المتبقي: {f}).',
       // G6a (client-side only: the export checks of assets/js/rpt/export.js)
       MRS_EXPORT: 'تعذّر إنشاء ملف التصدير. أعد المحاولة.',
+      // G7 subscriptions & plan limits (docs/online/G7_SPEC.md §Errors); {f} = AR.planLabels label, never the raw key
+      MRS_PLAN_LIMIT: 'وصلت المؤسسة إلى حد الباقة ({f}). لم يُحفظ شيء. تواصل مع إدارة المنصة لترقية الباقة.',
+      MRS_PLAN_INACTIVE: 'اشتراك المؤسسة غير نشط ({f}). يمكنك الاطلاع على البيانات، ولا يمكن إنشاء سجلات جديدة.',
       DUPLICATE: 'هذا السجل موجود من قبل (تكرار). إن كان ملفًا فقد رُفع سابقًا.',
       FK: 'مرجع غير صالح أو لا يخص مؤسستك.',
       CHECK: 'بعض القيم غير صحيحة.',
@@ -247,6 +250,16 @@
     },
     // G6b: messages for a detail word under one code only ('CODE:detail'); checked before details / the code text
     codeDetails: {
+      // G7 subscriptions (platform RPCs)
+      'MRS_BAD_TRANSITION:subscription_suspended': 'الاشتراك موقوف: أعد التفعيل من إدارة الاشتراكات.',
+      'MRS_BAD_TRANSITION:use_suspend': 'لتعليق الاشتراك أو إلغائه استخدم «تعليق» بدلًا من تغيير الباقة.',
+      'MRS_BAD_TRANSITION:org_suspended': 'اشتراك المؤسسة موقوف أو ملغى: أعد تفعيله أولًا ثم غيّر الباقة.',
+      'MRS_BAD_TRANSITION:pilot_required': 'باقة «تجريبية (pilot)» لا يمكن إيقافها؛ هي الباقة الافتراضية للمؤسسات.',
+      'MRS_INVALID:plan_inactive': 'الباقة المختارة غير مفعّلة. فعّلها من «الباقات» أو اختر باقة أخرى.',
+      'MRS_INVALID:period': 'فترة الاشتراك غير صحيحة: تاريخ النهاية يجب ألا يسبق البداية، وهو مطلوب للتجربة.',
+      'MRS_INVALID:limit_overrides': 'قيم الحدود الخاصة غير صحيحة (أعداد صحيحة غير سالبة فقط).',
+      'MRS_INVALID:months': 'عدد الأشهر غير صحيح (من 1 إلى 24).',
+      'MRS_NOT_FOUND:plan': 'الباقة غير موجودة.',
       'MRS_NOT_FOUND:thread': 'المحادثة غير موجودة أو لا تملك صلاحية عرضها (المراسلات مفصولة حسب المؤسسة والفرع).',
       'MRS_NOT_FOUND:message': 'الرسالة غير موجودة أو لا تملك صلاحية عرضها.',
       'MRS_NOT_FOUND:reply': 'الرد غير موجود أو لا تملك صلاحية عرضه.',
@@ -264,6 +277,13 @@
     },
     banner: {
       staging: 'بيئة تجريبية (Staging) — البيانات للاختبار فقط'
+    },
+    // G7: the {f} of MRS_PLAN_LIMIT (metric key) / MRS_PLAN_INACTIVE (status detail); English: err.plan_metric_<key> / err.plan_inactive_<detail>
+    planLabels: {
+      metric_users: 'عدد المستخدمين', metric_branches: 'عدد الفروع', metric_transactions_month: 'المعاملات في الشهر',
+      metric_storage_mb: 'مساحة التخزين', metric_storage_bytes: 'مساحة التخزين', metric_messages_month: 'الرسائل في الشهر',
+      metric_ai_runs_month: 'عمليات المعالجة الآلية في الشهر',
+      inactive_trial_expired: 'انتهت الفترة التجريبية', inactive_suspended: 'الاشتراك موقوف', inactive_cancelled: 'الاشتراك ملغى'
     }
   };
 
@@ -276,6 +296,22 @@
         MRS_OVER_ALLOCATED: 'The allocations exceed the line net; an allocation never doubles the invoice (remaining: {f}).',
         MRS_OVERPAID: 'The amount exceeds what remains of the total (remaining: {f}).',
         MRS_EXPORT: 'The export file could not be created. Try again.',
+        // G7 subscriptions & plan limits
+        MRS_PLAN_LIMIT: 'Your organization reached its plan limit ({f}). Nothing was saved. Contact the platform team to upgrade.',
+        MRS_PLAN_INACTIVE: 'The organization\'s subscription is not active ({f}). You can view data but cannot create new records.',
+        plan_metric_users: 'users', plan_metric_branches: 'branches', plan_metric_transactions_month: 'transactions per month',
+        plan_metric_storage_mb: 'storage', plan_metric_storage_bytes: 'storage', plan_metric_messages_month: 'messages per month',
+        plan_metric_ai_runs_month: 'automated-processing runs per month',
+        plan_inactive_trial_expired: 'trial period ended', plan_inactive_suspended: 'subscription suspended', plan_inactive_cancelled: 'subscription cancelled',
+        'cdetail_MRS_BAD_TRANSITION_subscription_suspended': 'The subscription is suspended: reactivate it from subscription management.',
+        'cdetail_MRS_BAD_TRANSITION_use_suspend': 'To suspend or cancel a subscription use "Suspend" instead of changing the plan.',
+        'cdetail_MRS_BAD_TRANSITION_org_suspended': 'The organization\'s subscription is suspended or cancelled: reactivate it first, then change the plan.',
+        'cdetail_MRS_BAD_TRANSITION_pilot_required': 'The "pilot" plan cannot be deactivated; it is the default plan for organizations.',
+        'cdetail_MRS_INVALID_plan_inactive': 'The selected plan is not active. Activate it under "Plans" or choose another plan.',
+        'cdetail_MRS_INVALID_period': 'Invalid subscription period: the end date must not be before the start, and it is required for a trial.',
+        'cdetail_MRS_INVALID_limit_overrides': 'Invalid custom limits (non-negative whole numbers only).',
+        'cdetail_MRS_INVALID_months': 'Invalid number of months (1 to 24).',
+        'cdetail_MRS_NOT_FOUND_plan': 'The plan does not exist.',
         detail_search_query_short: 'Type at least 2 characters to search.',
         detail_date_range: 'Invalid date range: "from" must not be after "to", and the range is at most three years (1096 days).',
         detail_export_rows: 'Too many rows to export (Excel / CSV up to 10,000 rows, print up to 2,000). Narrow the filters.',
@@ -459,6 +495,14 @@
     var label = fieldLabel(f);
     return String(tpl).replace(/\{f\}|\{field\}/g, label);
   }
+  // G7: MRS_PLAN_LIMIT detail = metric key, MRS_PLAN_INACTIVE detail = trial_expired | suspended | cancelled
+  var PLAN_CODES = { MRS_PLAN_LIMIT: 'metric_', MRS_PLAN_INACTIVE: 'inactive_' };
+  function planLabel(code, f) {
+    if (!f) return '';
+    var k = PLAN_CODES[code] + f;
+    if (!Object.prototype.hasOwnProperty.call(AR.planLabels, k)) return '';   // unknown detail: no raw key in the message
+    return i18nStr('err.plan_' + k) || AR.planLabels[k];
+  }
   function mkErr(code, field, raw, extra) {
     var tpl = null;
     // G6b: a detail word with its own message under this code only (MRS_NOT_FOUND 'thread', MRS_INVALID 'recipient', …)
@@ -466,7 +510,8 @@
     // G4: a detail code with its own message ({x} = the extra part, e.g. line numbers)
     if (!tpl && field && Object.prototype.hasOwnProperty.call(AR.details, field)) tpl = i18nStr('err.detail_' + field) || AR.details[field];
     if (!tpl) tpl = i18nStr('err.' + code) || AR.errors[code] || i18nStr('err.UNKNOWN') || AR.errors.UNKNOWN;
-    var msg = fmt(tpl, field).replace(/\{x\}/g, extra == null ? '' : String(extra)).replace(/\s*\(\)/g, '');
+    var msg = (PLAN_CODES[code] ? String(tpl).replace(/\{f\}|\{field\}/g, planLabel(code, field)) : fmt(tpl, field))
+      .replace(/\{x\}/g, extra == null ? '' : String(extra)).replace(/\s*\(\)/g, '');
     return { code: code, field: field || null, message: msg, raw: raw || null };
   }
   // G4 details may carry a reference after the code ('invoice_number_taken:<uuid>', 'lines_unallocated:1,3'),
@@ -1099,6 +1144,36 @@
   // → { org_id, invitation_id, email, expires_at, token, accept_path } (shown once, never stored)
   function platformReissueAdminInvitation(orgId) { return rpc('platform_reissue_admin_invitation', { p_org: orgId }); }
   function platformRecentErrors() { return rpc('platform_recent_errors'); }
+
+  /* ------------------------------------------------------------------
+     G7 plans, subscriptions & usage (docs/online/G7_SPEC.md §RPC list) — counts only, never tenant rows.
+     The limits are enforced by the server (MRS_PLAN_LIMIT / MRS_PLAN_INACTIVE); the UI only shows usage.
+     ------------------------------------------------------------------ */
+  // → [{code, name_ar, name_en, sort, is_active, limits{users, branches, transactions_month, storage_mb, messages_month, ai_runs_month}, price_monthly_sar, notes, orgs}]
+  function platformListPlans() { return rpc('platform_list_plans'); }
+  // payload = {name_ar, name_en?, sort?, is_active?, limits:{…six keys, null = unlimited}, price_monthly_sar?, notes?}; code immutable once created
+  function platformSavePlan(code, payload) { return rpc('platform_save_plan', { p_code: code, p_payload: payload || {} }); }
+  // → [{org_id, slug, name_ar, name_en, is_active, plan_code, plan_name_ar, plan_name_en, status, period_start, period_end,
+  //     limit_overrides, limits, usage, over_limit[], status_reason, suspended_at, updated_at}]
+  function platformListSubscriptions() { return rpc('platform_list_subscriptions'); }
+  // payload = {plan_code, status: 'trial'|'active', period_start, period_end?, limit_overrides?, reason} → {subscription, usage, over_limit[]}
+  // idempotent (p_idem_key): the same key is re-sent on a network error / timeout
+  function platformSetOrgPlan(orgId, payload, idemKey) {
+    return idemRpc('platform_set_org_plan', idemKey, function (k) { return { p_org: orgId, p_payload: payload || {}, p_idem_key: k }; });
+  }
+  // status → suspended (or cancelled with cancel=true) + organizations.is_active=false; already so → {unchanged:true}
+  function platformSuspendOrg(orgId, reason, cancel) { return rpc('platform_suspend_org', { p_org: orgId, p_reason: reason, p_cancel: !!cancel }); }
+  // status → active + organizations.is_active=true; already active → {unchanged:true}
+  function platformActivateOrg(orgId, reason) { return rpc('platform_activate_org', { p_org: orgId, p_reason: reason }); }
+  // → {org_id, limits, current, history:[{period_start, transactions_month, messages_month, ai_runs_month}], storage_mb, events:[…]}
+  function platformOrgUsage(orgId, months) {
+    var args = { p_org: orgId };
+    if (months != null) args.p_months = months;
+    return rpc('platform_org_usage', args);
+  }
+  function platformRecountUsage(orgId) { return rpc('platform_recount_usage', { p_org: orgId }); }
+  // org admin of p_org: {plan_code, plan_name_ar, plan_name_en, status, period_start, period_end, limits, usage, over_limit[]} (no price)
+  function orgSubscription(orgId) { return rpc('org_subscription', { p_org: orgId }); }
 
   // Internal staff fields (transactions.notes, clients.notes/classification) are not selectable by
   // the API roles (0700 column grants). Staff get them through staff_internal_fields(); for clients
@@ -2881,6 +2956,10 @@
     platformListOrgs: platformListOrgs, platformCreateOrg: platformCreateOrg, platformSetOrgActive: platformSetOrgActive,
     platformReissueAdminInvitation: platformReissueAdminInvitation,
     platformRecentErrors: platformRecentErrors,
+    // G7 plans / subscriptions / usage (platform admin) + the org admin's own subscription
+    platformListPlans: platformListPlans, platformSavePlan: platformSavePlan, platformListSubscriptions: platformListSubscriptions,
+    platformSetOrgPlan: platformSetOrgPlan, platformSuspendOrg: platformSuspendOrg, platformActivateOrg: platformActivateOrg,
+    platformOrgUsage: platformOrgUsage, platformRecountUsage: platformRecountUsage, orgSubscription: orgSubscription,
     // requests
     listRequests: listRequests, getRequest: getRequest, updateRequest: updateRequest,
     setRequestStatus: setRequestStatus, convertRequest: convertRequest,
