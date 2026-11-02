@@ -118,7 +118,7 @@
 ### 4.2 قبل أي لصق على Staging
 - [x] (2026-11-03) نسخة احتياطية من Staging (`scripts/backup-staging.sh` وفق `BACKUP_RESTORE_AR.md`، أو من لوحة Supabase).
 - [x] (2026-11-03) `SELECT public.health_check();` لمعرفة آخر إصدار مطبَّق؛ إن كان أقدم من `20261102000300` (G2) فطبّق ترحيلات G2 أولًا وفق `G2_REPORT_AR.md` §3.1–3.2.
-- [ ] (موصى به) تفعيل `pg_cron` قبل لصق G2 / G3 (التنظيف اليومي وتحديث التنبيهات كل 15 دقيقة)؛ وإلا تشغيل يدوي يومي لـ `app.idem_purge_expired()` و`app.client_errors_purge(30)`.
+- [x] (2026-11-03، بموافقة المالك) `pg_cron` مفعّل على Staging مع 3 مهام: `marsa_refresh_alerts` كل 15 دقيقة، `marsa_idem_purge` 03:17 و`marsa_client_errors_purge` 03:27 (UTC = 06:17/06:27 بتوقيت الرياض). (كان: (موصى به) تفعيل `pg_cron` قبل لصق G2 / G3 (التنظيف اليومي وتحديث التنبيهات كل 15 دقيقة)؛ وإلا تشغيل يدوي يومي لـ `app.idem_purge_expired()` و`app.client_errors_purge(30)`.)
 - [ ] قبل G4: الاستعلام عن مشرفين مرتبطين بفرع يجب أن يعيد صفرًا (`G4_REPORT_AR.md` §3.1).
 - [ ] قبل G5 (فقط إن لُصقت نسخة G5 أقدم): لا نطاق دفترة مشترك بين مؤسستين (`G5_REPORT_AR.md` §3.1).
 - [ ] (اختياري) تفعيل `pg_trgm` لفهارس البحث (G6a)، ثم إعادة لصق `g6a_apply.sql`.
