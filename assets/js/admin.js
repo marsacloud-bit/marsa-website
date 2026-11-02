@@ -181,6 +181,9 @@
     finApprove: ['accounts_manager', 'branch_manager', 'admin'],
     // G5 (docs/online/G5_SPEC.md §Roles) — mirrors app.bill_admin_roles (Daftra connection / catalog / tax settings, org-level)
     billAdmin: ['accounts_manager', 'admin'],
+    // G6a (docs/online/G6A_SPEC.md §Roles) — mirrors app.mgmt_roles / app.trip_finance_roles
+    mgmt: ['admin', 'supervisor', 'branch_manager'],
+    tripFin: ['accountant', 'accounts_manager', 'operations_manager', 'branch_manager', 'supervisor', 'admin'],
     backward: ['operations_manager', 'branch_manager', 'supervisor', 'admin']
   };
   var STATUS_ROLES = {
@@ -686,7 +689,7 @@
      The hook is read on every route, so a module that registers late still shows up.
      ------------------------------------------------------------------ */
   var OPS = window.MarsaOps = window.MarsaOps || { views: {}, txSections: [] };
-  var OPS_SETS = ['staff', 'opsWriter', 'transportWriter', 'orgAdmin', 'finance', 'finRead', 'finWrite', 'finApprove', 'billAdmin'];
+  var OPS_SETS = ['staff', 'opsWriter', 'transportWriter', 'orgAdmin', 'finance', 'finRead', 'finWrite', 'finApprove', 'billAdmin', 'mgmt', 'tripFin'];
   function opsRoleSet(allow) {
     if (Array.isArray(allow)) return allow;
     return OPS_SETS.indexOf(allow) !== -1 ? R[allow] : R.staff;
@@ -715,8 +718,24 @@
       t: function (key, vars) { return I && typeof I.t === 'function' ? I.t(key, vars) : key; },
       el: el, toast: toast, confirm: askConfirm, modal: opsModal, go: go, refresh: rerender,
       MarsaApi: api, label: opsLabel, fmtDate: fmtWhen, fmtMoney: fmtMoney, fmtNumber: fmtCount,
-      who: who, isEn: isEn, errText: apiErr, newIdemKey: newKey
+      who: who, isEn: isEn, errText: apiErr, newIdemKey: newKey,
+      // G6a: the raw ?query of the current hash (module views keep it, see route()) and its parsed form
+      query: parseHash().query, hashQuery: hashQuery
     };
+  }
+  // '#search?container_no=MSCU1&status=transport&status=appointment' → { container_no: 'MSCU1', status: ['transport', 'appointment'] }
+  // (repeated keys become arrays; undecodable pairs are skipped; keys are short identifiers only)
+  function hashQuery() {
+    var out = {}, q = parseHash().query;
+    if (!q) return out;
+    q.split('&').forEach(function (pair) {
+      if (!pair) return;
+      var i = pair.indexOf('='), k, v;
+      try { k = decodeURIComponent(i === -1 ? pair : pair.slice(0, i)); v = decodeURIComponent((i === -1 ? '' : pair.slice(i + 1)).replace(/\+/g, ' ')); } catch (e) { return; }
+      if (!/^[a-z][a-z0-9_]{0,40}$/.test(k)) return;
+      if (Object.prototype.hasOwnProperty.call(out, k)) out[k] = [].concat(out[k], v); else out[k] = v;
+    });
+    return out;
   }
   // status_labels / admin dictionaries first, then 'label.<domain>.<code>' (MarsaI18n.label) and the ops dictionaries
   function opsLabel(domain, code) {
@@ -801,8 +820,9 @@
   // views), then the staff pages elsewhere (bulk upload, OCR, platform) from MarsaShell.navItems().
   // Each link carries data-nav-id so MarsaShell.setActive / setBadge('alerts') find it.
   var NAV_EXTERNAL = ['bulk', 'ocr', 'platform'];
-  // daily work → G3 operations → G4 operating finance → G5 billing → management (unknown module views go last, stable)
+  // daily work → G3 operations → G6a reports & search → G4 operating finance → G5 billing → management (unknown module views go last, stable)
   var NAV_ORDER = ['dashboard', 'requests', 'transactions', 'clients', 'messages', 'imports', 'alerts', 'schedule', 'exceptions', 'parties',
+    'search', 'reports',
     'costs', 'payables', 'margins', 'demurrage', 'billing', 'daftra',
     'org', 'branches', 'members', 'requirements', 'audit', 'errors'];
   function buildNav() {
@@ -916,6 +936,9 @@
     var parent = DETAIL[name] || name;
     var allowed = allowedViews().map(function (v) { return v.id; });
     if (allowed.indexOf(parent) === -1 || (DETAIL[name] && !(id && UUID_RE.test(id)))) { name = 'dashboard'; parent = 'dashboard'; id = null; }
+    // G6a: a module view (#search?container_no=…, #reports/containers?overdue=true) owns its query: it stays in the
+    // hash (back / reload keep the filters) and reaches the view as opsApi().query / hashQuery()
+    else if (r.query && !ROUTE_FILTERS[name] && opsView(name)) { /* kept */ }
     else if (r.query) {
       applyQuery(name, r.query);
       try { history.replaceState(null, '', '#' + name); } catch (e) { /* ignore */ }
@@ -1259,7 +1282,66 @@
     }
     return out;
   }
-  function renderDashboard() {
+  /* ------------------------------------------------------------------
+     G6a role dashboards (docs/online/G6A_SPEC.md §3.4, G6a-4): #dashboard keeps the overview below and
+     adds role tabs rendered by window.MarsaDash (assets/js/rpt/dashboards.js) from dash_ops /
+     dash_finance / dash_management. Routes #dashboard, #dashboard/overview|ops|finance|management;
+     an unknown or forbidden tab → the default tab. Without MarsaDash the overview still works.
+     ------------------------------------------------------------------ */
+  var DASH_FALLBACK = {
+    ar: { tabs_label: 'أقسام لوحة التحكم', tab_overview: 'نظرة عامة', tab_ops: 'التشغيل', tab_finance: 'المالية', tab_management: 'الإدارة' },
+    en: { tabs_label: 'Dashboard sections', tab_overview: 'Overview', tab_ops: 'Operations', tab_finance: 'Finance', tab_management: 'Management' }
+  };
+  function dashT(k, vars) {
+    var I = window.MarsaI18n, key = 'dash.' + k;
+    if (I && typeof I.t === 'function') { var s = I.t(key, vars); if (s && s !== key) return s; }
+    return (DASH_FALLBACK[isEn() ? 'en' : 'ar'] || {})[k] || DASH_FALLBACK.ar[k] || k;
+  }
+  function dashModule() { var D = window.MarsaDash; return D && typeof D.render === 'function' ? D : null; }
+  function dashTabs() {
+    var tabs = ['overview', 'ops'];
+    if (canAny(R.finRead)) tabs.push('finance');
+    if (canAny(R.mgmt)) tabs.push('management');
+    return tabs;
+  }
+  function dashDefaultTab() {
+    if (!dashModule()) return 'overview';
+    if (canAny(R.mgmt)) return 'management';
+    if (canAny(['accountant', 'accounts_manager'])) return 'finance';
+    return 'ops';
+  }
+  function dashTabStrip(active, tabs) {
+    return el('div', { class: 'tab-list dash-tabs', role: 'tablist', 'aria-label': dashT('tabs_label') }, tabs.map(function (id) {
+      var b = el('button', { class: 'tab', type: 'button', role: 'tab', id: 'dash-tab-' + id, 'data-dash-tab': id,
+        'aria-selected': String(id === active), 'aria-controls': 'dash-panel', text: dashT('tab_' + id) });
+      b.addEventListener('click', function () { if (id !== active) go('#dashboard/' + id); });
+      return b;
+    }));
+  }
+  function renderDashboard(param) {
+    var tabs = dashTabs();
+    var tab = param && tabs.indexOf(param) !== -1 ? param : dashDefaultTab();
+    var strip = dashTabStrip(tab, tabs);
+    if (tab === 'overview') return renderOverview(strip);
+    var out = frag(dHead(viewLabel('dashboard'), t('dash_sub')));
+    out.appendChild(strip);
+    var root = el('div', { class: 'dash-view', id: 'dash-panel', role: 'tabpanel', 'aria-labelledby': 'dash-tab-' + tab, 'data-dash-tab': tab });
+    out.appendChild(root);
+    var D = dashModule();
+    var missing = function () { root.appendChild(dAlert('warning', opsT('ops.api_missing', { fn: 'MarsaDash' }, t('api_missing', { fn: 'MarsaDash' })))); };
+    if (!D) { missing(); return out; }
+    try {
+      var p = D.render(root, tab, opsApi());
+      if (p && typeof p.then === 'function') p.then(null, function (e) { root.appendChild(dAlert('danger', errText(e))); });
+    } catch (e) { root.appendChild(dAlert('danger', errText(e))); }
+    return out;
+  }
+  function opsT(key, vars, fallback) {
+    var I = window.MarsaI18n;
+    if (I && typeof I.t === 'function') { var s = I.t(key, vars); if (s && s !== key) return s; }
+    return fallback;
+  }
+  function renderOverview(strip) {
     var ops = canAny(R.opsWriter);
     var statsP = typeof (api && api.dashboardStats) === 'function' ? call('dashboardStats', S.orgId) : Promise.resolve({ data: null, error: { code: 'MRS_UNAVAILABLE' } });
     var listsP = Promise.all([
@@ -1274,6 +1356,7 @@
       var g3 = opsDashCounts(res[1][3], res[1][4]);
       return L.profiles((ee.data || []).map(function (e) { return e.actor; })).then(function () {
         var out = frag(dHead(viewLabel('dashboard'), t('dash_sub')));
+        if (strip) out.appendChild(strip);
         var tx = st.tx || {}, txTotal = 0, txOpen = 0;
         ORDER.operational_status.forEach(function (c) { var n = tx[c] || 0; txTotal += n; if (c !== 'closed') txOpen += n; });
 

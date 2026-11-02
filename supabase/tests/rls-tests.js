@@ -293,6 +293,12 @@ const G5_STAFF_RPCS = ['get_daftra_connection', 'save_daftra_connection', 'reque
   'request_billing_pull', 'resolve_billing_conflict', 'cancel_billing_intent', 'retry_billing_job', 'list_billing_intents',
   'get_billing_intent', 'list_billing_jobs', 'get_billing_job', 'billing_review_queue', 'resolve_billing_review', 'tx_billing'];
 const G5_WORKER_RPCS = ['daftra_claim_jobs', 'daftra_complete_job', 'daftra_schedule_pulls', 'daftra_mock_load', 'daftra_mock_save', 'daftra_renew_lease'];
+// G6a (20261106000100): read-side RPCs (search / reports / dashboards / portal invoices) + the export log
+const G6A_RPCS = ['search_records', 'report_transactions', 'report_containers', 'report_trips', 'dash_ops', 'dash_finance',
+  'dash_management', 'portal_invoices', 'log_report_export', 'list_report_exports'];
+// the staff readers (everything but portal_invoices / log_report_export), called with p_org and an empty filter
+const G6A_STAFF_READERS = ['search_records', 'report_transactions', 'report_containers', 'report_trips', 'dash_ops', 'dash_finance',
+  'dash_management', 'list_report_exports'];
 async function g5Fixtures(G4) {
   const rpcAs = async (who, sql, params) => (await as(who, sql, params))[0].r;
   const caps = {};
@@ -320,6 +326,14 @@ async function g5Fixtures(G4) {
     out[tag] = { org, tx, conn, probe, intent: intentId, push, review, attempt: ctx.attempt_id };
   }
   return out;
+}
+
+// G6a: one report_exports row per org, through the real RPC (org A: adminA; org B: staffB). Returns { A: id, B: id }.
+async function g6aFixtures() {
+  const rpcAs = async (who, sql, params) => (await as(who, sql, params))[0].r;
+  const a = await rpcAs('adminA', `SELECT public.log_report_export($1, $2) r`, [A, { report: 'transactions', format: 'xlsx', filters: { from: '2026-10-01' }, row_count: 3 }]);
+  const b = await rpcAs('staffB', `SELECT public.log_report_export($1, $2) r`, [B, { report: 'containers', format: 'csv', filters: {}, row_count: 1 }]);
+  return { A: a.id, B: b.id };
 }
 
 /* ------------------------------------------------------------------ tests */
@@ -360,7 +374,9 @@ const TENANT_TABLES = [
   // G4 suppliers & operating costs (20261104000100): read by finance roles only, written only through RPCs
   ...G4_TABLES.map(t => [t, `SELECT id::text id FROM public.${t} WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id']),
   // G5 Daftra integration & invoicing (20261105000100): read by finance roles only, written only through RPCs
-  ...G5_TABLES.map(t => [t, `SELECT id::text id FROM public.${t} WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'])
+  ...G5_TABLES.map(t => [t, `SELECT id::text id FROM public.${t} WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id']),
+  // G6a export log (20261106000100): SELECT only (own rows / auditors), append-only, written only by log_report_export
+  ['report_exports',     `SELECT id::text id FROM public.report_exports WHERE org_id = $1 LIMIT 1`,     'id::text',  'row_count = row_count']
 ];
 // G2 internal tables: no API grant at all (written/read only through SECURITY DEFINER RPCs)
 // G5: daftra_mock_accounts (fake Daftra account state) is service-role only, like the G2 internal tables
@@ -403,6 +419,9 @@ async function main() {
   let G5;
   try { G5 = await g5Fixtures(G4); pass('G5 fixtures: a row per org in every billing table (connection … review items, mock account)'); }
   catch (e) { fail('G5 fixtures', errText(e)); return finish(); }
+  let G6A;
+  try { G6A = await g6aFixtures(); pass('G6a fixtures: a report_exports row per org (log_report_export)'); }
+  catch (e) { fail('G6a fixtures', errText(e)); return finish(); }
 
   /* ---------------------------------------------------------------- catalog */
   section('catalog: RLS, grants, function privileges');
@@ -448,7 +467,7 @@ async function main() {
   });
   await check('anon has no USAGE on schema app', async () =>
     (await q(`SELECT has_schema_privilege('anon', 'app', 'USAGE') u`))[0].u === false);
-  await check('authenticated can execute only the 123 documented public RPCs', async () => {
+  await check('authenticated can execute only the 133 documented public RPCs', async () => {
     const r = await q(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                         WHERE n.nspname = 'public' AND has_function_privilege('authenticated', p.oid, 'EXECUTE') ORDER BY 1`);
     const exp = ['admin_list_members', 'admin_set_member_active', 'convert_request_to_transaction', 'import_commit', 'issue_tracking_token', 'my_context', 'public_track',
@@ -476,9 +495,11 @@ async function main() {
       'update_demurrage_case', 'set_demurrage_status', 'list_demurrage', 'create_cost_adjustment', 'review_cost_adjustment',
       'list_cost_adjustments', 'tx_costs', 'tx_margin', 'margin_report', 'cost_report',
       // G5 Daftra integration & invoicing (20261105000100): 25 staff RPCs; the 5 daftra_* worker RPCs are NOT here
-      ...G5_STAFF_RPCS];
+      ...G5_STAFF_RPCS,
+      // G6a portal / reports (20261106000100): 10 read-side RPCs (log_report_export is the only writer, append-only)
+      ...G6A_RPCS];
     const got = r.map(x => x.proname);
-    if (exp.length !== 123) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 133) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');
@@ -1461,6 +1482,133 @@ async function main() {
     const j = await denied('finB', `SELECT 1 FROM public.billing_sync_jobs WHERE org_id = $1`, [A]);
     return j;
   });
+
+  /* ---------------------------------------------------------------- G6a */
+  section('G6a portal / reports: catalog, clients reach no staff reader, export log append-only');
+  await check('G6a RPCs: SECURITY DEFINER, search_path pinned, EXECUTE for authenticated only (not PUBLIC / anon)', async () => {
+    const r = await q(`SELECT p.proname, p.prosecdef d, has_function_privilege('anon', p.oid, 'EXECUTE') n,
+                              has_function_privilege('authenticated', p.oid, 'EXECUTE') a, coalesce(array_to_string(p.proacl, ','), '') acl,
+                              EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig, '{}')) c WHERE c = 'search_path=""') sp
+                         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = ANY($1)`, [G6A_RPCS]);
+    const bad = r.filter(x => !x.d || x.n || !x.a || !x.sp || /(^|,)=X/.test(x.acl));
+    return (r.length === G6A_RPCS.length && bad.length === 0) || 'found ' + r.length + ' bad: ' + bad.map(x => x.proname + ' ' + JSON.stringify(x)).join('; ');
+  });
+  await check('G6a app helpers (rpt_*, mgmt_roles): not executable by anon / authenticated', async () => {
+    const r = await q(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'app'
+                         AND (p.proname LIKE 'rpt\\_%' OR p.proname = 'mgmt_roles')
+                         AND (has_function_privilege('authenticated', p.oid, 'EXECUTE') OR has_function_privilege('anon', p.oid, 'EXECUTE'))`);
+    const n = (await q(`SELECT count(*)::int n FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'app'
+                         AND (p.proname LIKE 'rpt\\_%' OR p.proname = 'mgmt_roles')`))[0].n;
+    return (n >= 10 && r.length === 0) || 'helpers ' + n + ' callable: ' + r.map(x => x.proname).join(', ');
+  });
+  await check('report_exports: authenticated holds SELECT only, anon nothing, no column grant', async () => {
+    const r = await q(`SELECT grantee, privilege_type FROM information_schema.role_table_grants
+                        WHERE grantee IN ('anon','authenticated') AND table_schema = 'public' AND table_name = 'report_exports'`);
+    const c = await q(`SELECT grantee, column_name, privilege_type FROM information_schema.column_privileges
+                        WHERE grantee IN ('anon','authenticated') AND table_schema = 'public' AND table_name = 'report_exports' AND privilege_type <> 'SELECT'`);
+    const got = r.map(x => x.grantee + ':' + x.privilege_type).sort().join(',');
+    return (got === 'authenticated:SELECT' && c.length === 0) || got + ' cols ' + JSON.stringify(c);
+  });
+  await check('report_exports: one SELECT policy to authenticated, append-only triggers, not under trg_audit, no row-data column', async () => {
+    const pol = await q(`SELECT policyname, cmd, roles::text roles FROM pg_policies WHERE schemaname = 'public' AND tablename = 'report_exports'`);
+    const trg = (await q(`SELECT string_agg(t.tgname, ',' ORDER BY t.tgname) s FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+                           WHERE c.relname = 'report_exports' AND NOT t.tgisinternal`))[0].s;
+    const cols = (await q(`SELECT string_agg(column_name, ',' ORDER BY column_name) s FROM information_schema.columns
+                            WHERE table_schema = 'public' AND table_name = 'report_exports'`))[0].s;
+    const ok = pol.length === 1 && pol[0].cmd === 'SELECT' && pol[0].roles === '{authenticated}'
+      && trg === 'trg_append_only,trg_append_only_trunc' && cols === 'actor,created_at,filters,format,id,org_id,report,row_count';
+    return ok || JSON.stringify({ pol, trg, cols });
+  });
+  await check('G6a dictionaries: report_kind / export_format / search_date_field internal, portal_payment_status client-visible', async () => {
+    const r = await q(`SELECT domain, count(*)::int n, count(*) FILTER (WHERE client_visible)::int v FROM public.status_labels
+                        WHERE domain IN ('report_kind','export_format','search_date_field','portal_payment_status') GROUP BY 1 ORDER BY 1`);
+    const m = Object.fromEntries(r.map(x => [x.domain, x]));
+    const ok = m.report_kind && m.report_kind.n === 6 && m.report_kind.v === 0 && m.export_format && m.export_format.n === 3 && m.export_format.v === 0
+      && m.search_date_field && m.search_date_field.n === 4 && m.search_date_field.v === 0
+      && m.portal_payment_status && m.portal_payment_status.n === 4 && m.portal_payment_status.v === 4;
+    return ok || JSON.stringify(r);
+  });
+  // anon: no EXECUTE at all
+  for (const fn of G6A_RPCS) {
+    const sql = fn === 'portal_invoices' ? `SELECT public.portal_invoices(NULL)`
+      : fn === 'log_report_export' ? `SELECT public.log_report_export('${A}', '{"report":"search","format":"csv","row_count":0}')`
+      : `SELECT public.${fn}('${A}', '{}')`;
+    await expectErr(`anon cannot call ${fn}`, () => as('anon', sql), /permission denied/, 'G6a §5 REVOKE … FROM PUBLIC, anon');
+  }
+  // clients of org A and org B, and org-B staff: every staff reader on org A → MRS_FORBIDDEN (never an empty success)
+  for (const fn of G6A_STAFF_READERS) {
+    for (const who of ['clientA', 'clientA2', 'clientB', 'staffB', 'finB']) {
+      await expectErr(`${who} gets MRS_FORBIDDEN from ${fn}(org A)`, () => as(who, `SELECT public.${fn}($1, '{}')`, [A]), /MRS_FORBIDDEN/, 'G6a §Roles gate (is_staff / fin_org_read / mgmt)');
+    }
+  }
+  await expectErr('clientB gets MRS_FORBIDDEN from search_records(own org B)', () => as('clientB', `SELECT public.search_records($1, '{}')`, [B]), /MRS_FORBIDDEN/);
+  await expectErr('clientB gets MRS_FORBIDDEN from dash_ops(own org B)', () => as('clientB', `SELECT public.dash_ops($1, '{}')`, [B]), /MRS_FORBIDDEN/);
+  for (const [who, rep] of [['clientA', 'transactions'], ['clientA', 'search'], ['clientB', 'containers'], ['staffB', 'trips']]) {
+    await expectErr(`${who} cannot log a ${rep} export for org A`, () => as(who, `SELECT public.log_report_export($1, $2)`,
+      [A, { report: rep, format: 'csv', filters: {}, row_count: 1 }]), /MRS_FORBIDDEN/);
+  }
+  // non-finance / non-management staff of org A
+  for (const [fn, re] of [['dash_finance', /MRS_FORBIDDEN/], ['dash_management', /MRS_FORBIDDEN/]]) {
+    await expectErr(`staffA (clearance_staff) gets MRS_FORBIDDEN from ${fn}`, () => as('staffA', `SELECT public.${fn}($1, '{}')`, [A]), re);
+  }
+  await expectErr('staffA (clearance_staff) cannot log a margins export', () => as('staffA', `SELECT public.log_report_export($1, $2)`,
+    [A, { report: 'margins', format: 'xlsx', filters: {}, row_count: 1 }]), /MRS_FORBIDDEN/);
+  await expectErr('staffA (clearance_staff) cannot ask trip finance (report_trips include_finance)', () => as('staffA',
+    `SELECT public.report_trips($1, '{"include_finance":true}')`, [A]), /MRS_FORBIDDEN/);
+  await check('positive control: staffA search_records(org A) answers with org-A rows only, financial_status hidden', async () => {
+    const r = (await as('staffA', `SELECT public.search_records($1, '{}') r`, [A]))[0].r;
+    const orgs = (await q(`SELECT count(*)::int n FROM public.transactions WHERE id = ANY($1) AND org_id <> $2`, [r.items.map(x => x.id), A]))[0].n;
+    return (r.total > 0 && orgs === 0 && r.items.every(x => x.financial_status === null)) || JSON.stringify({ total: r.total, orgs });
+  });
+  await check('positive control: adminA reads dash_ops / dash_finance / dash_management of org A', async () => {
+    for (const fn of ['dash_ops', 'dash_finance', 'dash_management']) {
+      const r = (await as('adminA', `SELECT public.${fn}($1, '{}') r`, [A]))[0].r;
+      if (!r || typeof r !== 'object') return fn + ' returned ' + JSON.stringify(r);
+    }
+    return true;
+  });
+  // portal_invoices: never another client's transaction, same answer for other org
+  for (const [who, tx] of [['clientA2', TX1], ['clientB', TX1], ['clientA', TX2], ['clientA', B_TX], ['staffB', TX1]]) {
+    await expectErr(`${who} portal_invoices(<not own tx>) → MRS_NOT_FOUND`, () => as(who, `SELECT public.portal_invoices($1)`, [tx]), /MRS_NOT_FOUND/, 'portal_invoices: client_id ∈ my_client_ids()');
+  }
+  await check('staffA / adminA (no client link) get an empty portal_invoices()', async () => {
+    for (const who of ['staffA', 'adminA']) {
+      const r = (await as(who, `SELECT public.portal_invoices(NULL) r`))[0].r;
+      if (!(r && r.count === 0 && Array.isArray(r.items) && r.items.length === 0)) return who + ': ' + JSON.stringify(r);
+    }
+    return true;
+  });
+  await check('clientA portal_invoices() lists no draft / open / cancelled intent', async () => {
+    const r = (await as('clientA', `SELECT public.portal_invoices(NULL) r`))[0].r;
+    const ids = r.items.map(x => x.id);
+    const bad = ids.length ? (await q(`SELECT count(*)::int n FROM public.billing_intents WHERE id = ANY($1) AND status <> 'issued'`, [ids]))[0].n : 0;
+    return (Array.isArray(r.items) && bad === 0) || JSON.stringify(r);
+  });
+  // export log visibility and append-only
+  await check('report_exports: clients read 0 rows (own org and other org)', async () => {
+    for (const who of ['clientA', 'clientA2', 'clientB']) {
+      const d = await denied(who, `SELECT 1 FROM public.report_exports`);
+      if (d !== true) return who + ': ' + d;
+    }
+    return true;
+  });
+  await check('report_exports: staffA sees only its own rows; adminA (auditor) sees the org-A row of adminA', async () => {
+    await as('staffA', `SELECT public.log_report_export($1, $2)`, [A, { report: 'search', format: 'csv', filters: { q: 'MSCU' }, row_count: 0 }]);
+    const mine = await as('staffA', `SELECT actor::text a FROM public.report_exports`);
+    const adm = await as('adminA', `SELECT actor::text a, org_id::text o FROM public.report_exports`);
+    const okS = mine.length === 1 && mine[0].a === U.staffA;
+    const okA = adm.length === 2 && adm.every(x => x.o === A);
+    const lst = (await as('staffA', `SELECT public.list_report_exports($1, $2) r`, [A, { actor: U.adminA }]))[0].r;
+    return (okS && okA && lst.total === 0) || JSON.stringify({ mine, adm, lst: lst.total });
+  });
+  for (const who of ['adminA', 'staffA', 'clientA']) {
+    await expectErr(`${who} cannot UPDATE report_exports`, () => as(who, `UPDATE public.report_exports SET row_count = 0 WHERE id = $1 RETURNING 1`, [G6A.A]), /permission denied/);
+    await expectErr(`${who} cannot DELETE report_exports`, () => as(who, `DELETE FROM public.report_exports WHERE id = $1 RETURNING 1`, [G6A.A]), /permission denied/);
+    await expectErr(`${who} cannot INSERT report_exports directly`, () => as(who,
+      `INSERT INTO public.report_exports (org_id, actor, report, format, row_count) VALUES ($1, $2, 'search', 'csv', 0)`, [A, U.adminA]), /permission denied|row-level security/);
+  }
+  await expectErr('owner UPDATE of report_exports refused by the trigger (MRS_APPEND_ONLY)', () => q(`UPDATE public.report_exports SET row_count = 0 WHERE id = $1`, [G6A.A]), /MRS_APPEND_ONLY/);
+  await expectErr('owner DELETE of report_exports refused by the trigger (MRS_APPEND_ONLY)', () => q(`DELETE FROM public.report_exports WHERE id = $1`, [G6A.B]), /MRS_APPEND_ONLY/);
 
   return finish();
 }

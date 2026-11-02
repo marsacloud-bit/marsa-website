@@ -118,7 +118,10 @@
     finWrite: ['accountant', 'accounts_manager', 'branch_manager', 'admin'],
     finApprove: ['accounts_manager', 'branch_manager', 'admin'],
     // G5 (docs/online/G5_SPEC.md §Roles) — mirrors app.bill_admin_roles (Daftra connection / catalog / tax settings)
-    billAdmin: ['accounts_manager', 'admin']
+    billAdmin: ['accounts_manager', 'admin'],
+    // G6a (docs/online/G6A_SPEC.md §Roles) — mirrors app.mgmt_roles / app.trip_finance_roles
+    mgmt: ['admin', 'supervisor', 'branch_manager'],
+    tripFin: ['accountant', 'accounts_manager', 'operations_manager', 'branch_manager', 'supervisor', 'admin']
   };
   var ROLE_RANK = ['client', 'clearance_staff', 'transport_staff', 'accountant', 'accounts_manager', 'operations_manager', 'branch_manager', 'supervisor', 'admin'];
 
@@ -143,6 +146,11 @@
       { id: 'schedule', key: 'ops.nav_schedule', href: 'admin.html#schedule', icon: 'calendar', allow: R.staff },
       { id: 'exceptions', key: 'ops.nav_exceptions', href: 'admin.html#exceptions', icon: 'flag', allow: R.staff },
       { id: 'parties', key: 'ops.nav_parties', href: 'admin.html#parties', icon: 'truck', allow: R.staff }
+    ] },
+    // G6a reports & advanced search (assets/js/rpt/*.js views, allow 'staff'). Group id 'comms' is reserved for G6b messaging.
+    { id: 'insight', key: 'rpt.nav_group', items: [
+      { id: 'search', key: 'rpt.nav_search', href: 'admin.html#search', icon: 'search', allow: R.staff },
+      { id: 'reports', key: 'rpt.nav_reports', href: 'admin.html#reports', icon: 'report', allow: R.staff }
     ] },
     // G4 operating finance (assets/js/fin/*.js views, allow 'finRead')
     { id: 'finance', key: 'fin.nav_group', items: [
@@ -179,12 +187,16 @@
       'ops.nav_parties': 'الجهات والناقلون', 'ops.nav_requirements': 'قواعد المستندات', 'ops.nav_alerts_badge': 'التنبيهات المفتوحة: {n}',
       'fin.nav_group': 'المالية التشغيلية', 'fin.nav_costs': 'فواتير الموردين', 'fin.nav_payables': 'المستحقات والمدفوعات',
       'fin.nav_margins': 'الهامش والتكاليف', 'fin.nav_demurrage': 'الأرضيات والغرامات',
-      'bill.nav_billing': 'الفوترة ودفترة', 'bill.nav_daftra': 'إعداد دفترة' },
+      'bill.nav_billing': 'الفوترة ودفترة', 'bill.nav_daftra': 'إعداد دفترة',
+      'rpt.nav_group': 'التقارير والبحث', 'rpt.nav_search': 'البحث المتقدم', 'rpt.nav_reports': 'التقارير',
+      'rpt.cmdk_advanced': 'بحث متقدم عن «{q}»…' },
     en: { 'ops.nav_group': 'Operations', 'ops.nav_alerts': 'Alerts', 'ops.nav_schedule': 'Daily schedule', 'ops.nav_exceptions': 'Exceptions',
       'ops.nav_parties': 'Parties & carriers', 'ops.nav_requirements': 'Document rules', 'ops.nav_alerts_badge': 'Open alerts: {n}',
       'fin.nav_group': 'Operating finance', 'fin.nav_costs': 'Supplier invoices', 'fin.nav_payables': 'Payables & payments',
       'fin.nav_margins': 'Margins & costs', 'fin.nav_demurrage': 'Storage & demurrage',
-      'bill.nav_billing': 'Billing & Daftra', 'bill.nav_daftra': 'Daftra settings' }
+      'bill.nav_billing': 'Billing & Daftra', 'bill.nav_daftra': 'Daftra settings',
+      'rpt.nav_group': 'Reports & search', 'rpt.nav_search': 'Advanced search', 'rpt.nav_reports': 'Reports',
+      'rpt.cmdk_advanced': 'Advanced search for "{q}"…' }
   };
   var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -245,7 +257,9 @@
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     // G5 billing & Daftra
     sync: '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 3v5h5"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 21v-5h-5"/>',
-    link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/>'
+    link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/>',
+    // G6a reports
+    report: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 17v-3M12 17v-6M15 17v-2"/>'
   };
   function icon(name, cls) {
     var s = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -1027,9 +1041,16 @@
     });
     return out;
   }
+  // G6a: last item of the records part → admin.html#search?q=<q> (advanced search, staff only; the q travels
+  // in the hash only, never in a query string sent to a server)
+  function advancedItem(q) {
+    var trimmed = String(q || '').trim().slice(0, 80);
+    if (trimmed.length < 2 || S.status !== 'ready' || !canAny(R.staff)) return [];
+    return [{ group: 'tx', title: keyLabel('rpt.cmdk_advanced', { q: trimmed }), icon: 'search', href: 'admin.html#search?q=' + encodeURIComponent(trimmed) }];
+  }
   var GROUP_LABEL = { nav: 'cmdk_nav', tx: 'cmdk_tx', clients: 'cmdk_clients', requests: 'cmdk_requests', actions: 'cmdk_actions' };
   function renderPalette(q) {
-    var items = navMatches(q).concat(remoteItems()).concat(actionMatches(q));
+    var items = navMatches(q).concat(remoteItems()).concat(advancedItem(q)).concat(actionMatches(q));
     pItems = items;
     if (pIndex >= items.length) pIndex = 0;
     clear(pList);

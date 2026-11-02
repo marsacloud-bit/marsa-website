@@ -67,6 +67,8 @@
       // G4 (docs/online/G4_SPEC.md)
       MRS_OVER_ALLOCATED: 'مجموع التوزيع يتجاوز صافي البند؛ التوزيع لا يضاعف الفاتورة (المتبقي القابل للتوزيع: {f}).',
       MRS_OVERPAID: 'المبلغ يتجاوز المتبقي من الإجمالي (المتبقي: {f}).',
+      // G6a (client-side only: the export checks of assets/js/rpt/export.js)
+      MRS_EXPORT: 'تعذّر إنشاء ملف التصدير. أعد المحاولة.',
       DUPLICATE: 'هذا السجل موجود من قبل (تكرار). إن كان ملفًا فقد رُفع سابقًا.',
       FK: 'مرجع غير صالح أو لا يخص مؤسستك.',
       CHECK: 'بعض القيم غير صحيحة.',
@@ -136,7 +138,10 @@
       default_service_vat_rate: 'نسبة ضريبة الخدمات', reimbursable_tax_code: 'تصنيف ضريبة المبالغ المستردة', tax_code: 'التصنيف الضريبي',
       invoice_notes: 'ملاحظات الفاتورة', intent_id: 'غرض الفوترة', charge_ids: 'المبالغ', link_id: 'ربط العميل', job_id: 'مهمة المزامنة',
       name_ar: 'الاسم بالعربية', name_en: 'الاسم بالإنجليزية', default_vat_rate: 'نسبة الضريبة الافتراضية',
-      intent: 'غرض الفوترة', external_invoice_id: 'رقم الفاتورة في دفترة'
+      intent: 'غرض الفوترة', external_invoice_id: 'رقم الفاتورة في دفترة',
+      // G6a search / reports / export (docs/online/G6A_SPEC.md §6)
+      q: 'نص البحث', date_field: 'نوع التاريخ', sort: 'الترتيب', return_status: 'حالة إرجاع الحاوية', trip_status: 'حالة الرحلة',
+      report: 'نوع التقرير', format: 'صيغة التصدير'
     },
     // G4 detail-specific messages (error.field = the detail code); they replace the code's generic text
     details: {
@@ -192,7 +197,16 @@
       conflict_reason: 'هذا القرار لا يناسب نوع التعارض ({x}).',
       unlinked: 'ربط العميل مفكوك؛ اربطه من جديد من «إعداد دفترة».',
       unreconciled_remote: 'قد يكون إنشاء الفاتورة وصل إلى دفترة دون تأكيد؛ أعد محاولة المزامنة لتتم المطابقة بالمرجع قبل الإلغاء أو الحذف.',
-      subdomain_taken: 'حساب دفترة هذا مربوط بمؤسسة أخرى؛ لكل مؤسسة حساب دفترة خاص بها.'
+      subdomain_taken: 'حساب دفترة هذا مربوط بمؤسسة أخرى؛ لكل مؤسسة حساب دفترة خاص بها.',
+      // G6a search / reports / export (docs/online/G6A_SPEC.md §6)
+      search_query_short: 'اكتب حرفين على الأقل للبحث.',
+      date_range: 'نطاق التاريخ غير صحيح: «من» يجب أن يسبق «إلى»، والمدة لا تتجاوز ثلاث سنوات (1096 يومًا).',
+      export_rows: 'عدد الصفوف أكبر من المسموح للتصدير (Excel / CSV حتى 10٬000 صف، الطباعة حتى 2٬000). ضيّق الفلاتر.',
+      totals_mismatch: 'تغيّرت البيانات أثناء التصدير، أعد المحاولة.',
+      data_changed: 'تغيّرت البيانات أثناء التصدير، أعد المحاولة.',
+      too_many_rows: 'عدد الصفوف أكبر من المسموح للتصدير. ضيّق الفلاتر.',
+      audit_failed: 'تعذّر تسجيل عملية التصدير في السجل، فلم يُنشأ الملف. أعد المحاولة.',
+      no_rows: 'لا توجد صفوف للتصدير بهذه الفلاتر.'
     },
     banner: {
       staging: 'بيئة تجريبية (Staging) — البيانات للاختبار فقط'
@@ -207,6 +221,15 @@
       I.register('err', { en: {
         MRS_OVER_ALLOCATED: 'The allocations exceed the line net; an allocation never doubles the invoice (remaining: {f}).',
         MRS_OVERPAID: 'The amount exceeds what remains of the total (remaining: {f}).',
+        MRS_EXPORT: 'The export file could not be created. Try again.',
+        detail_search_query_short: 'Type at least 2 characters to search.',
+        detail_date_range: 'Invalid date range: "from" must not be after "to", and the range is at most three years (1096 days).',
+        detail_export_rows: 'Too many rows to export (Excel / CSV up to 10,000 rows, print up to 2,000). Narrow the filters.',
+        detail_totals_mismatch: 'The data changed during the export; try again.',
+        detail_data_changed: 'The data changed during the export; try again.',
+        detail_too_many_rows: 'Too many rows to export. Narrow the filters.',
+        detail_audit_failed: 'The export could not be recorded in the log, so no file was created. Try again.',
+        detail_no_rows: 'There are no rows to export for these filters.',
         detail_invoice_number_taken: 'This invoice number is already registered for this supplier (after normalization). Open the existing invoice instead of entering it again.',
         detail_file_duplicate: 'This file is already registered as a finance document. Open the existing record instead of uploading it again.',
         detail_duplicate_ref: 'A matching record already exists (duplicate number or file). Open it instead of creating a copy.',
@@ -280,7 +303,10 @@
         default_service_vat_rate: 'Service VAT rate', reimbursable_tax_code: 'Reimbursable tax code', tax_code: 'Tax code',
         invoice_notes: 'Invoice notes', intent_id: 'Billing intent', charge_ids: 'Charges', link_id: 'Client link', job_id: 'Sync job',
         name_ar: 'Arabic name', name_en: 'English name', default_vat_rate: 'Default VAT rate',
-        intent: 'Billing intent', external_invoice_id: 'Daftra invoice id'
+        intent: 'Billing intent', external_invoice_id: 'Daftra invoice id',
+        // G6a
+        q: 'Search text', date_field: 'Date type', sort: 'Sort order', return_status: 'Container return status', trip_status: 'Trip status',
+        report: 'Report type', format: 'Export format'
       } });
     } catch (e) { /* Arabic messages stay */ }
   })();
@@ -2220,7 +2246,9 @@
   // transaction_bls); such hits carry declaration_no + declaration_status or bl_number of the matching row.
   // Clients name (ar/en) / CR / VAT; requests ref.
   // error only when every query failed (e.g. network); a failed group is otherwise just empty.
-  function globalSearch(q, o) {
+  // G6a-11: the transactions group comes from search_records ({q, limit}); this G2 PostgREST path stays the fallback
+  // while the RPC is missing (42883 / PGRST202). skipTx → the clients / requests groups only.
+  function globalSearchG2(q, o, skipTx) {
     o = o || {};
     var empty = { transactions: [], clients: [], requests: [] };
     if (!configured) return demoOnly();
@@ -2241,7 +2269,7 @@
       return function (row) { return row && row.transactions ? Object.assign({}, row.transactions, extra(row)) : null; };
     }
     var groups = {
-      transactions: [by('transactions', SEARCH_TX_COLS, 'ref', 'created_at'), by('transactions', SEARCH_TX_COLS, 'bl_number', 'created_at'),
+      transactions: skipTx ? [] : [by('transactions', SEARCH_TX_COLS, 'ref', 'created_at'), by('transactions', SEARCH_TX_COLS, 'bl_number', 'created_at'),
         by('transactions', SEARCH_TX_COLS, 'declaration_no', 'created_at'),
         by('containers', 'container_no,transaction_id,transactions(' + SEARCH_TX_COLS + ')', 'container_no', null,
           viaTx(function (row) { return { container_no: row.container_no }; })),
@@ -2275,6 +2303,127 @@
       if (failed.length === total) return { data: null, error: failed[0] };
       return ok(data);
     }, function (e) { return { data: null, error: normalizeError(e) }; });
+  }
+  // a function that is not deployed yet (G6a migration not applied): Postgres 42883 / PostgREST PGRST202
+  function rpcMissing(err) {
+    var raw = err && (err.raw || err);
+    var code = raw && raw.code ? String(raw.code) : '';
+    return code === '42883' || code === 'PGRST202' || /could not find the function/i.test(String((raw && raw.message) || ''));
+  }
+  // search_records item → the palette's G2 row shape ({id, org_id, ref, bl_number, declaration_no, operational_status,
+  // created_at, clients:{name_ar, name_en}, matched: column, container_no? | declaration_status?})
+  function searchItemToRow(it, oid) {
+    var m = Array.isArray(it.matched) ? it.matched : [];
+    var pick = null, declStatus = null;
+    m.forEach(function (x) {
+      if (!x || typeof x !== 'object') return;
+      if (x.field === 'declaration_status') { declStatus = x.value; return; }
+      if (!pick && (x.field === 'container_no' || x.field === 'declaration_no' || x.field === 'bl_number')) pick = x;
+    });
+    var row = { id: it.id, org_id: it.org_id || oid || null, ref: it.ref, bl_number: it.bl_number || null, declaration_no: it.declaration_no || null,
+      operational_status: it.operational_status, created_at: it.created_at,
+      clients: { name_ar: it.client_name || null, name_en: it.client_name_en || null }, matched: pick ? pick.field : 'ref' };
+    if (pick && pick.field === 'container_no') row.container_no = pick.value;
+    if (pick && pick.field === 'bl_number') row.bl_number = pick.value;
+    if (pick && pick.field === 'declaration_no') { row.declaration_no = pick.value; row.declaration_status = pick.status || declStatus || null; }
+    return row;
+  }
+  function globalSearch(q, o) {
+    o = o || {};
+    if (!configured) return demoOnly();
+    var trimmed = String(q == null ? '' : q).replace(/\s+/g, ' ').trim();
+    if (trimmed.length < 2 || !likeContains(q)) return Promise.resolve(ok({ transactions: [], clients: [], requests: [] }));
+    var limit = Math.min(Math.max(parseInt(o.limit, 10) || 8, 1), 8);
+    var cached = o.orgId || (ctxCache ? pickActiveOrg(ctxCache) : null);
+    var pick = cached ? Promise.resolve(ok(cached)) : orgId();
+    return pick.then(function (r) {
+      if (r.error || !r.data) return globalSearchG2(q, o);
+      var oid = r.data;
+      return Promise.all([
+        rpc('search_records', { p_org: oid, p_filters: { q: trimmed.slice(0, 80), limit: limit } }),
+        globalSearchG2(q, Object.assign({}, o, { orgId: oid }), true)
+      ]).then(function (res) {
+        var sr = res[0], rest = res[1];
+        if (sr.error && rpcMissing(sr.error)) return globalSearchG2(q, Object.assign({}, o, { orgId: oid }));
+        if (sr.error && rest.error) return { data: null, error: sr.error };
+        var data = rest.data ? { clients: rest.data.clients || [], requests: rest.data.requests || [] } : { clients: [], requests: [] };
+        var items = sr.error ? [] : ((sr.data && Array.isArray(sr.data.items)) ? sr.data.items : []);
+        var seen = {};
+        data.transactions = items.filter(function (it) {
+          if (!it || !isUuid(it.id) || seen[it.id]) return false;
+          seen[it.id] = true; return true;
+        }).slice(0, limit).map(function (it) { return searchItemToRow(it, oid); });
+        return ok(data);
+      });
+    }, function (e) { return { data: null, error: normalizeError(e) }; });
+  }
+
+  /* ------------------------------------------------------------------
+     G6a — advanced search, role dashboards, reports & export log, portal readers
+     (docs/online/G6A_SPEC.md §8). Every reader is an RLS-scoped / guarded RPC
+     with p_org = the active org (or f.orgId) and p_filters = the remaining keys
+     (null / '' / empty arrays dropped, strings trimmed, limit / offset clamped).
+     The server filters by org, branch scope and role; the UI never does.
+     ------------------------------------------------------------------ */
+  function rptFilters(f, maxLimit) {
+    var out = {};
+    Object.keys(f || {}).forEach(function (k) {
+      var v = f[k];
+      if (k === 'orgId' || v == null || typeof v === 'function') return;
+      if (Array.isArray(v)) { v = v.filter(function (x) { return x != null && x !== ''; }); if (!v.length) return; }
+      else if (typeof v === 'string') { v = v.trim(); if (v === '') return; }
+      else if (typeof v === 'object') return;
+      out[k] = v;
+    });
+    if (maxLimit) {
+      if (out.limit != null) out.limit = Math.max(1, Math.min(maxLimit, parseInt(out.limit, 10) || maxLimit));
+      if (out.offset != null) out.offset = Math.max(0, Math.min(1000000, parseInt(out.offset, 10) || 0));
+    } else { delete out.limit; delete out.offset; }
+    return out;
+  }
+  function rptRpc(name, f, maxLimit) {
+    f = f || {};
+    return inActiveOrg(f.orgId, function (oid) { return rpc(name, { p_org: oid, p_filters: rptFilters(f, maxLimit) }); });
+  }
+  function searchRecords(f) { return rptRpc('search_records', f, 100); }
+  function dashOps(f) { return rptRpc('dash_ops', f, 0); }
+  function dashFinance(f) { return rptRpc('dash_finance', f, 0); }
+  function dashManagement(f) { return rptRpc('dash_management', f, 0); }
+  function reportTransactions(f) { return rptRpc('report_transactions', f, 500); }
+  function reportContainers(f) { return rptRpc('report_containers', f, 500); }
+  function reportTrips(f) { return rptRpc('report_trips', f, 500); }
+  function listReportExports(f) { return rptRpc('list_report_exports', f, 200); }
+  // p = { report, format, filters, row_count } — only these keys travel (never rows or totals); the filters are the
+  // report's own filter object without limit / offset / empty values (G6a-9: the server stores who / what / how many)
+  var EXPORT_REPORTS = ['search', 'transactions', 'containers', 'trips', 'margins', 'costs'], EXPORT_FORMATS = ['xlsx', 'csv', 'print'];
+  function logReportExport(p) {
+    p = p || {};
+    if (!configured) return demoOnly();
+    if (EXPORT_REPORTS.indexOf(p.report) === -1) return Promise.resolve(fail('MRS_INVALID', 'report'));
+    if (EXPORT_FORMATS.indexOf(p.format) === -1) return Promise.resolve(fail('MRS_INVALID', 'format'));
+    var n = Number(p.row_count);
+    if (!isFinite(n) || n < 0 || Math.floor(n) !== n) return Promise.resolve(fail('MRS_INVALID', 'export_rows'));
+    var filters = rptFilters(p.filters && typeof p.filters === 'object' && !Array.isArray(p.filters) ? p.filters : {}, 0);
+    var orgPick = p.orgId || (p.filters && p.filters.orgId) || null;
+    return inActiveOrg(orgPick, function (oid) {
+      return rpc('log_report_export', { p_org: oid, p_payload: { report: p.report, format: p.format, filters: filters, row_count: n } });
+    });
+  }
+  // portal (client): plain RLS read of the client's containers — only the fixed portal columns (G6a-14)
+  var PORTAL_CONTAINER_COLS = 'id,transaction_id,container_no,container_type,operational_state,return_status,return_deadline,returned_at,transactions(ref)';
+  function listMyContainers(o) {
+    o = o || {};
+    return online(function (c) {
+      var b = c.from('containers').select(PORTAL_CONTAINER_COLS);
+      if (o.openOnly) b = b.in('return_status', DASH_OPEN_RETURN);
+      return b.order('return_deadline', { ascending: true, nullsFirst: false }).order('container_no', { ascending: true }).limit(500);
+    });
+  }
+  // portal (client): issued Daftra invoices of the client's own transactions (G6a-1); txId optional
+  function portalInvoices(txId) {
+    if (!configured) return demoOnly();
+    if (txId != null && txId !== '' && !isUuid(txId)) return Promise.resolve(fail('MRS_INVALID', 'transaction'));
+    return rpc('portal_invoices', { p_tx: txId ? String(txId) : null });
   }
 
   var DASH_REQ = ['new', 'under_review', 'converted', 'rejected'];
@@ -2465,6 +2614,11 @@
     requestBillingPull: requestBillingPull, resolveBillingConflict: resolveBillingConflict, cancelBillingIntent: cancelBillingIntent,
     listBillingJobs: listBillingJobs, getBillingJob: getBillingJob, retryBillingJob: retryBillingJob,
     billingReviewQueue: billingReviewQueue, resolveBillingReview: resolveBillingReview, txBilling: txBilling,
+    // G6a portal, dashboards, advanced search, reports & export log (docs/online/G6A_SPEC.md §8)
+    searchRecords: searchRecords, dashOps: dashOps, dashFinance: dashFinance, dashManagement: dashManagement,
+    reportTransactions: reportTransactions, reportContainers: reportContainers, reportTrips: reportTrips,
+    logReportExport: logReportExport, listReportExports: listReportExports,
+    listMyContainers: listMyContainers, portalInvoices: portalInvoices,
     // app shell
     globalSearch: globalSearch, dashboardStats: dashboardStats,
     // utils

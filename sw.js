@@ -31,7 +31,7 @@
    ========================================================================== */
 'use strict';
 
-var VERSION = '2026-11-05.1';   // G5: billing & Daftra (bill/*.js, bill.js, bill.css); G4 fin/* kept
+var VERSION = '2026-11-06.2';   // G6a review fixes (rpt/*.js, i18n/rpt.js); G6a: search / reports / dashboards (rpt/*.js, rpt.js, rpt.css, dash.css) + portal tabs; G4 fin/*, G5 bill/* kept
 var CACHE = 'marsa-app-' + VERSION;
 var OFFLINE_URL = 'offline.html';
 
@@ -43,6 +43,7 @@ var PRECACHE = [
   // styles: the original design system + shared components + page sheets
   'assets/css/style.css', 'assets/css/app.css',
   'assets/css/pages/login.css', 'assets/css/pages/admin.css', 'assets/css/pages/ops.css', 'assets/css/pages/fin.css', 'assets/css/pages/bill.css',
+  'assets/css/pages/rpt.css', 'assets/css/pages/dash.css',
   'assets/css/pages/platform.css',
   'assets/css/pages/portal.css', 'assets/css/pages/ocr.css', 'assets/css/pages/bulk-upload.css',
   // scripts
@@ -55,8 +56,9 @@ var PRECACHE = [
   'assets/js/fin/invoices.js', 'assets/js/fin/payables.js', 'assets/js/fin/margins.js',
   'assets/js/fin/demurrage.js', 'assets/js/fin/tx-fin.js',
   'assets/js/bill/billing.js', 'assets/js/bill/daftra.js', 'assets/js/bill/tx-bill.js',
+  'assets/js/rpt/xlsx.js', 'assets/js/rpt/export.js', 'assets/js/rpt/search.js', 'assets/js/rpt/reports.js', 'assets/js/rpt/dashboards.js',
   // dictionaries (a missing optional file never blocks the install)
-  'assets/i18n/app.js', 'assets/i18n/login.js', 'assets/i18n/admin.js', 'assets/i18n/ops.js', 'assets/i18n/fin.js', 'assets/i18n/bill.js',
+  'assets/i18n/app.js', 'assets/i18n/login.js', 'assets/i18n/admin.js', 'assets/i18n/ops.js', 'assets/i18n/fin.js', 'assets/i18n/bill.js', 'assets/i18n/rpt.js',
   'assets/i18n/platform.js',
   'assets/i18n/ocr.js', 'assets/i18n/bulk.js', 'assets/i18n/portal.js',
   // images: header logo (site-header / drawer / footer), favicon, PWA icons

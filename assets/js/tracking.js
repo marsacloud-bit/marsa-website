@@ -372,7 +372,7 @@
             containersRow(s) +
           '</ul>' +
           '<p class="demo-note mt-3 mb-0">' + svg('<path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 16v-4M12 8h.01"/>') +
-            '<span>تفاصيل العميل متاحة في بوابة العميل (قريبًا). لا تعرض هذه الصفحة الاسم أو الجوال أو رمز HS أو القيمة.</span></p>' +
+            '<span>تفاصيل العميل متاحة عبر بوابة العميل بعد تسجيل الدخول. لا تعرض هذه الصفحة الاسم أو الجوال أو رمز HS أو القيمة.</span></p>' +
         '</div>' +
         '<div class="card-footer text-xs text-muted">تاريخ الحفظ: <span class="fw-bold">' + esc(s.updated) + '</span></div>' +
       '</article>';

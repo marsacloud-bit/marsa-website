@@ -1,0 +1,68 @@
+/* ==========================================================================
+   مرسى | MARSA — G6a #search / #reports + the print / PDF report (rpt/export.js)
+   Original look (style.css tokens; no dark theme, as fin.css / bill.css). Logical
+   properties only. Prefix: rpt-.
+   ========================================================================== */
+.rpt-filter-card .app-card-body { padding-block: 16px; }
+.rpt-filters { display: flex; flex-direction: column; gap: 14px; }
+.rpt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px 14px; }
+.rpt-grid .rpt-field.is-wide { grid-column: span 2; }
+.rpt-fieldset { border: 1px solid var(--border); border-radius: var(--r-sm); padding: 8px 12px 10px; margin: 0; min-width: 0; }
+.rpt-fieldset legend { padding-inline: 6px; }
+.rpt-checks { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.rpt-check { white-space: normal; }
+.rpt-form-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.rpt-form-error { margin: 0; color: var(--danger); font-weight: 700; font-size: var(--fs-sm); }
+
+.rpt-tabs { margin-block: 4px 16px; }
+.rpt-tiles { margin-block: 12px; }
+
+.rpt-result-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.rpt-count { margin: 0; font-weight: 800; color: var(--navy-dark); }
+.rpt-export-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rpt-export-label { font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
+.rpt-export-msg { font-size: var(--fs-sm); color: var(--muted); }
+.rpt-export-msg.is-error { color: var(--danger); font-weight: 700; }
+
+.rpt-table tfoot td { font-weight: 800; color: var(--navy-dark); border-top: 2px solid var(--border); background: #F6F9FC; }
+.rpt-table td.num, .rpt-table th.num { text-align: end; }
+.rpt-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.rpt-chip { font-weight: 600; }
+.rpt-filters-text { font-size: var(--fs-xs); color: var(--muted); word-break: break-word; }
+
+.rpt-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-block: 12px; }
+.rpt-pager-info { font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* the print report lives off-screen until body.rpt-printing */
+.rpt-print { display: none; }
+
+@media (max-width: 640px) {
+  .rpt-grid { grid-template-columns: 1fr; }
+  .rpt-grid .rpt-field.is-wide { grid-column: auto; }
+  .rpt-result-head { flex-direction: column; align-items: stretch; }
+}
+
+@media print {
+  @page { size: A4 landscape; margin: 12mm; }
+  body.rpt-printing > *:not(.rpt-print) { display: none !important; }
+  body.rpt-printing { background: #fff !important; }
+  body.rpt-printing .rpt-print { display: block; font-family: "Cairo", "Segoe UI", Tahoma, sans-serif; color: #000; font-size: 10pt; }
+  .rpt-print-head { margin-block-end: 8px; }
+  .rpt-print-brand { margin: 0; font-weight: 800; font-size: 9pt; }
+  .rpt-print-title { margin: 2px 0; font-size: 15pt; }
+  .rpt-print-org { margin: 0 0 6px; }
+  .rpt-print-criteria { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px 16px; margin: 0 0 10px; font-size: 9pt; }
+  .rpt-print-criteria div { display: flex; gap: 6px; }
+  .rpt-print-criteria dt { font-weight: 800; }
+  .rpt-print-criteria dd { margin: 0; }
+  .rpt-print-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  .rpt-print-table thead { display: table-header-group; }
+  .rpt-print-table tfoot { display: table-row-group; }
+  .rpt-print-table th, .rpt-print-table td { border: 1px solid #999; padding: 3px 5px; text-align: start; vertical-align: top; }
+  .rpt-print-table th { font-weight: 800; background: none; }
+  .rpt-print-table td.num { text-align: end; }
+  .rpt-print-table .is-ltr { direction: ltr; unicode-bidi: isolate; }
+  .rpt-print-table tr { break-inside: avoid; page-break-inside: avoid; }
+  .rpt-print-total td { font-weight: 800; border-top: 2px solid #000; }
+  .rpt-print-foot { margin-block-start: 8px; font-size: 8pt; }
+}

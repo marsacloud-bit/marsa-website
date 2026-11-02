@@ -191,6 +191,9 @@ async function buildSample() {
   await q(`INSERT INTO public.billing_review_items (org_id, transaction_id, intent_id, kind, details) VALUES ($1, $2, $3, 'issued_mismatch', '{"drill":true}')`, [A, TX1, intentId]);
   await rpc('service', `SELECT public.daftra_mock_save($1, $2, 0) r`, [A, { clients: [{ id: 'c-1', reference: 'MRSC-drill' }] }]);
   r1.g5 = { intent: intentId, job: push.job.id };
+  // G6a: one export-log row (no row data, append-only)
+  const exp = await rpc('adminA', `SELECT public.log_report_export($1, $2) r`, [A, { report: 'transactions', format: 'xlsx', filters: { from: '2026-10-01' }, row_count: 2 }]);
+  r1.g6a = { export: exp.id };
   return r1;
 }
 
@@ -250,7 +253,9 @@ async function main() {
     'public.cost_accruals', 'public.supplier_payments', 'public.client_charges', 'public.charge_collections',
     'public.demurrage_cases', 'public.cost_adjustments',
     // G5
-    ...G5_TABLES.map(t => 'public.' + t), 'public.daftra_mock_accounts']
+    ...G5_TABLES.map(t => 'public.' + t), 'public.daftra_mock_accounts',
+    // G6a
+    'public.report_exports']
     .filter(k => !before[k] || before[k].n === 0);
   await check('source has rows in the key tables (drill is not vacuous)', () => empty.length === 0 || 'empty: ' + empty.join(', '));
   await check('both orgs present in the source', async () =>
@@ -405,6 +410,22 @@ async function main() {
     catch (e) { if (!/permission denied/.test(errText(e))) return errText(e); }
     return (again.job.id === r1.g5.job && dup.job.id === r1.g5.job && dup.deduplicated === true && jobs === 1 && !!pushCtx
             && pushCtx.intent.lines.length === 1) || JSON.stringify({ again: again.job.id, dup: dup.job.id, jobs, claimed: claimed.length });
+  });
+  await check('G6a after restore: export log kept and append-only; search / reports scoped; clientA refused', async () => {
+    const row = (await q(`SELECT row_count FROM public.report_exports WHERE id = $1`, [r1.g6a.export]))[0];
+    if (!row || row.row_count !== 2) return 'export row lost: ' + JSON.stringify(row);
+    try { await q(`UPDATE public.report_exports SET row_count = 0 WHERE id = $1`, [r1.g6a.export]); return 'export row updated'; }
+    catch (e) { if (!/MRS_APPEND_ONLY/.test(errText(e))) return errText(e); }
+    const s = await rpc('staffA', `SELECT public.search_records($1, '{}') r`, [A]);
+    const t = await rpc('staffA', `SELECT public.report_transactions($1, '{}') r`, [A]);
+    if (!(s.total > 0 && s.total === t.total)) return 'search ' + s.total + ' report ' + t.total;
+    for (const fn of ['search_records', 'dash_ops']) {
+      try { await as('clientA', `SELECT public.${fn}($1, '{}')`, [A]); return fn + ' answered for clientA'; }
+      catch (e) { if (!/MRS_FORBIDDEN/.test(errText(e))) return fn + ': ' + errText(e); }
+    }
+    try { await as('staffB', `SELECT public.search_records($1, '{}')`, [A]); return 'staffB searched org A'; }
+    catch (e) { if (!/MRS_FORBIDDEN/.test(errText(e))) return errText(e); }
+    return true;
   });
   await check('writes work after restore (new request gets the next ref)', async () => {
     const r = await rpc('anon', `SELECT public.submit_service_request($1) r`, [reqPayload('0559000099', {})]);

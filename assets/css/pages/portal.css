@@ -37,8 +37,20 @@
 .table td .badge { white-space: nowrap; }
 .portal-card code { font-size: .85em; background: rgba(11, 58, 110, .06); padding: 1px 6px; border-radius: 6px; }
 
+/* G6a: containers / invoices tabs */
+.portal-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 20px; margin-bottom: 14px; }
+.portal-toolbar .check { white-space: nowrap; }
+.portal-count[hidden] { display: none; }
+.portal-money { text-align: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.portal-inv-cancel { margin-inline-start: 6px; }
+.portal-ctr-table td, .portal-inv-table td { vertical-align: middle; }
+.table td a .num { text-decoration: underline; text-underline-offset: 2px; }
+
 @media (max-width: 980px) {
   .portal-detail-grid { grid-template-columns: 1fr; }
+  /* six tabs: scroll instead of squeezing */
+  .portal-tabs { overflow-x: auto; flex-wrap: nowrap; }
+  .portal-tabs .tab { flex: 0 0 auto; }
 }
 @media (max-width: 560px) {
   .portal-tabs { overflow-x: auto; flex-wrap: nowrap; }

@@ -1,0 +1,26 @@
+/* ==========================================================================
+   مرسى | MARSA — G6a role dashboards (#dashboard tabs, assets/js/rpt/dashboards.js)
+   Small tweaks on top of style.css (.tab-list / .tab / .card-stat) and
+   admin.css (.adm-tiles / .adm-tile / .adm-mini / .adm-cols / .adm-filters).
+   ========================================================================== */
+.dash-tabs { margin-bottom: 18px; }
+.dash-view { display: grid; gap: 18px; }
+.dash-body { display: grid; gap: 20px; }
+.dash-title { margin: 0; font-size: var(--fs-lg); color: var(--navy-dark); }
+.dash-filters { margin: 0; }
+.dash-filters .form-group { min-width: 190px; }
+.dash-range-error { flex: 1 1 100%; margin: 0; color: var(--danger); font-size: var(--fs-sm); }
+.dash-range-error[hidden] { display: none; }
+.dash-note, .dash-mock { margin: 0; }
+.dash-sub-title { margin: 14px 0 8px; font-size: var(--fs-sm); color: var(--muted); font-weight: 700; }
+.dash-sub-title:first-child { margin-top: 0; }
+.dash-kv { margin: 0; }
+.dash-empty { margin: 0; }
+.dash-source { margin: 10px 0 0; }
+.dash-period { margin: 0; }
+.dash-foot { margin: 0; }
+.dash-unofficial { border-style: dashed; }
+.dash-tiles .adm-tile { min-height: 112px; }
+@media (max-width: 640px) {
+  .dash-filters .form-group { min-width: 0; }
+}
