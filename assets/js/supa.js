@@ -81,6 +81,10 @@
       AUTH_EXISTS: 'هذا البريد الإلكتروني مسجّل من قبل.',
       AUTH_WEAK: 'كلمة المرور ضعيفة. استخدم 8 أحرف على الأقل تجمع حروفًا وأرقامًا.',
       AUTH_RATE: 'محاولات كثيرة. انتظر قليلًا ثم حاول مرة أخرى.',
+      // MFA (docs/online/MFA_SPEC.md §6)
+      MRS_MFA_REQUIRED: 'هذا الإجراء يتطلب التحقق بخطوتين. أكمل التحقق ثم حاول مرة أخرى.',
+      MFA_INVALID_CODE: 'الرمز غير صحيح أو انتهت صلاحيته. أدخل الرمز الحالي من التطبيق.',
+      MFA_AAL2_REQUIRED: 'أدخل رمز التحقق أولًا.',
       UNKNOWN: 'حدث خطأ غير متوقع. حاول مرة أخرى.'
     },
     fields: {
@@ -296,6 +300,10 @@
         MRS_OVER_ALLOCATED: 'The allocations exceed the line net; an allocation never doubles the invoice (remaining: {f}).',
         MRS_OVERPAID: 'The amount exceeds what remains of the total (remaining: {f}).',
         MRS_EXPORT: 'The export file could not be created. Try again.',
+        // MFA (docs/online/MFA_SPEC.md §6)
+        MRS_MFA_REQUIRED: 'This action requires two-step verification. Complete it and try again.',
+        MFA_INVALID_CODE: 'The code is wrong or expired. Enter the current code from the app.',
+        MFA_AAL2_REQUIRED: 'Enter a verification code first.',
         // G7 subscriptions & plan limits
         MRS_PLAN_LIMIT: 'Your organization reached its plan limit ({f}). Nothing was saved. Contact the platform team to upgrade.',
         MRS_PLAN_INACTIVE: 'The organization\'s subscription is not active ({f}). You can view data but cannot create new records.',
@@ -557,6 +565,13 @@
     if (pg === '23503') return mkErr('FK', null, e);
     if (pg === '23514' || pg === '22P02' || pg === '22007' || pg === '22008') return mkErr('CHECK', null, e);
     if (pg === '42501' || /row-level security|permission denied/i.test(msg)) return mkErr('RLS', null, e);
+    // GoTrue MFA (TOTP) messages
+    if (/invalid totp code|invalid code|mfa_verification_failed|challenge.*expired/i.test(msg) || e.code === 'mfa_verification_failed'
+        || e.code === 'mfa_challenge_expired') return mkErr('MFA_INVALID_CODE', null, e);
+    if (/aal2 required|AAL2/i.test(msg) || e.code === 'insufficient_aal') return mkErr('MFA_AAL2_REQUIRED', null, e);
+    // supabase-js / GoTrue: no usable session any more (expired, revoked, signed out elsewhere) → sign in again
+    if (e.name === 'AuthSessionMissingError' || e.code === 'session_not_found' || e.code === 'refresh_token_not_found'
+        || /auth session missing|session.*not found|invalid refresh token|refresh token not found/i.test(msg)) return mkErr('MRS_AUTH_REQUIRED', null, e);
     if (/invalid login credentials/i.test(msg)) return mkErr('AUTH_INVALID', null, e);
     if (/email not confirmed/i.test(msg)) return mkErr('AUTH_UNCONFIRMED', null, e);
     if (/already registered|already been registered|user already exists/i.test(msg)) return mkErr('AUTH_EXISTS', null, e);
@@ -915,6 +930,75 @@
     });
     ctxPending = p;
     return p;
+  }
+
+  /* ---- MFA (TOTP, Supabase Auth MFA; docs/online/MFA_SPEC.md §5.1) ----
+     Only these wrappers call c.auth.mfa.*; pages use MarsaApi.mfa*. */
+  var MFA_QR_RE = /^data:image\/svg\+xml[;,]/;
+  // { verified: [factor], unverified: [factor] } — TOTP factors of the signed-in user
+  function mfaFactors() {
+    return online(function (c) {
+      return c.auth.mfa.listFactors().then(function (r) {
+        if (r.error) return { data: null, error: r.error };
+        var all = (r.data && (r.data.all || r.data.totp)) || [], out = { verified: [], unverified: [] };
+        all.forEach(function (f) {
+          if (!f || (f.factor_type && f.factor_type !== 'totp')) return;
+          (f.status === 'verified' ? out.verified : out.unverified).push(f);
+        });
+        return { data: out, error: null };
+      });
+    }, function () { return ok({ verified: [], unverified: [] }); });
+  }
+  // { current: 'aal1'|'aal2'|null, next: 'aal1'|'aal2'|null }
+  function mfaAal() {
+    return online(function (c) {
+      return c.auth.mfa.getAuthenticatorAssuranceLevel().then(function (r) {
+        if (r.error) return { data: null, error: r.error };
+        return { data: { current: (r.data && r.data.currentLevel) || null, next: (r.data && r.data.nextLevel) || null }, error: null };
+      });
+    }, function () { return ok({ current: null, next: null }); });
+  }
+  // drops stale half-enrollments, then starts a new TOTP enrollment → { factorId, qr (SVG data URI or null), secret }
+  function mfaEnroll() {
+    return online(function (c) {
+      return c.auth.mfa.listFactors().then(function (lr) {
+        var stale = ((lr && lr.data && lr.data.all) || []).filter(function (f) { return f && f.status !== 'verified'; });
+        return stale.reduce(function (p, f) {
+          return p.then(function () { return c.auth.mfa.unenroll({ factorId: f.id }).catch(function () { return null; }); });
+        }, Promise.resolve());
+      }).then(function () {
+        return c.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'Marsa ' + new Date().toISOString() });
+      }).then(function (r) {
+        if (r.error) return { data: null, error: r.error };
+        var d = r.data || {}, totp = d.totp || {};
+        var qr = typeof totp.qr_code === 'string' && MFA_QR_RE.test(totp.qr_code) ? totp.qr_code : null;
+        return { data: { factorId: d.id, qr: qr, secret: typeof totp.secret === 'string' ? totp.secret : '' }, error: null };
+      });
+    });
+  }
+  function mfaVerify(factorId, code) {
+    return online(function (c) {
+      return c.auth.mfa.challengeAndVerify({ factorId: factorId, code: String(code || '') }).then(function (r) {
+        if (!r.error) { ctxCache = null; ctxPending = null; }
+        return r;
+      });
+    });
+  }
+  function mfaUnenroll(factorId) {
+    return online(function (c) {
+      return c.auth.mfa.unenroll({ factorId: factorId }).then(function (r) {
+        if (r.error) return r;
+        ctxCache = null; ctxPending = null;
+        return c.auth.refreshSession().then(function () { return r; }, function () { return r; });
+      });
+    });
+  }
+  // pure: the my_context().mfa object; a context without it (migration not applied yet) counts as satisfied
+  function mfaState(ctx) {
+    var m = ctx && ctx.mfa;
+    if (!m || typeof m !== 'object') return { required: false, satisfied: true, enrolled: false, aal: 'aal1', reasons: [] };
+    return { required: !!m.required, satisfied: m.satisfied !== false, enrolled: !!m.enrolled,
+             aal: m.aal || 'aal1', reasons: Array.isArray(m.reasons) ? m.reasons : [] };
   }
   function myMemberships() {
     return myContext().then(function (r) { return r.error ? r : ok(r.data.memberships || []); });
@@ -2938,6 +3022,7 @@
     signIn: signIn, signUp: signUp, signOut: signOut, signOutEverywhere: signOutEverywhere,
     resetPassword: resetPassword, updatePassword: updatePassword,
     onAuth: onAuth, currentUser: currentUser, getSession: getSession,
+    mfaFactors: mfaFactors, mfaAal: mfaAal, mfaEnroll: mfaEnroll, mfaVerify: mfaVerify, mfaUnenroll: mfaUnenroll, mfaState: mfaState,
     myContext: myContext, myMemberships: myMemberships, myRole: myRole, hasRole: hasRole, isStaff: isStaff, orgId: orgId,
     isPlatformAdmin: isPlatformAdmin, activeOrgId: activeOrgId, setActiveOrg: setActiveOrg, setMyLocale: setMyLocale,
     // public

@@ -1,7 +1,7 @@
 -- =====================================================================
 -- shim.sql — LOCAL TESTS ONLY (PGlite / plain Postgres 16). NEVER run on Supabase.
 -- Recreates the minimum Supabase objects the migrations reference:
---   roles anon / authenticated / service_role, schema auth (users, uid(), jwt()),
+--   roles anon / authenticated / service_role, schema auth (users, mfa_factors, uid(), jwt() with default aal2),
 --   schema storage (buckets, objects, foldername()) and Supabase-like default grants.
 -- Simulate a signed-in user:
 --   SET ROLE authenticated;
@@ -23,8 +23,16 @@ CREATE TABLE IF NOT EXISTS auth.users (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_confirmed_at timestamptz;
+-- MFA (20261109000100): real Supabase access tokens always carry "aal". The suites written before MFA mint claims
+-- without it, so a token with "sub" but no "aal" gets "aal":"aal2" injected (their baseline stays identical).
+-- SELECT set_config('marsa_test.default_aal', 'none', false) disables the injection (a missing claim = aal1 in the DB);
+-- any other value (e.g. 'aal1') is injected instead.
 CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql STABLE AS $$
-  SELECT coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb
+  SELECT CASE WHEN c ? 'sub' AND NOT c ? 'aal'
+                   AND coalesce(nullif(current_setting('marsa_test.default_aal', true), ''), 'aal2') <> 'none'
+              THEN c || jsonb_build_object('aal', coalesce(nullif(current_setting('marsa_test.default_aal', true), ''), 'aal2'))
+              ELSE c END
+    FROM (SELECT coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb c) x
 $$;
 CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$
   SELECT nullif(auth.jwt() ->> 'sub', '')::uuid
@@ -32,6 +40,18 @@ $$;
 CREATE OR REPLACE FUNCTION auth.role() RETURNS text LANGUAGE sql STABLE AS $$
   SELECT auth.jwt() ->> 'role'
 $$;
+-- Supabase Auth MFA factors (minimal: the columns the MFA helpers read; enums are plain text here, the migration
+-- compares factor_type::text / status::text). Created before the migrations: sql helper bodies are validated at
+-- CREATE time. No grant to anon / authenticated (as on Supabase).
+CREATE TABLE IF NOT EXISTS auth.mfa_factors (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  friendly_name text,
+  factor_type text NOT NULL DEFAULT 'totp',
+  status text NOT NULL DEFAULT 'unverified',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
 GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION auth.uid(), auth.jwt(), auth.role() TO anon, authenticated, service_role;
 

@@ -15,7 +15,9 @@
 
    window.MarsaShell = {
      ready                      Promise → my_context data, or null (signed out / demo / offline / error); never rejects
-     status()                   'loading' | 'ready' | 'signedout' | 'demo' | 'error' | 'offline'
+     status()                   'loading' | 'ready' | 'signedout' | 'demo' | 'error' | 'offline' | 'mfa'
+                                ('mfa': my_context().mfa.satisfied === false → redirected to
+                                login.html?mfa=1&next=<this page>; ready resolves null — MFA_SPEC §5.4)
      context() orgId() roles() can(roles[]) isClient() isPlatformAdmin()   R (role sets)  NAV (full definition)
      navItems(opts?)            role-filtered NAV, flat: [{id, href, label, group, groupLabel, page, local, badge?, count?}]
                                 opts.group: only that group id · opts.local: only items on the current page
@@ -41,6 +43,8 @@
      [data-shell-org]           slot: a labelled <select class="form-control"> org switcher when the user has > 1 org
      [data-shell-user]          slot: name + roles text (strong + span.text-xs.text-muted)
      [data-shell-signout] / [data-shell-signout-all]   buttons (an empty one is filled with icon + label)
+     [data-shell-security]      link to login.html?security=1 («أمان الحساب»); the shell also adds one
+                                before the first sign-out button of the page while signed in
      [data-shell-session]       container shown only while signed in (status 'ready')
      [data-shell-staff]         shown only for staff of the active org (e.g. an «alerts» link)
      [data-shell-alerts]        empty <a data-nav-id="alerts"> is filled with icon + label; setBadge paints its count
@@ -396,7 +400,7 @@
      State
      ------------------------------------------------------------------ */
   var S = {
-    status: 'loading',          // loading | ready | signedout | demo | error | offline
+    status: 'loading',          // loading | ready | signedout | demo | error | offline | mfa
     ctx: null, session: null, orgId: null, roles: [], memberships: [],
     active: null, manualActive: false,
     title: null, crumbs: []
@@ -488,6 +492,14 @@
     S.roles.sort(function (a, b) { return ROLE_RANK.indexOf(b) - ROLE_RANK.indexOf(a); });
   }
   function loginHref() { return PAGE === 'portal' ? 'login.html#client' : 'login.html#staff'; }
+  // login.html?mfa=1&next=<this page>[#route] (the hash only when login.html's safeNext() accepts it)
+  function mfaHref() {
+    var page = fileName(), h = location.hash || '';
+    if (!/^[a-z-]+\.html$/.test(page)) page = 'admin.html';
+    if (!/^#[A-Za-z0-9/_-]{1,120}$/.test(h)) h = '';
+    return 'login.html?mfa=1&next=' + encodeURIComponent(page + h);
+  }
+  var SECURITY_HREF = 'login.html?security=1';
 
   /* ------------------------------------------------------------------
      Context
@@ -507,6 +519,14 @@
           S.ctx = null; S.roles = []; return null;
         }
         S.ctx = c.data;
+        // two-step verification required but not done in this session (org admin / platform admin at
+        // aal1): every app page sends the user to the challenge / enrollment first (MFA_SPEC §5.4)
+        var mst = typeof api.mfaState === 'function' ? api.mfaState(c.data) : null;
+        if (mst && mst.satisfied === false && PAGE !== 'login' && PAGE !== 'offline') {
+          S.status = 'mfa'; S.roles = [];
+          try { location.replace(mfaHref()); } catch (e) { /* blocked navigation: the page gates stay */ }
+          return null;
+        }
         return call(function () { return api.activeOrgId(); }).then(function (o) {
           var v = o && !o.error ? o.data : null;
           S.orgId = typeof v === 'string' ? v : null;
@@ -938,6 +958,21 @@
       b.appendChild(icon('logout'));
       b.appendChild(el('span', { text: t(b.hasAttribute('data-shell-signout-all') ? 'signout_all' : 'signout') }));
     });
+    // «account security» for every signed-in user: next to the page's own sign-out button
+    var so = qsa('[data-shell-signout], #adm-signout, [data-pf-signout]')[0];
+    if (so && so.parentNode && !qsa('[data-shell-security]').length) {
+      var sec = el('a', { class: 'btn btn-sm btn-ghost', href: SECURITY_HREF });
+      sec.setAttribute('data-shell-security', '');
+      so.parentNode.insertBefore(sec, so);
+    }
+    qsa('[data-shell-security]').forEach(function (a) {
+      a.hidden = !ready;
+      if (!a.hasAttribute('data-shell-filled') && a.firstChild) return;
+      clear(a).setAttribute('data-shell-filled', '');
+      if (!a.getAttribute('href')) a.setAttribute('href', SECURITY_HREF);
+      a.appendChild(icon('shield'));
+      a.appendChild(el('span', { text: t('security') }));
+    });
     var alertsIt = navItem('alerts');
     qsa('[data-shell-alerts]').forEach(function (a) {
       if (!a.hasAttribute('data-shell-filled') && a.firstChild) return;
@@ -1061,6 +1096,7 @@
     }
     if (canSwitchLang()) add(t('act_lang'), 'languages', function () { switchLang(lang() === 'en' ? 'ar' : 'en'); }, 'language english arabic لغة');
     if (S.status === 'ready') {
+      add(t('security'), 'shield', function () { location.href = SECURITY_HREF; }, 'security mfa two-step 2fa totp أمان تحقق');
       add(t('act_signout'), 'logout', signOut, 'logout sign out خروج');
       add(t('signout_all'), 'logout', signOutAll, 'logout all devices خروج الأجهزة');
     } else if (S.status === 'signedout') add(t('sign_in'), 'signin', function () { location.href = loginHref(); }, 'login دخول');

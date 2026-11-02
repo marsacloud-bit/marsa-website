@@ -150,6 +150,13 @@
               <a class="btn btn-ghost" href="portal.html" data-i18n="platform.gateToPortal">بوابة العميل</a>
             </div>
           </div>
+          <div data-pf-gate="mfa" hidden>
+            <h2 data-i18n="platform.gateMfaTitle">التحقق بخطوتين مطلوب</h2>
+            <p class="text-muted" data-i18n="platform.gateMfaText">لوحة المنصة تتطلب التحقق بخطوتين.</p>
+            <div class="btn-group pf-gate-actions">
+              <a class="btn btn-primary" href="login.html?mfa=1&amp;next=platform.html" data-i18n="platform.gateMfaBtn">إكمال التحقق</a>
+            </div>
+          </div>
           <div data-pf-gate="error" hidden>
             <h2 data-i18n="platform.gateErrorTitle">تعذّر التحقق من الجلسة</h2>
             <p class="text-muted" data-pf-gate-error></p>

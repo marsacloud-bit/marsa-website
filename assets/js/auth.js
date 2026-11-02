@@ -26,6 +26,13 @@
      invitation_preview / accept_invitation. Preview → (sign in | sign up
      with the invited e-mail | accept when already signed in) → accept →
      admin.html#dashboard for staff roles, portal.html for client invitations.
+   * Two-step verification (TOTP, docs/online/MFA_SPEC.md §5.3): routeByRole() is the single
+     choke point after every sign-in / "continue" / PWA start / confirmation link. A user with a
+     verified factor at aal1 gets the code challenge; a user for whom my_context().mfa says MFA
+     is required (org admin / platform admin) without a verified factor gets the enrollment
+     (assets/js/mfa.js, view "mfa"). Cancel = sign out.
+     ?mfa=1[&next=…] (sent by app-shell.js / admin / platform gates): with a session → that step at
+     once; without → the staff sign-in tab (next is kept). ?security=1 → the account security view.
    ========================================================================== */
 (function () {
   'use strict';
@@ -103,6 +110,8 @@
   var confirmedAtLoad = params.type === 'signup' || query.confirmed === '1';
   var fromPwa = query.source === 'pwa';
   var signedOutAtLoad = query.signedout === 'all' ? 'all' : (query.signedout === '1' ? 'one' : '');
+  var mfaAtLoad = query.mfa === '1';
+  var securityAtLoad = query.security === '1';
   var routing = false;
 
   function parseParams(s) {
@@ -116,7 +125,7 @@
   }
   // Only same-site pages from this allow-list may be used as "next" (an optional #route of
   // plain characters is kept, e.g. admin.html#transactions/<uuid>); anything else is ignored.
-  var NEXT_PAGES = ['portal.html', 'admin.html', 'platform.html', 'ocr.html', 'bulk-upload.html'];
+  var NEXT_PAGES = ['portal.html', 'admin.html', 'platform.html', 'ocr.html', 'bulk-upload.html', 'help.html'];
   function safeNext() {
     var n = String(query.next || '').replace(/^\.?\//, '');
     var m = /^([a-z-]+\.html)(#[A-Za-z0-9/_-]{1,120})?$/.exec(n);
@@ -170,7 +179,7 @@
   }
   function hideMsg() { if (msgBox) msgBox.hidden = true; }
 
-  var VIEWS = ['loading', 'tabs', 'forgot', 'reset', 'session', 'demo', 'invite'];
+  var VIEWS = ['loading', 'tabs', 'forgot', 'reset', 'session', 'demo', 'invite', 'mfa', 'security'];
   function showView(name) {
     VIEWS.forEach(function (v) {
       var el = $('[data-auth-view="' + v + '"]');
@@ -243,8 +252,12 @@
   function routeByRole(preferStaff) {
     if (routing) return Promise.resolve();
     routing = true;
-    return api.myContext(true).then(function (r) {
+    var aalP = typeof api.mfaAal === 'function' ? api.mfaAal() : Promise.resolve({ data: null, error: null });
+    return Promise.all([api.myContext(true), aalP]).then(function (rs) {
+      var r = rs[0];
       var ctx = r.data || {};
+      // two-step verification before any routing (MFA_SPEC §5.3)
+      if (!r.error && mfaStep(ctx, (rs[1] && rs[1].data) || {}, preferStaff)) { routing = false; return; }
       // staff in any organization (multi-org users pick the org in admin.html)
       var staff = !r.error && (ctx.memberships || []).some(function (m) { return m.role && m.role !== 'client'; });
       var platform = !r.error && !!ctx.is_platform_admin;
@@ -259,6 +272,42 @@
       }
       showMsg(tr('signedIn'), 'success');
       location.replace(dest);
+    });
+  }
+
+  /* ---- two-step verification step (view "mfa") ----
+     true when a challenge / enrollment screen is shown instead of routing */
+  function mfaStep(ctx, aal, preferStaff) {
+    var Mfa = window.MarsaMfa, host = $('[data-mfa-host]');
+    if (!Mfa || !host || typeof api.mfaState !== 'function') return false;   // the server still denies admin access at aal1
+    var st = api.mfaState(ctx);
+    var challenge = (aal.current === 'aal1' && aal.next === 'aal2') || (st.required && !st.satisfied && st.enrolled);
+    var enroll = !challenge && st.required && !st.satisfied;
+    if (!challenge && !enroll) return false;
+    hideMsg();
+    showView('mfa');
+    var opts = {
+      required: st.required,
+      onDone: function () { routing = false; routeByRole(preferStaff); },
+      onCancel: function () {
+        api.signOut().then(function () {
+          showView('tabs'); selectTab(preferStaff || mfaAtLoad ? 'staff' : 'client'); showClientSub('signin');
+          showMsg(tr('signedOut'), 'info');
+        });
+      }
+    };
+    if (challenge) Mfa.renderChallenge(host, opts); else Mfa.renderEnroll(host, opts);
+    return true;
+  }
+
+  /* ---- account security (view "security") ---- */
+  function showSecurity() {
+    hideMsg();
+    showView('security');
+    var host = $('[data-security-host]');
+    return api.myContext(true).then(function (r) {
+      if (r.error && r.error.code === 'MRS_AUTH_REQUIRED') { showView('tabs'); return; }
+      if (window.MarsaMfa && host) window.MarsaMfa.renderManage(host, { ctx: r.error ? null : r.data });
     });
   }
 
@@ -446,6 +495,13 @@
     });
   });
   $$('[data-continue]').forEach(function (b) { b.addEventListener('click', function () { routeByRole(false); }); });
+  $$('[data-go-security]').forEach(function (b) { b.addEventListener('click', function () { showSecurity(); }); });
+  $$('[data-go-session]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      hideMsg();
+      api.getSession().then(function (s) { if (s.data) showSession(s.data.user); else showView('tabs'); });
+    });
+  });
 
   /* ======================================================================
      INVITATION
@@ -644,12 +700,16 @@
         return;
       }
       if (session) {
+        if (securityAtLoad) return showSecurity();
+        // sent here for two-step verification (app-shell / admin / platform gates): that step at once
+        if (mfaAtLoad) return routeByRole(false);
         // back from the confirmation link, or the installed app starting: go straight in
         if (confirmedAtLoad || fromPwa) { cleanUrl(); return routeByRole(false); }
         showSession(session.user);
         return;
       }
       showView('tabs');
+      if (mfaAtLoad) { selectTab('staff'); return; }
       if (confirmedAtLoad) { cleanUrl('client'); showMsg(tr('confirmed'), 'success'); return; }
       if (signedOutAtLoad) {
         cleanUrl(location.hash.replace(/^#/, ''));

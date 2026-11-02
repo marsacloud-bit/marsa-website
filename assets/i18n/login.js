@@ -121,7 +121,49 @@
     resetBtn: 'حفظ كلمة المرور',
 
     /* session check (online mode, before the forms or a PWA redirect) */
-    loading: 'جارٍ التحقق من الجلسة…'
+    loading: 'جارٍ التحقق من الجلسة…',
+
+    /* MFA (TOTP): mfa.js challenge / enrollment / account security (docs/online/MFA_SPEC.md §6) */
+    mfaChallengeTitle: 'التحقق بخطوتين',
+    mfaChallengeLead: 'أدخل الرمز المكوّن من 6 أرقام من تطبيق المصادقة على جوالك.',
+    mfaCodeLabel: 'رمز التحقق',
+    mfaCodeFormat: 'الرمز 6 أرقام.',
+    mfaVerifyBtn: 'تحقّق',
+    mfaInvalidCode: 'الرمز غير صحيح أو انتهت صلاحيته. أدخل الرمز الحالي من التطبيق.',
+    mfaDone: 'تم التحقق. جارٍ تحويلك…',
+    mfaEnrollTitle: 'فعّل التحقق بخطوتين',
+    mfaEnrollRequired: 'حسابك له صلاحيات إدارية، لذلك التحقق بخطوتين إلزامي قبل المتابعة.',
+    mfaEnrollStep1: 'امسح رمز QR بتطبيق مصادقة مثل Google Authenticator أو Microsoft Authenticator.',
+    mfaQrAlt: 'رمز QR لإضافة حسابك إلى تطبيق المصادقة',
+    mfaQrMissing: 'تعذّر عرض رمز QR. أدخل المفتاح أدناه يدويًا في التطبيق.',
+    mfaSecretLabel: 'أو أدخل هذا المفتاح يدويًا في التطبيق',
+    mfaCopySecret: 'نسخ المفتاح',
+    mfaCopied: 'تم النسخ.',
+    mfaEnrollStep2: 'ثم أدخل الرمز الذي يظهر في التطبيق.',
+    mfaEnrollBtn: 'تفعيل',
+    mfaEnrolled: 'تم تفعيل التحقق بخطوتين.',
+    mfaEnrollFail: 'تعذّر بدء التفعيل. حاول مرة أخرى.',
+    mfaRetry: 'إعادة المحاولة',
+    mfaLostDevice: 'فقدت جهازك؟ تواصل مع مالك المنصة لإعادة تعيين التحقق بخطوتين.',
+    mfaCancelSignOut: 'إلغاء وتسجيل الخروج',
+    mfaSkip: 'لاحقًا',
+    securityOpen: 'أمان الحساب',
+    securityTitle: 'أمان الحساب',
+    securityLead: 'التحقق بخطوتين يحمي حسابك حتى لو عُرفت كلمة المرور.',
+    securityStatusOn: 'التحقق بخطوتين مفعّل',
+    securityStatusOff: 'التحقق بخطوتين غير مفعّل',
+    securityRequiredNote: 'إلزامي لحسابك (مدير مؤسسة أو مشرف منصة).',
+    securityEnable: 'تفعيل التحقق بخطوتين',
+    securityAddDevice: 'إضافة جهاز آخر',
+    securityDisable: 'إزالة',
+    securityDisableConfirm: 'هل تريد إزالة وسيلة التحقق هذه؟',
+    securityDisableBlocked: 'لا يمكن إزالة آخر وسيلة تحقق لأن التحقق بخطوتين إلزامي لحسابك.',
+    securityDisabled: 'أُزيلت وسيلة التحقق.',
+    securityFactorAdded: 'أُضيف في {date}',
+    securityFactorName: 'تطبيق المصادقة',
+    securityNeedsAal2: 'لإدارة وسائل التحقق أدخل رمز التحقق أولًا.',
+    securityLoadFail: 'تعذّر تحميل إعدادات الأمان. حاول مرة أخرى.',
+    securityBack: 'العودة'
   };
 
   var en = {
@@ -236,7 +278,49 @@
     resetBtn: 'Save password',
 
     /* session check (online mode, before the forms or a PWA redirect) */
-    loading: 'Checking your session…'
+    loading: 'Checking your session…',
+
+    /* MFA (TOTP): mfa.js challenge / enrollment / account security (docs/online/MFA_SPEC.md §6) */
+    mfaChallengeTitle: 'Two-step verification',
+    mfaChallengeLead: 'Enter the 6-digit code from your authenticator app.',
+    mfaCodeLabel: 'Verification code',
+    mfaCodeFormat: 'The code is 6 digits.',
+    mfaVerifyBtn: 'Verify',
+    mfaInvalidCode: 'The code is wrong or expired. Enter the current code from the app.',
+    mfaDone: 'Verified. Redirecting…',
+    mfaEnrollTitle: 'Set up two-step verification',
+    mfaEnrollRequired: 'Your account has admin rights, so two-step verification is required before you continue.',
+    mfaEnrollStep1: 'Scan the QR code with an authenticator app such as Google Authenticator or Microsoft Authenticator.',
+    mfaQrAlt: 'QR code to add your account to the authenticator app',
+    mfaQrMissing: 'The QR code could not be shown. Enter the key below manually in the app.',
+    mfaSecretLabel: 'Or enter this key manually in the app',
+    mfaCopySecret: 'Copy key',
+    mfaCopied: 'Copied.',
+    mfaEnrollStep2: 'Then enter the code shown in the app.',
+    mfaEnrollBtn: 'Activate',
+    mfaEnrolled: 'Two-step verification is on.',
+    mfaEnrollFail: 'Setup could not start. Try again.',
+    mfaRetry: 'Try again',
+    mfaLostDevice: 'Lost your device? Contact the platform owner to reset two-step verification.',
+    mfaCancelSignOut: 'Cancel and sign out',
+    mfaSkip: 'Later',
+    securityOpen: 'Account security',
+    securityTitle: 'Account security',
+    securityLead: 'Two-step verification protects your account even if your password is known.',
+    securityStatusOn: 'Two-step verification is on',
+    securityStatusOff: 'Two-step verification is off',
+    securityRequiredNote: 'Required for your account (organization admin or platform admin).',
+    securityEnable: 'Turn on two-step verification',
+    securityAddDevice: 'Add another device',
+    securityDisable: 'Remove',
+    securityDisableConfirm: 'Remove this verification method?',
+    securityDisableBlocked: 'You cannot remove the last method because two-step verification is required for your account.',
+    securityDisabled: 'The verification method was removed.',
+    securityFactorAdded: 'Added on {date}',
+    securityFactorName: 'Authenticator app',
+    securityNeedsAal2: 'Enter a verification code first to manage your methods.',
+    securityLoadFail: 'Security settings could not be loaded. Try again.',
+    securityBack: 'Back'
   };
 
   window.MarsaI18n.register('login', { ar: ar, en: en });

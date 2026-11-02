@@ -38,6 +38,7 @@
       // account
       user_fallback: 'مستخدم', none: '—', platform_admin: 'مدير المنصة', client_account: 'حساب عميل',
       signout: 'تسجيل الخروج', signout_all: 'تسجيل الخروج من كل الأجهزة',
+      security: 'أمان الحساب',
       signout_all_title: 'تسجيل الخروج من كل الأجهزة؟',
       signout_all_text: 'سيُلغى الدخول في كل المتصفحات والأجهزة المرتبطة بحسابك، وقد تبقى الجلسات المفتوحة صالحة حتى ساعة واحدة كحد أقصى.',
       signout_all_ok: 'الخروج من كل الأجهزة', signout_failed: 'تعذّر تسجيل الخروج: {msg}',
@@ -73,6 +74,7 @@
       org_unknown: 'This organization is not available to your account.',
       user_fallback: 'User', none: '—', platform_admin: 'Platform admin', client_account: 'Client account',
       signout: 'Sign out', signout_all: 'Sign out of all devices',
+      security: 'Account security',
       signout_all_title: 'Sign out of all devices?',
       signout_all_text: 'Every browser and device signed in to your account will be signed out. Sessions already open may stay valid for up to one hour.',
       signout_all_ok: 'Sign out everywhere', signout_failed: 'Could not sign out: {msg}',

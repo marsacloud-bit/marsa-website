@@ -78,7 +78,11 @@
     if (typeof Shell.setTitle === 'function') Shell.setTitle(tr('title'));
     if (typeof Shell.setActive === 'function') Shell.setActive('platform');
   }
-  function errText(err) { return (err && err.message) || (api && api.errorMessage ? api.errorMessage(err) : tr('unknownError')); }
+  function errText(err) {
+    // the server refused for a missing second step (session aal1, MFA_SPEC §5.5): switch to the MFA gate
+    if (err && err.code === 'MRS_MFA_REQUIRED') setTimeout(function () { gate('mfa'); }, 0);
+    return (err && err.message) || (api && api.errorMessage ? api.errorMessage(err) : tr('unknownError'));
+  }
 
   /* ---- gate / messages ---- */
   var gateEl = $('#pf-gate'), appEl = $('#pf-app');
@@ -1025,6 +1029,9 @@
           if (r.error.code === 'MRS_AUTH_REQUIRED') { gate('signin'); return; }
           $('[data-pf-gate-error]').textContent = errText(r.error); gate('error'); return;
         }
+        // two-step verification first: is_platform_admin is false at aal1 (effective value)
+        var st = api.mfaState ? api.mfaState(r.data) : null;
+        if (st && st.required && !st.satisfied) { gate('mfa'); return; }
         if (!r.data || !r.data.is_platform_admin) { gate('denied'); return; }
         gate(null);
         loadAll();

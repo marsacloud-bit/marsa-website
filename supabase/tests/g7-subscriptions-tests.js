@@ -5,9 +5,9 @@
   Runs on PGlite (real Postgres 16 in memory). Never point it at Supabase. No network, no Daftra, no mailbox,
   no WhatsApp, no LLM, no payment provider, no keys.
 
-  Loads: supabase/tests/shim.sql → supabase/migrations/*.sql (sorted, G7 held back) → supabase/seed.sql → pre-G7
+  Loads: supabase/tests/shim.sql → supabase/migrations/*.sql before G7 (sorted) → supabase/seed.sql → pre-G7
   fixtures (org B with transactions + documents = "live staging with G2–G6b data") → the G7 migration (preflight
-  probe first, then applied three times in total) → fixtures.
+  probe first, then applied three times in total) → the migrations after G7 (sorted, e.g. MFA) → fixtures.
 
   usage:
     NODE_PATH=/tmp/pgtest/node_modules node supabase/tests/g7-subscriptions-tests.js [/path/to/marsa-website] [--quiet]
@@ -1169,13 +1169,16 @@ async function dbMain() {
   const migDir = path.join(SUPA, 'migrations');
   const migFiles = fs.readdirSync(migDir).filter(f => /^\d+_.*\.sql$/.test(f)).sort();
   if (!migFiles.includes(G7_MIGRATION)) { fail('G7 migration present', G7_MIGRATION + ' not found'); return; }
-  if (migFiles[migFiles.length - 1] !== G7_MIGRATION) { fail('G7 migration is the latest', 'latest is ' + migFiles[migFiles.length - 1]); return; }
+  // later files (MFA 20261109000100 …) are loaded after the G7 apply section, so its "G7 re-creates nothing" /
+  // health_check = 20261108000100 checks still see G7 as the latest version
+  const LATER = migFiles.filter(f => f > G7_MIGRATION);
   if (!await runFile(path.join(SUPA, 'tests', 'shim.sql'))) return;
-  for (const m of migFiles.filter(f => f !== G7_MIGRATION)) if (!await runFile(path.join(migDir, m), QUIET)) return;
+  for (const m of migFiles.filter(f => f < G7_MIGRATION)) if (!await runFile(path.join(migDir, m), QUIET)) return;
   if (!await runFile(path.join(SUPA, 'seed.sql'))) return;
   try { await preFixtures(); pass('pre-G7 fixtures: users, platform admin, org B with 2 transactions (one 2 months back) + document, document in A'); }
   catch (e) { fail('pre-G7 fixtures', errText(e)); return; }
   try { await secPreflightAndApply(); } catch (e) { fail('preflight / apply', errText(e)); return; }
+  for (const m of LATER) if (!await runFile(path.join(migDir, m), QUIET)) return;
   try { await fixtures(); pass('fixtures: 9 role users in A, org M with admin / clearance / ops'); }
   catch (e) { fail('fixtures', errText(e)); return; }
   const secs = [secCatalog, secInert, secPlansRpc, secOrgCreate, secSetPlan, secUsers, secBranches, secTransactions, secStorage, secMessaging,

@@ -303,6 +303,21 @@
               <button class="btn btn-primary" type="button" data-continue data-i18n="login.continue">متابعة إلى بوابتي</button>
               <button class="btn btn-ghost" type="button" data-sign-out data-i18n="login.signOut">تسجيل الخروج</button>
               <button class="btn btn-ghost" type="button" data-sign-out-all data-i18n="login.signOutAll">تسجيل الخروج من كل الأجهزة</button>
+              <button class="btn btn-ghost" type="button" data-go-security data-i18n="login.securityOpen">أمان الحساب</button>
+            </div>
+          </div>
+
+          <!-- ===== TWO-STEP VERIFICATION (TOTP): code challenge or enrollment (assets/js/mfa.js) ===== -->
+          <div data-auth-view="mfa" hidden>
+            <div data-mfa-host></div>
+          </div>
+
+          <!-- ===== ACCOUNT SECURITY (login.html?security=1): enroll / remove TOTP factors ===== -->
+          <div data-auth-view="security" hidden>
+            <h3 class="auth-h" data-i18n="login.securityTitle">أمان الحساب</h3>
+            <div data-security-host></div>
+            <div class="btn-group mt-3">
+              <button class="btn btn-ghost" type="button" data-go-session data-i18n="login.securityBack">العودة</button>
             </div>
           </div>
 
@@ -539,6 +554,7 @@
   <script src="assets/js/main.js" defer></script>
   <script src="assets/js/supa.js" defer></script>
   <script src="assets/js/pwa.js" defer></script>
+  <script src="assets/js/mfa.js" defer></script>
   <script src="assets/js/auth.js" defer></script>
 </body>
 </html>

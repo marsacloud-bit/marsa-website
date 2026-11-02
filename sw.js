@@ -33,7 +33,7 @@
    ========================================================================== */
 'use strict';
 
-var VERSION = '2026-11-08.3';   // main.js reloads once when config.js did not load (PWA window opened from an e-mail link without Basic Auth); G7 review fixes (help.js skip link + phone scroll, platform.js paused / trial-ended badges, i18n/platform.js, platform.css); G7: plans / subscriptions / usage (platform.js, i18n/platform.js, platform.css, supa.js), help.html + help.js + i18n/help.js + help.css (guides network-first, not precached), app-shell.js help nav + admin.js help pill; G6b review fixes (msg/inbox.js, kit.js, contacts.js, tx-msg.js, i18n/msg.js, app-shell.js); G6b: unified inbox (msg/*.js, i18n/msg.js, msg.css); G6a review fixes (rpt/*.js, i18n/rpt.js); G6a: search / reports / dashboards (rpt/*.js, rpt.js, rpt.css, dash.css) + portal tabs; G4 fin/*, G5 bill/* kept
+var VERSION = '2026-11-09.1';   // MFA: mfa.js, login / admin / platform gates, supa.js mfa*, app-shell.js mfa redirect + account security link, login.css; main.js reloads once when config.js did not load (PWA window opened from an e-mail link without Basic Auth); G7 review fixes (help.js skip link + phone scroll, platform.js paused / trial-ended badges, i18n/platform.js, platform.css); G7: plans / subscriptions / usage (platform.js, i18n/platform.js, platform.css, supa.js), help.html + help.js + i18n/help.js + help.css (guides network-first, not precached), app-shell.js help nav + admin.js help pill; G6b review fixes (msg/inbox.js, kit.js, contacts.js, tx-msg.js, i18n/msg.js, app-shell.js); G6b: unified inbox (msg/*.js, i18n/msg.js, msg.css); G6a review fixes (rpt/*.js, i18n/rpt.js); G6a: search / reports / dashboards (rpt/*.js, rpt.js, rpt.css, dash.css) + portal tabs; G4 fin/*, G5 bill/* kept
 var CACHE = 'marsa-app-' + VERSION;
 var OFFLINE_URL = 'offline.html';
 
@@ -50,7 +50,7 @@ var PRECACHE = [
   'assets/css/pages/portal.css', 'assets/css/pages/ocr.css', 'assets/css/pages/bulk-upload.css',
   // scripts
   'assets/js/config.js', 'assets/js/i18n.js', 'assets/js/main.js', 'assets/js/supa.js',
-  'assets/js/app-shell.js', 'assets/js/pwa.js', 'assets/js/auth.js',
+  'assets/js/app-shell.js', 'assets/js/pwa.js', 'assets/js/auth.js', 'assets/js/mfa.js',
   'assets/js/admin.js', 'assets/js/platform.js', 'assets/js/portal.js', 'assets/js/help.js',
   'assets/js/ocr.js', 'assets/js/ocr-parse.js', 'assets/js/bulk-upload.js', 'assets/js/xlsx-lite.js',
   'assets/js/ops/alerts.js', 'assets/js/ops/schedule.js', 'assets/js/ops/parties.js',

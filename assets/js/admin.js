@@ -65,6 +65,9 @@
       forbiddenTitle: 'لا تملك صلاحية موظف',
       forbidden: 'حسابك مسجّل، لكن لا توجد له صلاحية موظف نشطة في هذه المؤسسة. تواصل مع مدير النظام لإضافتك.',
       errorTitle: 'تعذّر تحميل اللوحة',
+      mfaTitle: 'التحقق بخطوتين مطلوب',
+      mfa: 'لوحة الإدارة تتطلب التحقق بخطوتين لحسابات المديرين. أكمل التحقق للمتابعة.',
+      mfaBtn: 'إكمال التحقق',
       retry: 'إعادة المحاولة',
       home: 'العودة للرئيسية'
     },
@@ -572,6 +575,13 @@
     } else if (kind === 'forbidden') {
       title = T.gate.forbiddenTitle; text = T.gate.forbidden;
       actions = '<button class="btn btn-secondary" type="button" data-gate="signout">' + esc(t('signout')) + '</button>';
+    } else if (kind === 'mfa') {
+      // two-step verification required for this account and not done in this session (MFA_SPEC §5.5)
+      title = T.gate.mfaTitle; text = T.gate.mfa;
+      var h = /^#[A-Za-z0-9/_-]{1,120}$/.test(location.hash || '') ? location.hash : '';
+      actions = '<a class="btn btn-primary" href="login.html?mfa=1&amp;next=' + esc(encodeURIComponent('admin.html' + h)) + '" data-gate-mfa>' +
+        esc(tx2('gate_mfa_btn', T.gate.mfaBtn)) + '</a>' +
+        '<button class="btn btn-secondary" type="button" data-gate="signout">' + esc(t('signout')) + '</button>';
     } else if (kind === 'loading') {
       gateBody.innerHTML = '<div class="adm-loading" role="status"><span class="adm-spinner" aria-hidden="true"></span>' + esc(t('gate_checking')) + '</div>';
       return;
@@ -634,6 +644,8 @@
     }).then(null, function (e) { showGate('error', errText(e)); });
   }
   function withContext(ctx) {
+    var st = api.mfaState ? api.mfaState(ctx) : null;
+    if (st && st.required && !st.satisfied) { showGate('mfa'); return Promise.resolve(); }
     S.ctx = ctx || {};
     S.orgs = staffOrgs(S.ctx);
     if (!S.orgs.length) { showGate('forbidden'); return Promise.resolve(); }
@@ -2773,9 +2785,17 @@
     return String(v == null ? '' : v).toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي')
       .replace(/[^0-9a-z\u0621-\u064a]+/g, '');
   }
-  function isForbidden(e) { var c = errCode(e); return c === 'MRS_FORBIDDEN' || c === 'RLS' || c === 'MRS_RLS' || c === '42501'; }
+  function isForbidden(e) { var c = errCode(e); return c === 'MRS_FORBIDDEN' || c === 'RLS' || c === 'MRS_RLS' || c === '42501' || c === 'MRS_MFA_REQUIRED'; }
+  // the server refused for a missing second step (session aal1): switch to the MFA gate once
+  var mfaGateShown = false;
+  function mfaGateSoon() {
+    if (mfaGateShown) return;
+    mfaGateShown = true;
+    setTimeout(function () { showGate('mfa'); }, 0);
+  }
   function apiErr(e) {
     var c = errCode(e);
+    if (c === 'MRS_MFA_REQUIRED') { mfaGateSoon(); return errText(e); }
     if (c === 'MRS_UNKNOWN_RESULT') return t('unknown_result');
     if (c === 'MRS_IN_PROGRESS') return t('in_progress');
     if (c === 'MRS_IDEMPOTENCY_CONFLICT') return t('idem_conflict');
