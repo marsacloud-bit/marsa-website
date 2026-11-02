@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" data-i18n-page>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>غير متصل | مرساة كلاود</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#0B3A6E">
+  <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
+  <link rel="icon" type="image/png" href="assets/img/favicon.png">
+  <link rel="apple-touch-icon" href="assets/img/icons/icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <script>(function(){try{var t=localStorage.getItem('marsa_theme');if(t==='dark'||(t!=='light'&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();</script>
+  <script>(function(){try{if(localStorage.getItem('marsa_lang')==='en'){var h=document.documentElement;h.setAttribute('lang','en');h.setAttribute('dir','ltr');}}catch(e){}})();</script>
+  <!-- Served by sw.js for any navigation while offline: only precached files below, no web fonts
+       required, and the critical styles are inline so the page renders even if a stylesheet is missing. -->
+  <link rel="stylesheet" href="assets/css/style.css">
+  <link rel="stylesheet" href="assets/css/app.css">
+  <style>
+    .offline-wrap { --o-bg: #F4F8FB; --o-surface: #FFFFFF; --o-text: #0F1E33; --o-muted: #5A6B82; --o-border: #DCE6EF; --o-accent: #0B3A6E; --o-accent-soft: rgba(11, 58, 110, .08); --o-ring: 0 0 0 3px rgba(20, 163, 168, .45); }
+    /* dark values alias app.css (with the same values as inline fallbacks) so offline matches the app shell */
+    html[data-theme="dark"] .offline-wrap { --o-bg: var(--app-bg, #0A111D); --o-surface: var(--app-surface, #101927); --o-text: var(--app-text, #E6EDF6); --o-muted: var(--app-muted, #93A2B7); --o-border: var(--app-border, #22314A); --o-accent: var(--app-accent-solid, #3DBDC3); --o-accent-soft: var(--app-accent-soft, rgba(61, 189, 195, .14)); }
+    html, body { margin: 0; min-height: 100%; }
+    body { font-family: "Cairo", "Segoe UI", Tahoma, "Geeza Pro", system-ui, sans-serif; }
+    html[data-theme="dark"] body { background: var(--app-bg, #0A111D); color: var(--app-text, #E6EDF6); }
+    .offline-wrap { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; background: var(--o-bg); color: var(--o-text); box-sizing: border-box; }
+    .offline-card { width: 100%; max-width: 440px; background: var(--o-surface); border: 1px solid var(--o-border); border-radius: 16px; padding: 32px 24px; text-align: center; box-shadow: 0 1px 2px rgba(15, 30, 51, .06), 0 8px 24px rgba(15, 30, 51, .06); box-sizing: border-box; }
+    .offline-icon { width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 14px; display: grid; place-items: center; background: var(--o-accent-soft); color: var(--o-accent); }
+    .offline-icon svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .offline-card h2 { margin: 0 0 8px; font-size: 1.25rem; line-height: 1.4; font-weight: 800; color: var(--o-text); }
+    .offline-card p { margin: 0 0 24px; font-size: .9375rem; line-height: 1.7; color: var(--o-muted); }
+    .offline-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+    .offline-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 8px 16px; border-radius: var(--app-r, 8px); border: 1px solid transparent; font: inherit; font-size: .9375rem; font-weight: 700; cursor: pointer; text-decoration: none; transition: background-color .15s, border-color .15s; }
+    .offline-btn:focus-visible { outline: none; box-shadow: var(--o-ring); }
+    .offline-btn-primary { background: #0B3A6E; color: #fff; }
+    .offline-btn-primary:hover { background: #072A52; color: #fff; }
+    html[data-theme="dark"] .offline-btn-primary { background: var(--app-brand, #3DBDC3); color: var(--app-on-brand, #041C1E); }
+    html[data-theme="dark"] .offline-btn-primary:hover { background: var(--app-brand-hover, #5ACBD0); color: var(--app-on-brand, #041C1E); }
+    .offline-btn-ghost { background: transparent; color: var(--o-text); border-color: var(--o-border); }
+    .offline-btn-ghost:hover { background: var(--o-accent-soft); color: var(--o-text); }
+    .offline-card .offline-status { margin: 16px 0 0; font-size: .8125rem; color: var(--o-muted); min-height: 1.4em; }
+    .offline-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #C98A0B; margin-inline-end: 6px; vertical-align: middle; }
+    .offline-dot.is-online { background: #13955F; }
+    @media (prefers-reduced-motion: reduce) { .offline-btn { transition: none; } }
+  </style>
+</head>
+<body class="app-page" data-app-page="offline">
+  <main id="app-main">
+    <div class="offline-wrap">
+      <section class="offline-card" aria-labelledby="offline-title">
+        <div class="offline-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M2 8.8a15 15 0 0 1 4.2-2.6M10.7 5a15 15 0 0 1 11.3 3.8M5 12.6a10 10 0 0 1 5.2-2.5M16.8 10.9A10 10 0 0 1 19 12.6M8.5 16.1a5 5 0 0 1 7 0M12 20h.01M3 3l18 18"/></svg>
+        </div>
+        <h2 id="offline-title" data-i18n="offline.title">أنت غير متصل بالإنترنت</h2>
+        <p data-i18n="offline.text">تعذّر تحميل هذه الصفحة لأن الجهاز غير متصل. تحقّق من اتصالك ثم أعد المحاولة. لا تُحفظ أي بيانات تشغيلية على هذا الجهاز، لذلك تحتاج المنصة إلى اتصال لعرض الطلبات والمعاملات.</p>
+        <div class="offline-actions">
+          <button class="offline-btn offline-btn-primary" type="button" data-offline-retry data-i18n="offline.retry">إعادة المحاولة</button>
+          <a class="offline-btn offline-btn-ghost" href="login.html" data-i18n="offline.home">صفحة الدخول</a>
+        </div>
+        <p class="offline-status" role="status" aria-live="polite"><span class="offline-dot" data-offline-dot></span><span data-offline-status data-i18n="offline.waiting">بانتظار عودة الاتصال…</span></p>
+      </section>
+    </div>
+  </main>
+
+  <script src="assets/js/config.js" defer></script>
+  <script src="assets/js/i18n.js" defer></script>
+  <script src="assets/i18n/app.js" defer></script>
+  <script src="assets/js/main.js" defer></script>
+  <script src="assets/js/supa.js" defer></script>
+  <script src="assets/js/app-shell.js" defer></script>
+  <script src="assets/js/pwa.js" defer></script>
+  <script>
+    /* offline page: dictionary + retry. Inline so it needs no extra file; runs after the deferred
+       scripts (DOMContentLoaded) and also works when none of them loaded. */
+    document.addEventListener('DOMContentLoaded', function () {
+      var I = window.MarsaI18n;
+      var STR = {
+        ar: { title: 'أنت غير متصل بالإنترنت', text: 'تعذّر تحميل هذه الصفحة لأن الجهاز غير متصل. تحقّق من اتصالك ثم أعد المحاولة. لا تُحفظ أي بيانات تشغيلية على هذا الجهاز، لذلك تحتاج المنصة إلى اتصال لعرض الطلبات والمعاملات.',
+              retry: 'إعادة المحاولة', home: 'صفحة الدخول', waiting: 'بانتظار عودة الاتصال…', back: 'عاد الاتصال. جارٍ إعادة التحميل…', pageTitle: 'غير متصل | مرساة كلاود' },
+        en: { title: 'You are offline', text: 'This page could not be loaded because the device is offline. Check your connection and try again. No operational data is stored on this device, so the platform needs a connection to show requests and transactions.',
+              retry: 'Try again', home: 'Sign-in page', waiting: 'Waiting for the connection…', back: 'Back online. Reloading…', pageTitle: 'Offline | Marsa Cloud' }
+      };
+      if (I && I.register) { I.register('offline', STR); if (I.apply) I.apply(document); }
+      function t(k) { var l = I && I.lang ? I.lang() : 'ar'; return (STR[l] || STR.ar)[k]; }
+      function title() { document.title = t('pageTitle'); }
+      title();
+      window.addEventListener('marsa:langchange', title);
+      if (window.MarsaShell && window.MarsaShell.setTitle) { try { window.MarsaShell.setTitle(t('title'), []); } catch (e) { /* optional */ } }
+      var retry = document.querySelector('[data-offline-retry]');
+      if (retry) retry.addEventListener('click', function () { location.reload(); });
+      var dot = document.querySelector('[data-offline-dot]'), st = document.querySelector('[data-offline-status]');
+      window.addEventListener('online', function () {
+        if (dot) dot.classList.add('is-online');
+        if (st) { st.removeAttribute('data-i18n'); st.textContent = t('back'); }
+        setTimeout(function () { location.reload(); }, 800);
+      });
+    });
+  </script>
+</body>
+</html>

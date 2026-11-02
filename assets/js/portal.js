@@ -1,6 +1,12 @@
 /* ==========================================================================
    مرسى | MARSA — portal.html  (client portal, STAGING)
-   Load order: config.js → main.js → supa.js → portal.js  (plain <script defer>)
+   Load order: config.js → i18n.js → assets/i18n/portal.js → assets/i18n/app.js → main.js
+               → supa.js → app-shell.js → pwa.js → portal.js  (plain <script defer>)
+
+   * App page: window.MarsaShell (app-shell.js) draws the sidebar / topbar
+     around <main id="app-main"> (user menu with sign out / sign out of all
+     devices); the profile tab keeps its own sign-out buttons. Toasts go
+     through Shell.toast (Marsa.toast without the shell).
 
    * Demo mode: shows a notice (login needs the online setup); no network.
    * Online: guard → login.html when there is no session. Everything shown is
@@ -14,6 +20,16 @@
 
   var api = window.MarsaApi;
   var M = window.Marsa || {};
+  var Shell = window.MarsaShell || null;
+  var I = window.MarsaI18n || null;
+  // shell strings in assets/i18n/portal.js ('portal.*'); Arabic fallback when missing
+  function tr(k, fb) { var key = 'portal.' + k, v = I && typeof I.t === 'function' ? I.t(key) : key; return v === key ? fb : v; }
+  function setShellTitle() {
+    if (!Shell) return;
+    if (typeof Shell.setTitle === 'function') Shell.setTitle(tr('title', 'بوابة العميل'), [{ label: tr('crumb', 'حسابي') }]);
+    if (typeof Shell.setActive === 'function') Shell.setActive('portal');
+  }
+  setShellTitle();
   function $(sel, root) { return (root || document).querySelector(sel); }
   function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
 
@@ -120,7 +136,25 @@
     return h('div', { class: 'alert alert-' + type, role: type === 'danger' ? 'alert' : 'status' }, [
       svgIcon(['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z', 'M12 16v-4M12 8h.01']), h('span', { text: text })]);
   }
-  function loadingBox() { return h('p', { class: 'portal-loading', role: 'status' }, [h('span', { class: 'dot dot-pulse' }), T.loading]); }
+  function loadingBox() {
+    return h('div', { class: 'portal-skeleton', role: 'status', 'aria-live': 'polite' }, [h('span', { class: 'sr-only', text: T.loading }),
+      h('span', { class: 'skeleton skeleton-title', 'aria-hidden': 'true' }), h('span', { class: 'skeleton skeleton-text', 'aria-hidden': 'true' }),
+      h('span', { class: 'skeleton skeleton-text is-mid', 'aria-hidden': 'true' }), h('span', { class: 'skeleton skeleton-text is-short', 'aria-hidden': 'true' })]);
+  }
+  // empty list: icon + message (+ optional action)
+  function emptyBox(text, action) {
+    return h('div', { class: 'empty-state portal-empty' }, [
+      h('span', { class: 'empty-state-icon', 'aria-hidden': 'true' }, [svgIcon(['M3 7h18v13H3z', 'M3 7l2-4h14l2 4', 'M9 12h6'])]),
+      h('p', { text: text }), action ? h('div', { class: 'empty-state-actions' }, [action]) : null]);
+  }
+  // app.css card: .app-card-head (title) + .app-card-body; returns the section, children go into the body
+  function panel(id, title, kids) {
+    var body = h('div', { class: 'app-card-body portal-panel-body' }, kids || []);
+    var sec = h('section', { class: 'app-card portal-panel', 'aria-labelledby': id }, [
+      h('div', { class: 'app-card-head' }, [h('h4', { id: id, class: 'app-card-title', text: title })]), body]);
+    sec.body = body;   // callers append later content to sec.body
+    return sec;
+  }
   function errorBox(err, retryFn) {
     var box = alertBox('danger', T.loadFail + ' ' + errText(err));
     if (retryFn) box.appendChild(h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: T.retry, onclick: retryFn }));
@@ -151,7 +185,10 @@
     if (msg) { g.classList.add('has-error'); input.setAttribute('aria-invalid', 'true'); if (err) err.textContent = msg; }
     else { g.classList.remove('has-error'); input.removeAttribute('aria-invalid'); }
   }
-  function toast(msg, type) { if (M.toast) M.toast(msg, type); }
+  function toast(msg, type) {
+    if (Shell && typeof Shell.toast === 'function') Shell.toast(msg, type);
+    else if (M.toast) M.toast(msg, type);
+  }
 
   /* ---- views ---- */
   function showView(name) {
@@ -194,12 +231,13 @@
       });
     });
   }
+  // status → pill tone (app.css .pill-<tone>)
   function statusBadge(domain, code) {
-    var cls = 'badge-blue';
-    if (domain === 'request_status') cls = { new: 'badge-blue', under_review: 'badge-warning', converted: 'badge-success', rejected: 'badge-danger' }[code] || cls;
-    if (domain === 'operational_status') cls = { operationally_complete: 'badge-success', under_billing: 'badge-teal', billed: 'badge-teal', closed: 'badge-navy' }[code] || 'badge-blue';
-    if (domain === 'container_return_status') cls = { pending: 'badge-warning', evidence_submitted: 'badge-blue', returned_verified: 'badge-success', disputed: 'badge-danger', waived: 'badge-teal' }[code] || cls;
-    return h('span', { class: 'badge ' + cls, text: label(domain, code) });
+    var tone = 'info';
+    if (domain === 'request_status') tone = { new: 'info', under_review: 'warning', converted: 'success', rejected: 'danger' }[code] || tone;
+    if (domain === 'operational_status') tone = { operationally_complete: 'success', under_billing: 'brand', billed: 'brand', closed: 'neutral' }[code] || 'info';
+    if (domain === 'container_return_status') tone = { pending: 'warning', evidence_submitted: 'info', returned_verified: 'success', disputed: 'danger', waived: 'neutral' }[code] || tone;
+    return h('span', { class: 'pill pill-dot pill-' + tone, text: label(domain, code) });
   }
 
   /* ---- header: user + sign-out ---- */
@@ -244,7 +282,7 @@
       if (r.error) { txList.appendChild(errorBox(r.error, loadTransactions)); return; }
       var rows = r.data || [];
       var cnt = $('[data-count="tx"]'); if (cnt) cnt.textContent = String(rows.length);
-      if (!rows.length) { txList.appendChild(alertBox('info', T.noTx)); return; }
+      if (!rows.length) { txList.appendChild(emptyBox(T.noTx)); return; }
       state.txCache = {};
       var tbody = h('tbody');
       rows.forEach(function (t) {
@@ -255,11 +293,11 @@
           h('td', null, [t.bl_number ? num(t.bl_number) : '—']),
           h('td', null, [statusBadge('operational_status', t.operational_status)]),
           h('td', { text: fmtDate(t.status_changed_at || t.updated_at) }),
-          h('td', null, [h('button', { class: 'btn btn-sm btn-secondary', type: 'button', text: T.details,
+          h('td', { class: 'portal-col-actions' }, [h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: T.details,
             'aria-label': T.details + ' ' + (t.ref || ''), onclick: function () { openTransaction(t.id); } })])
         ]));
       });
-      txList.appendChild(h('div', { class: 'table-wrap' }, [h('table', { class: 'table table-striped' }, [
+      txList.appendChild(h('div', { class: 'data-table-wrap' }, [h('table', { class: 'data-table portal-table' }, [
         h('caption', { class: 'sr-only', text: 'معاملاتي' }),
         h('thead', null, [h('tr', null, ['الرقم المرجعي', 'العملية', 'رقم البوليصة', 'المرحلة الحالية', 'آخر تحديث', ''].map(function (x) { return h('th', { scope: 'col', text: x }); }))]),
         tbody])]));
@@ -271,7 +309,7 @@
     clear(txDetail).appendChild(loadingBox());
     Promise.all([api.getTransaction(id), api.listEvents(id), api.listDocuments({ transactionId: id })]).then(function (rs) {
       clear(txDetail);
-      var back = h('button', { class: 'btn btn-sm btn-ghost mb-3', type: 'button', onclick: function () { txDetail.hidden = true; txList.hidden = false; } },
+      var back = h('button', { class: 'btn btn-sm btn-ghost portal-back', type: 'button', onclick: function () { txDetail.hidden = true; txList.hidden = false; } },
         [svgIcon('M5 12h14M13 6l6 6-6 6'), T.back]);
       txDetail.appendChild(back);
       var tr = rs[0], ev = rs[1], dr = rs[2];
@@ -288,8 +326,7 @@
       grid.appendChild(main); grid.appendChild(side);
 
       // summary
-      main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'tx-sum-h' }, [
-        h('h4', { id: 'tx-sum-h', text: 'بيانات المعاملة' }),
+      main.appendChild(panel('tx-sum-h', 'بيانات المعاملة', [
         kvList([
           ['العميل', t.clients && t.clients.name_ar],
           ['الفرع', t.branches && t.branches.name_ar],
@@ -328,17 +365,16 @@
         s.sort === cur ? h('span', { class: 'tl-meta', text: 'منذ ' + fmtDate(t.status_changed_at, true) }) : null
       ]));
     });
-    return h('section', { class: 'card', 'aria-labelledby': 'tx-stage-h' }, [
-      h('h4', { id: 'tx-stage-h', text: 'المراحل التشغيلية' }),
+    return panel('tx-stage-h', 'المراحل التشغيلية', [
       h('p', { class: 'text-xs text-muted', text: 'الحالة التشغيلية منفصلة عن الحالة المالية.' }),
       ol]);
   }
 
   function renderEvents(ev) {
-    var sec = h('section', { class: 'card', 'aria-labelledby': 'tx-ev-h' }, [h('h4', { id: 'tx-ev-h', text: 'سجل الأحداث' })]);
-    if (ev.error) { sec.appendChild(errorBox(ev.error)); return sec; }
+    var sec = panel('tx-ev-h', 'سجل الأحداث');
+    if (ev.error) { sec.body.appendChild(errorBox(ev.error)); return sec; }
     var rows = ev.data || [];
-    if (!rows.length) { sec.appendChild(h('p', { class: 'text-muted text-sm', text: T.noEvents })); return sec; }
+    if (!rows.length) { sec.body.appendChild(h('p', { class: 'text-muted text-sm', text: T.noEvents })); return sec; }
     var ol = h('ol', { class: 'timeline' });
     rows.slice().reverse().forEach(function (e, i) {
       var title = T.eventTypes[e.event_type] || e.event_type;
@@ -357,14 +393,14 @@
         h('span', { class: 'tl-meta', text: fmtDate(e.created_at, true) })
       ]));
     });
-    sec.appendChild(ol);
-    sec.appendChild(h('p', { class: 'text-xs text-muted mt-2', text: 'السجل للإضافة فقط: التصحيحات تُضاف كأحداث جديدة ولا تمحو ما سبق.' }));
+    sec.body.appendChild(ol);
+    sec.body.appendChild(h('p', { class: 'text-xs text-muted mt-2', text: 'السجل للإضافة فقط: التصحيحات تُضاف كأحداث جديدة ولا تمحو ما سبق.' }));
     return sec;
   }
 
   function renderContainers(list) {
-    var sec = h('section', { class: 'card', 'aria-labelledby': 'tx-ct-h' }, [h('h4', { id: 'tx-ct-h', text: 'الحاويات وحالة إرجاع الفارغ' })]);
-    if (!list.length) { sec.appendChild(h('p', { class: 'text-muted text-sm', text: T.noContainers })); return sec; }
+    var sec = panel('tx-ct-h', 'الحاويات وحالة إرجاع الفارغ');
+    if (!list.length) { sec.body.appendChild(h('p', { class: 'text-muted text-sm', text: T.noContainers })); return sec; }
     list = list.slice().sort(function (a, b) { return String(a.container_no).localeCompare(String(b.container_no)); });
     var tbody = h('tbody');
     list.forEach(function (c) {
@@ -376,17 +412,17 @@
         h('td', { text: c.returned_at ? fmtDate(c.returned_at) : '—' })
       ]));
     });
-    sec.appendChild(h('div', { class: 'table-wrap' }, [h('table', { class: 'table' }, [
+    sec.body.appendChild(h('div', { class: 'data-table-wrap' }, [h('table', { class: 'data-table is-compact portal-table' }, [
       h('thead', null, [h('tr', null, ['رقم الحاوية', 'النوع', 'حالة الإرجاع', 'آخر موعد للإرجاع', 'تاريخ الإرجاع'].map(function (x) { return h('th', { scope: 'col', text: x }); }))]),
       tbody])]));
-    sec.appendChild(h('p', { class: 'text-xs text-muted mt-2', text: 'تُعدّ الحاوية مُرجعة فقط بإيصال استلام الفارغ من الساحة أو المشغّل بعد تحقق موظف مرسى؛ تعليمات الإرجاع أو إيصال تسليم الممتلئ ليست إثباتًا.' }));
+    sec.body.appendChild(h('p', { class: 'text-xs text-muted mt-2', text: 'تُعدّ الحاوية مُرجعة فقط بإيصال استلام الفارغ من الساحة أو المشغّل بعد تحقق موظف مرسى؛ تعليمات الإرجاع أو إيصال تسليم الممتلئ ليست إثباتًا.' }));
     return sec;
   }
 
   function renderDocuments(t, dr) {
-    var sec = h('section', { class: 'card', 'aria-labelledby': 'tx-doc-h' }, [h('h4', { id: 'tx-doc-h', text: 'المستندات' })]);
+    var sec = panel('tx-doc-h', 'المستندات');
     var listWrap = h('div');
-    sec.appendChild(listWrap);
+    sec.body.appendChild(listWrap);
     function paint(res) {
       clear(listWrap);
       if (res.error) { listWrap.appendChild(errorBox(res.error)); return; }
@@ -414,7 +450,7 @@
       listWrap.appendChild(ul);
     }
     paint(dr);
-    sec.appendChild(uploadForm(t, function () { api.listDocuments({ transactionId: t.id }).then(paint); }));
+    sec.body.appendChild(uploadForm(t, function () { api.listDocuments({ transactionId: t.id }).then(paint); }));
     return sec;
   }
 
@@ -493,8 +529,7 @@
       var rows = r.data || [];
       var cnt = $('[data-count="req"]'); if (cnt) cnt.textContent = String(rows.length);
       if (!rows.length) {
-        reqList.appendChild(alertBox('info', T.noReq));
-        reqList.appendChild(h('p', { class: 'mt-2' }, [h('a', { class: 'btn btn-primary btn-sm', href: 'request.html', text: 'اطلب تخليص' })]));
+        reqList.appendChild(emptyBox(T.noReq, h('a', { class: 'btn btn-primary btn-sm', href: 'request.html', text: 'اطلب تخليص' })));
         return;
       }
       var tbody = h('tbody');
@@ -506,11 +541,11 @@
           h('td', { text: [T.direction[q.direction] || q.direction, T.mode[q.mode] || q.mode].filter(Boolean).join(' · ') || '—' }),
           h('td', { text: q.port || '—' }),
           h('td', null, [statusBadge('request_status', q.status)]),
-          h('td', null, [h('button', { class: 'btn btn-sm btn-secondary', type: 'button', text: T.details,
+          h('td', { class: 'portal-col-actions' }, [h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: T.details,
             'aria-label': T.details + ' ' + (q.ref || ''), onclick: function () { openRequest(q.id); } })])
         ]));
       });
-      reqList.appendChild(h('div', { class: 'table-wrap' }, [h('table', { class: 'table table-striped' }, [
+      reqList.appendChild(h('div', { class: 'data-table-wrap' }, [h('table', { class: 'data-table portal-table' }, [
         h('caption', { class: 'sr-only', text: 'طلباتي' }),
         h('thead', null, [h('tr', null, ['رقم الطلب', 'تاريخ الإرسال', 'العملية', 'المنفذ', 'الحالة', ''].map(function (x) { return h('th', { scope: 'col', text: x }); }))]),
         tbody])]));
@@ -521,14 +556,14 @@
     if (!q) return;
     reqList.hidden = true; reqDetail.hidden = false;
     clear(reqDetail);
-    reqDetail.appendChild(h('button', { class: 'btn btn-sm btn-ghost mb-3', type: 'button', onclick: function () { reqDetail.hidden = true; reqList.hidden = false; } },
+    reqDetail.appendChild(h('button', { class: 'btn btn-sm btn-ghost portal-back', type: 'button', onclick: function () { reqDetail.hidden = true; reqList.hidden = false; } },
       [svgIcon('M5 12h14M13 6l6 6-6 6'), T.back]));
     reqDetail.appendChild(h('div', { class: 'portal-detail-head' }, [
       h('div', null, [h('p', { class: 'eyebrow mb-1', text: 'طلب خدمة' }), h('h3', { class: 'mb-0' }, [num(q.ref)])]),
       statusBadge('request_status', q.status)
     ]));
     var docs = (q.declared_documents || []).map(function (d) { return d && d.name; }).filter(Boolean);
-    reqDetail.appendChild(h('section', { class: 'card' }, [
+    reqDetail.appendChild(h('section', { class: 'app-card portal-panel' }, [h('div', { class: 'app-card-body portal-panel-body' }, [
       kvList([
         ['تاريخ الإرسال', fmtDate(q.created_at, true)],
         ['مقدّم الطلب', q.full_name], ['الشركة', q.company],
@@ -541,7 +576,7 @@
       ]),
       q.status === 'converted' ? h('p', { class: 'text-sm mt-2', text: 'تحوّل هذا الطلب إلى معاملة؛ تظهر في تبويب «معاملاتي» بعد ربط ملف العميل بحسابك.' }) : null,
       h('p', { class: 'text-xs text-muted mt-2', text: 'المستندات المعلنة أسماء ملفات فقط؛ ارفع الأصول من صفحة المعاملة بعد تحويل الطلب.' })
-    ]));
+    ])]));
   }
 
   /* ======================================================================
@@ -571,7 +606,7 @@
            ['تاريخ الإرسال', d.request ? fmtDate(d.request.created_at) : null]];
       var send = h('button', { class: 'btn btn-primary mt-3', type: 'button', text: 'اطلب ربطه بحسابي' });
       send.addEventListener('click', function () { requestLink(ref, send); });
-      linkResult.appendChild(h('div', { class: 'card card-muted' }, [
+      linkResult.appendChild(h('div', { class: 'app-card-body app-card portal-panel is-muted' }, [
         alertBox('success', 'تم التحقق من الرقم المرجعي ورمز التتبع.'),
         h('div', { class: 'mt-2' }, [kvList(info)]),
         h('p', { class: 'text-sm mt-2', text: 'الربط بحسابك قرار يتخذه فريق مرسى بعد التحقق (لا يتم تلقائيًا). سنرسل إليهم الرقم المرجعي وبيانات حسابك فقط، دون رمز التتبع.' }),

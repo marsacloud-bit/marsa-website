@@ -1,15 +1,25 @@
 /* ==========================================================================
    مرسى | MARSA — admin.html staff console (STAGING)
    --------------------------------------------------------------------------
-   Load order: config.js → i18n.js → main.js → supa.js → assets/i18n/admin.js
-   → admin.js (plain <script defer>).
+   Load order: config.js → i18n.js → assets/i18n/admin.js → assets/i18n/app.js
+   → main.js → supa.js → app-shell.js → pwa.js → admin.js (all defer).
+   * App shell: window.MarsaShell builds sidebar / topbar / org switcher /
+     user menu (sign out, sign out everywhere) around <main id="app-main">.
+     admin.js waits for MarsaShell.ready (my_context or null), sets the
+     title + active nav item on every route, follows 'marsa:orgchange',
+     and uses MarsaShell.toast / confirm. Without the shell it falls back
+     to its own session check and a minimal in-page section nav.
    * Online only. In demo mode (empty config) the page shows a notice and
      never touches localStorage data.
-   * Role guard: any active staff membership in the active org (G2: the
+   * Role guard: any active staff membership in the active org (the shell's
      org switcher picks it when the user is staff in more than one org;
      default MARSA_CONFIG.orgSlug). The UI only hides what a role cannot do;
      the database (RLS + guarded RPCs) is the real gate, and every error
      from it is shown as returned.
+   * List views load a window of up to WINDOW rows with the server filters
+     (status / branch / search), then quick-filter, sort and paginate
+     (PAGE rows) on the client; newer / next-window buttons re-query with
+     S.filters[key].offset ± WINDOW. Rows open their detail view.
    * All user-supplied values are HTML-escaped before rendering (esc()).
      The G2 console views (org, branches, members & invitations, audit,
      client errors) build DOM nodes and set data with textContent only.
@@ -21,11 +31,12 @@
 
   var api = window.MarsaApi;
   var M = window.Marsa || {};
+  var SH = window.MarsaShell || null;
   var gateBody = document.getElementById('adm-gate-body');
   var gate = document.getElementById('adm-gate');
   var app = document.getElementById('adm-app');
   var view = document.getElementById('adm-view');
-  var nav = document.getElementById('adm-nav');
+  var nav = null;   // fallback section nav (only without the app shell)
   if (!gate || !app || !view) return;
 
   /* ------------------------------------------------------------------
@@ -34,7 +45,7 @@
   var T = {
     views: {
       dashboard: 'نظرة عامة', requests: 'الطلبات الواردة', transactions: 'المعاملات', clients: 'العملاء',
-      messages: 'رسائل التواصل', imports: 'الرفع الجماعي', members: 'الأعضاء والدعوات',
+      messages: 'رسائل التواصل', imports: 'سجل الاستيراد', members: 'الأعضاء والدعوات',
       org: 'المؤسسة', branches: 'الفروع', audit: 'سجل التدقيق', errors: 'أخطاء الواجهة'
     },
     gate: {
@@ -84,6 +95,7 @@
     event_type: { created: 'إنشاء المعاملة', request_converted: 'تحويل من طلب خدمة', operational_status: 'تغيير الحالة التشغيلية', financial_status: 'تغيير الحالة المالية', container_return: 'حالة إرجاع حاوية', document: 'مستند', note: 'ملاحظة', tracking_token: 'إصدار رمز تتبع' }
   };
   var LABELS = JSON.parse(JSON.stringify(FALLBACK));
+  var LABELS_EN = {};   // status_labels.label_en per domain (filled by loadLabels)
   var ORDER = {
     operational_status: ['new', 'in_progress', 'customs_declaration', 'appointment', 'transport', 'empty_return', 'operationally_complete', 'under_billing', 'billed', 'closed']
   };
@@ -116,18 +128,22 @@
 
   var S = {
     ctx: null, orgId: null, orgs: [], memberships: [], roles: [], branches: [], profiles: {},
+    // server-side filters of the list views (re-query); offset = first row of the fetched window
     filters: {
       requests: { status: 'new', search: '', offset: 0 },
       transactions: { status: '', branchId: '', search: '', offset: 0 },
       clients: { search: '', inactive: false, offset: 0 },
       messages: { status: 'new', offset: 0 },
-      imports: { status: '', offset: 0 }
+      imports: { status: '', search: '', offset: 0 }
     },
+    // client-side table state per list view: quick filter, sort column/direction, page
+    list: {},
     showVoided: false,
     g2: { audit: { table: '', actor: '', from: '', to: '', rowId: '' }, allInvites: false },
     renderSeq: 0
   };
-  var PAGE = 25;
+  var PAGE = 25;      // rows per client-side page
+  var WINDOW = 200;   // rows fetched per list view (server filters narrow it further)
   var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   function rolesAt(branchId) {
@@ -149,6 +165,13 @@
   }
   function lbl(domain, code) {
     if (code == null || code === '') return T.common.none;
+    if (isEn()) {
+      // English: status_labels.label_en, else the page dictionary, else the Arabic label
+      var en = (LABELS_EN[domain] || {})[code];
+      if (en) return en;
+      var k = 'lbl_' + domain + '_' + code, s = t(k);
+      if (s !== k) return s;
+    }
     var d = LABELS[domain] || {};
     return d[code] || String(code);
   }
@@ -165,12 +188,12 @@
   function fmtDate(v) {
     if (!v) return T.common.none;
     var d = new Date(v); if (isNaN(d)) return esc(v);
-    try { return d.toLocaleDateString(DATE_LOCALE, { year: 'numeric', month: 'short', day: 'numeric' }); } catch (e) { return d.toISOString().slice(0, 10); }
+    try { return d.toLocaleDateString(isEn() ? 'en-GB' : DATE_LOCALE, { year: 'numeric', month: 'short', day: 'numeric' }); } catch (e) { return d.toISOString().slice(0, 10); }
   }
   function fmtDateTime(v) {
     if (!v) return T.common.none;
     var d = new Date(v); if (isNaN(d)) return esc(v);
-    try { return d.toLocaleString(DATE_LOCALE, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch (e) { return d.toISOString().replace('T', ' ').slice(0, 16); }
+    try { return d.toLocaleString(isEn() ? 'en-GB' : DATE_LOCALE, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch (e) { return d.toISOString().replace('T', ' ').slice(0, 16); }
   }
   function todayISO(offsetDays) {
     var d = new Date(); d.setDate(d.getDate() + (offsetDays || 0));
@@ -191,7 +214,21 @@
     if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
     return (b / 1048576).toFixed(1) + ' MB';
   }
-  function toast(msg, type) { if (M.toast) M.toast(msg, type || 'info'); }
+  // feedback goes through the app shell when present (tones: info | success | warning | error)
+  function toast(msg, type) {
+    if (SH && typeof SH.toast === 'function') { try { SH.toast(msg, type || 'info'); return; } catch (e) { /* fall back */ } }
+    if (M.toast) M.toast(msg, type || 'info');
+  }
+  // askConfirm({title, text, okText, danger}) → Promise<boolean>.
+  // While the native <dialog> is open (top layer, page inert) the question is asked
+  // inside it; otherwise MarsaShell.confirm, else window.confirm.
+  function askConfirm(o) {
+    if (dlg && dlg.open) return dialogConfirm(o);
+    if (SH && typeof SH.confirm === 'function') {
+      return Promise.resolve().then(function () { return SH.confirm(o); }).then(function (v) { return !!v; }, function () { return false; });
+    }
+    return Promise.resolve(window.confirm(o.text || o.title || ''));
+  }
   function errText(e) { return (e && e.message) || (api && api.errorMessage ? api.errorMessage(e) : T.common.none); }
   function nn(v) { v = v == null ? '' : String(v).trim(); return v === '' ? null : v; }
   function icon(name) {
@@ -202,7 +239,16 @@
       file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
       lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
       info: '<path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 16v-4M12 8h.01"/>',
-      box: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/>'
+      box: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
+      search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+      inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.8 1.1z"/>',
+      layers: '<path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>',
+      clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+      alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+      chevron: '<path d="m9 18 6-6-6-6"/>',   // points back in RTL; flipped for LTR in CSS
+      activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+      arrow: '<path d="M7 17 17 7M7 7h10v10"/>',
+      x: '<path d="M6 6l12 12M18 6 6 18"/>'
     }[name] || '';
     return '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">' + p + '</svg>';
   }
@@ -217,10 +263,13 @@
     import_row_status: { pending: 'blue', valid: 'success', error: 'danger', duplicate: 'warning', committed: 'navy', skipped: 'blue' },
     batch_status: { draft: 'warning', committed: 'success', cancelled: 'danger' }
   };
-  function badge(domain, code) {
-    var c = (BADGE[domain] || {})[code] || 'blue';
-    return '<span class="badge badge-' + c + '">' + esc(lbl(domain, code)) + '</span>';
-  }
+  // legacy colour names → status-pill tones (app.css .pill + admin.css [data-tone])
+  var TONE = { blue: 'info', teal: 'brand', navy: 'neutral', warning: 'warning', danger: 'danger', success: 'success' };
+  function toneOf(domain, code) { return TONE[(BADGE[domain] || {})[code] || 'blue'] || 'info'; }
+  function pillHtml(tone, text) { return '<span class="pill pill-' + tone + ' adm-pill" data-tone="' + tone + '">' + esc(text) + '</span>'; }
+  function badge(domain, code) { return pillHtml(toneOf(domain, code), lbl(domain, code)); }
+  function pillNode(tone, text) { return el('span', { class: 'pill pill-' + tone + ' adm-pill', 'data-tone': tone, text: text }); }
+  function badgeNode(domain, code) { return pillNode(toneOf(domain, code), lbl(domain, code)); }
   function kv(rows) {
     return '<ul class="kv">' + rows.filter(Boolean).map(function (r) {
       return '<li><span class="k">' + esc(r[0]) + '</span><span class="v">' + (r[2] ? r[1] : esc(r[1] == null || r[1] === '' ? T.common.none : r[1])) + '</span></li>';
@@ -229,15 +278,17 @@
   function alertBox(type, text, html) {
     return '<div class="alert alert-' + type + '" role="' + (type === 'danger' ? 'alert' : 'status') + '">' + icon('info') + '<div>' + (html ? text : esc(text)) + '</div></div>';
   }
-  function emptyRow(cols, text) { return '<tr><td colspan="' + cols + '" class="adm-empty">' + esc(text || T.common.empty) + '</td></tr>'; }
-  function loadingBox() { return '<div class="adm-loading" role="status"><span class="adm-spinner" aria-hidden="true"></span>' + esc(T.common.loading) + '</div>'; }
-  function pager(key, count) {
-    var f = S.filters[key];
-    if (count == null || count <= PAGE) return count != null ? '<p class="adm-count text-xs text-muted">' + num(count) + ' ' + T.common.results + '</p>' : '';
-    var from = f.offset + 1, to = Math.min(f.offset + PAGE, count);
-    return '<div class="adm-pager"><span class="text-xs text-muted">' + num(from + '–' + to) + ' ' + T.common.ofTotal + ' ' + num(count) + '</span>' +
-      '<div class="btn-group"><button class="btn btn-sm btn-ghost" type="button" data-act="page" data-key="' + key + '" data-dir="-1"' + (f.offset <= 0 ? ' disabled' : '') + '>' + T.common.prev + '</button>' +
-      '<button class="btn btn-sm btn-ghost" type="button" data-act="page" data-key="' + key + '" data-dir="1"' + (to >= count ? ' disabled' : '') + '>' + T.common.next + '</button></div></div>';
+  function emptyRow(cols, text) {
+    return '<tr class="adm-empty-row"><td colspan="' + cols + '"><div class="empty-state is-compact"><div class="empty-state-icon">' + icon('inbox') + '</div><p>' + esc(text || T.common.empty) + '</p></div></td></tr>';
+  }
+  // skeleton placeholder while a view loads (shape: header + toolbar + rows)
+  function loadingBox() {
+    var rows = '';
+    for (var i = 0; i < 7; i++) rows += '<span class="skeleton skeleton-text' + (i % 3 === 2 ? ' is-mid' : '') + '"></span>';
+    return '<div class="adm-skel" role="status"><span class="adm-sr">' + esc(t('loading')) + '</span>' +
+      '<span class="skeleton skeleton-title"></span><span class="skeleton skeleton-text is-short"></span>' +
+      '<div class="adm-skel-kpis"><span class="skeleton skeleton-block"></span><span class="skeleton skeleton-block"></span><span class="skeleton skeleton-block"></span></div>' +
+      '<div class="app-card adm-skel-card">' + rows + '</div></div>';
   }
 
   /* ------------------------------------------------------------------
@@ -262,11 +313,19 @@
       return local(function (c) { var q = inOrg(c.from(table).select('id', { count: 'exact', head: true })); return build ? build(q) : q; })
         .then(function (r) { return r.error ? r : { data: r.count || 0, error: null }; });
     },
-    containersDue: function (days) {
+    // open containers with the nearest return deadlines (overdue first)
+    containersNext: function (n) {
       return local(function (c) {
         return inOrg(c.from('containers').select('id,container_no,return_deadline,return_status,transaction_id,transactions(ref)'))
           .in('return_status', ['pending', 'evidence_submitted', 'disputed']).not('return_deadline', 'is', null)
-          .lte('return_deadline', todayISO(days)).order('return_deadline').limit(10);
+          .order('return_deadline').limit(n || 6);
+      });
+    },
+    // latest transaction events of the active org (dashboard "recent activity")
+    recentEvents: function (n) {
+      return local(function (c) {
+        return inOrg(c.from('transaction_events').select('id,event_type,from_status,to_status,payload,actor,created_at,transaction_id,transactions(ref)'))
+          .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(n || 8);
       });
     },
     listImportBatches: function (o) {
@@ -274,7 +333,9 @@
         var q = inOrg(c.from('import_batches').select('id,ref,client_id,file_name,file_size,sheet_names,status,total_rows,committed_rows,skipped_rows,created_by,created_at,committed_at,clients(name_ar)', { count: 'exact' }))
           .order('created_at', { ascending: false });
         if (o.status) q = q.eq('status', o.status);
-        return q.range(o.offset || 0, (o.offset || 0) + PAGE - 1);
+        if (o.search) { var s = String(o.search).replace(/[%_,()\\]/g, ' ').trim().slice(0, 60); if (s) q = q.or('ref.ilike.%' + s + '%,file_name.ilike.%' + s + '%'); }
+        var off = Math.max(o.offset || 0, 0);
+        return q.range(off, off + WINDOW - 1);
       });
     },
     getImportBatch: function (id) {
@@ -306,10 +367,10 @@
     }
   };
   function who(id) {
-    if (!id) return 'النظام';
-    if (S.ctx && id === S.ctx.user_id) return 'أنت';
+    if (!id) return t('who_system');
+    if (S.ctx && id === S.ctx.user_id) return t('you');
     var n = S.profiles[id];
-    return n ? n : 'مستخدم ' + String(id).slice(0, 8);
+    return n ? n : t('who_user', { id: String(id).slice(0, 8) });
   }
 
   /* ------------------------------------------------------------------
@@ -324,6 +385,7 @@
   var dlgHandler = null, dlgBusy = false, dlgReturnFocus = null;
 
   function openDialog(o) {
+    dropDialogConfirm(false);
     dlgTitle.textContent = o.title;
     dlgBody.innerHTML = o.body;
     dlgErr.hidden = true; dlgErr.textContent = '';
@@ -339,11 +401,40 @@
     if (first) setTimeout(function () { first.focus(); }, 30);
   }
   function closeDialog() {
+    dropDialogConfirm(false);
     if (typeof dlg.close === 'function' && dlg.open) dlg.close(); else dlg.removeAttribute('open');
     dlgHandler = null; dlgBody.innerHTML = '';
     if (dlgReturnFocus && dlgReturnFocus.focus && document.contains(dlgReturnFocus)) dlgReturnFocus.focus();
   }
   function dialogError(msg) { dlgErr.textContent = msg; dlgErr.hidden = false; }
+  // in-dialog confirmation strip (the shell's modal cannot sit above a modal <dialog>)
+  var dlgAsk = null;
+  function dropDialogConfirm(answer) {
+    if (!dlgAsk) return;
+    var a = dlgAsk; dlgAsk = null;
+    if (a.node.parentNode) a.node.parentNode.removeChild(a.node);
+    var foot = dlgForm.querySelector('.adm-dialog-foot'); if (foot) foot.hidden = false;
+    a.resolve(!!answer);
+  }
+  function dialogConfirm(o) {
+    dropDialogConfirm(false);
+    return new Promise(function (resolve) {
+      var ok = el('button', { class: 'btn btn-sm ' + (o.danger ? 'btn-danger adm-btn-danger' : 'btn-primary'), type: 'button', text: o.okText || T.common.confirm });
+      var no = el('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: t('cancel') });
+      var node = el('div', { class: 'adm-dlg-confirm', role: 'alertdialog', 'aria-live': 'assertive' }, [
+        svgIcon('alert'),
+        el('div', { class: 'adm-dlg-confirm-text' }, [o.title ? el('strong', { text: o.title }) : null, o.text ? el('p', { text: o.text }) : null]),
+        el('div', { class: 'adm-dlg-confirm-actions' }, [no, ok])
+      ]);
+      ok.addEventListener('click', function () { dropDialogConfirm(true); });
+      no.addEventListener('click', function () { dropDialogConfirm(false); });
+      var foot = dlgForm.querySelector('.adm-dialog-foot');
+      dlgForm.insertBefore(node, foot);
+      if (foot) foot.hidden = true;
+      dlgAsk = { node: node, resolve: resolve };
+      setTimeout(function () { ok.focus(); }, 30);
+    });
+  }
   if (dlg) {
     dlgForm.addEventListener('submit', function (e) {
       e.preventDefault();
@@ -382,70 +473,86 @@
      ------------------------------------------------------------------ */
   function showGate(kind, extra) {
     app.hidden = true; gate.hidden = false;
-    var title, text, actions = '';
+    var title, text, actions = '', ico = 'lock';
     if (kind === 'demo') {
       title = T.gate.demoTitle; text = api && api.isMisconfigured && api.isMisconfigured() ? T.gate.misconfigured : T.gate.demo;
-      actions = '<a class="btn btn-primary" href="index.html">' + T.gate.home + '</a>';
+      actions = '<a class="btn btn-primary" href="index.html">' + esc(t('gate_home')) + '</a>'; ico = 'info';
     } else if (kind === 'signin') {
       title = T.gate.signInTitle; text = T.gate.signIn;
-      actions = '<a class="btn btn-primary" href="login.html#staff">' + T.gate.signInBtn + '</a>';
+      actions = '<a class="btn btn-primary" href="login.html#staff">' + esc(t('gate_signin_btn')) + '</a>';
     } else if (kind === 'forbidden') {
       title = T.gate.forbiddenTitle; text = T.gate.forbidden;
-      actions = '<button class="btn btn-secondary" type="button" data-gate="signout">تسجيل الخروج</button>';
+      actions = '<button class="btn btn-secondary" type="button" data-gate="signout">' + esc(t('signout')) + '</button>';
     } else if (kind === 'loading') {
-      gateBody.innerHTML = loadingBox(); return;
+      gateBody.innerHTML = '<div class="adm-loading" role="status"><span class="adm-spinner" aria-hidden="true"></span>' + esc(t('gate_checking')) + '</div>';
+      return;
     } else {
-      title = T.gate.errorTitle; text = extra || '';
-      actions = '<button class="btn btn-primary" type="button" data-gate="retry">' + T.gate.retry + '</button>';
+      title = T.gate.errorTitle; text = extra || ''; ico = 'alert';
+      actions = '<button class="btn btn-primary" type="button" data-gate="retry">' + esc(t('gate_retry')) + '</button>';
     }
-    gateBody.innerHTML = '<span class="icon-box icon-box-lg icon-box-soft">' + icon('lock') + '</span>' +
-      '<h2>' + esc(title) + '</h2><p class="text-muted">' + esc(text) + '</p><div class="btn-group adm-gate-actions">' + actions + '</div>';
+    if (isEn()) { var k = 'gate_' + kind + '_title', k2 = 'gate_' + kind + '_text'; if (t(k) !== k) title = t(k); if (kind !== 'error' && t(k2) !== k2) text = t(k2); }
+    gateBody.innerHTML = '<span class="adm-gate-icon" aria-hidden="true">' + icon(ico) + '</span>' +
+      '<h2>' + esc(title) + '</h2><p class="text-muted">' + esc(text) + '</p><div class="adm-gate-actions">' + actions + '</div>';
+    setPageTitle(t('page_title'), null);
   }
   gate.addEventListener('click', function (e) {
     var b = e.target.closest('[data-gate]');
     if (!b) return;
-    if (b.getAttribute('data-gate') === 'retry') boot();
+    if (b.getAttribute('data-gate') === 'retry') boot(false);
     if (b.getAttribute('data-gate') === 'signout') signOut();
   });
 
+  // sign out / sign out everywhere live in the shell's user menu; the forbidden gate keeps its own button
   function signOut() {
     api.signOut().then(function () { location.href = 'login.html#staff'; });
   }
-  // revokes the refresh tokens of every device (other devices end within their access-token lifetime)
-  function signOutAll() {
-    var b = document.getElementById('adm-signout-all');
-    if (b) b.disabled = true;
-    api.signOutEverywhere().then(function (r) {
-      if (b) b.disabled = false;
-      if (r && r.error) return toast(errText(r.error), 'error');
-      location.href = 'login.html#staff';
-    });
-  }
 
-  function boot() {
+  // MarsaShell.ready → my_context data, or null (signed out / demo). Tolerates a {data,error} value.
+  function shellReady() {
+    if (!SH || !SH.ready) return Promise.resolve(undefined);
+    var p;
+    try { p = typeof SH.ready === 'function' ? SH.ready() : SH.ready; } catch (e) { return Promise.resolve(undefined); }
+    return Promise.resolve(p).then(function (v) {
+      return v && typeof v === 'object' && ('error' in v) && ('data' in v) ? (v.error ? undefined : v.data) : v;
+    }, function () { return undefined; });
+  }
+  function boot(useShell) {
     if (!api || !api.isOnline || !api.isOnline()) { showGate('demo'); return; }
     showGate('loading');
-    api.getSession().then(function (r) {
-      if (r.error) return showGate('error', errText(r.error));
-      if (!r.data) return showGate('signin');
-      return api.myContext(true).then(function (c) {
-        if (c.error) return showGate(c.error.code === 'MRS_AUTH_REQUIRED' ? 'signin' : 'error', errText(c.error));
-        S.ctx = c.data || {};
-        S.orgs = staffOrgs(S.ctx);
-        if (!S.orgs.length) return showGate('forbidden');
-        return readActiveOrg().then(function (want) {
-          // active org: the stored choice when it is a staff org, else the configured slug, else the first
-          var pick = S.orgs.filter(function (o) { return o.org_id === want; })[0] ||
-            S.orgs.filter(function (o) { return o.slug === api.orgSlug; })[0] || S.orgs[0];
-          S.orgId = pick.org_id;
-          S.memberships = (S.ctx.memberships || []).filter(function (m) { return m.org_id === S.orgId && R.staff.indexOf(m.role) !== -1; });
-          S.roles = S.memberships.map(function (m) { return m.role; }).filter(function (r, i, a) { return a.indexOf(r) === i; });
-          S.roles.sort(function (a, b) { return ROLE_RANK.indexOf(b) - ROLE_RANK.indexOf(a); });
-          return Promise.all([api.listBranches(S.orgId), loadLabels()]).then(function (res) {
-            S.branches = (res[0].data || []).filter(function (b) { return b.org_id === S.orgId; });
-            startApp();
-          });
+    (useShell ? shellReady() : Promise.resolve(undefined)).then(function (shellCtx) {
+      if (shellCtx && typeof shellCtx === 'object') return withContext(shellCtx);
+      // no shell (or it found no session): the page's own session check decides which gate to show
+      return api.getSession().then(function (r) {
+        if (r.error) return showGate('error', errText(r.error));
+        if (!r.data) return showGate('signin');
+        return api.myContext(true).then(function (c) {
+          if (c.error) return showGate(c.error.code === 'MRS_AUTH_REQUIRED' ? 'signin' : 'error', errText(c.error));
+          return withContext(c.data || {});
         });
+      });
+    }).then(null, function (e) { showGate('error', errText(e)); });
+  }
+  function withContext(ctx) {
+    S.ctx = ctx || {};
+    S.orgs = staffOrgs(S.ctx);
+    if (!S.orgs.length) { showGate('forbidden'); return Promise.resolve(); }
+    return readActiveOrg().then(function (want) {
+      // active org: the stored choice when it is a staff org, else the configured slug, else the first
+      var pick = S.orgs.filter(function (o) { return o.org_id === want; })[0] ||
+        S.orgs.filter(function (o) { return o.slug === api.orgSlug; })[0] || S.orgs[0];
+      S.orgId = pick.org_id;
+      // the stored org is not a staff org here (e.g. a client-only membership): store the pick so the
+      // shell (header, nav roles, palette search) and the other pages follow the same org. The
+      // 'marsa:orgchange' it fires is ignored below because S.orgId already matches.
+      if (want && want !== pick.org_id && typeof api.setActiveOrg === 'function') {
+        Promise.resolve(api.setActiveOrg(pick.org_id)).then(null, function () { /* the shell keeps its own pick */ });
+      }
+      S.memberships = (S.ctx.memberships || []).filter(function (m) { return m.org_id === S.orgId && R.staff.indexOf(m.role) !== -1; });
+      S.roles = S.memberships.map(function (m) { return m.role; }).filter(function (r, i, a) { return a.indexOf(r) === i; });
+      S.roles.sort(function (a, b) { return ROLE_RANK.indexOf(b) - ROLE_RANK.indexOf(a); });
+      return Promise.all([api.listBranches(S.orgId), loadLabels()]).then(function (res) {
+        S.branches = (res[0].data || []).filter(function (b) { return b.org_id === S.orgId; });
+        startApp();
       });
     });
   }
@@ -477,14 +584,16 @@
     return Promise.all(domains.map(function (d) { return api.statusLabels(d); })).then(function (res) {
       res.forEach(function (r, i) {
         if (r.error || !r.data || !r.data.length) return;
-        var map = {}, order = [];
-        r.data.forEach(function (x) { map[x.code] = x.label_ar; order.push(x.code); });
+        var map = {}, en = {}, order = [];
+        r.data.forEach(function (x) { map[x.code] = x.label_ar; if (x.label_en) en[x.code] = x.label_en; order.push(x.code); });
         LABELS[domains[i]] = map;
+        LABELS_EN[domains[i]] = en;
         ORDER[domains[i]] = order;
       });
     });
   }
 
+  // Source of truth for the sections and who sees them (the shell's NAV mirrors these sets).
   var VIEWS = [
     { id: 'dashboard', allow: R.staff },
     { id: 'requests', allow: R.opsWriter },
@@ -502,50 +611,93 @@
 
   function startApp() {
     gate.hidden = true; app.hidden = false;
-    var p = S.ctx.profile || {};
-    document.getElementById('adm-me-name').textContent = p.full_name || 'موظف';
-    document.getElementById('adm-me-roles').textContent = S.memberships.map(function (m) {
-      var b = m.branch_id ? (m.branch_name_ar || (S.branches.filter(function (x) { return x.id === m.branch_id; })[0] || {}).name_ar || 'فرع محدد') : 'كل الفروع';
-      return lbl('role', m.role) + ' — ' + b;
-    }).filter(function (x, i, a) { return a.indexOf(x) === i; }).join('، ');
-    buildNav();
-    fillOrgSwitch();
+    if (!SH) buildNav();
     if (window.MarsaI18n && typeof window.MarsaI18n.apply === 'function') { try { window.MarsaI18n.apply(app); } catch (e) { /* static Arabic stays */ } }
     route();
   }
+  // fallback section nav, only when the app shell is not loaded
   function buildNav() {
-    nav.innerHTML = allowedViews().map(function (v) {
-      return '<li><a class="adm-nav-link" href="#' + v.id + '" data-view="' + v.id + '">' + esc(viewLabel(v.id)) + '</a></li>';
-    }).join('');
+    if (!nav) {
+      var wrap = el('nav', { class: 'adm-nav', 'aria-label': t('nav_aria') });
+      nav = el('ul', { class: 'adm-nav-list' });
+      wrap.appendChild(nav);
+      app.insertBefore(wrap, view);
+    }
+    nav.textContent = '';
+    allowedViews().forEach(function (v) {
+      nav.appendChild(el('li', null, el('a', { class: 'adm-nav-link', href: '#' + v.id, 'data-view': v.id, text: viewLabel(v.id) })));
+    });
   }
-  document.getElementById('adm-signout').addEventListener('click', signOut);
-  var soAll = document.getElementById('adm-signout-all');
-  if (soAll) soAll.addEventListener('click', signOutAll);
-  document.getElementById('adm-refresh').addEventListener('click', function () { route(true); });
   window.addEventListener('hashchange', function () { if (!app.hidden) route(false); });
   if (api && api.onAuth) {
     api.onAuth(function (event) { if (event === 'SIGNED_OUT') { S.ctx = null; showGate('signin'); } });
   }
 
   /* ------------------------------------------------------------------
-     Router: #view  |  #request/<id> #tx/<id> #client/<id> #import/<id>
+     Shell integration: title / breadcrumb / active nav item
      ------------------------------------------------------------------ */
-  var DETAIL = { request: 'requests', tx: 'transactions', client: 'clients', import: 'imports' };
-  function route(keepDialog) {
-    if (!keepDialog && dlg && dlg.open) closeDialog();
-    var h = (location.hash || '').replace(/^#/, '');
-    var parts = h.split('/');
-    var name = parts[0] || 'dashboard', id = parts[1] || null;
-    var parent = DETAIL[name] || name;
-    var allowed = allowedViews().map(function (v) { return v.id; });
-    if (allowed.indexOf(parent) === -1 || (DETAIL[name] && !(id && UUID_RE.test(id)))) { name = 'dashboard'; parent = 'dashboard'; id = null; }
+  function setPageTitle(title, parentId) {
+    var crumbs = [{ label: t('page_title'), href: '#dashboard' }];
+    if (parentId && parentId !== 'dashboard') crumbs.push({ label: viewLabel(parentId), href: '#' + parentId });
+    if (title !== t('page_title')) crumbs.push({ label: title });
+    if (SH && typeof SH.setTitle === 'function') { try { SH.setTitle(title, crumbs); } catch (e) { /* shell optional */ } }
+    else document.title = title + ' | ' + t('doc_title_suffix');
+  }
+  function setNav(id) {
+    if (SH && typeof SH.setActive === 'function') { try { SH.setActive(id); } catch (e) { /* shell optional */ } }
+    if (!nav) return;
     Array.prototype.forEach.call(nav.querySelectorAll('[data-view]'), function (a) {
-      var on = a.getAttribute('data-view') === parent;
+      var on = a.getAttribute('data-view') === id;
       a.classList.toggle('is-active', on);
       if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
+  }
+
+  /* ------------------------------------------------------------------
+     Router: #view[?status=…]  |  #request/<id> #tx/<id> #client/<id> #import/<id>
+     A ?query (from dashboard tiles) sets the view's server filters once,
+     then the hash is normalised to #view.
+     ------------------------------------------------------------------ */
+  var DETAIL = { request: 'requests', tx: 'transactions', client: 'clients', import: 'imports' };
+  var ROUTE_FILTERS = { requests: ['status'], transactions: ['status', 'branchId'], messages: ['status'], imports: ['status'] };
+  function parseHash() {
+    var h = (location.hash || '').replace(/^#/, ''), q = '';
+    var qi = h.indexOf('?');
+    if (qi !== -1) { q = h.slice(qi + 1); h = h.slice(0, qi); }
+    var parts = h.split('/');
+    return { name: parts[0] || 'dashboard', id: parts[1] || null, query: q };
+  }
+  function applyQuery(name, q) {
+    var keys = ROUTE_FILTERS[name];
+    if (!q || !keys) return;
+    var f = S.filters[name];
+    q.split('&').forEach(function (pair) {
+      var i = pair.indexOf('='), k, v;
+      try { k = decodeURIComponent(i === -1 ? pair : pair.slice(0, i)); v = decodeURIComponent(i === -1 ? '' : pair.slice(i + 1)); } catch (e) { return; }
+      if (keys.indexOf(k) === -1) return;
+      if (k === 'branchId' && v && !UUID_RE.test(v)) return;
+      if (k === 'status' && v && !/^[a-z_]{1,40}$/.test(v)) return;
+      f[k] = v;
+    });
+    f.search = ''; f.offset = 0;
+    listState(name).page = 0; listState(name).q = '';
+  }
+  function route(keepDialog) {
+    if (!keepDialog && dlg && dlg.open) closeDialog();
+    var r = parseHash(), name = r.name, id = r.id;
+    var parent = DETAIL[name] || name;
+    var allowed = allowedViews().map(function (v) { return v.id; });
+    if (allowed.indexOf(parent) === -1 || (DETAIL[name] && !(id && UUID_RE.test(id)))) { name = 'dashboard'; parent = 'dashboard'; id = null; }
+    else if (r.query) {
+      applyQuery(name, r.query);
+      try { history.replaceState(null, '', '#' + name); } catch (e) { /* ignore */ }
+    }
+    setNav(parent);
+    setPageTitle(viewLabel(parent), null);
     var seq = ++S.renderSeq;
+    view.setAttribute('aria-busy', 'true');
     view.innerHTML = loadingBox();
+    if (!keepDialog) { try { window.scrollTo(0, 0); } catch (e) { /* ignore */ } }
     var fn = {
       dashboard: renderDashboard, requests: renderRequests, request: renderRequest, transactions: renderTransactions,
       tx: renderTx, clients: renderClients, client: renderClient, messages: renderMessages, imports: renderImports,
@@ -554,78 +706,374 @@
     }[name];
     Promise.resolve(fn(id)).then(function (html) {
       if (seq !== S.renderSeq) return;            // a newer navigation won
-      if (html && html.nodeType) { view.textContent = ''; view.appendChild(html); }   // G2 views return DOM nodes
+      if (html && html.nodeType) { view.textContent = ''; view.appendChild(html); }   // DOM views
       else view.innerHTML = html;
+      view.removeAttribute('aria-busy');
+      // detail views: the rendered heading (e.g. the reference) becomes the shell title
+      var h = view.querySelector('.adm-title');
+      if (DETAIL[name] && h) setPageTitle(h.textContent.trim(), parent);
     }, function (e) {
       if (seq !== S.renderSeq) return;
+      view.removeAttribute('aria-busy');
       view.innerHTML = alertBox('danger', errText(e));
     });
   }
   function rerender() { route(true); }   // keeps an open result dialog (e.g. a one-time token)
   function go(hash) { if (location.hash === hash) route(); else location.hash = hash; }
+  function refreshBtnHtml() {
+    return '<button class="btn btn-sm btn-ghost btn-icon adm-icon-btn" type="button" data-act="refresh" aria-label="' + esc(t('refresh')) + '" title="' + esc(t('refresh')) + '">' + icon('refresh') + '</button>';
+  }
+  // view header: optional back link (to the parent list), title (trusted HTML), subtitle, actions bar
   function head(title, sub, actions, backHash) {
-    return '<div class="adm-head">' +
-      '<div class="adm-head-title">' + (backHash ? '<a class="btn btn-sm btn-ghost adm-back" href="' + backHash + '">' + icon('back') + T.common.back + '</a>' : '') +
-      '<div><h2>' + title + '</h2>' + (sub ? '<p class="text-sm text-muted">' + sub + '</p>' : '') + '</div></div>' +
-      (actions ? '<div class="btn-group adm-head-actions">' + actions + '</div>' : '') + '</div>';
+    var back = '';
+    if (backHash) {
+      var pid = backHash.replace(/^#/, '');
+      back = '<a class="adm-back" href="' + esc(backHash) + '">' + icon('chevron') + '<span>' + esc(viewLabel(pid)) + '</span></a>';
+    }
+    return '<header class="app-page-head adm-head' + (backHash ? ' adm-head-detail' : '') + '"><div class="adm-head-main">' + back +
+      '<h2 class="adm-title">' + title + '</h2>' + (sub ? '<p class="app-page-sub adm-head-sub">' + sub + '</p>' : '') + '</div>' +
+      '<div class="app-page-actions adm-head-actions">' + (actions || '') + refreshBtnHtml() + '</div></header>';
   }
   function card(title, body, actions, cls) {
-    return '<div class="card card-flush adm-card' + (cls ? ' ' + cls : '') + '"><div class="card-header"><h3>' + title + '</h3>' +
-      (actions ? '<div class="btn-group">' + actions + '</div>' : '') + '</div><div class="card-body">' + body + '</div></div>';
+    return '<section class="app-card adm-card' + (cls ? ' ' + cls : '') + '"><header class="app-card-head adm-card-head"><h3 class="app-card-title">' + title + '</h3>' +
+      (actions ? '<div class="adm-card-actions">' + actions + '</div>' : '') + '</header><div class="app-card-body adm-card-body">' + body + '</div></section>';
   }
   function table(headers, rows, cols) {
-    return '<div class="table-wrap"><table class="table table-striped adm-table"><thead><tr>' +
+    return '<div class="data-table-wrap adm-table-wrap"><table class="data-table adm-dt"><thead><tr>' +
       headers.map(function (h) { return '<th scope="col">' + esc(h) + '</th>'; }).join('') + '</tr></thead><tbody>' +
       (rows.length ? rows.join('') : emptyRow(cols || headers.length)) + '</tbody></table></div>';
   }
 
   /* ------------------------------------------------------------------
-     Dashboard
+     List views: toolbar (quick filter + server filters) → sortable,
+     paginated .data-table. Built with DOM nodes (textContent only).
+     cfg = { key, rows, total, error, columns:[{id,label,value(row),cell(row),num,desc}],
+             href(row) | open(row), text(row), tools:[nodes], placeholder, empty,
+             serverSearch (Enter searches every record on the server) }
      ------------------------------------------------------------------ */
-  function renderDashboard() {
-    var tiles = [];
-    var jobs = [];
-    function tile(key, label, hash, p, tone) {
-      var t = { label: label, hash: hash, value: null, tone: tone || '' };
-      tiles.push(t);
-      jobs.push(p.then(function (r) { t.value = r.error ? '!' : (r.count != null ? r.count : r.data); t.err = r.error; }));
-    }
-    if (canAny(R.opsWriter)) {
-      tile('req_new', 'طلبات جديدة', '#requests', api.listRequests({ orgId: S.orgId, status: 'new', limit: 1 }));
-      tile('req_review', 'طلبات قيد المراجعة', '#requests', api.listRequests({ orgId: S.orgId, status: 'under_review', limit: 1 }));
-    }
-    tile('tx_open', 'معاملات مفتوحة', '#transactions', L.count('transactions', function (q) { return q.neq('operational_status', 'closed'); }));
-    tile('ctr_overdue', 'حاويات تجاوزت موعد الإرجاع', '#transactions', L.count('containers', function (q) {
-      return q.in('return_status', ['pending', 'evidence_submitted', 'disputed']).lt('return_deadline', todayISO(0));
-    }), 'danger');
-    tile('ctr_evidence', 'أدلة إرجاع بانتظار التحقق', '#transactions', L.count('containers', function (q) { return q.eq('return_status', 'evidence_submitted'); }), 'warning');
-    tile('doc_unrev', 'مستندات لم تُصنّف', '#transactions', L.count('documents', function (q) { return q.eq('classification_status', 'unreviewed').is('voided_at', null); }), 'warning');
-    if (canAny(R.contact)) tile('msg_new', 'رسائل تواصل جديدة', '#messages', api.listContactMessages({ orgId: S.orgId, status: 'new', limit: 1 }));
-    if (canAny(R.opsWriter)) tile('imp_draft', 'دفعات رفع جماعي مسودة', '#imports', L.count('import_batches', function (q) { return q.eq('status', 'draft'); }));
+  function listState(key) { return S.list[key] || (S.list[key] = { q: '', sort: null, dir: 1, page: 0 }); }
+  function norm(s) { return String(s == null ? '' : s).toLowerCase().replace(/[\u064B-\u0652]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي'); }
+  function cmp(a, b) {
+    var an = a == null || a === '', bn = b == null || b === '';
+    if (an || bn) return an && bn ? 0 : (an ? 1 : -1);          // empty values last
+    if (typeof a === 'number' && typeof b === 'number') return a - b;
+    return String(a).localeCompare(String(b), isEn() ? 'en' : 'ar', { numeric: true, sensitivity: 'base' });
+  }
+  function cellKids(v) { return v == null || v === '' ? T.common.none : v; }
+  function listView(cfg) {
+    var st = listState(cfg.key), f = S.filters[cfg.key] || {};
+    var rows = cfg.rows || [];
+    var root = el('section', { class: 'app-card is-flush adm-list-card' });
 
-    var recent = canAny(R.opsWriter) ? api.listRequests({ orgId: S.orgId, limit: 5 }) : Promise.resolve({ data: [] });
-    var due = L.containersDue(3);
-    return Promise.all(jobs.concat([recent, due])).then(function () {
-      return Promise.all([recent, due]);
-    }).then(function (res) {
-      var rr = res[0], dd = res[1];
-      var html = head('نظرة عامة', 'الأرقام محسوبة على البيانات المسموح لك برؤيتها فقط (حسب الفرع والصلاحية).');
-      html += '<div class="adm-tiles">' + tiles.map(function (t) {
-        return '<a class="card card-stat adm-tile' + (t.tone && t.value ? ' adm-tile-' + t.tone : '') + '" href="' + t.hash + '"' + (t.err ? ' title="' + esc(errText(t.err)) + '"' : '') + '>' +
-          '<span class="stat-value num">' + esc(t.value == null ? '—' : t.value) + '</span><span class="stat-label">' + esc(t.label) + '</span></a>';
-      }).join('') + '</div>';
-      var cols = '';
-      if (canAny(R.opsWriter)) {
-        cols += card('أحدث الطلبات', rr.error ? alertBox('danger', errText(rr.error)) : table(['المرجع', 'مقدّم الطلب', 'الحالة', 'التاريخ'], (rr.data || []).map(function (r) {
-          return '<tr><td><a href="#request/' + esc(r.id) + '">' + ltr(r.ref) + '</a></td><td>' + esc(r.company || r.full_name) + '</td><td>' + badge('request_status', r.status) + '</td><td>' + fmtDate(r.created_at) + '</td></tr>';
-        })), '<a class="btn btn-sm btn-ghost" href="#requests">كل الطلبات</a>');
+    // toolbar: quick filter · server filters · count
+    var qIn = el('input', { class: 'form-control', type: 'search', value: st.q, maxlength: 60,
+      placeholder: cfg.placeholder || t('quick_filter'), 'aria-label': t('quick_filter'), autocomplete: 'off', enterkeyhint: 'search' });
+    var countEl = el('span', { class: 'toolbar-count', 'aria-live': 'polite' });
+    root.appendChild(el('div', { class: 'toolbar adm-toolbar', role: 'search' }, [
+      el('div', { class: 'toolbar-search' }, [svgIcon('search'), qIn]),
+      cfg.tools && cfg.tools.length ? el('div', { class: 'toolbar-filters' }, cfg.tools) : null,
+      el('div', { class: 'toolbar-actions' }, countEl)
+    ]));
+    if (cfg.serverSearch && f.search) {
+      root.appendChild(el('div', { class: 'adm-chips-row' }, el('span', { class: 'pill pill-info adm-chip' }, [
+        el('span', { text: t('server_search_chip', { q: f.search }) }),
+        el('button', { class: 'adm-chip-x', type: 'button', 'aria-label': t('clear_search'), title: t('clear_search'),
+          onclick: function () { f.search = ''; f.offset = 0; st.page = 0; rerender(); } }, svgIcon('x'))
+      ])));
+    }
+    if (cfg.error) { root.appendChild(el('div', { class: 'adm-list-error' }, dAlert('danger', errText(cfg.error)))); return root; }
+    // server window: more than WINDOW matching rows → newer / next window (re-query with offset ± WINDOW)
+    var off = f.offset || 0;
+    if (cfg.total != null && (off > 0 || cfg.total > off + rows.length)) {
+      var shift = function (d) { f.offset = Math.max(0, off + d * WINDOW); st.page = 0; st.q = ''; rerender(); };
+      root.appendChild(el('div', { class: 'adm-window-note' }, [
+        el('span', { class: 'adm-window-text', text: t('list_window', { from: fmtCount(rows.length ? off + 1 : 0), to: fmtCount(off + rows.length), total: fmtCount(cfg.total) }) }),
+        el('div', { class: 'adm-window-btns' }, [
+          dBtn(t('window_prev', { n: WINDOW }), 'btn-secondary', function () { shift(-1); }, { disabled: off <= 0, 'data-window': 'prev' }),
+          dBtn(t('window_next', { n: WINDOW }), 'btn-secondary', function () { shift(1); }, { disabled: off + rows.length >= cfg.total, 'data-window': 'next' })
+        ])
+      ]));
+    }
+
+    // table
+    var cols = cfg.columns;
+    var ths = cols.map(function (c) {
+      var th = el('th', { scope: 'col', class: c.num ? 'num' : null });
+      if (c.value) {
+        var b = el('button', { class: 'th-sort', type: 'button', text: c.label });
+        b.addEventListener('click', function () {
+          if (st.sort === c.id) st.dir = -st.dir; else { st.sort = c.id; st.dir = c.desc ? -1 : 1; }
+          st.page = 0; paint();
+        });
+        th.appendChild(b);
+      } else th.textContent = c.label;
+      th._col = c;
+      return th;
+    });
+    var tbody = el('tbody');
+    var wrap = el('div', { class: 'data-table-wrap is-scroll adm-table-wrap' },
+      el('table', { class: 'data-table adm-dt' }, [el('thead', null, el('tr', null, ths)), tbody]));
+    root.appendChild(wrap);
+    var foot = el('div', { class: 'data-table-foot adm-pager' });
+    root.appendChild(foot);
+
+    function filtered() {
+      var q = norm(st.q.trim());
+      var list = !q ? rows.slice() : rows.filter(function (r) { return norm(cfg.text(r)).indexOf(q) !== -1; });
+      var col = cols.filter(function (c) { return c.id === st.sort; })[0];
+      if (col && col.value) list.sort(function (a, b) { return st.dir * cmp(col.value(a), col.value(b)); });
+      return list;
+    }
+    function paint() {
+      var list = filtered(), pages = Math.max(1, Math.ceil(list.length / PAGE));
+      if (st.page >= pages) st.page = pages - 1;
+      if (st.page < 0) st.page = 0;
+      var from = st.page * PAGE, slice = list.slice(from, from + PAGE);
+      ths.forEach(function (th) {
+        if (!th._col.value) return;
+        th.setAttribute('aria-sort', th._col.id === st.sort ? (st.dir > 0 ? 'ascending' : 'descending') : 'none');
+      });
+      tbody.textContent = '';
+      if (!slice.length) {
+        tbody.appendChild(el('tr', { class: 'adm-empty-row' }, el('td', { colspan: cols.length },
+          emptyState(st.q ? 'search' : 'inbox', st.q ? t('no_match', { q: st.q.trim() }) : (cfg.empty || T.common.empty),
+            st.q ? dBtn(t('clear_filter'), 'btn-secondary', function () { st.q = ''; qIn.value = ''; st.page = 0; paint(); qIn.focus(); }) : null))));
       }
-      cols += card('حاويات موعد إرجاعها خلال 3 أيام أو متأخرة', dd.error ? alertBox('danger', errText(dd.error)) : table(['الحاوية', 'المعاملة', 'آخر موعد', 'الحالة'], (dd.data || []).map(function (c) {
-        var late = c.return_deadline < todayISO(0);
-        return '<tr><td>' + ltr(c.container_no) + '</td><td><a href="#tx/' + esc(c.transaction_id) + '">' + ltr(c.transactions && c.transactions.ref) + '</a></td><td>' + fmtDate(c.return_deadline) +
-          (late ? ' <span class="badge badge-danger">متأخرة</span>' : '') + '</td><td>' + badge('container_return_status', c.return_status) + '</td></tr>';
-      })));
-      return html + '<div class="adm-cols">' + cols + '</div>';
+      slice.forEach(function (r) {
+        var href = cfg.href ? cfg.href(r) : null;
+        var tr = el('tr', { class: (href || cfg.open) ? 'is-clickable' : null });
+        if (cfg.rowClass) { var rc = cfg.rowClass(r); if (rc) tr.classList.add(rc); }
+        cols.forEach(function (c) { tr.appendChild(el('td', { class: c.num ? 'num' : (c.desc || c.nowrap ? 'is-nowrap' : null) }, cellKids(c.cell(r)))); });
+        if (href || cfg.open) {
+          tr.addEventListener('click', function (e) {
+            if (e.target.closest('a, button, input, select, label, textarea')) return;
+            if (window.getSelection && String(window.getSelection()).length) return;   // selecting text, not opening
+            if (href) location.hash = href; else cfg.open(r);
+          });
+        }
+        tbody.appendChild(tr);
+      });
+      countEl.textContent = st.q ? t('count_filtered', { n: fmtCount(list.length), total: fmtCount(rows.length) }) : t('count_rows', { n: fmtCount(rows.length) });
+      foot.textContent = '';
+      foot.hidden = list.length <= PAGE;
+      if (list.length > PAGE) {
+        append(foot, [
+          el('span', { class: 'adm-pager-info num', text: t('pager_range', { from: from + 1, to: Math.min(from + PAGE, list.length), total: list.length }) }),
+          el('div', { class: 'adm-pager-btns' }, [
+            dBtn(t('prev'), 'btn-secondary', function () { st.page--; paint(); toTop(); }, { disabled: st.page <= 0 }),
+            el('span', { class: 'adm-pager-page num', text: t('pager_page', { p: st.page + 1, n: pages }) }),
+            dBtn(t('next'), 'btn-secondary', function () { st.page++; paint(); toTop(); }, { disabled: st.page >= pages - 1 })
+          ])
+        ]);
+      }
+    }
+    function toTop() {
+      wrap.scrollTop = 0;
+      var r = root.getBoundingClientRect();
+      if (r.top < 0) { try { root.scrollIntoView({ block: 'start' }); } catch (e) { /* old browsers */ } }
+    }
+    qIn.addEventListener('input', function () { st.q = qIn.value.slice(0, 60); st.page = 0; paint(); });
+    qIn.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && qIn.value) { e.preventDefault(); e.stopPropagation(); qIn.value = ''; st.q = ''; st.page = 0; paint(); }
+      // Enter: search every record on the server (the window may not hold them all)
+      if (e.key === 'Enter' && cfg.serverSearch) { e.preventDefault(); f.search = qIn.value.trim().slice(0, 60); f.offset = 0; st.q = ''; st.page = 0; rerender(); }
+    });
+    if (cfg.serverSearch) qIn.title = t('enter_server_search');
+    paint();
+    return root;
+  }
+  // .empty-state block (icon, text, optional action)
+  function emptyState(ico, text, action) {
+    return el('div', { class: 'empty-state is-compact' }, [el('div', { class: 'empty-state-icon', 'aria-hidden': 'true' }, svgIcon(ico)), el('p', { text: text }),
+      action ? el('div', { class: 'empty-state-actions' }, action) : null]);
+  }
+  // toolbar <select> bound to a server filter of S.filters[key]
+  function filterSelect(key, name, label, options) {
+    var s = el('select', { class: 'form-control is-sm adm-select', 'aria-label': label, title: label },
+      options.map(function (o) { return el('option', { value: o[0], text: o[1] }); }));
+    s.value = S.filters[key][name] || '';
+    s.addEventListener('change', function () { S.filters[key][name] = s.value; S.filters[key].offset = 0; listState(key).page = 0; rerender(); });
+    return s;
+  }
+  function statusOptions(domain, allLabel) {
+    var keys = ORDER[domain] || Object.keys(LABELS[domain] || {});
+    return [['', allLabel || t('all_statuses')]].concat(keys.map(function (k) { return [k, lbl(domain, k)]; }));
+  }
+  function refCell(text, href) { return text ? el('a', { class: 'adm-ref', href: href }, el('bdi', { dir: 'ltr', text: text })) : T.common.none; }
+  function twoLine(main, sub, subLtr) {
+    return [el('span', { class: 'cell-main', text: main || T.common.none }), sub ? el('span', { class: 'cell-sub', dir: subLtr ? 'ltr' : null, text: sub }) : null];
+  }
+  function ts(v) { var d = v ? new Date(v) : null; return d && !isNaN(d) ? d.getTime() : null; }
+
+  /* ------------------------------------------------------------------
+     Dashboard — MarsaApi.dashboardStats(orgId) (counts only; falls back
+     to per-count queries when it is missing or incomplete)
+     ------------------------------------------------------------------ */
+  function nOr(v) { return typeof v === 'number' && isFinite(v) ? v : (v != null && v !== '' && !isNaN(+v) && typeof v !== 'boolean' && typeof v !== 'object' ? +v : null); }
+  function dig(o, paths) {
+    for (var i = 0; i < paths.length; i++) {
+      var v = o, p = paths[i].split('.');
+      for (var j = 0; j < p.length && v != null; j++) v = v[p[j]];
+      if (v != null) return v;
+    }
+    return null;
+  }
+  // {code: n} from a map, a {by_status} wrapper or a [{code|status, count|n}] list
+  function countMap(v) {
+    if (!v || typeof v !== 'object') return null;
+    var out = {}, any = false;
+    if (Array.isArray(v)) {
+      v.forEach(function (x) { var k = x && (x.code || x.status || x.key), n = x && nOr(x.count != null ? x.count : x.n); if (k && n != null) { out[k] = n; any = true; } });
+      return any ? out : null;
+    }
+    if (v.by_status || v.byStatus || v.by_operational_status) return countMap(v.by_status || v.byStatus || v.by_operational_status);
+    Object.keys(v).forEach(function (k) { var n = nOr(v[k]); if (n != null) { out[k] = n; any = true; } });
+    return any ? out : null;
+  }
+  function normStats(d) {
+    if (!d || typeof d !== 'object') return {};
+    return {
+      req: countMap(dig(d, ['requests_by_status', 'requests.by_status', 'requests', 'request_status'])),
+      tx: countMap(dig(d, ['transactions_by_status', 'transactions.by_status', 'transactions.by_operational_status', 'transactions', 'operational_status'])),
+      overdue: nOr(dig(d, ['containers.overdue', 'containers_overdue', 'containers.return_overdue'])),
+      due3: nOr(dig(d, ['containers.due_3d', 'containers.due3', 'containers.due_soon', 'containers.due_in_3_days', 'containers_due_3d', 'containers_due_soon', 'containers_due3'])),
+      pending: nOr(dig(d, ['containers.pending', 'containers.pending_return', 'containers_pending', 'containers_pending_return'])),
+      evidence: nOr(dig(d, ['containers.evidence_submitted', 'containers_evidence_submitted'])),
+      docs: nOr(dig(d, ['documents.unreviewed', 'documents_unreviewed', 'docs_unreviewed', 'documents.unreviewed_count']))
+    };
+  }
+  function cnt(table, build) { return L.count(table, build).then(function (r) { return r.error ? null : r.data; }); }
+  function fillStats(st) {
+    var jobs = [], ops = canAny(R.opsWriter);
+    var openRet = ['pending', 'evidence_submitted', 'disputed'];
+    function need(k, p) { if (st[k] == null) jobs.push(p.then(function (v) { st[k] = v; })); }
+    function needMap(k, table, col, codes) {
+      if (st[k]) return;
+      var m = st[k] = {};
+      codes.forEach(function (c) { jobs.push(cnt(table, function (q) { return q.eq(col, c); }).then(function (v) { if (v != null) m[c] = v; })); });
+    }
+    if (ops) needMap('req', 'service_requests', 'status', ['new', 'under_review']);
+    needMap('tx', 'transactions', 'operational_status', ORDER.operational_status);
+    need('overdue', cnt('containers', function (q) { return q.in('return_status', openRet).lt('return_deadline', todayISO(0)); }));
+    need('due3', cnt('containers', function (q) { return q.in('return_status', openRet).gte('return_deadline', todayISO(0)).lte('return_deadline', todayISO(3)); }));
+    need('evidence', cnt('containers', function (q) { return q.eq('return_status', 'evidence_submitted'); }));
+    need('docs', cnt('documents', function (q) { return q.eq('classification_status', 'unreviewed').is('voided_at', null); }));
+    if (canAny(R.contact)) jobs.push(api.listContactMessages({ orgId: S.orgId, status: 'new', limit: 1 }).then(function (r) { st.msgNew = r.error ? null : r.count; }));
+    if (ops) jobs.push(cnt('import_batches', function (q) { return q.eq('status', 'draft'); }).then(function (v) { st.impDraft = v; }));
+    return Promise.all(jobs).then(function () { return st; });
+  }
+  function daysFrom(iso) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ''); if (!m) return null;
+    var d = new Date(+m[1], m[2] - 1, +m[3]), n = new Date(); n = new Date(n.getFullYear(), n.getMonth(), n.getDate());
+    return Math.round((d - n) / 86400000);
+  }
+  function dueText(iso) {
+    var n = daysFrom(iso);
+    if (n == null) return '';
+    if (n < 0) return t('overdue_by', { n: -n });
+    if (n === 0) return t('due_today');
+    return t('due_in', { n: n });
+  }
+  function fmtCount(v) {
+    if (v == null) return T.common.none;
+    var I = window.MarsaI18n;
+    if (I && typeof I.fmtNumber === 'function') { try { return I.fmtNumber(v); } catch (e) { /* plain */ } }
+    return String(v);
+  }
+  function kpiNode(o) {
+    // o: {label, value, foot, href, icon, tone, alert}; the tone draws the top accent bar, alert colours the value
+    return el('a', { class: 'kpi adm-kpi' + (o.alert ? ' is-alert' : ''), href: o.href, 'data-tone': o.tone || null }, [
+      el('span', { class: 'adm-kpi-top' }, [el('span', { class: 'kpi-label', text: o.label }), el('span', { class: 'adm-kpi-icon', 'aria-hidden': 'true' }, svgIcon(o.icon))]),
+      el('span', { class: 'kpi-value', text: fmtCount(o.value) }),
+      o.foot ? el('span', { class: 'kpi-foot', text: o.foot }) : null
+    ]);
+  }
+  function miniList(items, emptyText) {
+    if (!items.length) return emptyState('inbox', emptyText || T.common.empty);
+    return el('ul', { class: 'adm-mini' }, items.map(function (it) {
+      return el('li', null, el('a', { class: 'adm-mini-row', href: it.href }, [
+        el('span', { class: 'adm-mini-main' }, [el('span', { class: 'adm-mini-title' }, it.title), it.sub ? el('span', { class: 'adm-mini-sub', text: it.sub }) : null]),
+        it.side ? el('span', { class: 'adm-mini-side' }, it.side) : null
+      ]));
+    }));
+  }
+  function eventText(e) {
+    var p = e.payload || {}, arrow = isEn() ? ' → ' : ' ← ', s = lbl('event_type', e.event_type);
+    if (e.event_type === 'operational_status') s += ': ' + lbl('operational_status', e.from_status) + arrow + lbl('operational_status', e.to_status);
+    else if (e.event_type === 'financial_status') s += ': ' + lbl('financial_status', e.from_status) + arrow + lbl('financial_status', e.to_status);
+    else if (e.event_type === 'container_return') s += (p.container_no ? ' ' + p.container_no : '') + ': ' + lbl('container_return_status', e.to_status);
+    return s;
+  }
+  function renderDashboard() {
+    var ops = canAny(R.opsWriter);
+    var statsP = typeof (api && api.dashboardStats) === 'function' ? call('dashboardStats', S.orgId) : Promise.resolve({ data: null, error: { code: 'MRS_UNAVAILABLE' } });
+    var listsP = Promise.all([
+      ops ? api.listRequests({ orgId: S.orgId, limit: 6 }) : Promise.resolve({ data: [] }),
+      L.containersNext(6), L.recentEvents(8)
+    ]);
+    return Promise.all([statsP.then(function (r) { return fillStats(r.error ? {} : normStats(r.data)); }), listsP]).then(function (res) {
+      var st = res[0], rr = res[1][0], cc = res[1][1], ee = res[1][2];
+      return L.profiles((ee.data || []).map(function (e) { return e.actor; })).then(function () {
+        var out = frag(dHead(viewLabel('dashboard'), t('dash_sub')));
+        var tx = st.tx || {}, txTotal = 0, txOpen = 0;
+        ORDER.operational_status.forEach(function (c) { var n = tx[c] || 0; txTotal += n; if (c !== 'closed') txOpen += n; });
+
+        // KPI row
+        var kpis = [];
+        if (ops) kpis.push({ label: t('kpi_req_new'), value: st.req ? (st.req.new || 0) : null, icon: 'inbox', href: '#requests?status=new',
+          foot: st.req && st.req.under_review != null ? t('kpi_req_hint', { n: fmtCount(st.req.under_review) }) : null, tone: st.req && st.req.new ? 'info' : null });
+        else kpis.push({ label: t('kpi_evidence'), value: st.evidence, icon: 'file', href: '#transactions?status=', foot: t('kpi_evidence_hint'), tone: st.evidence ? 'warning' : null, alert: !!st.evidence });
+        kpis.push({ label: t('kpi_tx_open'), value: st.tx ? txOpen : null, icon: 'layers', href: '#transactions', foot: st.tx ? t('kpi_tx_hint', { n: fmtCount(txTotal) }) : null, tone: 'brand' });
+        kpis.push({ label: t('kpi_ctr_overdue'), value: st.overdue, icon: 'clock', href: '#transactions?status=',
+          foot: st.due3 != null ? t('kpi_ctr_due3', { n: fmtCount(st.due3) }) : null, tone: st.overdue ? 'danger' : (st.due3 ? 'warning' : null), alert: !!st.overdue });
+        kpis.push({ label: t('kpi_docs'), value: st.docs, icon: 'file', href: '#transactions', foot: t('kpi_docs_hint'), tone: st.docs ? 'warning' : null, alert: !!st.docs });
+        out.appendChild(el('div', { class: 'kpi-grid adm-kpis' }, kpis.map(kpiNode)));
+
+        // stage chart + needs attention
+        var max = 0;
+        ORDER.operational_status.forEach(function (c) { max = Math.max(max, tx[c] || 0); });
+        var bars = st.tx ? el('div', { class: 'chart-bars adm-bars', role: 'list', 'aria-label': t('chart_stages') }, ORDER.operational_status.map(function (c) {
+          var n = tx[c] || 0;
+          var bar = el('a', { class: 'chart-bar' + (n ? '' : ' is-zero'), role: 'listitem', href: '#transactions?status=' + encodeURIComponent(c), 'data-tone': toneOf('operational_status', c),
+            'aria-label': lbl('operational_status', c) + ': ' + fmtCount(n) }, [
+            el('span', { class: 'chart-bar-label', text: lbl('operational_status', c) }),
+            el('span', { class: 'chart-bar-track', 'aria-hidden': 'true' }, el('span', { class: 'chart-bar-fill' })),
+            el('span', { class: 'chart-bar-value', text: fmtCount(n) })
+          ]);
+          bar.style.setProperty('--v', String(max ? n / max : 0));
+          return bar;
+        })) : dAlert('warning', t('stats_unavailable'));
+        var attn = [];
+        if (ops && st.req) attn.push({ title: t('attn_review'), href: '#requests?status=under_review', side: el('span', { class: 'adm-count-pill', text: fmtCount(st.req.under_review || 0) }) });
+        attn.push({ title: t('attn_evidence'), href: '#transactions?status=', side: el('span', { class: 'adm-count-pill', 'data-tone': st.evidence ? 'warning' : null, text: fmtCount(st.evidence) }) });
+        attn.push({ title: t('attn_due3'), href: '#transactions?status=', side: el('span', { class: 'adm-count-pill', 'data-tone': st.due3 ? 'warning' : null, text: fmtCount(st.due3) }) });
+        if (canAny(R.contact)) attn.push({ title: t('attn_messages'), href: '#messages?status=new', side: el('span', { class: 'adm-count-pill', 'data-tone': st.msgNew ? 'info' : null, text: fmtCount(st.msgNew) }) });
+        if (ops) attn.push({ title: t('attn_imports'), href: '#imports?status=draft', side: el('span', { class: 'adm-count-pill', text: fmtCount(st.impDraft) }) });
+        out.appendChild(el('div', { class: 'adm-dash-grid' }, [
+          dCard(t('chart_stages'), [bars, st.tx ? el('p', { class: 'adm-card-foot-note', text: t('chart_hint') }) : null], null, 'adm-span-2'),
+          dCard(t('attn_title'), miniList(attn))
+        ]));
+
+        // latest requests · nearest deadlines · recent activity
+        var cols3 = [];
+        if (ops) {
+          cols3.push(dCard(t('latest_requests'), rr.error ? dAlert('danger', errText(rr.error)) : miniList((rr.data || []).map(function (q) {
+            return { href: '#request/' + q.id, title: [el('bdi', { dir: 'ltr', class: 'num', text: q.ref || '' }), ' · ', q.company || q.full_name || ''], sub: fmtWhen(q.created_at, true), side: badgeNode('request_status', q.status) };
+          }), t('empty_requests')), [el('a', { class: 'btn btn-sm btn-ghost', href: '#requests', text: t('see_all') })]));
+        }
+        cols3.push(dCard(t('nearest_deadlines'), cc.error ? dAlert('danger', errText(cc.error)) : miniList((cc.data || []).map(function (c) {
+          var n = daysFrom(c.return_deadline);
+          return { href: '#tx/' + c.transaction_id, title: [el('bdi', { dir: 'ltr', class: 'num', text: c.container_no || '' }), c.transactions && c.transactions.ref ? [' · ', el('bdi', { dir: 'ltr', class: 'num adm-muted', text: c.transactions.ref })] : null],
+            sub: fmtWhen(c.return_deadline) + ' · ' + lbl('container_return_status', c.return_status),
+            side: pillNode(n == null ? 'neutral' : n < 0 ? 'danger' : n <= 3 ? 'warning' : 'neutral', dueText(c.return_deadline)) };
+        }), t('empty_deadlines')), [el('a', { class: 'btn btn-sm btn-ghost', href: '#transactions?status=', text: t('see_all') })]));
+        cols3.push(dCard(t('recent_activity'), ee.error ? dAlert('danger', errText(ee.error)) : miniList((ee.data || []).map(function (e) {
+          return { href: '#tx/' + e.transaction_id, title: eventText(e), sub: who(e.actor) + ' · ' + fmtWhen(e.created_at, true),
+            side: e.transactions && e.transactions.ref ? el('bdi', { dir: 'ltr', class: 'num adm-muted', text: e.transactions.ref }) : null };
+        }), t('empty_activity'))));
+        out.appendChild(el('div', { class: (cols3.length > 2 ? 'app-grid-3' : 'app-grid-2') + ' adm-dash-cols' }, cols3));
+        return out;
+      });
     });
   }
 
@@ -634,20 +1082,25 @@
      ------------------------------------------------------------------ */
   function renderRequests() {
     var f = S.filters.requests;
-    return api.listRequests({ orgId: S.orgId, status: f.status || null, search: f.search, limit: PAGE, offset: f.offset }).then(function (r) {
-      var html = head(T.views.requests, 'الطلبات المرسلة من نموذج «اطلب تخليص» ومن الرفع الجماعي. راجع الطلب ثم حوّله إلى معاملة أو ارفضه مع ذكر السبب.');
-      html += '<form class="adm-filters card" data-form="filter" data-key="requests">' +
-        '<div class="form-group"><label class="form-label" for="flt-req-status">الحالة</label><select class="form-control" id="flt-req-status" name="status">' + opts('request_status', f.status, true) + '</select></div>' +
-        '<div class="form-group adm-grow"><label class="form-label" for="flt-req-q">بحث</label><input class="form-control" id="flt-req-q" name="search" type="search" value="' + esc(f.search) + '" placeholder="المرجع أو الاسم أو الشركة أو رقم البوليصة"></div>' +
-        '<button class="btn btn-primary" type="submit">' + T.common.search + '</button></form>';
-      if (r.error) return html + alertBox('danger', errText(r.error));
-      html += table(['المرجع', 'التاريخ', 'مقدّم الطلب', 'العملية', 'المنفذ', 'المصدر', 'الحالة', ''], (r.data || []).map(function (q) {
-        return '<tr><td>' + ltr(q.ref) + '</td><td>' + fmtDate(q.created_at) + '</td><td><strong>' + esc(q.company || q.full_name) + '</strong>' +
-          (q.company ? '<span class="adm-sub">' + esc(q.full_name) + '</span>' : '') + '</td><td>' + esc(lbl('direction', q.direction)) + ' · ' + esc(lbl('mode', q.mode)) +
-          '</td><td>' + esc(q.port) + '</td><td>' + esc(lbl('source', q.source)) + '</td><td>' + badge('request_status', q.status) +
-          '</td><td><a class="btn btn-sm btn-ghost" href="#request/' + esc(q.id) + '">' + T.common.view + '</a></td></tr>';
+    return api.listRequests({ orgId: S.orgId, status: f.status || null, search: f.search, limit: WINDOW, offset: f.offset }).then(function (r) {
+      var out = frag(dHead(viewLabel('requests'), t('requests_sub')));
+      out.appendChild(listView({
+        key: 'requests', rows: r.data || [], total: r.count, error: r.error, serverSearch: true,
+        placeholder: t('ph_requests'), empty: t('empty_requests'),
+        tools: [filterSelect('requests', 'status', t('col_status'), statusOptions('request_status'))],
+        href: function (q) { return '#request/' + q.id; },
+        text: function (q) { return [q.ref, q.full_name, q.company, q.port, q.bl_number, q.email, q.phone, lbl('request_status', q.status)].join(' '); },
+        columns: [
+          { id: 'ref', label: t('col_ref'), value: function (q) { return q.ref; }, cell: function (q) { return refCell(q.ref, '#request/' + q.id); } },
+          { id: 'date', label: t('col_date'), desc: true, value: function (q) { return ts(q.created_at); }, cell: function (q) { return fmtWhen(q.created_at); } },
+          { id: 'who', label: t('col_applicant'), value: function (q) { return q.company || q.full_name; }, cell: function (q) { return twoLine(q.company || q.full_name, q.company ? q.full_name : null); } },
+          { id: 'op', label: t('col_operation'), value: function (q) { return lbl('direction', q.direction) + lbl('mode', q.mode); }, cell: function (q) { return lbl('direction', q.direction) + ' · ' + lbl('mode', q.mode); } },
+          { id: 'port', label: t('col_port'), value: function (q) { return q.port; }, cell: function (q) { return q.port; } },
+          { id: 'source', label: t('col_source'), value: function (q) { return lbl('source', q.source); }, cell: function (q) { return lbl('source', q.source); } },
+          { id: 'status', label: t('col_status'), nowrap: true, value: function (q) { return (ORDER.request_status || []).indexOf(q.status); }, cell: function (q) { return badgeNode('request_status', q.status); } }
+        ]
       }));
-      return html + pager('requests', r.count);
+      return out;
     });
   }
 
@@ -782,21 +1235,31 @@
   }
   function renderTransactions() {
     var f = S.filters.transactions;
-    return api.listTransactions({ orgId: S.orgId, status: f.status || null, branchId: f.branchId || null, search: f.search, limit: PAGE, offset: f.offset }).then(function (r) {
-      var html = head(T.views.transactions, 'المعاملة هي محور العمل: الحالة التشغيلية منفصلة عن الحالة المالية، وكل تغيير يُسجَّل في سجل أحداث لا يُعدّل.');
-      html += '<form class="adm-filters card" data-form="filter" data-key="transactions">' +
-        '<div class="form-group"><label class="form-label" for="flt-tx-status">الحالة التشغيلية</label><select class="form-control" id="flt-tx-status" name="status">' + opts('operational_status', f.status, true) + '</select></div>' +
-        (S.branches.length > 1 ? '<div class="form-group"><label class="form-label" for="flt-tx-branch">الفرع</label><select class="form-control" id="flt-tx-branch" name="branchId">' + branchOpts(f.branchId, T.common.all) + '</select></div>' : '') +
-        '<div class="form-group adm-grow"><label class="form-label" for="flt-tx-q">بحث</label><input class="form-control" id="flt-tx-q" name="search" type="search" value="' + esc(f.search) + '" placeholder="المرجع أو رقم البوليصة أو رقم البيان"></div>' +
-        '<button class="btn btn-primary" type="submit">' + T.common.search + '</button></form>';
-      if (r.error) return html + alertBox('danger', errText(r.error));
-      html += table(['المرجع', 'العميل', 'الفرع', 'العملية', 'البوليصة', 'الحاويات', 'الحالة التشغيلية', 'الحالة المالية', 'آخر تغيير', ''], (r.data || []).map(function (t) {
-        return '<tr><td>' + ltr(t.ref) + '</td><td>' + esc(t.clients && t.clients.name_ar) + '</td><td>' + esc(t.branches && t.branches.name_ar) + '</td><td>' +
-          esc(lbl('direction', t.operation)) + ' · ' + esc(lbl('mode', t.mode)) + '</td><td>' + ltr(t.bl_number) + '</td><td>' + num(t.container_count) + '</td><td>' +
-          badge('operational_status', t.operational_status) + '</td><td>' + badge('financial_status', t.financial_status) + '</td><td>' + fmtDate(t.status_changed_at) +
-          '</td><td><a class="btn btn-sm btn-ghost" href="#tx/' + esc(t.id) + '">' + T.common.view + '</a></td></tr>';
+    return api.listTransactions({ orgId: S.orgId, status: f.status || null, branchId: f.branchId || null, search: f.search, limit: WINDOW, offset: f.offset }).then(function (r) {
+      var out = frag(dHead(viewLabel('transactions'), t('transactions_sub')));
+      var multi = S.branches.length > 1;
+      var tools = [filterSelect('transactions', 'status', t('col_op_status'), statusOptions('operational_status'))];
+      if (multi) tools.push(filterSelect('transactions', 'branchId', t('col_branch'), [['', t('all_branches')]].concat(S.branches.map(function (b) { return [b.id, (isEn() && b.name_en) || b.name_ar]; }))));
+      var cols = [
+        { id: 'ref', label: t('col_ref'), value: function (x) { return x.ref; }, cell: function (x) { return refCell(x.ref, '#tx/' + x.id); } },
+        { id: 'client', label: t('col_client'), value: function (x) { return x.clients && x.clients.name_ar; }, cell: function (x) { return x.clients && x.clients.name_ar; } }
+      ];
+      if (multi) cols.push({ id: 'branch', label: t('col_branch'), value: function (x) { return x.branches && x.branches.name_ar; }, cell: function (x) { return x.branches && x.branches.name_ar; } });
+      cols.push(
+        { id: 'op', label: t('col_operation'), value: function (x) { return lbl('direction', x.operation) + lbl('mode', x.mode); }, cell: function (x) { return lbl('direction', x.operation) + ' · ' + lbl('mode', x.mode); } },
+        { id: 'bl', label: t('col_bl'), value: function (x) { return x.bl_number; }, cell: function (x) { return dLtr(x.bl_number); } },
+        { id: 'ctr', label: t('col_containers'), num: true, value: function (x) { return x.container_count; }, cell: function (x) { return el('span', { class: 'num', text: fmtCount(x.container_count) }); } },
+        { id: 'ops', label: t('col_op_status'), value: function (x) { return ORDER.operational_status.indexOf(x.operational_status); }, cell: function (x) { return badgeNode('operational_status', x.operational_status); } },
+        { id: 'fin', label: t('col_fin_status'), value: function (x) { return (ORDER.financial_status || Object.keys(LABELS.financial_status)).indexOf(x.financial_status); }, cell: function (x) { return badgeNode('financial_status', x.financial_status); } },
+        { id: 'changed', label: t('col_changed_at'), desc: true, value: function (x) { return ts(x.status_changed_at); }, cell: function (x) { return fmtWhen(x.status_changed_at); } }
+      );
+      out.appendChild(listView({
+        key: 'transactions', rows: r.data || [], total: r.count, error: r.error, serverSearch: true,
+        placeholder: t('ph_transactions'), empty: t('empty_transactions'), tools: tools, columns: cols,
+        href: function (x) { return '#tx/' + x.id; },
+        text: function (x) { return [x.ref, x.bl_number, x.declaration_no, x.clients && x.clients.name_ar, x.branches && x.branches.name_ar, x.port_of_discharge, lbl('operational_status', x.operational_status)].join(' '); }
       }));
-      return html + pager('transactions', r.count);
+      return out;
     });
   }
 
@@ -869,7 +1332,7 @@
           var open = ['pending', 'evidence_submitted', 'disputed'].indexOf(c.return_status) !== -1;
           var late = open && c.return_deadline && c.return_deadline < todayISO(0);
           return '<tr><td>' + ltr(c.container_no) + '</td><td>' + esc(lbl('container_type', c.container_type)) + '</td><td>' + fmtDate(c.return_deadline) +
-            (late ? ' <span class="badge badge-danger">متأخرة</span>' : '') + '</td><td>' + esc(c.return_location || T.common.none) + '</td><td>' +
+            (late ? ' ' + pillHtml('danger', tl('late')) : '') + '</td><td>' + esc(c.return_location || T.common.none) + '</td><td>' +
             badge('container_return_status', c.return_status) + (c.verified_at ? '<span class="adm-sub">تحقّق: ' + esc(who(c.verified_by)) + ' · ' + fmtDate(c.verified_at) + '</span>' : '') +
             '</td><td>' + (ev ? '<button class="btn-link" type="button" data-act="doc-open" data-id="' + esc(ev.id) + '">' + esc(ev.original_name) + '</button>' : (c.evidence_document_id ? 'مستند ملغى أو غير ظاهر' : T.common.none)) +
             '</td><td>' + (canTr ? '<button class="btn btn-sm btn-ghost" type="button" data-act="ctr-edit" data-tx="' + esc(t.id) + '" data-id="' + esc(c.id) + '">' + T.common.edit + '</button>' : '') + '</td></tr>';
@@ -931,7 +1394,7 @@
           '<button class="btn btn-sm btn-ghost adm-text-danger" type="button" data-act="doc-void" data-tx="' + esc(t.id) + '" data-id="' + esc(d.id) + '">إلغاء</button>';
       }
       return '<tr' + (voided ? ' class="adm-voided"' : '') + '><td><strong>' + esc(d.original_name) + '</strong><span class="adm-sub">' + fmtSize(d.size_bytes) +
-        (d.version > 1 ? ' · نسخة ' + num(d.version) : '') + (voided ? ' · <span class="badge badge-danger">ملغى</span> ' + esc(d.void_reason || '') : '') + '</span></td><td>' +
+        (d.version > 1 ? ' · نسخة ' + num(d.version) : '') + (voided ? ' · ' + pillHtml('danger', tl('voided')) + ' ' + esc(d.void_reason || '') : '') + '</span></td><td>' +
         esc(lbl('document_kind', d.kind)) + '</td><td>' + (d.classification ? esc(lbl('document_kind', d.classification)) + '<br>' : '') + badge('classification_status', d.classification_status) +
         (d.classification_note ? '<span class="adm-sub">' + esc(d.classification_note) + '</span>' : '') + '</td><td>' + esc(lbl('visibility', d.visibility)) + '</td><td>' +
         esc(lbl('doc_source', d.source)) + (d.source_ref ? '<span class="adm-sub">' + esc(d.source_ref) + '</span>' : '') + '</td><td>' + fmtDate(d.uploaded_at) +
@@ -947,7 +1410,7 @@
       var p = e.payload || {};
       if (e.event_type === 'operational_status') {
         title += ': ' + esc(lbl('operational_status', e.from_status)) + ' ← ' + esc(lbl('operational_status', e.to_status));
-        if (p.direction === 'backward') detail += '<span class="badge badge-warning">تصحيح للخلف</span> ';
+        if (p.direction === 'backward') detail += pillHtml('warning', t('backward')) + ' ';
       } else if (e.event_type === 'financial_status') {
         title += ': ' + esc(lbl('financial_status', e.from_status)) + ' ← ' + esc(lbl('financial_status', e.to_status));
       } else if (e.event_type === 'container_return') {
@@ -963,7 +1426,7 @@
       if (e.note) detail += '<span class="adm-pre">' + esc(e.note) + '</span>';
       return '<li class="' + (i === 0 ? 'is-current' : 'is-done') + '"><span class="tl-dot" aria-hidden="true"></span><span class="tl-title">' + title + '</span>' +
         (detail ? '<span class="adm-tl-note">' + detail + '</span>' : '') +
-        '<span class="tl-meta">' + esc(who(e.actor)) + ' · ' + fmtDateTime(e.created_at) + (e.visible_to_client ? ' · <span class="badge badge-teal">يظهر للعميل</span>' : '') + '</span></li>';
+        '<span class="tl-meta">' + esc(who(e.actor)) + ' · ' + fmtDateTime(e.created_at) + (e.visible_to_client ? ' · ' + pillHtml('brand', t('client_visible')) : '') + '</span></li>';
     }).join('') + '</ol>';
   }
 
@@ -1149,10 +1612,13 @@
   }
   function docVisibility(txId, id, to) {
     var d = findDoc(txId, id); if (!d) return;
-    if (to === 'client' && !window.confirm('سيظهر المستند «' + d.original_name + '» للعميل في بوابته. هل تريد المتابعة؟')) return;
-    api.setDocumentVisibility(id, to).then(function (r) {
-      if (r.error) return toast(errText(r.error), 'error');
-      toast(T.common.saved, 'success'); rerender();
+    var ask = to === 'client' ? askConfirm({ title: t('confirm_show_client_title'), text: t('confirm_show_client', { name: d.original_name }), okText: t('confirm_show_client_ok') }) : Promise.resolve(true);
+    ask.then(function (yes) {
+      if (!yes) return;
+      api.setDocumentVisibility(id, to).then(function (r) {
+        if (r.error) return toast(errText(r.error), 'error');
+        toast(T.common.saved, 'success'); rerender();
+      });
     });
   }
   function docVoid(txId, id) {
@@ -1194,21 +1660,29 @@
   function renderClients() {
     var f = S.filters.clients;
     var canW = canAny(R.opsWriter);
-    return api.listClients({ orgId: S.orgId, search: f.search, active: f.inactive ? false : true, limit: PAGE, offset: f.offset }).then(function (r) {
-      var html = head(T.views.clients, 'ملف العميل سجل رئيسي مستقل يُستخدم في كل معاملاته، فلا تُعاد كتابة بياناته في كل معاملة.',
-        canW ? '<button class="btn btn-sm btn-primary" type="button" data-act="client-new">' + icon('plus') + 'عميل جديد</button>' : '');
-      html += '<form class="adm-filters card" data-form="filter" data-key="clients">' +
-        '<div class="form-group adm-grow"><label class="form-label" for="flt-cl-q">بحث</label><input class="form-control" id="flt-cl-q" name="search" type="search" value="' + esc(f.search) + '" placeholder="الاسم أو السجل التجاري أو الرقم الضريبي"></div>' +
-        '<label class="check adm-filter-check"><input type="checkbox" name="inactive"' + (f.inactive ? ' checked' : '') + '> إظهار غير النشطين</label>' +
-        '<button class="btn btn-primary" type="submit">' + T.common.search + '</button></form>';
-      if (r.error) return html + alertBox('danger', errText(r.error));
-      html += table(['الاسم', 'النوع', 'السجل التجاري', 'الرقم الضريبي', 'الجوال', 'العنوان المختصر', 'الحالة', ''], (r.data || []).map(function (c) {
-        return '<tr><td><strong>' + esc(c.name_ar) + '</strong>' + (c.name_en ? '<span class="adm-sub" dir="ltr">' + esc(c.name_en) + '</span>' : '') + '</td><td>' + esc(lbl('client_type', c.client_type)) +
-          '</td><td>' + ltr(c.cr_number) + '</td><td>' + ltr(c.vat_number) + '</td><td>' + ltr(c.phone) + '</td><td>' + ltr(c.national_address_short) + '</td><td>' +
-          (c.is_active ? '<span class="badge badge-success">نشط</span>' : '<span class="badge badge-danger">غير نشط</span>') +
-          '</td><td><a class="btn btn-sm btn-ghost" href="#client/' + esc(c.id) + '">' + T.common.view + '</a></td></tr>';
+    return api.listClients({ orgId: S.orgId, search: f.search, active: f.inactive ? false : true, limit: WINDOW, offset: f.offset }).then(function (r) {
+      var out = frag(dHead(viewLabel('clients'), t('clients_sub'),
+        canW ? [dBtn([svgIcon('plus'), t('client_new')], 'btn-primary', function () { clientDialog(null); })] : null));
+      var inactive = el('label', { class: 'check adm-tool-check' }, [el('input', { type: 'checkbox', checked: !!f.inactive,
+        onchange: function (e) { f.inactive = e.target.checked; f.offset = 0; listState('clients').page = 0; rerender(); } }), ' ', t('show_inactive')]);
+      out.appendChild(listView({
+        key: 'clients', rows: r.data || [], total: r.count, error: r.error, serverSearch: true,
+        placeholder: t('ph_clients'), empty: t('empty_clients'), tools: [inactive],
+        href: function (c) { return '#client/' + c.id; },
+        rowClass: function (c) { return c.is_active ? null : 'adm-voided'; },
+        text: function (c) { return [c.name_ar, c.name_en, c.cr_number, c.vat_number, c.phone, c.email, c.national_address_short].join(' '); },
+        columns: [
+          { id: 'name', label: t('col_name'), value: function (c) { return c.name_ar; }, cell: function (c) {
+            return [el('a', { class: 'cell-main', href: '#client/' + c.id, text: c.name_ar }), c.name_en ? el('span', { class: 'cell-sub', dir: 'ltr', text: c.name_en }) : null]; } },
+          { id: 'type', label: t('col_type'), value: function (c) { return lbl('client_type', c.client_type); }, cell: function (c) { return lbl('client_type', c.client_type); } },
+          { id: 'cr', label: t('col_cr'), value: function (c) { return c.cr_number; }, cell: function (c) { return dLtr(c.cr_number); } },
+          { id: 'vat', label: t('col_vat'), value: function (c) { return c.vat_number; }, cell: function (c) { return dLtr(c.vat_number); } },
+          { id: 'phone', label: t('col_phone'), value: function (c) { return c.phone; }, cell: function (c) { return dLtr(c.phone); } },
+          { id: 'addr', label: t('col_short_addr'), value: function (c) { return c.national_address_short; }, cell: function (c) { return dLtr(c.national_address_short); } },
+          { id: 'status', label: t('col_status'), value: function (c) { return c.is_active ? 0 : 1; }, cell: function (c) { return c.is_active ? pillNode('success', t('active')) : pillNode('danger', t('inactive')); } }
+        ]
       }));
-      return html + pager('clients', r.count);
+      return out;
     });
   }
   var CLIENT_CACHE = {};
@@ -1219,7 +1693,7 @@
       if (!c) return head('عميل', '', '', '#clients') + alertBox('warning', 'العميل غير موجود أو لا تملك صلاحية عرضه.');
       CLIENT_CACHE[id] = c;
       var a = c.national_address || {};
-      var html = head(esc(c.name_ar), esc(lbl('client_type', c.client_type)) + (c.is_active ? '' : ' · <span class="badge badge-danger">غير نشط</span>'),
+      var html = head(esc(c.name_ar), esc(lbl('client_type', c.client_type)) + (c.is_active ? '' : ' · ' + pillHtml('danger', t('inactive'))),
         canAny(R.opsWriter) ? '<button class="btn btn-sm btn-primary" type="button" data-act="client-edit" data-id="' + esc(c.id) + '">' + T.common.edit + '</button>' : '', '#clients');
       html += '<div class="adm-cols">' + card('البيانات الأساسية', kv([
         ['الاسم بالعربية', c.name_ar], ['الاسم بالإنجليزية', c.name_en ? '<bdi dir="ltr">' + esc(c.name_en) + '</bdi>' : T.common.none, true],
@@ -1306,19 +1780,26 @@
   var MSG_CACHE = {};
   function renderMessages() {
     var f = S.filters.messages;
-    return api.listContactMessages({ orgId: S.orgId, status: f.status || null, limit: PAGE, offset: f.offset }).then(function (r) {
-      var html = head(T.views.messages, 'رسائل نموذج «تواصل معنا». بيانات شخصية: اطّلع عليها لغرض الرد فقط.');
-      html += '<form class="adm-filters card" data-form="filter" data-key="messages">' +
-        '<div class="form-group"><label class="form-label" for="flt-msg-status">الحالة</label><select class="form-control" id="flt-msg-status" name="status">' + opts('contact_status', f.status, true) + '</select></div>' +
-        '<button class="btn btn-primary" type="submit">تصفية</button></form>';
-      if (r.error) return html + alertBox('danger', errText(r.error));
+    return api.listContactMessages({ orgId: S.orgId, status: f.status || null, limit: WINDOW, offset: f.offset }).then(function (r) {
+      var out = frag(dHead(viewLabel('messages'), t('messages_sub')));
       (r.data || []).forEach(function (m) { MSG_CACHE[m.id] = m; });
-      html += table(['المرجع', 'التاريخ', 'المرسل', 'الموضوع', 'التواصل المفضل', 'الحالة', ''], (r.data || []).map(function (m) {
-        return '<tr><td>' + ltr(m.ref) + '</td><td>' + fmtDate(m.created_at) + '</td><td><strong>' + esc(m.name) + '</strong>' + (m.company ? '<span class="adm-sub">' + esc(m.company) + '</span>' : '') +
-          '</td><td>' + esc(lbl('subject', m.subject)) + '</td><td>' + esc(lbl('contact_pref', m.preferred)) + '</td><td>' + badge('contact_status', m.status) +
-          '</td><td><button class="btn btn-sm btn-ghost" type="button" data-act="msg-view" data-id="' + esc(m.id) + '">' + T.common.view + '</button></td></tr>';
+      out.appendChild(listView({
+        key: 'messages', rows: r.data || [], total: r.count, error: r.error,
+        placeholder: t('ph_messages'), empty: t('empty_messages'),
+        tools: [filterSelect('messages', 'status', t('col_status'), statusOptions('contact_status'))],
+        open: function (m) { msgView(m.id); },
+        text: function (m) { return [m.ref, m.name, m.company, m.email, m.phone, lbl('subject', m.subject)].join(' '); },
+        columns: [
+          { id: 'ref', label: t('col_ref'), value: function (m) { return m.ref; }, cell: function (m) {
+            return el('button', { class: 'adm-ref btn-link', type: 'button', 'data-act': 'msg-view', 'data-id': m.id }, el('bdi', { dir: 'ltr', text: m.ref || '—' })); } },
+          { id: 'date', label: t('col_date'), desc: true, value: function (m) { return ts(m.created_at); }, cell: function (m) { return fmtWhen(m.created_at); } },
+          { id: 'from', label: t('col_sender'), value: function (m) { return m.name; }, cell: function (m) { return twoLine(m.name, m.company); } },
+          { id: 'subject', label: t('col_subject'), value: function (m) { return lbl('subject', m.subject); }, cell: function (m) { return lbl('subject', m.subject); } },
+          { id: 'pref', label: t('col_pref'), value: function (m) { return lbl('contact_pref', m.preferred); }, cell: function (m) { return lbl('contact_pref', m.preferred); } },
+          { id: 'status', label: t('col_status'), value: function (m) { return (ORDER.contact_status || []).indexOf(m.status); }, cell: function (m) { return badgeNode('contact_status', m.status); } }
+        ]
       }));
-      return html + pager('messages', r.count);
+      return out;
     });
   }
   function msgView(id) {
@@ -1358,17 +1839,25 @@
   function renderImports() {
     var f = S.filters.imports;
     return L.listImportBatches(f).then(function (r) {
-      var html = head(T.views.imports, 'دفعات ملفات Excel / CSV. كل صف له معرّف مصدر فريد (بصمة الملف + الورقة + رقم الصف) فلا يُستورد مرتين.');
-      html += '<form class="adm-filters card" data-form="filter" data-key="imports">' +
-        '<div class="form-group"><label class="form-label" for="flt-imp-status">الحالة</label><select class="form-control" id="flt-imp-status" name="status">' + opts('batch_status', f.status, true) + '</select></div>' +
-        '<button class="btn btn-primary" type="submit">تصفية</button></form>';
-      if (r.error) return html + alertBox('danger', errText(r.error));
-      html += table(['المرجع', 'الملف', 'العميل', 'الصفوف', 'معتمد', 'متجاهَل', 'الحالة', 'التاريخ', ''], (r.data || []).map(function (b) {
-        return '<tr><td>' + ltr(b.ref) + '</td><td><bdi>' + esc(b.file_name) + '</bdi><span class="adm-sub">' + fmtSize(b.file_size) + '</span></td><td>' + esc(b.clients ? b.clients.name_ar : T.common.none) +
-          '</td><td>' + num(b.total_rows) + '</td><td>' + num(b.committed_rows) + '</td><td>' + num(b.skipped_rows) + '</td><td>' + badge('batch_status', b.status) +
-          '</td><td>' + fmtDate(b.created_at) + '</td><td><a class="btn btn-sm btn-ghost" href="#import/' + esc(b.id) + '">' + T.common.view + '</a></td></tr>';
+      var out = frag(dHead(viewLabel('imports'), t('imports_sub'), [el('a', { class: 'btn btn-sm btn-primary', href: 'bulk-upload.html' }, [svgIcon('plus'), t('imports_new')])]));
+      out.appendChild(listView({
+        key: 'imports', rows: r.data || [], total: r.count, error: r.error, serverSearch: true,
+        placeholder: t('ph_imports'), empty: t('empty_imports'),
+        tools: [filterSelect('imports', 'status', t('col_status'), statusOptions('batch_status'))],
+        href: function (b) { return '#import/' + b.id; },
+        text: function (b) { return [b.ref, b.file_name, b.clients && b.clients.name_ar, lbl('batch_status', b.status)].join(' '); },
+        columns: [
+          { id: 'ref', label: t('col_ref'), value: function (b) { return b.ref; }, cell: function (b) { return refCell(b.ref, '#import/' + b.id); } },
+          { id: 'file', label: t('col_file'), value: function (b) { return b.file_name; }, cell: function (b) { return [el('bdi', { class: 'cell-main', text: b.file_name || '—' }), el('span', { class: 'cell-sub', text: fmtSize(b.file_size) })]; } },
+          { id: 'client', label: t('col_client'), value: function (b) { return b.clients && b.clients.name_ar; }, cell: function (b) { return b.clients ? b.clients.name_ar : null; } },
+          { id: 'rows', label: t('col_rows'), num: true, value: function (b) { return b.total_rows; }, cell: function (b) { return el('span', { class: 'num', text: fmtCount(b.total_rows) }); } },
+          { id: 'ok', label: t('col_committed'), num: true, value: function (b) { return b.committed_rows; }, cell: function (b) { return el('span', { class: 'num', text: fmtCount(b.committed_rows) }); } },
+          { id: 'skip', label: t('col_skipped'), num: true, value: function (b) { return b.skipped_rows; }, cell: function (b) { return el('span', { class: 'num', text: fmtCount(b.skipped_rows) }); } },
+          { id: 'status', label: t('col_status'), value: function (b) { return b.status; }, cell: function (b) { return badgeNode('batch_status', b.status); } },
+          { id: 'date', label: t('col_date'), desc: true, value: function (b) { return ts(b.created_at); }, cell: function (b) { return fmtWhen(b.created_at); } }
+        ]
       }));
-      return html + pager('imports', r.count);
+      return out;
     });
   }
   function renderImport(id) {
@@ -1429,10 +1918,12 @@
     });
   }
   function impCancel(id) {
-    if (!window.confirm('إلغاء الدفعة نهائي ولا يمكن اعتمادها بعده. تبقى الصفوف محفوظة للسجل. هل تريد المتابعة؟')) return;
-    api.cancelImportBatch(id).then(function (r) {
-      if (r.error) return toast(errText(r.error), 'error');
-      toast('تم إلغاء الدفعة.', 'success'); rerender();
+    askConfirm({ title: t('confirm_cancel_batch_title'), text: t('confirm_cancel_batch'), okText: t('confirm_cancel_batch_ok'), danger: true }).then(function (yes) {
+      if (!yes) return;
+      api.cancelImportBatch(id).then(function (r) {
+        if (r.error) return toast(errText(r.error), 'error');
+        toast(t('batch_cancelled'), 'success'); rerender();
+      });
     });
   }
 
@@ -1450,10 +1941,11 @@
     var s = I.t(key, vars);
     return s === key ? k : s;
   }
+  // same as t(); for scopes where a local `t` (a transaction row) shadows the helper
+  function tl(k, vars) { return t(k, vars); }
   function viewLabel(id) { var k = 'view_' + id, s = t(k); return s === k ? (T.views[id] || id) : s; }
   function isEn() { var I = window.MarsaI18n; return !!(I && typeof I.lang === 'function' && I.lang() === 'en'); }
   function roleLabel(code) { var k = 'role_' + code, s = t(k); return isEn() && s !== k ? s : lbl('role', code); }
-  function orgName(o) { return (isEn() && o.name_en) || o.name_ar || o.slug || String(o.org_id).slice(0, 8); }
   function branchName(id) {
     var b = S.branches.filter(function (x) { return x.id === id; })[0];
     return b ? ((isEn() && b.name_en) || b.name_ar) : null;
@@ -1494,21 +1986,22 @@
     return b;
   }
   function dHead(title, sub, actions) {
-    return el('div', { class: 'adm-head' }, [
-      el('div', { class: 'adm-head-title' }, el('div', null, [el('h2', { text: title }), sub ? el('p', { class: 'text-sm text-muted', text: sub }) : null])),
-      actions && actions.length ? el('div', { class: 'btn-group adm-head-actions' }, actions) : null
+    var refresh = el('button', { class: 'btn btn-sm btn-ghost btn-icon adm-icon-btn', type: 'button', 'data-act': 'refresh', 'aria-label': t('refresh'), title: t('refresh') }, svgIcon('refresh'));
+    return el('header', { class: 'app-page-head adm-head' }, [
+      el('div', { class: 'adm-head-main' }, [el('h2', { class: 'adm-title', text: title }), sub ? el('p', { class: 'app-page-sub adm-head-sub', text: sub }) : null]),
+      el('div', { class: 'app-page-actions adm-head-actions' }, [actions && actions.length ? actions : null, refresh])
     ]);
   }
-  function dCard(title, body, actions) {
-    return el('div', { class: 'card card-flush adm-card' }, [
-      el('div', { class: 'card-header' }, [el('h3', { text: title }), actions && actions.length ? el('div', { class: 'btn-group' }, actions) : null]),
-      el('div', { class: 'card-body' }, body)
+  function dCard(title, body, actions, cls) {
+    return el('section', { class: 'app-card adm-card' + (cls ? ' ' + cls : '') }, [
+      el('header', { class: 'app-card-head adm-card-head' }, [el('h3', { class: 'app-card-title', text: title }), actions && actions.length ? el('div', { class: 'adm-card-actions' }, actions) : null]),
+      el('div', { class: 'app-card-body adm-card-body' }, body)
     ]);
   }
   function dAlert(type, text) {
     return el('div', { class: 'alert alert-' + type, role: type === 'danger' ? 'alert' : 'status' }, [svgIcon('info'), el('div', { text: text })]);
   }
-  function dBadge(tone, text) { return el('span', { class: 'badge badge-' + tone, text: text }); }
+  function dBadge(tone, text) { return pillNode(TONE[tone] || tone, text); }
   function dLtr(v) { return v ? el('bdi', { dir: 'ltr', class: 'num', text: v }) : T.common.none; }
   function dKv(rows) {
     return el('ul', { class: 'kv' }, rows.filter(Boolean).map(function (r) {
@@ -1517,8 +2010,9 @@
     }));
   }
   function dTable(headers, rows, emptyText) {
-    var body = el('tbody', null, rows.length ? rows : el('tr', null, el('td', { colspan: headers.length, class: 'adm-empty', text: emptyText || T.common.empty })));
-    return el('div', { class: 'table-wrap' }, el('table', { class: 'table table-striped adm-table' }, [
+    var body = el('tbody', null, rows.length ? rows : el('tr', { class: 'adm-empty-row' }, el('td', { colspan: headers.length },
+      emptyState('inbox', emptyText || T.common.empty))));
+    return el('div', { class: 'data-table-wrap adm-table-wrap' }, el('table', { class: 'data-table adm-dt' }, [
       el('thead', null, el('tr', null, headers.map(function (h) { return el('th', { scope: 'col', text: h }); }))), body
     ]));
   }
@@ -1751,13 +2245,15 @@
     });
   }
   function branchToggle(b, to, btn) {
-    if (!to && !window.confirm(t('branch_deactivate_confirm'))) return;
-    btn.disabled = true;
-    call('updateBranch', b.id, { is_active: !!to }).then(function (r) {
-      btn.disabled = false;
-      if (r.error) return toast(errCode(r.error) === 'MRS_FORBIDDEN' && errField(r.error) === 'last_branch' ? t('last_branch') : apiErr(r.error), 'error');
-      toast(T.common.saved, 'success');
-      refreshBranches().then(rerender);
+    (to ? Promise.resolve(true) : askConfirm({ title: t('deactivate'), text: t('branch_deactivate_confirm'), okText: t('deactivate'), danger: true })).then(function (yes) {
+      if (!yes) return;
+      btn.disabled = true;
+      call('updateBranch', b.id, { is_active: !!to }).then(function (r) {
+        btn.disabled = false;
+        if (r.error) return toast(errCode(r.error) === 'MRS_FORBIDDEN' && errField(r.error) === 'last_branch' ? t('last_branch') : apiErr(r.error), 'error');
+        toast(T.common.saved, 'success');
+        refreshBranches().then(rerender);
+      });
     });
   }
 
@@ -1805,12 +2301,14 @@
     }), t('members_empty'));
   }
   function memberToggle(m, to, btn) {
-    if (!to && !window.confirm(t('member_deactivate_confirm'))) return;
-    btn.disabled = true;
-    api.setMembershipActive(m.id, to).then(function (r) {
-      btn.disabled = false;
-      if (r.error) return toast(errCode(r.error) === 'MRS_FORBIDDEN' ? t('member_forbidden') : apiErr(r.error), 'error');
-      toast(T.common.saved, 'success'); rerender();
+    (to ? Promise.resolve(true) : askConfirm({ title: t('deactivate'), text: t('member_deactivate_confirm'), okText: t('deactivate'), danger: true })).then(function (yes) {
+      if (!yes) return;
+      btn.disabled = true;
+      api.setMembershipActive(m.id, to).then(function (r) {
+        btn.disabled = false;
+        if (r.error) return toast(errCode(r.error) === 'MRS_FORBIDDEN' ? t('member_forbidden') : apiErr(r.error), 'error');
+        toast(T.common.saved, 'success'); rerender();
+      });
     });
   }
 
@@ -1896,12 +2394,13 @@
         if (role !== 'client' && (role === 'branch_manager' || !admin) && !branch) return t('branch_required');
         var client = role === 'client' ? (fval(form, 'client') || null) : null;
         if (role === 'client' && !client) return t('client_required');
-        if (role === 'admin' && !window.confirm(t('admin_confirm'))) return false;
         var payload = { email: email, role: role };
         if (branch) payload.branch_id = branch;
         if (client) payload.client_id = client;
         payload.idempotencyKey = idemKey('invite', payload);
-        return call('invite', S.orgId, payload).then(function (r) {
+        var ask = role === 'admin' ? askConfirm({ title: roleLabel('admin'), text: t('admin_confirm'), okText: t('invite_submit') }) : Promise.resolve(true);
+        return ask.then(function (yes) { return yes ? call('invite', S.orgId, payload) : null; }).then(function (r) {
+          if (!r) return false;
           idemSettle('invite', r.error);
           if (r.error) return errCode(r.error) === 'DUPLICATE' ? t('invite_dup') : apiErr(r.error);
           showLink(r.data || {}, t('invite_done_title'));
@@ -1947,22 +2446,26 @@
     else fallback();
   }
   function inviteRevoke(id, btn) {
-    if (!window.confirm(t('revoke_confirm'))) return;
-    btn.disabled = true;
-    call('revokeInvitation', id).then(function (r) {
-      btn.disabled = false;
-      if (r.error) return toast(apiErr(r.error), 'error');
-      toast(t('revoked_ok'), 'success'); rerender();
+    askConfirm({ title: t('revoke'), text: t('revoke_confirm'), okText: t('revoke'), danger: true }).then(function (yes) {
+      if (!yes) return;
+      btn.disabled = true;
+      call('revokeInvitation', id).then(function (r) {
+        btn.disabled = false;
+        if (r.error) return toast(apiErr(r.error), 'error');
+        toast(t('revoked_ok'), 'success'); rerender();
+      });
     });
   }
   function inviteReissue(id, btn, inDialog) {
-    if (!window.confirm(t('reissue_confirm'))) return;
-    btn.disabled = true;
-    call('reissueInvitation', id).then(function (r) {
-      btn.disabled = false;
-      if (r.error) { if (inDialog) dialogError(apiErr(r.error)); else toast(apiErr(r.error), 'error'); return; }
-      showLink(r.data || {}, t('reissue_done_title'));
-      rerender();
+    askConfirm({ title: t('reissue'), text: t('reissue_confirm'), okText: t('reissue') }).then(function (yes) {
+      if (!yes) return;
+      btn.disabled = true;
+      call('reissueInvitation', id).then(function (r) {
+        btn.disabled = false;
+        if (r.error) { if (inDialog) dialogError(apiErr(r.error)); else toast(apiErr(r.error), 'error'); return; }
+        showLink(r.data || {}, t('reissue_done_title'));
+        rerender();
+      });
     });
   }
 
@@ -2000,7 +2503,7 @@
       })));
       tableSel.value = f.table || '';
       var grp = function (id, label, ctl, grow) { return el('div', { class: 'form-group' + (grow ? ' adm-grow' : '') }, [el('label', { class: 'form-label', for: id, text: label }), ctl]); };
-      var filt = el('form', { class: 'adm-filters card', novalidate: true }, [
+      var filt = el('form', { class: 'toolbar adm-toolbar adm-filters', novalidate: true }, [
         grp('adg-a-table', t('col_table'), tableSel),
         grp('adg-a-actor', t('col_actor'), actorCtl),
         grp('adg-a-from', t('f_from'), el('input', { class: 'form-control', type: 'date', id: 'adg-a-from', name: 'from', value: f.from })),
@@ -2020,7 +2523,7 @@
 
       var tbody = el('tbody'), more = el('div', { class: 'adm-pager' });
       var status = el('p', { class: 'adm-count text-xs text-muted' });
-      out.appendChild(el('div', { class: 'table-wrap' }, el('table', { class: 'table table-striped adm-table' }, [
+      out.appendChild(el('div', { class: 'data-table-wrap is-scroll adm-table-wrap' }, el('table', { class: 'data-table adm-dt' }, [
         el('thead', null, el('tr', null, [t('col_time'), t('col_table'), t('col_action'), t('col_row'), t('col_actor'), t('col_changed'), ''].map(function (h) { return el('th', { scope: 'col', text: h }); }))),
         tbody
       ])));
@@ -2047,7 +2550,7 @@
             return;
           }
           var list = rowsOf(r.data);
-          if (!total && !list.length) tbody.appendChild(el('tr', null, el('td', { colspan: 7, class: 'adm-empty', text: T.common.empty })));
+          if (!total && !list.length) tbody.appendChild(el('tr', null, el('td', { colspan: 7 }, emptyState('inbox', T.common.empty))));
           list.forEach(function (row) { tbody.appendChild(auditRow(row)); });
           total += list.length;
           if (list.length) lastId = list[list.length - 1].id;
@@ -2135,45 +2638,36 @@
   }
 
   /* ------------------------------------------------------------------
-     Active-org switcher (only when staff in more than one org)
+     Active org: the shell's org switcher (MarsaApi.setActiveOrg) fires
+     'marsa:orgchange'; reload this org's context and views.
      ------------------------------------------------------------------ */
-  var orgWrap = document.getElementById('adm-org-switch-wrap');
-  var orgSel = document.getElementById('adm-org-switch');
-  function fillOrgSwitch() {
-    if (!orgWrap || !orgSel) return;
-    orgSel.textContent = '';
-    S.orgs.forEach(function (o) { orgSel.appendChild(el('option', { value: o.org_id, text: orgName(o) })); });
-    orgSel.value = S.orgId || '';
-    orgWrap.hidden = S.orgs.length < 2;
-  }
   function resetOrgState() {
     S.profiles = {};
-    Object.keys(S.filters).forEach(function (k) { S.filters[k].offset = 0; if ('branchId' in S.filters[k]) S.filters[k].branchId = ''; });
+    Object.keys(S.filters).forEach(function (k) { S.filters[k].offset = 0; if ('branchId' in S.filters[k]) S.filters[k].branchId = ''; if ('search' in S.filters[k]) S.filters[k].search = ''; });
+    S.list = {};
     S.g2 = { audit: { table: '', actor: '', from: '', to: '', rowId: '' }, allInvites: false };
     Object.keys(TX_CACHE).forEach(function (k) { delete TX_CACHE[k]; });
     Object.keys(MSG_CACHE).forEach(function (k) { delete MSG_CACHE[k]; });
+    Object.keys(CLIENT_CACHE).forEach(function (k) { delete CLIENT_CACHE[k]; });
     IDEM = {};
   }
-  function switchOrg(id) {
-    if (!id || id === S.orgId || !UUID_RE.test(id)) return;
-    orgSel.disabled = true;
-    var p = api && typeof api.setActiveOrg === 'function'
-      ? Promise.resolve().then(function () { return api.setActiveOrg(id); })
-      : Promise.resolve((function () { try { localStorage.setItem('marsa_active_org', id); } catch (e) { /* private mode */ } return null; })());
-    p.then(function (r) {
-      orgSel.disabled = false;
-      if (r && r.error) { orgSel.value = S.orgId; return toast(apiErr(r.error), 'error'); }
-      if (dlg && dlg.open) closeDialog();
-      resetOrgState();
-      // detail routes point at the previous org's rows → back to the overview (no extra hashchange render)
-      if (DETAIL[(location.hash || '').replace(/^#/, '').split('/')[0]]) { try { history.replaceState(null, '', '#dashboard'); } catch (e) { /* ignore */ } }
-      boot();
-    }, function (e) { orgSel.disabled = false; orgSel.value = S.orgId; toast(errText(e), 'error'); });
-  }
-  if (orgSel) orgSel.addEventListener('change', function () { switchOrg(orgSel.value); });
+  window.addEventListener('marsa:orgchange', function (e) {
+    var id = e && e.detail && e.detail.orgId;
+    if (!S.ctx || (id && id === S.orgId)) return;   // first boot reads the active org itself
+    if (dlg && dlg.open) closeDialog();
+    resetOrgState();
+    // detail routes point at the previous org's rows → back to the overview (no extra hashchange render)
+    if (DETAIL[parseHash().name]) { try { history.replaceState(null, '', '#dashboard'); } catch (err) { /* ignore */ } }
+    showGate('loading');
+    // memberships of every org are already in my_context; refetch it so roles are current
+    api.myContext(true).then(function (c) {
+      return withContext(c.error ? S.ctx : (c.data || S.ctx));
+    }).then(null, function (err) { showGate('error', errText(err)); });
+  });
   window.addEventListener('marsa:langchange', function () {
     if (app.hidden) return;
-    buildNav(); fillOrgSwitch(); route(true);
+    if (!SH) buildNav();
+    route(true);
   });
 
   /* ------------------------------------------------------------------
@@ -2186,10 +2680,7 @@
     if (id && !UUID_RE.test(id)) return;
     if (tx && !UUID_RE.test(tx)) return;
     switch (a) {
-      case 'page': {
-        var k = el.getAttribute('data-key'), f = S.filters[k];
-        f.offset = Math.max(0, f.offset + PAGE * parseInt(el.getAttribute('data-dir'), 10)); rerender(); break;
-      }
+      case 'refresh': route(true); break;
       case 'req-review': reqReview(id); break;
       case 'req-reject': reqReject(id); break;
       case 'req-convert': reqConvert(id); break;
@@ -2226,14 +2717,6 @@
     var btn = form.querySelector('[type=submit]');
     var done = function () { if (btn) btn.disabled = false; };
     if (btn) btn.disabled = true;
-    if (kind === 'filter') {
-      var key = form.getAttribute('data-key'), f = S.filters[key];
-      Array.prototype.forEach.call(form.elements, function (el) {
-        if (!el.name || !(el.name in f)) return;
-        f[el.name] = el.type === 'checkbox' ? el.checked : el.value.trim().slice(0, 60);
-      });
-      f.offset = 0; done(); rerender(); return;
-    }
     var id = form.getAttribute('data-id') || form.getAttribute('data-tx');
     if (!id || !UUID_RE.test(id)) return done();
     if (kind === 'tx-status') {
@@ -2271,5 +2754,6 @@
   });
 
   /* ------------------------------------------------------------------ */
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+  function start() { boot(true); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();

@@ -1261,6 +1261,123 @@
   }
 
   /* ------------------------------------------------------------------
+     App shell: global search (command palette) + dashboard counters.
+     Plain RLS-scoped PostgREST reads, limited to the active org (or o.orgId).
+     ------------------------------------------------------------------ */
+  // ILIKE "contains" pattern with the LIKE metacharacters \ % _ escaped (Postgres' default
+  // escape is the backslash). '*' is PostgREST's own wildcard alias and cannot be escaped,
+  // so it is dropped. One column per query: no or() string, so , ( ) " need no quoting.
+  function likeContains(s) {
+    var v = String(s == null ? '' : s).replace(/\*/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+    return v ? '%' + v.replace(/[\\%_]/g, '\\$&') + '%' : '';
+  }
+  function localDay(offsetDays) {
+    var d = new Date(); d.setDate(d.getDate() + (offsetDays || 0));
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+  var SEARCH_TX_COLS = 'id,org_id,ref,bl_number,declaration_no,operational_status,created_at,clients(name_ar,name_en)';
+  // q ≥ 2 characters. o = { limit (≤ 8 per group), orgId }.
+  // → { data: { transactions: [{…row, matched, container_no?}], clients: [{…row, matched}], requests: [{…row, matched}] }, error }
+  // Transactions match ref / B/L / declaration no. / container no.; clients name (ar/en) / CR / VAT; requests ref.
+  // error only when every query failed (e.g. network); a failed group is otherwise just empty.
+  function globalSearch(q, o) {
+    o = o || {};
+    var empty = { transactions: [], clients: [], requests: [] };
+    if (!configured) return demoOnly();
+    var pat = likeContains(q);
+    if (!pat || String(q).trim().length < 2) return Promise.resolve(ok(empty));
+    var limit = Math.min(Math.max(parseInt(o.limit, 10) || 8, 1), 8);
+    var oid = o.orgId || (ctxCache ? pickActiveOrg(ctxCache) : null);
+    function scoped(b) { return oid ? b.eq('org_id', oid) : b; }
+    function by(table, cols, col, order) {
+      return online(function (c) {
+        var b = scoped(c.from(table).select(cols)).ilike(col, pat);
+        if (order) b = b.order(order, { ascending: false });
+        return b.limit(limit);
+      }).then(function (r) { r.col = col; return r; });
+    }
+    var groups = {
+      transactions: [by('transactions', SEARCH_TX_COLS, 'ref', 'created_at'), by('transactions', SEARCH_TX_COLS, 'bl_number', 'created_at'),
+        by('transactions', SEARCH_TX_COLS, 'declaration_no', 'created_at'),
+        by('containers', 'container_no,transaction_id,transactions(' + SEARCH_TX_COLS + ')', 'container_no')],
+      clients: ['name_ar', 'name_en', 'cr_number', 'vat_number'].map(function (col) {
+        return by('clients', 'id,org_id,client_type,name_ar,name_en,cr_number,vat_number,is_active', col, null);
+      }),
+      requests: [by('service_requests', 'id,org_id,ref,status,full_name,company,created_at', 'ref', 'created_at')]
+    };
+    var names = Object.keys(groups), jobs = [], total = 0, failed = [];
+    names.forEach(function (g) { groups[g].forEach(function (p) { jobs.push(p); total++; }); });
+    return Promise.all(jobs).then(function (res) {
+      var data = {}, i = 0;
+      names.forEach(function (g) {
+        var seen = {}, out = [];
+        groups[g].forEach(function () {
+          var r = res[i++];
+          if (r.error) { failed.push(r.error); return; }
+          (r.data || []).forEach(function (row) {
+            var item = row;
+            if (r.col === 'container_no') {   // container hit → its transaction
+              if (!row || !row.transactions) return;
+              item = Object.assign({}, row.transactions, { container_no: row.container_no });
+            }
+            if (!item || !item.id || seen[item.id] || out.length >= limit) return;
+            seen[item.id] = true;
+            out.push(Object.assign({}, item, { matched: r.col }));
+          });
+        });
+        data[g] = out;
+      });
+      if (failed.length === total) return { data: null, error: failed[0] };
+      return ok(data);
+    }, function (e) { return { data: null, error: normalizeError(e) }; });
+  }
+
+  var DASH_REQ = ['new', 'under_review', 'converted', 'rejected'];
+  var DASH_TX = ['new', 'in_progress', 'customs_declaration', 'appointment', 'transport', 'empty_return',
+    'operationally_complete', 'under_billing', 'billed', 'closed'];
+  var DASH_OPEN_RETURN = ['pending', 'evidence_submitted', 'disputed'];
+  // Parallel HEAD counts for the active org (or orgId).
+  // → { data: { org_id, requests: {<status>: n}, transactions: {<operational_status>: n, open: n},
+  //             containers: { pending_return, overdue, due_3d }, documents: { unreviewed }, failed: n }, error }
+  // A count that failed is null (RLS gives 0 for what a role may not read); error only when all failed.
+  function dashboardStats(oid) {
+    if (!configured) return demoOnly();
+    var pick = oid ? Promise.resolve(ok(oid)) : activeOrgId();
+    return pick.then(function (r) {
+      if (r.error) return r;
+      if (!r.data) return fail('MRS_FORBIDDEN', 'organization');
+      var org = r.data, jobs = [], failed = [];
+      function count(table, build) {
+        var p = online(function (c) { return build(c.from(table).select('id', { count: 'exact', head: true }).eq('org_id', org)); })
+          .then(function (x) { if (x.error) { failed.push(x.error); return null; } return x.count || 0; });
+        jobs.push(p);
+        return p;
+      }
+      var today = localDay(0), in3 = localDay(3);
+      var reqs = DASH_REQ.map(function (s) { return count('service_requests', function (q) { return q.eq('status', s); }); });
+      var txs = DASH_TX.map(function (s) { return count('transactions', function (q) { return q.eq('operational_status', s); }); });
+      var ctr = [
+        count('containers', function (q) { return q.in('return_status', DASH_OPEN_RETURN); }),
+        count('containers', function (q) { return q.in('return_status', DASH_OPEN_RETURN).lt('return_deadline', today); }),
+        count('containers', function (q) { return q.in('return_status', DASH_OPEN_RETURN).gte('return_deadline', today).lte('return_deadline', in3); })
+      ];
+      var docs = count('documents', function (q) { return q.eq('classification_status', 'unreviewed').is('voided_at', null); });
+      return Promise.all([Promise.all(reqs), Promise.all(txs), Promise.all(ctr), docs]).then(function (v) {
+        if (failed.length === jobs.length) return { data: null, error: failed[0] };
+        var d = { org_id: org, requests: {}, transactions: { open: 0 }, containers: {}, documents: {}, failed: failed.length };
+        DASH_REQ.forEach(function (s, i) { d.requests[s] = v[0][i]; });
+        DASH_TX.forEach(function (s, i) {
+          d.transactions[s] = v[1][i];
+          if (s !== 'closed' && v[1][i] != null) d.transactions.open += v[1][i];
+        });
+        d.containers = { pending_return: v[2][0], overdue: v[2][1], due_3d: v[2][2] };
+        d.documents = { unreviewed: v[3] };
+        return ok(d);
+      });
+    }, function (e) { return { data: null, error: normalizeError(e) }; });
+  }
+
+  /* ------------------------------------------------------------------
      Page chrome: mark the mode and relabel the demo banner when online
      ------------------------------------------------------------------ */
   function applyModeToPage() {
@@ -1362,6 +1479,8 @@
     localExtractions: localExtractions,
     // inbox / audit
     listContactMessages: listContactMessages, setContactStatus: setContactStatus, listAudit: listAudit,
+    // app shell
+    globalSearch: globalSearch, dashboardStats: dashboardStats,
     // utils
     util: { sha256Hex: sha256Hex, uuid: uuid, safeFileName: safeFileName, toRequestPayload: toRequestPayload, toContactPayload: toContactPayload }
   };

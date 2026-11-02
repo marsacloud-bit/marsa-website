@@ -1,6 +1,7 @@
 /* ==========================================================================
    مرسى | MARSA — platform.html dictionary (namespace 'platform'), ar + en.
-   Load order: config.js → i18n.js → assets/i18n/platform.js → main.js → supa.js → platform.js (defer).
+   Load order: config.js → i18n.js → assets/i18n/platform.js → assets/i18n/app.js → main.js → supa.js
+               → app-shell.js → pwa.js → platform.js (defer).
    Static markup carries the Arabic text and [data-i18n="platform.<k>"];
    platform.js reads the JS messages with MarsaI18n.t('platform.<k>').
    ========================================================================== */
@@ -111,7 +112,26 @@
     colTime: 'الوقت',
     colPage: 'الصفحة',
     colCode: 'الرمز',
-    colMessage: 'الرسالة'
+    colMessage: 'الرسالة',
+
+    /* app shell (topbar title / breadcrumb) + console additions */
+    crumbRoot: 'المنصة',
+    kpiAria: 'ملخص المنصة',
+    kpiOrgs: 'المؤسسات',
+    kpiActive: 'مفعّلة',
+    kpiSuspended: 'موقوفة',
+    kpiHealth: 'صحة الخادم',
+    searchOrgsLabel: 'بحث في المؤسسات',
+    searchOrgs: 'ابحث بالاسم أو المعرّف أو البادئة',
+    filterAria: 'تصفية حسب الحالة',
+    filterAll: 'الكل',
+    filterActive: 'المفعّلة',
+    filterSuspended: 'الموقوفة',
+    orgsNoMatch: 'لا توجد مؤسسات مطابقة للبحث.',
+    orgsCount: '{n} مؤسسة',
+    orgsShown: '{n} من {total} مؤسسة',
+    confirmSuspendTitle: 'إيقاف المؤسسة',
+    confirmReactivateTitle: 'إعادة تفعيل المؤسسة'
   };
 
   var en = {
@@ -216,7 +236,25 @@
     colTime: 'Time',
     colPage: 'Page',
     colCode: 'Code',
-    colMessage: 'Message'
+    colMessage: 'Message',
+
+    crumbRoot: 'Platform',
+    kpiAria: 'Platform summary',
+    kpiOrgs: 'Organizations',
+    kpiActive: 'Active',
+    kpiSuspended: 'Suspended',
+    kpiHealth: 'Server health',
+    searchOrgsLabel: 'Search organizations',
+    searchOrgs: 'Search by name, slug or prefix',
+    filterAria: 'Filter by status',
+    filterAll: 'All',
+    filterActive: 'Active',
+    filterSuspended: 'Suspended',
+    orgsNoMatch: 'No organizations match your search.',
+    orgsCount: '{n} organizations',
+    orgsShown: '{n} of {total} organizations',
+    confirmSuspendTitle: 'Suspend organization',
+    confirmReactivateTitle: 'Reactivate organization'
   };
 
   window.MarsaI18n.register('platform', { ar: ar, en: en });

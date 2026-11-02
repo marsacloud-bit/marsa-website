@@ -2,354 +2,208 @@
 <html lang="ar" dir="rtl" class="no-js">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>بوابة العميل | مرسى MARSA</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>بوابتي | مرساة كلاود</title>
   <meta name="description" content="بوابة عملاء مرسى للتخليص الجمركي في السعودية: متابعة الطلبات والمعاملات ومراحلها والحاويات والمستندات. بيئة تجريبية.">
   <meta name="robots" content="noindex, nofollow">
   <meta name="theme-color" content="#0B3A6E">
+  <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
+  <link rel="apple-touch-icon" href="assets/img/icons/icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <link rel="icon" type="image/png" href="assets/img/favicon.png">
+  <script>(function(){try{var t=localStorage.getItem('marsa_theme');if(t==='dark'||(t!=='light'&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="assets/css/style.css">
+  <link rel="stylesheet" href="assets/css/app.css">
   <link rel="stylesheet" href="assets/css/pages/portal.css">
 </head>
-<body data-page="portal">
-  <a class="skip-link" href="#main">تخطَّ إلى المحتوى</a>
+<body class="app-page" data-app-page="portal" data-page="portal">
+  <main id="app-main" class="portal-main" tabindex="-1">
 
-  <!-- ============ HEADER (shared) ============ -->
-  <div class="topbar">
-    <div class="container">
-      <span>منصة سعودية للتخليص الجمركي والشحن أونلاين</span>
-      <div class="topbar-links">
-        <nav class="topbar-auth" aria-label="الدخول إلى المنصة">
-          <a href="login.html#client"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>دخول العملاء</a>
-          <a href="login.html#staff"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/></svg>دخول الموظفين</a>
-          <a href="portal.html" data-account-link hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>بوابتي</a>
-        </nav>
-        <a href="tel:+966126143270"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><span dir="ltr">+966 12 614 3270</span></a>
-        <a href="mailto:info@marsa-sa.com"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span dir="ltr">info@marsa-sa.com</span></a>
+    <!-- ===== page header ===== -->
+    <header class="app-page-head portal-head">
+      <div class="portal-head-text">
+        <h2 id="page-title" class="portal-title"><span data-i18n="portal.title">بوابة العميل</span> <span class="pill pill-warning" data-i18n="portal.envBadge">بيئة تجريبية (Staging)</span></h2>
+        <p class="app-page-sub portal-lead" data-i18n="portal.lead">طلباتك ومعاملاتك في مكان واحد: المراحل التشغيلية، والحاويات وحالة إرجاعها، والمستندات الأصلية مع إمكانية رفع مستندات جديدة.</p>
       </div>
-    </div>
-  </div>
-  <header class="site-header">
-    <div class="container header-inner">
-      <a class="brand" href="index.html" aria-label="مرسى - الصفحة الرئيسية" data-i18n-attr="aria-label:nav.homeAria">
-        <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="84" height="58" data-i18n-attr="alt:nav.logoAlt">
-      </a>
-      <nav class="main-nav" aria-label="القائمة الرئيسية" data-i18n-attr="aria-label:nav.mainMenu">
-        <ul class="nav-list">
-          <li><a class="nav-link" href="index.html" data-i18n="nav.home">الرئيسية</a></li>
-          <li><a class="nav-link" href="services.html" data-i18n="nav.services">خدماتنا</a></li>
-          <li><a class="nav-link" href="calculator.html" data-i18n="nav.calculator">حاسبة الرسوم</a></li>
-          <li><a class="nav-link" href="tracking.html" data-i18n="nav.tracking">تتبع الشحنة</a></li>
-          <li><a class="nav-link" href="bulk-upload.html" data-i18n="nav.bulk">الرفع الجماعي</a></li>
-          <li><a class="nav-link" href="ocr.html" data-i18n="nav.ocr">قراءة المستندات</a></li>
-          <li><a class="nav-link" href="about.html" data-i18n="nav.about">من نحن</a></li>
-          <li><a class="nav-link" href="contact.html" data-i18n="nav.contact">تواصل معنا</a></li>
-          <li data-platform-only hidden><a class="nav-link" href="platform.html" data-platform-only hidden data-i18n="nav.platform">لوحة المنصة</a></li>
-        </ul>
-      </nav>
-      <div class="header-actions">
-        <a class="btn btn-primary btn-cta" href="request.html" data-i18n="nav.request">
-          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/></svg>
-          اطلب تخليص
+      <div class="app-page-actions">
+        <a class="btn btn-sm btn-secondary" href="tracking.html">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <span data-i18n="portal.track">تتبع شحنة</span>
         </a>
-        <button class="nav-toggle" type="button" aria-label="فتح القائمة" data-i18n-attr="aria-label:nav.openMenu" aria-expanded="false" aria-controls="mobile-drawer">
-          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
-        </button>
+        <a class="btn btn-sm btn-primary" href="request.html">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <span data-i18n="portal.newRequest">طلب جديد</span>
+        </a>
       </div>
-    </div>
-  </header>
-  <div class="site-demo-banner" role="note" data-demo-banner>
-    <div class="container">
-      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 16v-4M12 8h.01"/></svg>
-      <p data-demo-banner-text>نسخة عرض تجريبية — البيانات والأرقام توضيحية ولا تُرسل أي بيانات إلى خادم.</p>
-      <button class="site-demo-banner-close" type="button" aria-label="إخفاء تنبيه نسخة العرض لهذه الجلسة" data-demo-banner-close>
-        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
-      </button>
-    </div>
-  </div>
+    </header>
+    <h3 id="portal-title" class="sr-only">محتوى بوابة العميل</h3>
 
-  <aside class="drawer" id="mobile-drawer" aria-label="القائمة الجانبية" aria-hidden="true">
-    <div class="drawer-head">
-      <img src="assets/img/logo-header.png" alt="مرسى MARSA" width="72" height="50">
-      <button class="drawer-close" type="button" aria-label="إغلاق القائمة">
-        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
-      </button>
-    </div>
-    <ul class="drawer-nav">
-      <li><a href="index.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/></svg>الرئيسية</a></li>
-      <li><a href="services.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>خدماتنا</a></li>
-      <li><a href="calculator.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15v3M8 18h4"/></svg>حاسبة الرسوم الجمركية</a></li>
-      <li><a href="tracking.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>تتبع الشحنة</a></li>
-      <li><a href="request.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/></svg>اطلب تخليص</a></li>
-      <li><a href="bulk-upload.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5M12 3v12"/></svg>الرفع الجماعي للبيانات</a></li>
-      <li><a href="ocr.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 9h10M7 12h10M7 15h6"/></svg>قراءة المستندات (OCR)</a></li>
-      <li><a href="about.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2"/><path d="M12 7v14M5 13H3a9 9 0 0 0 18 0h-2M8 11h8"/></svg>من نحن</a></li>
-      <li><a href="contact.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/></svg>تواصل معنا</a></li>
-      <li><a href="login.html#client"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>دخول العملاء</a></li>
-      <li><a href="login.html#staff"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/></svg>دخول الموظفين</a></li>
-      <li data-account-item hidden><a href="portal.html" data-account-link><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>بوابتي</a></li>
-    </ul>
-    <div class="drawer-foot">
-      <a class="btn btn-primary btn-block" href="request.html">اطلب تخليص الآن</a>
-      <a href="tel:+966126143270"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><span dir="ltr">+966 12 614 3270</span></a>
-      <a href="mailto:info@marsa-sa.com"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span dir="ltr">info@marsa-sa.com</span></a>
-    </div>
-  </aside>
-  <div class="drawer-backdrop" aria-hidden="true"></div>
-  <!-- ============ /HEADER ============ -->
-
-  <main id="main">
-
-    <!-- PAGE HERO -->
-    <section class="page-hero" aria-labelledby="page-title">
-      <div class="container">
-        <nav class="breadcrumb" aria-label="مسار التنقل">
-          <ol>
-            <li><a href="index.html">الرئيسية</a></li>
-            <li aria-current="page">بوابة العميل</li>
-          </ol>
-        </nav>
-        <h1 id="page-title">بوابة العميل</h1>
-        <p class="lead">طلباتك ومعاملاتك في مكان واحد: المراحل التشغيلية، والحاويات وحالة إرجاعها، والمستندات الأصلية مع إمكانية رفع مستندات جديدة.</p>
-        <div class="portal-user" data-portal-view="app" hidden>
-          <span class="portal-user-name"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><strong data-portal-name></strong> <span class="text-sm" dir="ltr" data-portal-email></span></span>
-          <button class="btn btn-sm btn-outline-white" type="button" data-sign-out>تسجيل الخروج</button>
-        </div>
+    <!-- ===== DEMO (no online config) ===== -->
+    <section class="app-card portal-card" data-portal-view="demo" aria-labelledby="portal-demo-h">
+      <div class="app-card-body">
+      <div class="empty-state is-compact portal-empty">
+        <span class="empty-state-icon is-warning" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg></span>
+        <h3 id="portal-demo-h">بوابة العميل غير متاحة في نسخة العرض التجريبية</h3>
+        <p>تتطلب البوابة تسجيل الدخول، وتسجيل الدخول يعمل فقط بعد ربط الموقع بالبيئة المتصلة (Supabase) في ملف <code dir="ltr">assets/js/config.js</code>. لا تُحفظ في هذه النسخة أي حسابات أو مستندات.</p>
       </div>
-      <svg class="page-hero-wave" viewBox="0 0 1440 120" preserveAspectRatio="none" aria-hidden="true">
-        <path class="w-back" d="M0,40 C180,90 360,10 560,40 C760,70 900,20 1100,35 C1260,48 1360,70 1440,50 L1440,120 L0,120 Z"/>
-        <path class="w-mid" d="M0,70 C220,30 420,100 640,70 C860,40 1040,95 1240,70 C1330,60 1400,55 1440,60 L1440,120 L0,120 Z"/>
-        <path class="w-front" d="M0,90 C240,60 460,115 720,90 C980,65 1200,110 1440,85 L1440,120 L0,120 Z"/>
-      </svg>
+      <div class="portal-quick">
+        <a class="portal-quick-link" href="request.html">
+          <span class="portal-quick-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/></svg></span>
+          <span class="portal-quick-text"><strong>اطلب تخليص</strong><span>نموذج الطلب التوضيحي (يُحفظ على جهازك فقط).</span></span>
+        </a>
+        <a class="portal-quick-link" href="tracking.html">
+          <span class="portal-quick-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+          <span class="portal-quick-text"><strong>تتبع الشحنة</strong><span>تتبع توضيحي للطلبات المحفوظة محليًا.</span></span>
+        </a>
+        <a class="portal-quick-link" href="login.html#client">
+          <span class="portal-quick-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span>
+          <span class="portal-quick-text"><strong>صفحة الدخول</strong><span>تعرف على بوابتي العملاء والموظفين.</span></span>
+        </a>
+      </div>
+      </div>
     </section>
 
-    <section class="section overlap-up" aria-labelledby="portal-title">
-      <div class="container">
-        <h2 id="portal-title" class="sr-only">محتوى بوابة العميل</h2>
+    <!-- ===== LOADING / ERROR ===== -->
+    <section class="app-card portal-card" data-portal-view="loading" hidden>
+      <div class="app-card-body portal-skeleton" role="status" aria-live="polite">
+        <span class="sr-only">جارٍ التحقق من الجلسة وتحميل بياناتك…</span>
+        <span class="skeleton skeleton-title" aria-hidden="true"></span>
+        <span class="skeleton skeleton-text" aria-hidden="true"></span>
+        <span class="skeleton skeleton-text is-mid" aria-hidden="true"></span>
+        <span class="skeleton skeleton-text is-short" aria-hidden="true"></span>
+      </div>
+    </section>
+    <section class="app-card portal-card" data-portal-view="error" hidden>
+      <div class="empty-state portal-empty">
+        <span class="empty-state-icon is-danger" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 8v4M12 16h.01"/></svg></span>
+        <h3>تعذّر تحميل البوابة</h3>
+        <p role="alert" data-portal-error></p>
+        <div class="empty-state-actions">
+          <button class="btn btn-primary" type="button" data-portal-retry>إعادة المحاولة</button>
+          <a class="btn btn-ghost" href="login.html#client">صفحة الدخول</a>
+        </div>
+      </div>
+    </section>
 
-        <!-- ===== DEMO (no online config) ===== -->
-        <div class="card shadow-lg portal-card" data-portal-view="demo">
-          <div class="alert alert-warning">
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>
-            <span><strong>بوابة العميل غير متاحة في نسخة العرض التجريبية.</strong> تتطلب البوابة تسجيل الدخول، وتسجيل الدخول يعمل فقط بعد ربط الموقع بالبيئة المتصلة (Supabase) في ملف <code dir="ltr">assets/js/config.js</code>. لا تُحفظ في هذه النسخة أي حسابات أو مستندات.</span>
-          </div>
-          <div class="grid grid-3 mt-3">
-            <a class="card card-hover card-muted portal-demo-link" href="request.html">
-              <span class="icon-box icon-box-sm"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/></svg></span>
-              <span class="fw-bold">اطلب تخليص</span>
-              <span class="text-sm text-muted">نموذج الطلب التوضيحي (يُحفظ على جهازك فقط).</span>
-            </a>
-            <a class="card card-hover card-muted portal-demo-link" href="tracking.html">
-              <span class="icon-box icon-box-sm"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
-              <span class="fw-bold">تتبع الشحنة</span>
-              <span class="text-sm text-muted">تتبع توضيحي للطلبات المحفوظة محليًا.</span>
-            </a>
-            <a class="card card-hover card-muted portal-demo-link" href="login.html#client">
-              <span class="icon-box icon-box-sm"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span>
-              <span class="fw-bold">صفحة الدخول</span>
-              <span class="text-sm text-muted">تعرف على بوابتي العملاء والموظفين.</span>
-            </a>
-          </div>
+    <!-- ===== APP ===== -->
+    <div class="portal-notes" data-portal-view="app" hidden>
+      <div class="alert" data-staff-note hidden>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/></svg>
+        <span>حسابك لديه صلاحيات موظف. <a href="admin.html">انتقل إلى لوحة الموظفين</a>.</span>
+      </div>
+      <div class="alert" data-notlinked-note hidden>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 16v-4M12 8h.01"/></svg>
+        <span>حسابك غير مرتبط بملف عميل بعد. يمكنك متابعة طلباتك التي أرسلتها وأنت مسجّل الدخول، وطلب ربط طلب سابق من تبويب «ربط طلب».</span>
+      </div>
+    </div>
+    <section class="app-card portal-card portal-app" data-portal-view="app" hidden aria-labelledby="portal-title">
+      <div class="portal-tabwrap" data-tabs>
+        <div class="tabs portal-tabs" role="tablist" aria-label="أقسام البوابة">
+          <button class="tab" type="button" role="tab" id="tab-tx" aria-selected="true" aria-controls="panel-tx">معاملاتي <span class="tab-count portal-count num" data-count="tx">0</span></button>
+          <button class="tab" type="button" role="tab" id="tab-req" aria-selected="false" aria-controls="panel-req">طلباتي <span class="tab-count portal-count num" data-count="req">0</span></button>
+          <button class="tab" type="button" role="tab" id="tab-link" aria-selected="false" aria-controls="panel-link">ربط طلب</button>
+          <button class="tab" type="button" role="tab" id="tab-profile" aria-selected="false" aria-controls="panel-profile">ملفي</button>
         </div>
 
-        <!-- ===== LOADING / ERROR ===== -->
-        <div class="card shadow-lg portal-card" data-portal-view="loading" hidden>
-          <p class="portal-loading" role="status"><span class="dot dot-pulse"></span>جارٍ التحقق من الجلسة وتحميل بياناتك…</p>
-        </div>
-        <div class="card shadow-lg portal-card" data-portal-view="error" hidden>
-          <div class="alert alert-danger" role="alert">
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 8v4M12 16h.01"/></svg>
-            <span>تعذّر تحميل البوابة. <span data-portal-error></span></span>
-          </div>
-          <div class="btn-group mt-3">
-            <button class="btn btn-primary" type="button" data-portal-retry>إعادة المحاولة</button>
-            <a class="btn btn-ghost" href="login.html#client">صفحة الدخول</a>
-          </div>
+        <div class="tab-panel" role="tabpanel" id="panel-tx" aria-labelledby="tab-tx">
+          <div data-tx-list></div>
+          <div data-tx-detail hidden></div>
         </div>
 
-        <!-- ===== APP ===== -->
-        <div class="card shadow-lg portal-card" data-portal-view="app" hidden>
-          <p class="portal-env"><span class="badge badge-warning">بيئة تجريبية (Staging)</span> <span class="text-xs text-muted">بيانات اختبار فقط — لا ترفع مستندات حقيقية أو حساسة.</span></p>
-          <div class="alert mb-3" data-staff-note hidden>
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/></svg>
-            <span>حسابك لديه صلاحيات موظف. <a href="admin.html">انتقل إلى لوحة الموظفين</a>.</span>
-          </div>
-          <div class="alert mb-3" data-notlinked-note hidden>
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 16v-4M12 8h.01"/></svg>
-            <span>حسابك غير مرتبط بملف عميل بعد. يمكنك متابعة طلباتك التي أرسلتها وأنت مسجّل الدخول، وطلب ربط طلب سابق من تبويب «ربط طلب».</span>
-          </div>
+        <div class="tab-panel" role="tabpanel" id="panel-req" aria-labelledby="tab-req" hidden>
+          <div data-req-list></div>
+          <div data-req-detail hidden></div>
+        </div>
 
-          <div class="tabs" data-tabs>
-            <div class="tab-list portal-tabs" role="tablist" aria-label="أقسام البوابة">
-              <button class="tab" type="button" role="tab" id="tab-tx" aria-selected="true" aria-controls="panel-tx">معاملاتي <span class="portal-count num" data-count="tx">0</span></button>
-              <button class="tab" type="button" role="tab" id="tab-req" aria-selected="false" aria-controls="panel-req">طلباتي <span class="portal-count num" data-count="req">0</span></button>
-              <button class="tab" type="button" role="tab" id="tab-link" aria-selected="false" aria-controls="panel-link">ربط طلب</button>
-              <button class="tab" type="button" role="tab" id="tab-profile" aria-selected="false" aria-controls="panel-profile">ملفي</button>
+        <div class="tab-panel" role="tabpanel" id="panel-link" aria-labelledby="tab-link" hidden>
+          <h3 class="portal-h">ربط طلب سابق بحسابك</h3>
+          <p class="text-muted text-sm">إن أرسلت طلبًا قبل إنشاء حسابك فأدخل رقمه المرجعي ورمز التتبع الذي ظهر لك عند الإرسال. نتحقق منهما ثم نرسل طلب الربط إلى فريق مرسى.</p>
+          <form class="form portal-narrow" id="link-form" novalidate>
+            <div class="form-group">
+              <label class="form-label" for="lk-ref">الرقم المرجعي <span class="req">*</span></label>
+              <input class="form-control" id="lk-ref" name="ref" type="text" dir="ltr" autocomplete="off" maxlength="40" placeholder="REQ-2026-000045" required>
+              <span class="form-error">أدخل رقمًا مرجعيًا صحيحًا.</span>
             </div>
-
-            <div class="tab-panel" role="tabpanel" id="panel-tx" aria-labelledby="tab-tx">
-              <div data-tx-list></div>
-              <div data-tx-detail hidden></div>
+            <div class="form-group">
+              <label class="form-label" for="lk-token">رمز التتبع <span class="req">*</span></label>
+              <input class="form-control" id="lk-token" name="token" type="password" dir="ltr" autocomplete="off" spellcheck="false" maxlength="80" aria-describedby="lk-token-hint" required>
+              <span class="form-hint" id="lk-token-hint">رمز سري من 64 خانة. لا تشاركه مع أحد ولا ترسله في رسالة.</span>
+              <span class="form-error">رمز التتبع غير صحيح.</span>
             </div>
+            <div><button class="btn btn-primary" type="submit">تحقّق من الطلب</button></div>
+          </form>
+          <div class="mt-3" data-link-result aria-live="polite"></div>
+        </div>
 
-            <div class="tab-panel" role="tabpanel" id="panel-req" aria-labelledby="tab-req" hidden>
-              <div data-req-list></div>
-              <div data-req-detail hidden></div>
-            </div>
-
-            <div class="tab-panel" role="tabpanel" id="panel-link" aria-labelledby="tab-link" hidden>
-              <h3 class="portal-h">ربط طلب سابق بحسابك</h3>
-              <p class="text-muted text-sm">إن أرسلت طلبًا قبل إنشاء حسابك فأدخل رقمه المرجعي ورمز التتبع الذي ظهر لك عند الإرسال. نتحقق منهما ثم نرسل طلب الربط إلى فريق مرسى.</p>
-              <form class="form portal-narrow" id="link-form" novalidate>
+        <div class="tab-panel" role="tabpanel" id="panel-profile" aria-labelledby="tab-profile" hidden>
+          <div class="grid grid-2">
+            <section aria-labelledby="pf-h">
+              <h3 class="portal-h" id="pf-h">بياناتي</h3>
+              <form class="form" id="profile-form" novalidate>
                 <div class="form-group">
-                  <label class="form-label" for="lk-ref">الرقم المرجعي <span class="req">*</span></label>
-                  <input class="form-control" id="lk-ref" name="ref" type="text" dir="ltr" autocomplete="off" maxlength="40" placeholder="REQ-2026-000045" required>
-                  <span class="form-error">أدخل رقمًا مرجعيًا صحيحًا.</span>
+                  <label class="form-label" for="pf-email">البريد الإلكتروني</label>
+                  <input class="form-control" id="pf-email" type="email" dir="ltr" readonly>
+                  <span class="form-hint">لتغيير البريد تواصل مع فريق مرسى.</span>
                 </div>
                 <div class="form-group">
-                  <label class="form-label" for="lk-token">رمز التتبع <span class="req">*</span></label>
-                  <input class="form-control" id="lk-token" name="token" type="password" dir="ltr" autocomplete="off" spellcheck="false" maxlength="80" aria-describedby="lk-token-hint" required>
-                  <span class="form-hint" id="lk-token-hint">رمز سري من 64 خانة. لا تشاركه مع أحد ولا ترسله في رسالة.</span>
-                  <span class="form-error">رمز التتبع غير صحيح.</span>
+                  <label class="form-label" for="pf-name">الاسم الكامل <span class="req">*</span></label>
+                  <input class="form-control" id="pf-name" name="fullName" type="text" autocomplete="name" maxlength="120" required>
+                  <span class="form-error">أدخل الاسم الكامل.</span>
                 </div>
-                <div><button class="btn btn-primary" type="submit">تحقّق من الطلب</button></div>
+                <div class="form-group">
+                  <label class="form-label" for="pf-phone">رقم الجوال</label>
+                  <input class="form-control" id="pf-phone" name="phone" type="tel" dir="ltr" autocomplete="tel" inputmode="tel" maxlength="20" placeholder="05XXXXXXXX">
+                  <span class="form-error">أدخل رقم جوال سعودي صحيحًا.</span>
+                </div>
+                <div><button class="btn btn-primary" type="submit">حفظ البيانات</button></div>
               </form>
-              <div class="mt-3" data-link-result aria-live="polite"></div>
-            </div>
-
-            <div class="tab-panel" role="tabpanel" id="panel-profile" aria-labelledby="tab-profile" hidden>
-              <div class="grid grid-2">
-                <section aria-labelledby="pf-h">
-                  <h3 class="portal-h" id="pf-h">بياناتي</h3>
-                  <form class="form" id="profile-form" novalidate>
-                    <div class="form-group">
-                      <label class="form-label" for="pf-email">البريد الإلكتروني</label>
-                      <input class="form-control" id="pf-email" type="email" dir="ltr" readonly>
-                      <span class="form-hint">لتغيير البريد تواصل مع فريق مرسى.</span>
-                    </div>
-                    <div class="form-group">
-                      <label class="form-label" for="pf-name">الاسم الكامل <span class="req">*</span></label>
-                      <input class="form-control" id="pf-name" name="fullName" type="text" autocomplete="name" maxlength="120" required>
-                      <span class="form-error">أدخل الاسم الكامل.</span>
-                    </div>
-                    <div class="form-group">
-                      <label class="form-label" for="pf-phone">رقم الجوال</label>
-                      <input class="form-control" id="pf-phone" name="phone" type="tel" dir="ltr" autocomplete="tel" inputmode="tel" maxlength="20" placeholder="05XXXXXXXX">
-                      <span class="form-error">أدخل رقم جوال سعودي صحيحًا.</span>
-                    </div>
-                    <div><button class="btn btn-primary" type="submit">حفظ البيانات</button></div>
-                  </form>
-                  <div class="mt-4" data-profile-links></div>
-                </section>
-                <section aria-labelledby="pw-h">
-                  <h3 class="portal-h" id="pw-h">تغيير كلمة المرور</h3>
-                  <form class="form" id="password-form" novalidate>
-                    <div class="form-group">
-                      <label class="form-label" for="pf-pw">كلمة المرور الجديدة <span class="req">*</span></label>
-                      <input class="form-control" id="pf-pw" type="password" dir="ltr" autocomplete="new-password" minlength="8" maxlength="72" required>
-                      <span class="form-hint">8 أحرف على الأقل تجمع حروفًا وأرقامًا.</span>
-                      <span class="form-error">كلمة المرور ضعيفة.</span>
-                    </div>
-                    <div class="form-group">
-                      <label class="form-label" for="pf-pw2">تأكيد كلمة المرور <span class="req">*</span></label>
-                      <input class="form-control" id="pf-pw2" type="password" dir="ltr" autocomplete="new-password" maxlength="72" required>
-                      <span class="form-error">كلمتا المرور غير متطابقتين.</span>
-                    </div>
-                    <div><button class="btn btn-secondary" type="submit">تغيير كلمة المرور</button></div>
-                  </form>
-                  <div class="mt-4">
-                    <button class="btn btn-ghost" type="button" data-sign-out>تسجيل الخروج</button>
-                    <button class="btn btn-ghost" type="button" data-sign-out-all>تسجيل الخروج من كل الأجهزة</button>
-                    <p class="form-hint mt-2">ينهي جلساتك المفتوحة على كل المتصفحات والأجهزة، بما فيها هذا الجهاز.</p>
-                  </div>
-                </section>
+              <div class="mt-4" data-profile-links></div>
+            </section>
+            <section aria-labelledby="pw-h">
+              <h3 class="portal-h" id="pw-h">تغيير كلمة المرور</h3>
+              <form class="form" id="password-form" novalidate>
+                <div class="form-group">
+                  <label class="form-label" for="pf-pw">كلمة المرور الجديدة <span class="req">*</span></label>
+                  <input class="form-control" id="pf-pw" type="password" dir="ltr" autocomplete="new-password" minlength="8" maxlength="72" required>
+                  <span class="form-hint">8 أحرف على الأقل تجمع حروفًا وأرقامًا.</span>
+                  <span class="form-error">كلمة المرور ضعيفة.</span>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="pf-pw2">تأكيد كلمة المرور <span class="req">*</span></label>
+                  <input class="form-control" id="pf-pw2" type="password" dir="ltr" autocomplete="new-password" maxlength="72" required>
+                  <span class="form-error">كلمتا المرور غير متطابقتين.</span>
+                </div>
+                <div><button class="btn btn-secondary" type="submit">تغيير كلمة المرور</button></div>
+              </form>
+              <div class="portal-session">
+                <h3 class="portal-h">الجلسات</h3>
+                <div class="portal-session-actions">
+                  <button class="btn btn-secondary btn-sm" type="button" data-sign-out>تسجيل الخروج</button>
+                  <button class="btn btn-ghost btn-sm portal-btn-danger" type="button" data-sign-out-all>تسجيل الخروج من كل الأجهزة</button>
+                </div>
+                <p class="form-hint mb-0">ينهي جلساتك المفتوحة على كل المتصفحات والأجهزة، بما فيها هذا الجهاز.</p>
               </div>
-            </div>
+            </section>
           </div>
         </div>
-
-        <noscript><p class="alert alert-warning mt-3">تتطلب بوابة العميل تفعيل JavaScript في المتصفح.</p></noscript>
       </div>
     </section>
 
+    <noscript><p class="alert alert-warning mt-3">تتطلب بوابة العميل تفعيل JavaScript في المتصفح.</p></noscript>
   </main>
-
-
-  <!-- ============ FOOTER (shared) ============ -->
-  <footer class="site-footer">
-    <svg class="footer-wave" viewBox="0 0 1440 80" preserveAspectRatio="none" aria-hidden="true">
-      <path class="fw-fill" d="M0,0 L1440,0 L1440,30 C1200,75 960,10 720,40 C480,70 240,15 0,45 Z"/>
-    </svg>
-    <div class="container">
-      <div class="footer-grid">
-        <div class="footer-brand">
-          <a class="footer-logo" href="index.html" aria-label="مرسى - الصفحة الرئيسية" data-i18n-attr="aria-label:nav.homeAria">
-            <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="107" height="74" data-i18n-attr="alt:nav.logoAlt">
-          </a>
-          <p data-i18n="footer.about">مرسى منصة سعودية لخدمات التخليص الجمركي والشحن أونلاين، تساعد المستوردين والمصدّرين في المملكة على تخليص شحناتهم بسرعة وشفافية.</p>
-          <div class="social">
-            <a href="contact.html" aria-label="فيسبوك" data-i18n-attr="aria-label:footer.facebook"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h-2.5A3.5 3.5 0 0 0 9 6.5V9H7v3.5h2V21h3.5v-8.5H15l.5-3.5h-3V7a1 1 0 0 1 1-1H15z"/></svg></a>
-            <a href="contact.html" aria-label="لينكدإن" data-i18n-attr="aria-label:footer.linkedin"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 10v7M8 7v.01M12 17v-4a2 2 0 0 1 4 0v4M12 10v7"/></svg></a>
-            <a href="https://wa.me/966554821937" target="_blank" rel="noopener" aria-label="واتساب" data-i18n-attr="aria-label:footer.whatsapp"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/><path d="M9 9.5c.3 1.8 2 3.8 4 4.5l1-1 2 .8"/></svg></a>
-          </div>
-        </div>
-        <div class="footer-col">
-          <h3 data-i18n="footer.quickLinks">روابط سريعة</h3>
-          <ul class="footer-links">
-            <li><a href="index.html" data-i18n="nav.home">الرئيسية</a></li>
-            <li><a href="services.html" data-i18n="nav.services">خدماتنا</a></li>
-            <li><a href="about.html" data-i18n="nav.about">من نحن</a></li>
-            <li><a href="about.html#faq" data-i18n="footer.faq">الأسئلة الشائعة</a></li>
-            <li><a href="contact.html" data-i18n="nav.contact">تواصل معنا</a></li>
-            <li><a href="login.html#client" data-i18n="nav.clientLogin">دخول العملاء</a></li>
-            <li><a href="login.html#staff" data-i18n="nav.staffLogin">دخول الموظفين</a></li>
-          </ul>
-        </div>
-        <div class="footer-col">
-          <h3 data-i18n="footer.tools">أدوات المنصة</h3>
-          <ul class="footer-links">
-            <li><a href="request.html" data-i18n="nav.request">اطلب تخليص</a></li>
-            <li><a href="calculator.html" data-i18n="nav.calculatorFull">حاسبة الرسوم الجمركية</a></li>
-            <li><a href="tracking.html" data-i18n="nav.tracking">تتبع الشحنة</a></li>
-            <li><a href="bulk-upload.html" data-i18n="footer.bulk">الرفع الجماعي (Excel / CSV)</a></li>
-            <li><a href="ocr.html" data-i18n="nav.ocrFull">قراءة المستندات (OCR)</a></li>
-            <li><a href="services.html#aci" data-i18n="footer.aci">البيان المسبق ومنصة فسح</a></li>
-            <li><a href="services.html#hs" data-i18n="footer.hs">تصنيف HS Code</a></li>
-          </ul>
-        </div>
-        <div class="footer-col">
-          <h3 data-i18n="footer.contactTitle">تواصل معنا</h3>
-          <ul class="footer-contact">
-            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg><span data-i18n="footer.address">طريق الملك عبدالعزيز، حي الحمراء – جدة</span></li>
-            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><a href="tel:+966126143270" dir="ltr">+966 12 614 3270</a></li>
-            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><a href="mailto:info@marsa-sa.com" dir="ltr">info@marsa-sa.com</a></li>
-            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/><path d="M9 9.5c.3 1.8 2 3.8 4 4.5l1-1 2 .8"/></svg><a href="https://wa.me/966554821937" target="_blank" rel="noopener" dir="ltr">+966 55 482 1937</a></li>
-            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span data-i18n="footer.hours">الأحد – الخميس: 8 ص – 5 م</span></li>
-          </ul>
-        </div>
-      </div>
-    </div>
-    <div class="container footer-privacy">
-      <p><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg><span data-privacy-text><strong>الخصوصية في نسخة العرض:</strong> ما تُدخله في النماذج والحاسبة يبقى في التخزين المحلي (localStorage) لهذا المتصفح فقط، دون تشفير ودون إرسال إلى أي خادم، فلا تُدخل بيانات حقيقية حساسة. يُحمَّل خط الموقع من خدمة Google Fonts، لذا يتصل متصفحك بخوادم Google عند فتح الصفحات.</span></p>
-      <button class="btn btn-sm btn-outline-white" type="button" data-clear-local data-i18n="footer.clearData">مسح بياناتي من هذا الجهاز</button>
-    </div>
-    <div class="container footer-bottom">
-      <span>© <span id="year">2026</span> <span data-i18n="footer.rights">مرسى MARSA. جميع الحقوق محفوظة.</span></span>
-      <span data-i18n="footer.disclaimer">منصة خاصة لخدمات التخليص الجمركي — غير تابعة لأي جهة حكومية.</span>
-    </div>
-  </footer>
-  <button class="to-top" type="button" aria-label="العودة لأعلى الصفحة">
-    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
-  </button>
-  <!-- ============ /FOOTER ============ -->
 
   <script src="assets/js/config.js" defer></script>
   <script src="assets/js/i18n.js" defer></script>
+  <script src="assets/i18n/portal.js" defer></script>
+  <script src="assets/i18n/app.js" defer></script>
   <script src="assets/js/main.js" defer></script>
   <script src="assets/js/supa.js" defer></script>
+  <script src="assets/js/app-shell.js" defer></script>
+  <script src="assets/js/pwa.js" defer></script>
   <script src="assets/js/portal.js" defer></script>
 </body>
 </html>

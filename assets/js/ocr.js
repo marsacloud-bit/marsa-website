@@ -13,6 +13,12 @@
      transaction link and original upload); otherwise the local history
      "marsa_extractions" (MarsaApi.localExtractions).
    - "Use in request" → sessionStorage "marsa_ocr_prefill" → request.html?from=ocr
+   - App page (app-shell.js → window.MarsaShell): the shell draws the sidebar /
+     topbar around <main id="app-main"> (a minimal sidebar when signed out —
+     the tool keeps working for visitors and in demo mode with the local
+     history). Toasts / confirmations go through Shell.toast / Shell.confirm
+     (Marsa.toast / window.confirm without the shell). Server history and the
+     transaction picker follow the active organization (marsa:orgchange).
    Untrusted OCR text is only ever written with textContent / value.
    ===================================================================== */
 (function () {
@@ -30,7 +36,21 @@
     var API = window.MarsaApi || null;
     var $ = function (id) { return document.getElementById(id); };
     var qsa = function (s, c) { return Array.prototype.slice.call((c || document).querySelectorAll(s)); };
-    var toast = M.toast || function (m) { try { console.log(m); } catch (e) { /* noop */ } };
+    var Shell = window.MarsaShell || null;
+    var I18 = window.MarsaI18n || null;
+    var toast = Shell && typeof Shell.toast === 'function' ? function (m, t) { Shell.toast(m, t); }
+      : (M.toast || function (m) { try { console.log(m); } catch (e) { /* noop */ } });
+    // Promise<boolean>: the shell dialog when present, else the browser's
+    function ask(o) {
+      if (Shell && typeof Shell.confirm === 'function') return Promise.resolve(Shell.confirm(o)).then(function (v) { return !!v; });
+      return Promise.resolve(window.confirm(o.text || o.title));
+    }
+    // shell strings in assets/i18n/ocr.js ('ocr.*'); Arabic fallback when missing
+    function tr(k, fb) { var key = 'ocr.' + k, v = I18 && typeof I18.t === 'function' ? I18.t(key) : key; return v === key ? fb : v; }
+    if (Shell) {
+      if (typeof Shell.setTitle === 'function') Shell.setTitle(tr('title', 'قراءة المستندات (OCR)'), [{ label: tr('crumb', 'العمل اليومي') }]);
+      if (typeof Shell.setActive === 'function') Shell.setActive('ocr');
+    }
 
     var card = $('ocr-card');
     if (!card || !P) return;
@@ -745,7 +765,9 @@
       renderSaveState(j);
       if (focus) { $('ocr-result-title').focus(); }
     }
-    function badge(cls, text) { return el('span', 'badge ' + cls, text); }
+    // legacy badge names → app.css pill tones
+    var PILL = { 'badge-navy': 'neutral', 'badge-warning': 'warning', 'badge-success': 'success', 'badge-blue': 'info', 'badge-teal': 'brand', 'badge-danger': 'danger' };
+    function badge(cls, text) { return el('span', 'pill pill-' + (PILL[cls] || 'neutral'), text); }
     function renderMeta(j) {
       var box = $('ocr-result-meta');
       box.textContent = '';
@@ -987,13 +1009,17 @@
       var j = current();
       if (!j) return;
       var edited = Object.keys(j.fields).some(function (k) { return j.fields[k].source === 'manual'; });
-      if (edited && !window.confirm('ستُستبدل تعديلاتك على الحقول والبنود بالقيم المستخرجة من النص الحالي. هل تريد المتابعة؟')) return;
+      if (!edited) { reextract(j); return; }
+      ask({ title: 'إعادة استخراج البيانات', text: 'ستُستبدل تعديلاتك على الحقول والبنود بالقيم المستخرجة من النص الحالي. هل تريد المتابعة؟',
+            okText: 'إعادة الاستخراج', danger: true }).then(function (yes) { if (yes) reextract(j); });
+    });
+    function reextract(j) {
       var res = P.extractFields(j.text, j.docType);
       if (j.qr) res = P.mergeQr(res, j.qr);
       j.fields = res.fields; j.items = res.lineItems.map(function (x) { return Object.assign({}, x); });
       renderFields(j); renderItems(j);
       announce('أُعيد استخراج البيانات: ' + Object.keys(j.fields).length + ' حقلًا و' + j.items.length + ' بندًا.');
-    });
+    }
 
     /* ---------------------------------------------------------------
        Export
@@ -1114,6 +1140,12 @@
       $('ocr-save-label').textContent = j.saved ? 'حفظ التعديلات' : (where === 'server' ? 'حفظ على الخادم' : 'حفظ في السجل');
       setSaveMsg('', '');
     }
+    // the org the shell header shows: an unlinked server save goes there explicitly, never to
+    // whatever another tab stored as the active org meanwhile
+    function shellOrg(where) {
+      if (where !== 'server' || !Shell || typeof Shell.orgId !== 'function') return null;
+      try { var o = Shell.orgId(); return typeof o === 'string' && o ? o : null; } catch (e) { return null; }
+    }
     function buildRow(j) {
       return {
         doc_type: j.docType || 'other', source_name: String(j.name || 'document').slice(0, 255), source_sha256: j.sha256 || '',
@@ -1158,7 +1190,12 @@
       var S = store(where);
       if (!S) { setSaveMsg('error', 'الحفظ غير متاح: تعذّر تحميل طبقة البيانات (supa.js).'); return; }
       var invalid = qsa('#ocr-fields input[aria-invalid="true"]');
-      if (invalid.length && !window.confirm('بعض الحقول غير صحيحة (' + invalid.length + '). هل تريد الحفظ على أي حال؟')) { invalid[0].focus(); return; }
+      if (!invalid.length) { doSave(j, where, S); return; }
+      ask({ title: 'حقول غير صحيحة', text: 'بعض الحقول غير صحيحة (' + invalid.length + '). هل تريد الحفظ على أي حال؟', okText: 'الحفظ على أي حال' })
+        .then(function (yes) { if (yes) doSave(j, where, S); else invalid[0].focus(); });
+    });
+    function doSave(j, where, S) {
+      if (saving) return;
       if (!j.saved && !j.sha256) {
         if (where === 'server') { setSaveMsg('error', 'تعذّر حساب بصمة الملف في هذا المتصفح، فلا يمكن الحفظ على الخادم.'); return; }
       }
@@ -1169,7 +1206,7 @@
       var attach = !!(txId && $('ocr-attach').checked && j.file);
       var notes = [];
       var p = j.saved ? Promise.resolve({ data: j.saved.row, error: null })
-        : S.save(Object.assign(buildRow(j), txId && !attach ? { transaction_id: txId } : {}));
+        : S.save(Object.assign(buildRow(j), txId && !attach ? { transaction_id: txId } : (shellOrg(where) ? { org_id: shellOrg(where) } : {})));
       p.then(function (r) {
         if (r.error) throw r.error;
         var row = r.data;
@@ -1204,7 +1241,19 @@
         setSaveMsg('error', 'لم يُحفظ: ' + errMsg(e));
         $('ocr-save-msg').focus();
       }).then(function () { saving = false; btn.disabled = false; });
-    });
+    }
+
+    // active organization (server history / transaction picker); null when unknown
+    function activeOrg() {
+      if (!ONLINE || !API || !API.activeOrgId) return Promise.resolve(null);
+      return API.activeOrgId().then(function (r) { return r && !r.error ? r.data || null : null; }, function () { return null; });
+    }
+    function resetTxPicker() {
+      var sel = $('ocr-tx');
+      sel.textContent = '';
+      var o0 = el('option', null, 'بدون ربط'); o0.value = ''; sel.appendChild(o0);
+      $('ocr-tx-q').value = '';
+    }
 
     /* transaction picker (staff) */
     $('ocr-tx-search').addEventListener('click', searchTx);
@@ -1214,7 +1263,9 @@
       var q = $('ocr-tx-q').value.trim();
       var sel = $('ocr-tx'), b = $('ocr-tx-search');
       b.disabled = true;
-      API.listTransactions({ search: q, limit: 15 }).then(function (r) {
+      activeOrg().then(function (oid) {
+        return API.listTransactions({ search: q, limit: 15, orgId: oid || undefined });
+      }).then(function (r) {
         b.disabled = false;
         sel.textContent = '';
         var o0 = el('option', null, 'بدون ربط'); o0.value = ''; sel.appendChild(o0);
@@ -1237,7 +1288,11 @@
     function loadHistory() {
       var q = histQ.value.trim();
       var tasks = [];
-      if (ONLINE && STAFF) tasks.push(API.listExtractions({ limit: 30, q: q }).then(function (r) { return { where: 'server', r: r }; }));
+      if (ONLINE && STAFF) {
+        tasks.push(activeOrg().then(function (oid) {
+          return API.listExtractions({ limit: 30, q: q, orgId: oid || undefined });
+        }).then(function (r) { return { where: 'server', r: r }; }));
+      }
       if (LOCAL) tasks.push(LOCAL.list({ limit: 50, q: q }).then(function (r) { return { where: 'local', r: r }; }));
       if (!tasks.length) return;
       Promise.all(tasks).then(function (res) {
@@ -1280,14 +1335,16 @@
         var del = el('button', 'btn btn-ghost btn-sm', 'حذف من الجهاز');
         del.type = 'button'; del.setAttribute('aria-label', 'حذف ' + (row.source_name || 'السجل') + ' من هذا الجهاز');
         del.addEventListener('click', function () {
-          if (!window.confirm('حذف هذا السجل من هذا الجهاز نهائيًا؟')) return;
-          LOCAL.remove(row.id).then(function (r) {
-            if (r.error) { toast(r.error.message, 'error'); return; }
-            jobs.forEach(function (j) { if (j.saved && j.saved.id === row.id) j.saved = null; });
-            toast('حُذف السجل من هذا الجهاز.', 'info');
-            var c = current(); if (c) { renderMeta(c); renderSaveState(c); }
-            loadHistory();
-            histQ.focus();
+          ask({ title: 'حذف السجل', text: 'حذف هذا السجل من هذا الجهاز نهائيًا؟', okText: 'حذف', danger: true }).then(function (yes) {
+            if (!yes) return;
+            LOCAL.remove(row.id).then(function (r) {
+              if (r.error) { toast(r.error.message, 'error'); return; }
+              jobs.forEach(function (j) { if (j.saved && j.saved.id === row.id) j.saved = null; });
+              toast('حُذف السجل من هذا الجهاز.', 'info');
+              var c = current(); if (c) { renderMeta(c); renderSaveState(c); }
+              loadHistory();
+              histQ.focus();
+            });
           });
         });
         tools.appendChild(del);
@@ -1349,14 +1406,29 @@
         return API.isStaff().then(function (r) { return !r.error && !!r.data; });
       }).catch(function () { return false; });
     }
-    renderQueue();
-    initRole().then(function (staff) {
-      STAFF = staff;
+    function historySub() {
       $('ocr-history-sub').textContent = STAFF
         ? 'المستندات المقروءة المحفوظة على الخادم لمؤسستك، وما حُفظ على هذا الجهاز.'
         : 'المستندات المقروءة المحفوظة على هذا الجهاز. افتح أي سجل لمراجعته أو نسخه أو تنزيله.';
+    }
+    renderQueue();
+    initRole().then(function (staff) {
+      STAFF = staff;
+      historySub();
       var c = current(); if (c) renderSaveState(c);
       loadHistory();
+    });
+    // org switcher (app shell): staff role, server history and the transaction picker follow the active org.
+    // A result already saved keeps its row (it belongs to the org it was saved in).
+    window.addEventListener('marsa:orgchange', function () {
+      if (!ONLINE) return;
+      initRole().then(function (s) {
+        STAFF = s;
+        historySub();
+        resetTxPicker();
+        var c = current(); if (c && !c.saved) renderSaveState(c);
+        loadHistory();
+      });
     });
     if (ONLINE && API && API.onAuth) {
       API.onAuth(function () { initRole().then(function (s) { if (s !== STAFF) { STAFF = s; var c = current(); if (c && !c.saved) renderSaveState(c); loadHistory(); } }); });

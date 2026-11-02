@@ -2,15 +2,21 @@
    مرسى | MARSA — login.html (STAGING)
    Client / staff sign-in, client sign-up, forgot + reset password, sign-out,
    sign-out of all devices, and invitations (login.html?invite=<token>).
-   Load order: config.js → i18n.js → main.js → supa.js → assets/i18n/login.js → auth.js
+   App sign-in screen of the PWA (manifest start_url = login.html?source=pwa); not an
+   app-shell page, but it loads app.css (tokens) and has its own language + theme toggles.
+   Load order: config.js → i18n.js → assets/i18n/login.js → main.js → supa.js → pwa.js → auth.js
                (plain <script defer>)
 
    * Demo mode (config empty): the credential forms stay hidden; a notice
      explains that login needs the online setup. No network calls.
    * Online mode: Supabase Auth through window.MarsaApi. After sign-in the
-     user is routed by role from my_context(): staff → admin.html, platform
-     admins without a staff role → platform.html, everyone else → portal.html.
-     Roles are NEVER read from signup data.
+     user is routed by role from my_context(): staff → admin.html#dashboard (or a
+     safe ?next=), platform admins without a staff role → platform.html, everyone
+     else → portal.html. Roles are NEVER read from signup data.
+   * ?source=pwa (installed app start): an existing session is routed at once.
+   * ?signedout=1|all: notice after a sign-out started on another page.
+   * Theme: localStorage 'marsa_theme' = light | dark | (unset = system); the
+     toggle cycles system → light → dark and sets html[data-theme="dark"].
    * Recovery: resetPassword() redirects back to login.html?mode=reset;
      supabase-js reads the token from the URL (type=recovery) and fires
      PASSWORD_RECOVERY; we then show the "new password" form.
@@ -19,7 +25,7 @@
      (history.replaceState). It is never logged and never sent anywhere but
      invitation_preview / accept_invitation. Preview → (sign in | sign up
      with the invited e-mail | accept when already signed in) → accept →
-     admin.html for staff roles, portal.html for client invitations.
+     admin.html#dashboard for staff roles, portal.html for client invitations.
    ========================================================================== */
 (function () {
   'use strict';
@@ -63,6 +69,8 @@
     inviteUnconfirmed: 'يلزم تأكيد بريدك الإلكتروني أولًا من الرسالة المرسلة إليك، ثم اضغط «قبول الدعوة».',
     inviteRetry: 'تعذّر التحقق من الدعوة الآن. تحقّق من اتصالك ثم أعد تحميل الصفحة.',
     inviteDismissed: 'تم تجاهل الدعوة في هذه النافذة. يمكنك فتح رابطها من جديد لاحقًا.',
+    themeAria: 'المظهر: {mode} — اضغط للتغيير',
+    theme_system: 'تلقائي حسب النظام', theme_light: 'فاتح', theme_dark: 'داكن',
     roleFallback: { admin: 'مدير المؤسسة', branch_manager: 'مدير الفرع', supervisor: 'مشرف', operations_manager: 'مدير العمليات',
       accounts_manager: 'مدير الحسابات', accountant: 'محاسب', clearance_staff: 'موظف تخليص', transport_staff: 'موظف نقل', client: 'عميل (بوابة العميل)' }
   };
@@ -79,6 +87,45 @@
   }
   function lang() { return I && typeof I.lang === 'function' ? I.lang() : 'ar'; }
 
+  /* ---- theme toggle (works in demo mode too) ---- */
+  var THEME_KEY = 'marsa_theme';
+  var THEMES = ['system', 'light', 'dark'];
+  var darkMq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  function themePref() {
+    try { var v = localStorage.getItem(THEME_KEY); return v === 'light' || v === 'dark' ? v : 'system'; } catch (e) { return 'system'; }
+  }
+  function applyTheme() {
+    var pref = themePref();
+    var dark = pref === 'dark' || (pref === 'system' && !!(darkMq && darkMq.matches));
+    var root = document.documentElement;
+    if (dark) root.setAttribute('data-theme', 'dark'); else root.removeAttribute('data-theme');
+    var meta = $('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', dark ? '#0B1220' : '#0B3A6E');
+    $$('[data-theme-toggle]').forEach(function (b) {
+      $$('[data-theme-icon]', b).forEach(function (ic) { ic.hidden = ic.getAttribute('data-theme-icon') !== pref; });
+      var label = tr('themeAria', { mode: tr('theme_' + pref) });
+      b.setAttribute('aria-label', label);
+      b.title = label;
+    });
+  }
+  $$('[data-theme-toggle]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var next = THEMES[(THEMES.indexOf(themePref()) + 1) % THEMES.length];
+      try { if (next === 'system') localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, next); } catch (e) { /* storage blocked */ }
+      applyTheme();
+    });
+  });
+  if (darkMq) {
+    var onScheme = function () { if (themePref() === 'system') applyTheme(); };
+    if (darkMq.addEventListener) darkMq.addEventListener('change', onScheme); else if (darkMq.addListener) darkMq.addListener(onScheme);
+  }
+  window.addEventListener('marsa:langchange', function () { applyTheme(); setDocTitle(); });
+  function setDocTitle() { var v = tr('docTitle'); if (v && v !== 'docTitle') document.title = v; }
+  setDocTitle();
+  window.addEventListener('storage', function (e) { if (e.key === THEME_KEY) applyTheme(); });
+  applyTheme();
+  $$('[data-year]').forEach(function (el) { el.textContent = String(new Date().getFullYear()); });
+
   var hashAtLoad = location.hash || '';
   var searchAtLoad = location.search || '';
   var params = parseParams(hashAtLoad.replace(/^#/, ''));
@@ -86,6 +133,8 @@
   var recoveryMode = params.type === 'recovery' || query.mode === 'reset';
   var linkErrorAtLoad = !!(params.error || params.error_code || query.error || query.error_code);
   var confirmedAtLoad = params.type === 'signup' || query.confirmed === '1';
+  var fromPwa = query.source === 'pwa';
+  var signedOutAtLoad = query.signedout === 'all' ? 'all' : (query.signedout === '1' ? 'one' : '');
   var routing = false;
 
   function parseParams(s) {
@@ -97,11 +146,15 @@
     });
     return o;
   }
-  // Only same-site pages from this allow-list may be used as "next"
+  // Only same-site pages from this allow-list may be used as "next" (an optional #route of
+  // plain characters is kept, e.g. admin.html#transactions/<uuid>); anything else is ignored.
+  var NEXT_PAGES = ['portal.html', 'admin.html', 'platform.html', 'ocr.html', 'bulk-upload.html'];
   function safeNext() {
     var n = String(query.next || '').replace(/^\.?\//, '');
-    return ['portal.html', 'admin.html', 'platform.html'].indexOf(n) !== -1 ? n : '';
+    var m = /^([a-z-]+\.html)(#[A-Za-z0-9/_-]{1,120})?$/.exec(n);
+    return m && NEXT_PAGES.indexOf(m[1]) !== -1 ? n : '';
   }
+  function nextPage(n) { return String(n || '').split('#')[0]; }
   function cleanUrl(keepHash) {
     try { history.replaceState(null, '', location.pathname + (keepHash ? '#' + keepHash : '')); } catch (e) { /* ignore */ }
   }
@@ -142,22 +195,24 @@
   var msgBox = $('[data-auth-msg]');
   function showMsg(text, type) {
     if (!msgBox) return;
-    msgBox.className = 'alert alert-' + (type || 'info') + ' mb-3';
+    msgBox.className = 'alert auth-alert alert-' + (type || 'info');
     msgBox.querySelector('[data-auth-msg-text]').textContent = text;
     msgBox.hidden = false;
     try { msgBox.focus({ preventScroll: false }); } catch (e) { msgBox.focus(); }
   }
   function hideMsg() { if (msgBox) msgBox.hidden = true; }
 
-  var VIEWS = ['tabs', 'forgot', 'reset', 'session', 'demo', 'invite'];
+  var VIEWS = ['loading', 'tabs', 'forgot', 'reset', 'session', 'demo', 'invite'];
   function showView(name) {
     VIEWS.forEach(function (v) {
       var el = $('[data-auth-view="' + v + '"]');
       if (el) el.hidden = v !== name;
     });
   }
-  function showClientSub(name) {   // signin | signup
+  function showClientSub(name) {   // signin | signup (sign-up hides the tab header via CSS)
     $$('[data-client-sub]').forEach(function (el) { el.hidden = el.getAttribute('data-client-sub') !== name; });
+    var tabs = $('[data-auth-view="tabs"]');
+    if (tabs) tabs.setAttribute('data-client-mode', name);
   }
   function showInviteSub(name) {   // accept | signin | signup | none
     $$('[data-invite-sub]').forEach(function (el) { el.hidden = el.getAttribute('data-invite-sub') !== name; });
@@ -228,7 +283,9 @@
       var staff = !r.error && (ctx.memberships || []).some(function (m) { return m.role && m.role !== 'client'; });
       var platform = !r.error && !!ctx.is_platform_admin;
       var next = safeNext();
-      var dest = staff ? (next || 'admin.html') : (platform ? (next === 'platform.html' ? next : 'platform.html') : 'portal.html');
+      // staff: any allowed page; platform-only admin: platform.html; client: portal.html
+      var dest = staff ? (next || 'admin.html#dashboard')
+        : (platform ? 'platform.html' : (nextPage(next) === 'portal.html' ? next : 'portal.html'));
       if (preferStaff && !staff && !platform) {
         showMsg(tr('notStaff'), 'warning');
         setTimeout(function () { location.replace(dest); }, 1800);
@@ -269,15 +326,16 @@
   document.documentElement.setAttribute('data-auth-ready', 'loading');
   $$('[data-online-only]').forEach(function (el) { el.hidden = false; });
   var initialTab = /staff/.test(hashAtLoad) ? 'staff' : 'client';
+  // until the session is known: a neutral loading state (no form flash before a PWA redirect)
   if (inviteToken) { showView('invite'); showInviteSub('none'); }
-  else showView('tabs');
+  else showView('loading');
   selectTab(initialTab);
   showClientSub(/signup/.test(hashAtLoad) ? 'signup' : 'signin');
 
   // keep the #client / #staff anchors working after load
   window.addEventListener('hashchange', function () {
     var h = location.hash;
-    if (h === '#staff') { showView('tabs'); selectTab('staff'); }
+    if (h === '#staff') { showView('tabs'); showClientSub('signin'); selectTab('staff'); }
     else if (h === '#client' || h === '#signup') { showView('tabs'); selectTab('client'); showClientSub(h === '#signup' ? 'signup' : 'signin'); }
   });
   $$('[data-tab-hash]').forEach(function (t) {
@@ -513,7 +571,7 @@
       clearInvite();
       role = d.role || role;
       showMsg(tr('inviteAccepted'), 'success');
-      var dest = role === 'client' ? 'portal.html' : 'admin.html';
+      var dest = role === 'client' ? 'portal.html' : 'admin.html#dashboard';
       var setOrg = d.org_id && role !== 'client' ? api.setActiveOrg(d.org_id) : Promise.resolve();
       return setOrg.then(function () { routing = true; location.replace(dest); });
     });
@@ -588,7 +646,10 @@
   /* ---- initial state ---- */
   api.ready().then(function (r) {
     document.documentElement.setAttribute('data-auth-ready', r.error ? 'error' : 'ready');
-    if (r.error) { showMsg(tr('loadFail'), 'danger'); $$('form[data-auth-form]').forEach(function (f) { setBusy(f, true); }); return; }
+    if (r.error) {
+      if (!inviteToken) showView('tabs');
+      showMsg(tr('loadFail'), 'danger'); $$('form[data-auth-form]').forEach(function (f) { setBusy(f, true); }); return;
+    }
     return api.getSession().then(function (s) {
       var session = s.data;
       if (linkErrorAtLoad && !session) {
@@ -617,11 +678,19 @@
         return;
       }
       if (session) {
-        if (confirmedAtLoad) { cleanUrl(); return routeByRole(false); }
+        // back from the confirmation link, or the installed app starting: go straight in
+        if (confirmedAtLoad || fromPwa) { cleanUrl(); return routeByRole(false); }
         showSession(session.user);
         return;
       }
-      if (confirmedAtLoad) { cleanUrl('client'); showMsg(tr('confirmed'), 'success'); }
+      showView('tabs');
+      if (confirmedAtLoad) { cleanUrl('client'); showMsg(tr('confirmed'), 'success'); return; }
+      if (signedOutAtLoad) {
+        cleanUrl(location.hash.replace(/^#/, ''));
+        showMsg(tr(signedOutAtLoad === 'all' ? 'signedOutAll' : 'signedOut'), 'info');
+        return;
+      }
+      if (fromPwa) cleanUrl(location.hash.replace(/^#/, ''));
     });
   });
 })();
