@@ -17,6 +17,19 @@
    ===================================================================== */
 (function () {
   'use strict';
+  // config.js always defines MARSA_CONFIG (empty values = demo). When it is missing the file
+  // did not load: e.g. a PWA window opened from an e-mail link fetched it without the staging
+  // Basic Auth (401). Reload once so the browser authenticates; the 20 s flag stops a loop.
+  if (!window.MARSA_CONFIG && /^https?:$/.test(location.protocol) && document.querySelector('script[src*="assets/js/config.js"]')) {
+    var cfgKey = 'marsa_cfg_reload', cfgReload = false;
+    try {
+      if (Date.now() - (+sessionStorage.getItem(cfgKey) || 0) > 20000) {
+        sessionStorage.setItem(cfgKey, String(Date.now()));
+        cfgReload = true;
+      }
+    } catch (e) { /* storage blocked: no flag, so no reload (stays in demo mode) */ }
+    if (cfgReload) { location.reload(); return; }
+  }
   document.documentElement.classList.remove('no-js');
 
   var qs = function (sel, ctx) { return (ctx || document).querySelector(sel); };
