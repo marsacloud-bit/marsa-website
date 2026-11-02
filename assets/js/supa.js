@@ -5,7 +5,7 @@
                 (plain <script defer>)
 
    * Online  when window.MARSA_CONFIG has supabaseUrl + supabaseAnonKey:
-     supabase-js v2 (UMD, pinned 2.45.4) is injected from jsDelivr on demand.
+     supabase-js v2 (UMD, pinned 2.45.4) is injected on demand from assets/vendor/ (same origin, SRI).
    * Demo    otherwise: nothing is loaded from the network; the public calls
      fall back to the existing localStorage behaviour (marsa_requests,
      marsa_messages) and every staff/portal call returns MRS_DEMO_MODE
@@ -21,7 +21,14 @@
 (function () {
   'use strict';
 
-  var SUPABASE_UMD = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js';
+  // supabase-js 2.45.4 UMD, hosted with the site (PDPL: no third-party CDN on every page). Copied unchanged
+  // from the npm tarball (registry integrity sha512-E5p8/zOLaQ3a…); 591.supabase.js is its lazy ws chunk.
+  // Resolved next to this file so any page depth works; the hash is checked by the browser (SRI).
+  var SUPABASE_UMD = (function () {
+    var me = document.currentScript && document.currentScript.src;
+    return (me ? me.replace(/assets\/js\/supa\.js(?:[?#].*)?$/, '') : '') + 'assets/vendor/supabase-js-2.45.4/supabase.js';
+  })();
+  var SUPABASE_UMD_SRI = 'sha384-0w2KAL2YHP6wKOkUDzkCDGgVvfmHnj02DHeQ6XcHOgTfFsGyonKOpShMH1x6nk9o';
   var cfg = window.MARSA_CONFIG || {};
   var M = window.Marsa || {};
 
@@ -599,7 +606,7 @@
     return new Promise(function (resolve, reject) {
       if (window.supabase && window.supabase.createClient) return resolve();
       var s = document.createElement('script');
-      s.src = src; s.async = true; s.crossOrigin = 'anonymous'; s.referrerPolicy = 'no-referrer';
+      s.src = src; s.async = true; s.integrity = SUPABASE_UMD_SRI;
       s.onload = function () { resolve(); };
       s.onerror = function () { reject(new Error('Failed to fetch supabase-js')); };
       document.head.appendChild(s);

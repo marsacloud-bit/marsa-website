@@ -33,7 +33,7 @@
    ========================================================================== */
 'use strict';
 
-var VERSION = '2026-11-09.1';   // MFA: mfa.js, login / admin / platform gates, supa.js mfa*, app-shell.js mfa redirect + account security link, login.css; main.js reloads once when config.js did not load (PWA window opened from an e-mail link without Basic Auth); G7 review fixes (help.js skip link + phone scroll, platform.js paused / trial-ended badges, i18n/platform.js, platform.css); G7: plans / subscriptions / usage (platform.js, i18n/platform.js, platform.css, supa.js), help.html + help.js + i18n/help.js + help.css (guides network-first, not precached), app-shell.js help nav + admin.js help pill; G6b review fixes (msg/inbox.js, kit.js, contacts.js, tx-msg.js, i18n/msg.js, app-shell.js); G6b: unified inbox (msg/*.js, i18n/msg.js, msg.css); G6a review fixes (rpt/*.js, i18n/rpt.js); G6a: search / reports / dashboards (rpt/*.js, rpt.js, rpt.css, dash.css) + portal tabs; G4 fin/*, G5 bill/* kept
+var VERSION = '2026-11-09.2';   // self-hosted Cairo font (assets/fonts/cairo/) + supabase-js 2.45.4 (assets/vendor/, SRI) instead of Google Fonts / jsDelivr; MFA: mfa.js, login / admin / platform gates, supa.js mfa*, app-shell.js mfa redirect + account security link, login.css; main.js reloads once when config.js did not load (PWA window opened from an e-mail link without Basic Auth); G7 review fixes (help.js skip link + phone scroll, platform.js paused / trial-ended badges, i18n/platform.js, platform.css); G7: plans / subscriptions / usage (platform.js, i18n/platform.js, platform.css, supa.js), help.html + help.js + i18n/help.js + help.css (guides network-first, not precached), app-shell.js help nav + admin.js help pill; G6b review fixes (msg/inbox.js, kit.js, contacts.js, tx-msg.js, i18n/msg.js, app-shell.js); G6b: unified inbox (msg/*.js, i18n/msg.js, msg.css); G6a review fixes (rpt/*.js, i18n/rpt.js); G6a: search / reports / dashboards (rpt/*.js, rpt.js, rpt.css, dash.css) + portal tabs; G4 fin/*, G5 bill/* kept
 var CACHE = 'marsa-app-' + VERSION;
 var OFFLINE_URL = 'offline.html';
 
@@ -44,6 +44,8 @@ var PRECACHE = [
   'manifest.json',
   // styles: the original design system + shared components + page sheets
   'assets/css/style.css', 'assets/css/app.css',
+  'assets/fonts/cairo/cairo.css', 'assets/fonts/cairo/cairo-arabic.woff2', 'assets/fonts/cairo/cairo-latin.woff2', 'assets/fonts/cairo/cairo-latin-ext.woff2',
+  'assets/vendor/supabase-js-2.45.4/supabase.js',
   'assets/css/pages/login.css', 'assets/css/pages/admin.css', 'assets/css/pages/ops.css', 'assets/css/pages/fin.css', 'assets/css/pages/bill.css',
   'assets/css/pages/rpt.css', 'assets/css/pages/dash.css', 'assets/css/pages/msg.css',
   'assets/css/pages/platform.css', 'assets/css/pages/help.css',

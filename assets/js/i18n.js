@@ -269,8 +269,8 @@
       clearData: 'مسح بياناتي من هذا الجهاز',
       rights: 'مرسى MARSA. جميع الحقوق محفوظة.',
       disclaimer: 'منصة خاصة لخدمات التخليص الجمركي — غير تابعة لأي جهة حكومية.',
-      privacyDemo: '<strong>الخصوصية في نسخة العرض:</strong> ما تُدخله في النماذج والحاسبة يبقى في التخزين المحلي (localStorage) لهذا المتصفح فقط، دون تشفير ودون إرسال إلى أي خادم، فلا تُدخل بيانات حقيقية حساسة. يُحمَّل خط الموقع من خدمة Google Fonts، لذا يتصل متصفحك بخوادم Google عند فتح الصفحات.',
-      privacyStaging: '<strong>الخصوصية في البيئة التجريبية (Staging):</strong> هذه بيئة اختبار ببيانات تجريبية، فلا تُدخل بيانات حقيقية أو حساسة. طلبات التخليص ورسائل التواصل والرفع الجماعي وتسجيل الدخول والمستندات المرفوعة تُرسل عبر اتصال مشفّر (HTTPS) إلى قاعدة بيانات الموقع على خدمة Supabase، ويقتصر الاطلاع عليها على الموظفين المخوَّلين وصاحب الطلب وفق صلاحيات قاعدة البيانات. أما الحاسبة والمسودات وجلسة الدخول فتُحفظ في التخزين المحلي (localStorage) لهذا المتصفح. يُحمَّل الخط من Google Fonts ومكتبة الاتصال من jsDelivr، لذا يتصل متصفحك بخوادمهما.'
+      privacyDemo: '<strong>الخصوصية في نسخة العرض:</strong> ما تُدخله في النماذج والحاسبة يبقى في التخزين المحلي (localStorage) لهذا المتصفح فقط، دون تشفير ودون إرسال إلى أي خادم، فلا تُدخل بيانات حقيقية حساسة. خط الموقع ومكتبة الاتصال مستضافان على الموقع نفسه، فلا يتصل متصفحك بخوادم خارجية لتحميلهما.',
+      privacyStaging: '<strong>الخصوصية في البيئة التجريبية (Staging):</strong> هذه بيئة اختبار ببيانات تجريبية، فلا تُدخل بيانات حقيقية أو حساسة. طلبات التخليص ورسائل التواصل والرفع الجماعي وتسجيل الدخول والمستندات المرفوعة تُرسل عبر اتصال مشفّر (HTTPS) إلى قاعدة بيانات الموقع على خدمة Supabase، ويقتصر الاطلاع عليها على الموظفين المخوَّلين وصاحب الطلب وفق صلاحيات قاعدة البيانات. أما الحاسبة والمسودات وجلسة الدخول فتُحفظ في التخزين المحلي (localStorage) لهذا المتصفح. خط الموقع ومكتبة الاتصال مستضافان على الموقع نفسه، فلا يتصل متصفحك بخوادم خارجية لتحميلهما.'
     },
     en: {
       about: 'Marsa is a Saudi platform for online customs clearance and shipping services, helping importers and exporters in the Kingdom clear their shipments quickly and transparently.',
@@ -281,8 +281,8 @@
       clearData: 'Clear my data from this device',
       rights: 'MARSA. All rights reserved.',
       disclaimer: 'A private customs clearance service — not affiliated with any government body.',
-      privacyDemo: '<strong>Privacy in the demo:</strong> what you enter in forms and the calculator stays in this browser\'s local storage (localStorage) only, unencrypted and never sent to a server, so do not enter real sensitive data. The site font is loaded from Google Fonts, so your browser contacts Google servers when pages open.',
-      privacyStaging: '<strong>Privacy in staging:</strong> this is a test environment with test data, so do not enter real or sensitive data. Clearance requests, contact messages, bulk uploads, sign-in and uploaded documents are sent over an encrypted connection (HTTPS) to the site database on Supabase, and only authorised staff and the requester can see them, as enforced by database permissions. The calculator, drafts and sign-in session are kept in this browser\'s local storage (localStorage). The font is loaded from Google Fonts and the connection library from jsDelivr, so your browser contacts their servers.'
+      privacyDemo: '<strong>Privacy in the demo:</strong> what you enter in forms and the calculator stays in this browser\'s local storage (localStorage) only, unencrypted and never sent to a server, so do not enter real sensitive data. The site font and the connection library are hosted on this site, so your browser does not contact third-party servers to load them.',
+      privacyStaging: '<strong>Privacy in staging:</strong> this is a test environment with test data, so do not enter real or sensitive data. Clearance requests, contact messages, bulk uploads, sign-in and uploaded documents are sent over an encrypted connection (HTTPS) to the site database on Supabase, and only authorised staff and the requester can see them, as enforced by database permissions. The calculator, drafts and sign-in session are kept in this browser\'s local storage (localStorage). The site font and the connection library are hosted on this site, so your browser does not contact third-party servers to load them.'
     }
   });
 
