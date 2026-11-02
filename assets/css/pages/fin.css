@@ -1,0 +1,149 @@
+/* =====================================================================
+   مرسى | MARSA — G4 operating-cost views inside admin.html (#costs,
+   #costs/review, #costs/<id>, #payables, #margins, #demurrage) and the
+   transaction-detail finance sections. Loaded after ops.css.
+   Tiles, badges, tables, tabs, progress bars, alerts and dialogs are the
+   original style.css / admin.css / ops.css classes (.card-stat.adm-tile,
+   .badge-<tone>, .table.adm-table, .tab-list/.tab, .progress, .alert-*,
+   .adm-dialog / ops form modal). This file only adds: level badges, the
+   discrepancy banner, line-review row tints, the allocation remaining meter
+   and the four-figure demurrage strip — with the style.css tokens only
+   (original look, no dark theme). Logical properties only. Prefix: fin-.
+   ===================================================================== */
+
+/* ---- frame ---- */
+.fin-view .fin-kpis + .fin-kpis { margin-block-start: -6px; }
+.fin-card-note { margin: 0; color: var(--muted); }
+.fin-strong, .fin-strong .fin-money { font-weight: 800; color: var(--navy-dark); }
+.fin-text-danger { color: var(--danger); }
+.fin-money { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fin-money.is-neg { color: var(--danger); }
+.fin-dl { grid-template-columns: minmax(130px, max-content) 1fr; }
+.fin-kv .v .fin-money { font-weight: 800; }
+.fin-kv .v.total .fin-money { color: var(--teal); font-size: var(--fs-md); }
+.fin-tabs { margin-bottom: 0; }
+.fin-pager { margin-block-start: 4px; }
+.fin-sub-title { margin: 6px 0 10px; font-size: var(--fs-md); color: var(--navy-dark); }
+
+/* ---- level badges (مؤكد / تقديري / غير معروف): the original .badge, with a marker ---- */
+.fin-level { display: inline-flex; align-items: center; gap: 6px; }
+.fin-level::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.fin-level-estimated::before { background: transparent; border: 2px solid currentColor; width: 6px; height: 6px; }
+.fin-level-unknown::before { content: "?"; width: auto; height: auto; background: none; font-weight: 800; line-height: 1; }
+.fin-level-row-unknown td:first-child { box-shadow: inset 4px 0 0 var(--danger); }
+.fin-level-row-estimated td:first-child { box-shadow: inset 4px 0 0 var(--warning); }
+html[dir="rtl"] .fin-level-row-unknown td:first-child { box-shadow: inset -4px 0 0 var(--danger); }
+html[dir="rtl"] .fin-level-row-estimated td:first-child { box-shadow: inset -4px 0 0 var(--warning); }
+
+/* ---- analytical banner (#margins, margin sections) ---- */
+.fin-analytical { margin: 0; }
+.fin-analytical strong { font-weight: 800; }
+.fin-analytical-sub { font-weight: 500; }
+
+/* ---- discrepancy banner (header vs lines) ---- */
+.fin-disc { margin: 0; }
+.fin-disc > div { flex: 1; min-width: 0; }
+.fin-disc-figs { display: flex; flex-wrap: wrap; gap: 10px 18px; margin: 8px 0 6px; }
+.fin-disc-fig { display: inline-flex; flex-direction: column; gap: 2px; padding: 6px 12px; background: #fff; border: 1px solid var(--border); border-radius: var(--r); min-width: 120px; }
+.fin-disc-fig .fin-money { font-weight: 800; color: var(--muted); }
+.fin-disc-fig.is-off { border-color: rgba(200, 50, 60, .35); }
+.fin-disc-fig.is-off .fin-money { color: var(--danger); }
+.fin-disc p { margin: 0; }
+
+/* ---- duplicates ---- */
+.fin-dup { margin: 0; }
+.fin-dup > div { flex: 1; min-width: 0; }
+.fin-dup-box { display: grid; gap: 10px; }
+.fin-dup-box:empty { display: none; }
+.fin-dup-list { margin: 6px 0 0; padding-inline-start: 18px; display: grid; gap: 4px; }
+
+/* ---- invoice lines: review tint per row (original table, start edge + soft background) ---- */
+.fin-line td:first-child { box-shadow: inset 4px 0 0 transparent; }
+html[dir="rtl"] .fin-line td:first-child { box-shadow: inset -4px 0 0 transparent; }
+.fin-line-pending_review td { background: rgba(201, 138, 11, .06); }
+.fin-line-pending_review td:first-child { box-shadow: inset 4px 0 0 var(--warning); }
+.fin-line-disputed td { background: rgba(200, 50, 60, .05); }
+.fin-line-disputed td:first-child { box-shadow: inset 4px 0 0 var(--danger); }
+.fin-line-excluded td { color: var(--muted); }
+.fin-line-excluded .cell-main { text-decoration: line-through; text-decoration-color: var(--border-strong); }
+.fin-line-overhead td:first-child { box-shadow: inset 4px 0 0 var(--blue); }
+html[dir="rtl"] .fin-line-pending_review td:first-child { box-shadow: inset -4px 0 0 var(--warning); }
+html[dir="rtl"] .fin-line-disputed td:first-child { box-shadow: inset -4px 0 0 var(--danger); }
+html[dir="rtl"] .fin-line-overhead td:first-child { box-shadow: inset -4px 0 0 var(--blue); }
+.fin-reasons { display: flex; flex-wrap: wrap; gap: 4px; margin-block-start: 4px; }
+.fin-alloc-row td { background: #FAFCFE; font-size: var(--fs-xs); padding-block: 8px; }
+.fin-alloc-row.is-muted td { color: var(--muted); }
+.fin-alloc-arrow { color: var(--muted); }
+.fin-col-check { width: 1%; }
+.fin-col-meter { min-width: 170px; }
+
+/* ---- allocation remaining meter (the original .progress) ---- */
+.fin-meter { min-width: 150px; }
+.fin-meter .progress-meta { gap: 8px; margin-bottom: 4px; }
+.fin-meter .progress { height: 8px; }
+.fin-meter .progress-bar { transition: width .4s var(--ease); }
+.fin-meter.is-full .progress-bar { background: var(--success); }
+.fin-meter.is-over .progress-bar { background: var(--danger); }
+.fin-meter.is-over .progress-meta span:last-child { color: var(--danger); }
+.fin-remaining { display: grid; gap: 6px; padding: 12px 14px; background: #FAFCFE; border: 1px dashed var(--border-strong); border-radius: var(--r); }
+.fin-remaining p { margin: 0; }
+
+/* ---- dialogs: line editor, OCR paste, transaction finder, allocation targets ---- */
+.fin-dialog-intro { display: grid; gap: 12px; }
+.fin-lines-host { display: grid; gap: 8px; }
+.fin-lines-wrap { max-width: 100%; }
+.fin-lines-table { min-width: 1000px; }
+.fin-lines-table th, .fin-lines-table td { padding: 8px 8px; vertical-align: top; }
+.fin-lines-table .fin-line-in { min-width: 0; width: 100%; padding-inline: 8px; min-height: 36px; font-size: var(--fs-sm); }
+.fin-lines-table .fin-in-desc { min-width: 200px; }
+.fin-lines-table .fin-in-qty, .fin-lines-table .fin-in-rate { width: 70px; }
+.fin-lines-table .fin-in-price, .fin-lines-table .fin-in-net, .fin-lines-table .fin-in-vat { width: 110px; }
+.fin-lines-table .fin-in-ctr { width: 130px; }
+.fin-lines-table select.fin-line-in { min-width: 130px; }
+.fin-line-no { color: var(--muted); font-weight: 700; }
+.fin-line-ocr td { background: rgba(22, 115, 184, .04); }
+.fin-line-ocr .badge { margin-block-start: 4px; }
+.fin-lines-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.fin-ocr { border: 1px solid var(--border); border-radius: var(--r); padding: 10px 14px; background: #fff; }
+.fin-ocr summary { cursor: pointer; font-weight: 700; color: var(--navy); font-size: var(--fs-sm); }
+.fin-ocr[open] { display: grid; gap: 8px; }
+.fin-ocr p { margin: 0; }
+.fin-file-field .fin-file { padding-block: 8px; }
+.fin-finder { display: grid; gap: 6px; }
+.fin-finder-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.fin-finder-list:empty { display: none; }
+.fin-finder-chosen:empty { display: none; }
+.fin-finder-item { gap: 6px; }
+.fin-alloc { display: grid; gap: 12px; }
+.fin-alloc > p { margin: 0; }
+.fin-targets { display: grid; gap: 12px; }
+.fin-target { margin: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r); background: #fff; min-width: 0; display: grid; gap: 10px; }
+.fin-target legend { padding-inline: 6px; font-weight: 800; color: var(--navy-dark); font-size: var(--fs-sm); }
+.fin-share-amt { display: block; margin-block-start: 4px; }
+
+/* ---- payables: three separate figures, never summed ---- */
+.fin-pay-tiles { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.fin-pay-tiles .stat-value { font-size: var(--fs-xl); }
+.fin-tile-paid_by_client_direct { border-style: dashed; }
+
+/* ---- demurrage: the four-figure strip ---- */
+.fin-col-four { min-width: 460px; }
+.fin-four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.fin-four-fig { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; background: #FAFCFE; border: 1px solid var(--border); border-radius: var(--r-sm, 8px); min-width: 0; }
+.fin-four-fig .fin-money { font-weight: 800; color: var(--navy-dark); }
+.fin-four-label { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--muted); font-weight: 700; }
+.fin-four-no { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--navy); color: #fff; font-size: 11px; font-weight: 800; flex-shrink: 0; }
+.fin-four-sub { font-size: var(--fs-xs); color: var(--muted); overflow-wrap: anywhere; }
+.fin-four-sub .fin-money { font-weight: 700; }
+.fin-four-fig.is-remaining { background: var(--warning-bg); border-color: rgba(201, 138, 11, .25); }
+.fin-four-fig.is-remaining .fin-four-no { background: var(--warning); }
+
+@media (max-width: 767.98px) {
+  .fin-four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fin-col-four { min-width: 300px; }
+  .fin-disc-figs { flex-direction: column; }
+}
+@media print {
+  .fin-lines-tools, .fin-tabs { display: none !important; }
+  .fin-line td, .fin-alloc-row td { background: none !important; }
+}

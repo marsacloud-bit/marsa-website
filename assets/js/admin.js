@@ -101,8 +101,39 @@
     container_type: { '20ft': '20 قدم', '40ft': '40 قدم', '40hc': '40 قدم عالية', '45ft': '45 قدم', '20rf': '20 قدم مبردة', '40rf': '40 قدم مبردة', LCL: 'شحنة جزئية LCL', other: 'أخرى' },
     event_type: { created: 'إنشاء المعاملة', request_converted: 'تحويل من طلب خدمة', operational_status: 'تغيير الحالة التشغيلية', financial_status: 'تغيير الحالة المالية', container_return: 'حالة إرجاع حاوية', document: 'مستند', note: 'ملاحظة', tracking_token: 'إصدار رمز تتبع',
       // G3 (transaction children)
-      declaration: 'البيان الجمركي', bill_of_lading: 'بوليصة الشحن', bl: 'بوليصة الشحن', container: 'حاوية', container_state: 'الحالة التشغيلية للحاوية', appointment: 'موعد الميناء', trip: 'رحلة نقل', exception: 'استثناء تشغيلي', override: 'تجاوز قاعدة المستندات', docs_override: 'تجاوز قاعدة المستندات' }
+      declaration: 'البيان الجمركي', bill_of_lading: 'بوليصة الشحن', bl: 'بوليصة الشحن', container: 'حاوية', container_state: 'الحالة التشغيلية للحاوية', appointment: 'موعد الميناء', trip: 'رحلة نقل', exception: 'استثناء تشغيلي', override: 'تجاوز قاعدة المستندات', docs_override: 'تجاوز قاعدة المستندات',
+      // G4 (finance events never carry amounts: payload {op, entity, id, …ids})
+      finance: 'المالية التشغيلية' },
+    // G4 finance event payload.op
+    fin_event_op: {
+      allocation_proposed: 'اقتراح توزيع تكلفة', allocation_approved: 'اعتماد توزيع تكلفة', late_cost: 'تكلفة متأخرة بعد الفوترة',
+      allocation_rejected: 'رفض توزيع تكلفة', allocation_reversed: 'عكس توزيع تكلفة',
+      accrual_created: 'تسجيل تكلفة متوقعة', accrual_reviewed: 'مراجعة فرق تكلفة متوقعة', accrual_voided: 'إلغاء تكلفة متوقعة',
+      charge_created: 'إضافة مبلغ على العميل', charge_status: 'تغيير حالة مبلغ على العميل',
+      collection_recorded: 'تسجيل تحصيل من العميل', collection_voided: 'إلغاء تحصيل من العميل',
+      demurrage_created: 'فتح ملف أرضيات / غرامات', demurrage_updated: 'تحديث ملف أرضيات / غرامات', demurrage_status: 'تغيير حالة ملف أرضيات / غرامات',
+      adjustment_created: 'تسجيل رسوم / تسوية استثنائية', adjustment_reviewed: 'مراجعة رسوم / تسوية استثنائية'
+    }
   };
+  // English for the G4 labels above (admin namespace, read by lbl() as 'lbl_<domain>_<code>')
+  (function () {
+    var I = window.MarsaI18n;
+    if (!I || typeof I.register !== 'function') return;
+    try {
+      I.register('admin', { en: {
+        lbl_event_type_finance: 'Operating finance',
+        lbl_fin_event_op_allocation_proposed: 'Cost allocation proposed', lbl_fin_event_op_allocation_approved: 'Cost allocation approved',
+        lbl_fin_event_op_late_cost: 'Late cost (after billing)', lbl_fin_event_op_allocation_rejected: 'Cost allocation rejected',
+        lbl_fin_event_op_allocation_reversed: 'Cost allocation reversed', lbl_fin_event_op_accrual_created: 'Expected cost recorded',
+        lbl_fin_event_op_accrual_reviewed: 'Expected-cost variance reviewed', lbl_fin_event_op_accrual_voided: 'Expected cost voided',
+        lbl_fin_event_op_charge_created: 'Client charge added', lbl_fin_event_op_charge_status: 'Client charge status changed',
+        lbl_fin_event_op_collection_recorded: 'Client collection recorded', lbl_fin_event_op_collection_voided: 'Client collection voided',
+        lbl_fin_event_op_demurrage_created: 'Storage / demurrage case opened', lbl_fin_event_op_demurrage_updated: 'Storage / demurrage case updated',
+        lbl_fin_event_op_demurrage_status: 'Storage / demurrage case status', lbl_fin_event_op_adjustment_created: 'Exceptional fee / adjustment recorded',
+        lbl_fin_event_op_adjustment_reviewed: 'Exceptional fee / adjustment reviewed'
+      } });
+    } catch (e) { /* Arabic labels stay */ }
+  })();
   var LABELS = JSON.parse(JSON.stringify(FALLBACK));
   var LABELS_EN = {};   // status_labels.label_en per domain (filled by loadLabels)
   var ORDER = {
@@ -125,6 +156,10 @@
     membersWrite: ['admin', 'branch_manager'],
     orgAdmin: ['admin'],
     auditRead: ['admin', 'supervisor'],
+    // G4 (docs/online/G4_SPEC.md §Roles) — mirrors app.fin_read_roles / fin_write_roles / fin_approve_roles
+    finRead: ['accountant', 'accounts_manager', 'branch_manager', 'supervisor', 'admin'],
+    finWrite: ['accountant', 'accounts_manager', 'branch_manager', 'admin'],
+    finApprove: ['accounts_manager', 'branch_manager', 'admin'],
     backward: ['operations_manager', 'branch_manager', 'supervisor', 'admin']
   };
   var STATUS_ROLES = {
@@ -624,13 +659,13 @@
   ];
   /* ------------------------------------------------------------------
      G3 module hook — assets/js/ops/*.js load before admin.js and register
-       MarsaOps.views.<id>  = { allow: 'staff'|'opsWriter'|'transportWriter'|'orgAdmin'|'finance' (or a role list),
+       MarsaOps.views.<id>  = { allow: 'staff'|'opsWriter'|'transportWriter'|'orgAdmin'|'finance'|'finRead'|'finWrite'|'finApprove' (or a role list),
                                 titleKey, render(root, opsApi, param) }   → route #<id> / #<id>/<param>
        MarsaOps.txSections  = [{ id, order, render(root, tx, opsApi) }] → inside #tx/<id>, after admin.js' own cards
      The hook is read on every route, so a module that registers late still shows up.
      ------------------------------------------------------------------ */
   var OPS = window.MarsaOps = window.MarsaOps || { views: {}, txSections: [] };
-  var OPS_SETS = ['staff', 'opsWriter', 'transportWriter', 'orgAdmin', 'finance'];
+  var OPS_SETS = ['staff', 'opsWriter', 'transportWriter', 'orgAdmin', 'finance', 'finRead', 'finWrite', 'finApprove'];
   function opsRoleSet(allow) {
     if (Array.isArray(allow)) return allow;
     return OPS_SETS.indexOf(allow) !== -1 ? R[allow] : R.staff;
@@ -745,8 +780,9 @@
   // views), then the staff pages elsewhere (bulk upload, OCR, platform) from MarsaShell.navItems().
   // Each link carries data-nav-id so MarsaShell.setActive / setBadge('alerts') find it.
   var NAV_EXTERNAL = ['bulk', 'ocr', 'platform'];
-  // daily work → G3 operations → management (unknown module views go last, stable)
+  // daily work → G3 operations → G4 operating finance → management (unknown module views go last, stable)
   var NAV_ORDER = ['dashboard', 'requests', 'transactions', 'clients', 'messages', 'imports', 'alerts', 'schedule', 'exceptions', 'parties',
+    'costs', 'payables', 'margins', 'demurrage',
     'org', 'branches', 'members', 'requirements', 'audit', 'errors'];
   function buildNav() {
     if (!nav) return;
@@ -1174,6 +1210,7 @@
     if (e.event_type === 'operational_status') s += ': ' + lbl('operational_status', e.from_status) + arrow + lbl('operational_status', e.to_status);
     else if (e.event_type === 'financial_status') s += ': ' + lbl('financial_status', e.from_status) + arrow + lbl('financial_status', e.to_status);
     else if (e.event_type === 'container_return') s += (p.container_no ? ' ' + p.container_no : '') + ': ' + lbl('container_return_status', e.to_status);
+    else if (e.event_type === 'finance' && p.op) s += ': ' + lbl('fin_event_op', p.op);
     return s;
   }
   // G3 KPI counts: alerts by severity (status open / acknowledged) and today's appointments (not cancelled /
@@ -1861,6 +1898,8 @@
         title += ': ' + op + ' «' + esc(docName(p.document_id)) + '»' + (p.classification ? ' — ' + esc(lbl('document_kind', p.classification)) : '');
       } else if (e.event_type === 'request_converted') {
         title += ' ' + ltr(p.request_ref) + (p.client_created ? ' (ملف عميل جديد)' : '');
+      } else if (e.event_type === 'finance') {
+        if (p.op) title += ': ' + esc(lbl('fin_event_op', p.op));   // no amounts in finance events
       } else if (e.event_type === 'tracking_token') {
         title += p.reissued ? ' (إعادة إصدار؛ الرمز السابق لم يعد صالحًا)' : '';
       }
@@ -2891,8 +2930,8 @@
         var form = body.closest('form'), roleSel = form.elements.role, branchSel = form.elements.branch;
         var sync = function () {
           var r = roleSel.value;
-          // admin and client-portal invitations carry no branch (the server refuses one)
-          var noBranch = r === 'admin' || r === 'client';
+          // admin, supervisor (org-wide by construction since G4) and client-portal invitations carry no branch
+          var noBranch = r === 'admin' || r === 'supervisor' || r === 'client';
           branchSel.disabled = noBranch;
           if (noBranch) branchSel.value = '';
           else if (!admin && !branchSel.value && branchSel.options.length) branchSel.selectedIndex = 0;
@@ -2907,7 +2946,7 @@
         if (!email || email.length > 160 || !EMAIL_RE.test(email)) return t('email_invalid');
         var role = fval(form, 'role');
         if (roles.indexOf(role) === -1) return t('role_required');
-        var branch = (role === 'admin' || role === 'client') ? null : (fval(form, 'branch') || null);
+        var branch = (role === 'admin' || role === 'supervisor' || role === 'client') ? null : (fval(form, 'branch') || null);
         if (role !== 'client' && (role === 'branch_manager' || !admin) && !branch) return t('branch_required');
         var client = role === 'client' ? (fval(form, 'client') || null) : null;
         if (role === 'client' && !client) return t('client_required');

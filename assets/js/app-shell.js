@@ -112,7 +112,11 @@
     contact: ['clearance_staff', 'operations_manager', 'branch_manager', 'supervisor', 'admin'],
     membersRead: ['admin', 'branch_manager', 'supervisor'],
     orgAdmin: ['admin'],
-    auditRead: ['admin', 'supervisor']
+    auditRead: ['admin', 'supervisor'],
+    // G4 (docs/online/G4_SPEC.md §Roles) — mirrors app.fin_read_roles / fin_write_roles / fin_approve_roles
+    finRead: ['accountant', 'accounts_manager', 'branch_manager', 'supervisor', 'admin'],
+    finWrite: ['accountant', 'accounts_manager', 'branch_manager', 'admin'],
+    finApprove: ['accounts_manager', 'branch_manager', 'admin']
   };
   var ROLE_RANK = ['client', 'clearance_staff', 'transport_staff', 'accountant', 'accounts_manager', 'operations_manager', 'branch_manager', 'supervisor', 'admin'];
 
@@ -138,6 +142,13 @@
       { id: 'exceptions', key: 'ops.nav_exceptions', href: 'admin.html#exceptions', icon: 'flag', allow: R.staff },
       { id: 'parties', key: 'ops.nav_parties', href: 'admin.html#parties', icon: 'truck', allow: R.staff }
     ] },
+    // G4 operating finance (assets/js/fin/*.js views, allow 'finRead')
+    { id: 'finance', key: 'fin.nav_group', items: [
+      { id: 'costs', key: 'fin.nav_costs', href: 'admin.html#costs', icon: 'receipt', allow: R.finRead },
+      { id: 'payables', key: 'fin.nav_payables', href: 'admin.html#payables', icon: 'wallet', allow: R.finRead },
+      { id: 'margins', key: 'fin.nav_margins', href: 'admin.html#margins', icon: 'chart', allow: R.finRead },
+      { id: 'demurrage', key: 'fin.nav_demurrage', href: 'admin.html#demurrage', icon: 'clock', allow: R.finRead }
+    ] },
     { id: 'manage', label: 'grp_manage', items: [
       { id: 'org', href: 'admin.html#org', icon: 'building', allow: R.orgAdmin },
       { id: 'branches', href: 'admin.html#branches', icon: 'branch', allow: R.orgAdmin },
@@ -160,9 +171,13 @@
   var PAGE_NAV = { platform: 'platform', ocr: 'ocr', bulk: 'bulk', portal: 'portal', offline: null };
   var OPS_NAV = {
     ar: { 'ops.nav_group': 'العمليات', 'ops.nav_alerts': 'التنبيهات', 'ops.nav_schedule': 'الجدول اليومي', 'ops.nav_exceptions': 'الاستثناءات',
-      'ops.nav_parties': 'الجهات والناقلون', 'ops.nav_requirements': 'قواعد المستندات', 'ops.nav_alerts_badge': 'التنبيهات المفتوحة: {n}' },
+      'ops.nav_parties': 'الجهات والناقلون', 'ops.nav_requirements': 'قواعد المستندات', 'ops.nav_alerts_badge': 'التنبيهات المفتوحة: {n}',
+      'fin.nav_group': 'المالية التشغيلية', 'fin.nav_costs': 'فواتير الموردين', 'fin.nav_payables': 'المستحقات والمدفوعات',
+      'fin.nav_margins': 'الهامش والتكاليف', 'fin.nav_demurrage': 'الأرضيات والغرامات' },
     en: { 'ops.nav_group': 'Operations', 'ops.nav_alerts': 'Alerts', 'ops.nav_schedule': 'Daily schedule', 'ops.nav_exceptions': 'Exceptions',
-      'ops.nav_parties': 'Parties & carriers', 'ops.nav_requirements': 'Document rules', 'ops.nav_alerts_badge': 'Open alerts: {n}' }
+      'ops.nav_parties': 'Parties & carriers', 'ops.nav_requirements': 'Document rules', 'ops.nav_alerts_badge': 'Open alerts: {n}',
+      'fin.nav_group': 'Operating finance', 'fin.nav_costs': 'Supplier invoices', 'fin.nav_payables': 'Payables & payments',
+      'fin.nav_margins': 'Margins & costs', 'fin.nav_demurrage': 'Storage & demurrage' }
   };
   var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -215,7 +230,12 @@
     calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
     flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
     truck: '<path d="M2 6h11v10H2zM13 9h4l4 4v3h-8z"/><circle cx="6.5" cy="17.5" r="1.8"/><circle cx="17.5" cy="17.5" r="1.8"/>',
-    listCheck: '<path d="M10 6h10M10 12h10M10 18h10"/><path d="m3.5 6 1 1 2-2M3.5 12l1 1 2-2M3.5 18l1 1 2-2"/>'
+    listCheck: '<path d="M10 6h10M10 12h10M10 18h10"/><path d="m3.5 6 1 1 2-2M3.5 12l1 1 2-2M3.5 18l1 1 2-2"/>',
+    // G4 finance
+    receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+    wallet: '<path d="M4 7a2 2 0 0 1 2-2h12v4"/><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M16 13.5h2"/>',
+    chart: '<path d="M4 20V4M4 20h16"/><path d="M8 16v-4M12 16V8M16 16v-6"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
   };
   function icon(name, cls) {
     var s = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');

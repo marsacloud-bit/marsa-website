@@ -73,7 +73,8 @@ const U = {
   staffA: 'aaaa0000-0000-4000-8000-000000000003',
   adminA: 'aaaa0000-0000-4000-8000-000000000004',
   staffB: 'aaaa0000-0000-4000-8000-000000000005',
-  clientB: 'aaaa0000-0000-4000-8000-000000000006'
+  clientB: 'aaaa0000-0000-4000-8000-000000000006',
+  finB: 'aaaa0000-0000-4000-8000-000000000007'      // G4: accounts_manager, org B (writes the org-B finance fixtures)
 };
 const FP1 = '1f'.repeat(32), FP2 = '2f'.repeat(32), FP3 = '3f'.repeat(32), FP4 = '4f'.repeat(32), FP5 = '5f'.repeat(32);
 const hex = c => c.repeat(64);
@@ -242,6 +243,36 @@ async function g3Fixtures() {
            VALUES ($1, 'export', NULL, 'packing_list', 'customs_declaration'), ($2, 'export', NULL, 'packing_list', 'customs_declaration')`, [A, B]);
 }
 
+// G4 (20261104000100): one row per org in every finance table, written through the real RPCs by a finance
+// role of each org (org A: adminA; org B: finB, accounts_manager). Org A uses TX3 (as the G3 fixtures do).
+// Returns { A: {...ids}, B: {...ids} } for the client-visibility / storage checks below.
+const G4_TABLES = ['finance_documents', 'supplier_invoices', 'supplier_invoice_lines', 'cost_allocations', 'cost_accruals',
+  'supplier_payments', 'client_charges', 'charge_collections', 'demurrage_cases', 'cost_adjustments'];
+async function g4Fixtures() {
+  await q(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES ($1, 'finb@example.com', '{"full_name":"محاسب ب"}')`, [U.finB]);
+  await q(`INSERT INTO public.memberships (user_id, org_id, branch_id, role) VALUES ($1, $2, NULL, 'accounts_manager')`, [U.finB, B]);
+  const rpcAs = async (who, sql, params) => (await as(who, sql, params))[0].r;
+  const out = {};
+  for (const [who, org, br, tx, tag] of [['adminA', A, JED, TX3, 'A'], ['finB', B, B_BR, B_TX, 'B']]) {
+    const carrier = (await q(`SELECT id FROM public.parties WHERE org_id = $1 AND name_ar = $2`, [org, 'ناقل اختبار ' + tag]))[0].id;
+    const doc = await rpcAs(who, `SELECT public.register_finance_document($1) r`, [{ branch_id: br, kind: 'supplier_invoice',
+      original_name: 'inv-' + tag + '.pdf', mime_type: 'application/pdf', size_bytes: 1000, sha256: hex(tag === 'A' ? '7' : '8') }]);
+    await as(who, `INSERT INTO storage.objects (bucket_id, name, owner) VALUES ('finance', $1, $2)`, [doc.storage_path, U[who]]);
+    const inv = await rpcAs(who, `SELECT public.create_supplier_invoice($1) r`, [{ branch_id: br, supplier_id: carrier,
+      invoice_number: 'RLS-' + tag + '-1', invoice_date: '2026-11-01', subtotal: 1000, vat_amount: 150, finance_document_id: doc.id,
+      lines: [{ description: 'نقل حاوية', quantity: 1, unit_price: 1000, net_amount: 1000, vat_rate: 15, service_code: 'transport' }] }]);
+    const alloc = await rpcAs(who, `SELECT public.allocate_invoice_line($1, $2) r`, [inv.lines[0].id, JSON.stringify([{ transaction_id: tx, amount: 400 }])]);
+    const pay = await rpcAs(who, `SELECT public.record_supplier_payment($1) r`, [{ supplier_invoice_id: inv.id, amount: 100, method: 'cash', reference: 'PAY-' + tag }]);
+    const ch = await rpcAs(who, `SELECT public.create_client_charge($1) r`, [{ transaction_id: tx, kind: 'service', description: 'رسوم تخليص', unit_price: 500 }]);
+    await rpcAs(who, `SELECT public.set_charge_status($1, 'approved', NULL) r`, [ch.id]);
+    const col = await rpcAs(who, `SELECT public.record_charge_collection($1) r`, [{ charge_id: ch.id, amount: 100, method: 'cash', reference: 'COL-' + tag }]);
+    const dc = await rpcAs(who, `SELECT public.create_demurrage_case($1) r`, [{ transaction_id: tx, kind: 'storage', estimated_amount: 300 }]);
+    const adj = await rpcAs(who, `SELECT public.create_cost_adjustment($1) r`, [{ kind: 'amendment', supplier_invoice_id: inv.id, reason: 'تعديل اختبار ' + tag }]);
+    out[tag] = { org, tx, doc, inv, line: inv.lines[0].id, alloc: alloc.allocations ? alloc.allocations[0] : alloc, pay, ch, col, dc, adj };
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ tests */
 // every tenant table: [table, owner-side sample SQL returning {id}, filter column for "by id", update clause]
 const TENANT_TABLES = [
@@ -276,7 +307,9 @@ const TENANT_TABLES = [
   ['port_appointments',  `SELECT id::text id FROM public.port_appointments WHERE org_id = $1 LIMIT 1`,  'id::text',  'status = status'],
   ['transport_trips',    `SELECT id::text id FROM public.transport_trips WHERE org_id = $1 LIMIT 1`,    'id::text',  'status = status'],
   ['operational_exceptions', `SELECT id::text id FROM public.operational_exceptions WHERE org_id = $1 LIMIT 1`, 'id::text', 'status = status'],
-  ['operational_alerts', `SELECT id::text id FROM public.operational_alerts WHERE org_id = $1 LIMIT 1`, 'id::text',  'status = status']
+  ['operational_alerts', `SELECT id::text id FROM public.operational_alerts WHERE org_id = $1 LIMIT 1`, 'id::text',  'status = status'],
+  // G4 suppliers & operating costs (20261104000100): read by finance roles only, written only through RPCs
+  ...G4_TABLES.map(t => [t, `SELECT id::text id FROM public.${t} WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'])
 ];
 // G2 internal tables: no API grant at all (written/read only through SECURITY DEFINER RPCs)
 const NO_API_TABLES = ['idempotency_keys', 'platform_admins', 'schema_versions', 'client_errors', 'operational_alert_runs'];
@@ -311,6 +344,9 @@ async function main() {
   catch (e) { fail('fixtures', errText(e)); return finish(); }
   try { await g3Fixtures(); pass('G3 fixtures: a row per org in every G3 table (parties … alerts)'); }
   catch (e) { fail('G3 fixtures', errText(e)); return finish(); }
+  let G4;
+  try { G4 = await g4Fixtures(); pass('G4 fixtures: a row per org in every finance table (documents … adjustments)'); }
+  catch (e) { fail('G4 fixtures', errText(e)); return finish(); }
 
   /* ---------------------------------------------------------------- catalog */
   section('catalog: RLS, grants, function privileges');
@@ -356,7 +392,7 @@ async function main() {
   });
   await check('anon has no USAGE on schema app', async () =>
     (await q(`SELECT has_schema_privilege('anon', 'app', 'USAGE') u`))[0].u === false);
-  await check('authenticated can execute only the 56 documented public RPCs', async () => {
+  await check('authenticated can execute only the 98 documented public RPCs', async () => {
     const r = await q(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                         WHERE n.nspname = 'public' AND has_function_privilege('authenticated', p.oid, 'EXECUTE') ORDER BY 1`);
     const exp = ['admin_list_members', 'admin_set_member_active', 'convert_request_to_transaction', 'import_commit', 'issue_tracking_token', 'my_context', 'public_track',
@@ -372,9 +408,19 @@ async function main() {
       // G3 operations (20261103000200)
       'tx_checklist', 'create_appointment', 'reschedule_appointment', 'set_appointment_status', 'create_trip', 'update_trip',
       'set_trip_status', 'trip_finance', 'set_container_return', 'create_exception', 'resolve_exception', 'refresh_alerts',
-      'list_alerts', 'ack_alert', 'resolve_alert'];
+      'list_alerts', 'ack_alert', 'resolve_alert',
+      // G4 suppliers & operating costs (20261104000100)
+      'save_party_finance', 'register_finance_document', 'void_finance_document', 'create_supplier_invoice',
+      'update_supplier_invoice', 'set_supplier_invoice_status', 'check_supplier_invoice_duplicate', 'add_invoice_lines',
+      'update_invoice_line', 'review_invoice_line', 'allocate_invoice_line', 'approve_allocations', 'reject_allocation',
+      'reverse_allocation', 'cost_review_queue', 'list_supplier_invoices', 'get_supplier_invoice', 'create_accrual',
+      'review_accrual_variance', 'void_accrual', 'list_accruals', 'record_supplier_payment', 'void_supplier_payment',
+      'list_supplier_payments', 'create_client_charge', 'update_client_charge', 'set_charge_status', 'list_client_charges',
+      'suggest_client_charges', 'record_charge_collection', 'void_charge_collection', 'create_demurrage_case',
+      'update_demurrage_case', 'set_demurrage_status', 'list_demurrage', 'create_cost_adjustment', 'review_cost_adjustment',
+      'list_cost_adjustments', 'tx_costs', 'tx_margin', 'margin_report', 'cost_report'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 56) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 98) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');
@@ -409,6 +455,19 @@ async function main() {
   }, '0700 REVOKE ALL ON ALL SEQUENCES');
   await check('storage bucket "documents" is private', async () =>
     (await q(`SELECT public FROM storage.buckets WHERE id = 'documents'`))[0].public === false);
+  await check('storage bucket "finance" (G4 originals) is private', async () =>
+    (await q(`SELECT public FROM storage.buckets WHERE id = 'finance'`))[0].public === false);
+  await check('G4 tables: authenticated holds SELECT only (no INSERT / UPDATE / DELETE grant)', async () => {
+    const r = await q(`SELECT table_name, privilege_type FROM information_schema.role_table_grants
+                        WHERE grantee = 'authenticated' AND table_schema = 'public' AND table_name = ANY($1) AND privilege_type <> 'SELECT'`, [G4_TABLES]);
+    return r.length === 0 || r.map(x => x.table_name + ':' + x.privilege_type).join(', ');
+  });
+  await check('G4 tables carry the audit trigger', async () => {
+    const r = await q(`SELECT c.relname FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid WHERE t.tgname = 'trg_audit' AND c.relname = ANY($1)`, [G4_TABLES]);
+    return r.length === G4_TABLES.length || 'audited: ' + r.map(x => x.relname).join(',');
+  });
+  await check('G4 dictionaries are never client-visible (status_labels fin_*)', async () =>
+    (await q(`SELECT count(*)::int n FROM public.status_labels WHERE domain LIKE 'fin\\_%' AND client_visible`))[0].n === 0);
 
   /* ---------------------------------------------------------------- anon */
   section('anon: no direct table access');
@@ -450,7 +509,17 @@ async function main() {
     ['list_alerts', `SELECT public.list_alerts('${A}', '{}')`],
     ['refresh_alerts', `SELECT public.refresh_alerts('${A}')`],
     ['app.seed_document_requirements', `SELECT app.seed_document_requirements('${A}')`],
-    ['app.refresh_all_alerts', `SELECT app.refresh_all_alerts()`]
+    ['app.refresh_all_alerts', `SELECT app.refresh_all_alerts()`],
+    // G4
+    ['tx_costs', `SELECT public.tx_costs('${TX1}')`],
+    ['tx_margin', `SELECT public.tx_margin('${TX1}')`],
+    ['list_supplier_invoices', `SELECT public.list_supplier_invoices('${A}', '{}')`],
+    ['create_supplier_invoice', `SELECT public.create_supplier_invoice('{}')`],
+    ['register_finance_document', `SELECT public.register_finance_document('{}')`],
+    ['margin_report', `SELECT public.margin_report('${A}', '{}')`],
+    ['cost_report', `SELECT public.cost_report('${A}', '{"group_by":"transaction"}')`],
+    ['list_demurrage', `SELECT public.list_demurrage('${A}', '{}')`],
+    ['app.fin_cost_items', `SELECT * FROM app.fin_cost_items('${A}')`]
   ]) await expectErr(`anon cannot call ${fn}`, () => as('anon', sql), /permission denied/);
 
   /* ---------------------------------------------------------------- tenant isolation */
@@ -1079,6 +1148,84 @@ async function main() {
     const ch = (await q(`SELECT count(*)::int n FROM public.audit_log WHERE table_name = 'document_extractions' AND 'reviewed_fields' = ANY(changed_fields)`))[0];
     return r.n === 0 ? (ch.n > 0 || 'changed_fields lost reviewed_fields') : r.n + ' rows with content';
   });
+
+  /* ---------------------------------------------------------------- G4 */
+  section('G4 finance data: clients and non-finance staff see no cost / supplier / margin data');
+  // the fixtures are real: org A has a row in every finance table, so "0 rows" below is not vacuous
+  for (const t of G4_TABLES) {
+    await check(`G4 fixture: adminA reads its own org-A ${t}`, async () =>
+      (await as('adminA', `SELECT count(*)::int n FROM public.${t} WHERE org_id = $1`, [A]))[0].n > 0 || 'no visible row');
+    for (const who of ['clientA', 'clientA2', 'staffA']) {
+      await check(`${who} reads 0 rows of ${t} (own org)`, () => denied(who, `SELECT 1 FROM public.${t}`), `RLS ${t}_select: fin_read_roles only`);
+    }
+  }
+  await check('clientA (client 101 = TX3 owner) sees no finance timeline event on its own transaction', async () => {
+    const own = (await q(`SELECT count(*)::int n FROM public.transaction_events WHERE transaction_id = $1 AND event_type = 'finance'`, [TX3]))[0].n;
+    if (own === 0) return 'no finance event in the fixture — check would be vacuous';
+    return denied('clientA', `SELECT 1 FROM public.transaction_events WHERE transaction_id = $1 AND event_type = 'finance'`, [TX3]);
+  });
+  await check('finance events carry no amounts and are never client-visible', async () => {
+    const r = (await q(`SELECT count(*)::int n FROM public.transaction_events WHERE event_type = 'finance'
+                         AND (visible_to_client OR payload::text ~ '"(amount|net_amount|total_amount|unit_price|subtotal|vat_amount)"')`))[0].n;
+    return r === 0 || r + ' leaking finance events';
+  });
+  await check('clientA sees no finance-bucket storage object', () => denied('clientA', `SELECT 1 FROM storage.objects WHERE bucket_id = 'finance'`));
+  await check('staffA (clearance_staff) sees no finance-bucket storage object of its own org', () =>
+    denied('staffA', `SELECT 1 FROM storage.objects WHERE bucket_id = 'finance'`));
+  await check('staffB / finB see no org-A finance-bucket object', async () => {
+    for (const who of ['staffB', 'finB']) {
+      const d = await denied(who, `SELECT 1 FROM storage.objects WHERE bucket_id = 'finance' AND name LIKE $1`, [A + '/%']);
+      if (d !== true) return who + ': ' + d;
+    }
+    return true;
+  });
+  await check('adminA reads its own org-A finance original (positive control)', async () =>
+    (await as('adminA', `SELECT 1 FROM storage.objects WHERE bucket_id = 'finance' AND name = $1`, [G4.A.doc.storage_path])).length === 1);
+  await expectErr('finB cannot upload into an org-A finance path', () => as('finB',
+    `INSERT INTO storage.objects (bucket_id, name, owner) VALUES ('finance', $1, $2)`, [`${A}/${G4.A.doc.id}/evil.pdf`, U.finB]), /row-level security|permission denied/);
+  await expectErr('clientA cannot upload into the finance bucket', () => as('clientA',
+    `INSERT INTO storage.objects (bucket_id, name, owner) VALUES ('finance', $1, $2)`, [`${A}/${G4.A.doc.id}/x.pdf`, U.clientA]), /row-level security|permission denied/);
+  const g4Readers = [
+    ['tx_costs', `SELECT public.tx_costs($1)`, [TX3]],
+    ['tx_margin', `SELECT public.tx_margin($1)`, [TX3]],
+    ['list_client_charges', `SELECT public.list_client_charges($1)`, [TX3]],
+    ['suggest_client_charges', `SELECT public.suggest_client_charges($1)`, [TX3]],
+    ['get_supplier_invoice', `SELECT public.get_supplier_invoice($1)`, [G4.A.inv.id]],
+    ['list_supplier_invoices', `SELECT public.list_supplier_invoices($1, '{}')`, [A]],
+    ['check_supplier_invoice_duplicate', `SELECT public.check_supplier_invoice_duplicate($1, $2)`, [A, { supplier_id: G4.A.inv.supplier_id, invoice_number: 'RLS-A-1', invoice_date: '2026-11-01', total_amount: 1150 }]],
+    ['cost_review_queue', `SELECT public.cost_review_queue($1, '{}')`, [A]],
+    ['list_accruals', `SELECT public.list_accruals($1, '{}')`, [A]],
+    ['list_supplier_payments', `SELECT public.list_supplier_payments($1, '{}')`, [A]],
+    ['list_demurrage', `SELECT public.list_demurrage($1, '{}')`, [A]],
+    ['list_cost_adjustments', `SELECT public.list_cost_adjustments($1, '{}')`, [A]],
+    ['margin_report', `SELECT public.margin_report($1, '{}')`, [A]],
+    ['cost_report', `SELECT public.cost_report($1, '{"group_by":"transaction"}')`, [A]]
+  ];
+  for (const [fn, sql, params] of g4Readers) {
+    for (const who of ['clientA', 'staffA']) {
+      await expectErr(`${who} gets no result from ${fn} (own org)`, () => as(who, sql, params), /MRS_FORBIDDEN|MRS_NOT_FOUND/);
+    }
+    await expectErr(`staffB gets no result from ${fn} (org A)`, () => as('staffB', sql, params), /MRS_FORBIDDEN|MRS_NOT_FOUND/);
+    await expectErr(`finB (org-B finance) gets no result from ${fn} (org A)`, () => as('finB', sql, params), /MRS_FORBIDDEN|MRS_NOT_FOUND/);
+  }
+  await check('positive control: adminA reads tx_costs / tx_margin of TX3', async () => {
+    const c = (await as('adminA', `SELECT public.tx_costs($1) r`, [TX3]))[0].r;
+    const m = (await as('adminA', `SELECT public.tx_margin($1) r`, [TX3]))[0].r;
+    return (c.charges.length >= 1 && c.allocations.length >= 1 && m.analytical === true) || JSON.stringify({ c: Object.keys(c), m });
+  });
+  for (const [fn, sql, params] of [
+    ['create_supplier_invoice', `SELECT public.create_supplier_invoice($1)`, [{ branch_id: JED, supplier_id: G4.A.inv.supplier_id, invoice_number: 'X-1', invoice_date: '2026-11-01', subtotal: 1, vat_amount: 0 }]],
+    ['create_client_charge', `SELECT public.create_client_charge($1)`, [{ transaction_id: TX3, kind: 'service', description: 'x', unit_price: 1 }]],
+    ['record_supplier_payment', `SELECT public.record_supplier_payment($1)`, [{ supplier_invoice_id: G4.A.inv.id, amount: 1, method: 'cash', reference: 'x' }]],
+    ['allocate_invoice_line', `SELECT public.allocate_invoice_line($1, $2)`, [G4.A.line, JSON.stringify([{ transaction_id: TX3, amount: 1 }])]],
+    ['save_party_finance', `SELECT public.save_party_finance($1, $2)`, [G4.A.inv.supplier_id, { iban_last4: '1234' }]]
+  ]) {
+    for (const who of ['clientA', 'staffA', 'staffB', 'finB']) {
+      await expectErr(`${who} cannot call ${fn} on org A`, () => as(who, sql, params), /MRS_FORBIDDEN|MRS_NOT_FOUND/);
+    }
+  }
+  await expectErr('staffA cannot change a party finance column directly (guard trigger)', () => as('staffA',
+    `UPDATE public.parties SET iban_last4 = '9999' WHERE id = $1`, [G4.A.inv.supplier_id]), /MRS_FORBIDDEN|permission denied|row-level security/);
 
   return finish();
 }

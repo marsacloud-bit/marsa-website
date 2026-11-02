@@ -53,6 +53,7 @@ const U = {
   staffB: 'dddd0000-0000-4000-8000-000000000005'
 };
 const KEY_REQ = '0d0d0000-0000-4000-8000-000000000001';
+const KEY_INV = '0d0d0000-0000-4000-8000-00000000000a';   // G4 supplier invoice (replay after restore)
 
 /* ------------------------------------------------------------------ helpers */
 let db;
@@ -145,6 +146,25 @@ async function buildSample() {
   await rpc('staffA', `SELECT public.create_trip($1, $2) r`, [{ transaction_id: TX1, carrier_id: carrier, driver_id: driver, origin: 'ميناء جدة', destination: 'مستودع' }, '0d0d0000-0000-4000-8000-000000000007']);
   await rpc('staffA', `SELECT public.create_exception($1, $2) r`, [{ transaction_id: TX1, kind: 'inspection', reason: 'معاينة جمركية (اختبار الاستعادة)' }, '0d0d0000-0000-4000-8000-000000000008']);
   await rpc('staffA', `SELECT public.refresh_alerts($1) r`, [A]);
+  // G4 (20261104000100): one row in every finance table through the real RPCs (adminA = finance-capable admin);
+  // the trip above already has its carrier accrual (trigger). Idempotency keys make the replay check below possible.
+  const fdoc = await rpc('adminA', `SELECT public.register_finance_document($1, $2) r`, [{ branch_id: JED, kind: 'supplier_invoice',
+    original_name: 'carrier-inv.pdf', mime_type: 'application/pdf', size_bytes: 2048, sha256: '9'.repeat(64) }, '0d0d0000-0000-4000-8000-000000000009']);
+  await as('adminA', `INSERT INTO storage.objects (bucket_id, name, owner) VALUES ('finance', $1, $2)`, [fdoc.storage_path, U.adminA]);
+  const inv = await rpc('adminA', `SELECT public.create_supplier_invoice($1, $2) r`, [{ branch_id: JED, supplier_id: carrier,
+    invoice_number: 'RST-INV-1', invoice_date: '2026-11-01', subtotal: 800, vat_amount: 120, finance_document_id: fdoc.id,
+    lines: [{ description: 'نقل حاوية (اختبار الاستعادة)', quantity: 1, unit_price: 800, net_amount: 800, vat_rate: 15, service_code: 'transport' }] },
+    KEY_INV]);
+  const al = await rpc('adminA', `SELECT public.allocate_invoice_line($1, $2) r`, [inv.lines[0].id, JSON.stringify([{ transaction_id: TX1, amount: 800 }])]);
+  const allocIds = (al.allocations || [al]).map(x => x.id);
+  await rpc('adminA', `SELECT public.approve_allocations($1::uuid[], NULL) r`, [allocIds]);
+  await rpc('adminA', `SELECT public.record_supplier_payment($1) r`, [{ supplier_invoice_id: inv.id, amount: 460, method: 'bank_transfer', reference: 'RST-PAY-1' }]);
+  const ch = await rpc('adminA', `SELECT public.create_client_charge($1) r`, [{ transaction_id: TX1, kind: 'service', description: 'رسوم تخليص (استعادة)', unit_price: 1500 }]);
+  await rpc('adminA', `SELECT public.set_charge_status($1, 'approved', NULL) r`, [ch.id]);
+  await rpc('adminA', `SELECT public.record_charge_collection($1) r`, [{ charge_id: ch.id, amount: 500, method: 'cash', reference: 'RST-COL-1' }]);
+  await rpc('adminA', `SELECT public.create_demurrage_case($1) r`, [{ transaction_id: TX1, kind: 'storage', estimated_amount: 250 }]);
+  await rpc('adminA', `SELECT public.create_cost_adjustment($1) r`, [{ kind: 'amendment', supplier_invoice_id: inv.id, reason: 'تعديل (اختبار الاستعادة)' }]);
+  r1.g4 = { inv: inv.id };
   return r1;
 }
 
@@ -198,7 +218,11 @@ async function main() {
     // G3
     'public.parties', 'public.drivers', 'public.trucks', 'public.client_aliases', 'public.customs_declarations', 'public.bills_of_lading',
     'public.transaction_bls', 'public.document_requirements', 'public.port_appointments', 'public.transport_trips',
-    'public.operational_exceptions', 'public.operational_alerts', 'public.operational_alert_runs']
+    'public.operational_exceptions', 'public.operational_alerts', 'public.operational_alert_runs',
+    // G4
+    'public.finance_documents', 'public.supplier_invoices', 'public.supplier_invoice_lines', 'public.cost_allocations',
+    'public.cost_accruals', 'public.supplier_payments', 'public.client_charges', 'public.charge_collections',
+    'public.demurrage_cases', 'public.cost_adjustments']
     .filter(k => !before[k] || before[k].n === 0);
   await check('source has rows in the key tables (drill is not vacuous)', () => empty.length === 0 || 'empty: ' + empty.join(', '));
   await check('both orgs present in the source', async () =>
@@ -300,6 +324,35 @@ async function main() {
     const fin = await rpc('adminA', `SELECT public.trip_finance($1) r`, [[trip]]);
     const ck = await rpc('staffA', `SELECT public.tx_checklist($1) r`, [TX1]);
     return (al.total > 0 && fin[trip] && ck.configured === true && ck.items.length > 0) || JSON.stringify({ al: al.total, fin, ck: ck.configured });
+  });
+  await check('G4 after restore: staffB / staffA / clientA see no finance rows of org A', async () => {
+    for (const t of ['finance_documents', 'supplier_invoices', 'supplier_invoice_lines', 'cost_allocations', 'cost_accruals',
+      'supplier_payments', 'client_charges', 'charge_collections', 'demurrage_cases', 'cost_adjustments']) {
+      for (const who of ['staffB', 'staffA', 'clientA']) {
+        const r = await denied(who, `SELECT 1 FROM public.${t} WHERE org_id = $1`, [A]);
+        if (r !== true) return who + ' ' + t + ': ' + r;
+      }
+    }
+    return true;
+  });
+  await check('G4 after restore: tx_margin / tx_costs give the same figures; invoice replay returns the same id', async () => {
+    const m = await rpc('adminA', `SELECT public.tx_margin($1) r`, [TX1]);
+    const sar = (m.currencies || []).find(c => c.currency === 'SAR') || {};
+    const c = await rpc('adminA', `SELECT public.tx_costs($1) r`, [TX1]);
+    const inv = (await q(`SELECT company_paid_amount::text p, payment_status s FROM public.supplier_invoices WHERE id = $1`, [r1.g4.inv]))[0];
+    const again = await rpc('adminA', `SELECT public.create_supplier_invoice($1, $2) r`, [{ branch_id: JED, supplier_id: (await q(`SELECT supplier_id FROM public.supplier_invoices WHERE id = $1`, [r1.g4.inv]))[0].supplier_id,
+      invoice_number: 'RST-INV-1', invoice_date: '2026-11-01', subtotal: 800, vat_amount: 120, finance_document_id: (await q(`SELECT finance_document_id FROM public.supplier_invoices WHERE id = $1`, [r1.g4.inv]))[0].finance_document_id,
+      lines: [{ description: 'نقل حاوية (اختبار الاستعادة)', quantity: 1, unit_price: 800, net_amount: 800, vat_rate: 15, service_code: 'transport' }] }, KEY_INV]);
+    const ok = Number(sar.charges_service) === 1500 && Number(sar.cost_confirmed) === 0 && Number(sar.cost_estimated) === 1050
+      && c.charges.length === 1 && c.collections.length === 1 && inv.p === '460.00' && inv.s === 'partial' && again.id === r1.g4.inv;
+    return ok || JSON.stringify({ sar, inv, again: again.id });
+  });
+  await check('G4 after restore: clientA gets no tx_costs / tx_margin for its own TX1', async () => {
+    for (const fn of ['tx_costs', 'tx_margin']) {
+      try { await as('clientA', `SELECT public.${fn}($1)`, [TX1]); return fn + ' answered for a client'; }
+      catch (e) { if (!/MRS_FORBIDDEN|MRS_NOT_FOUND/.test(errText(e))) return fn + ': ' + errText(e); }
+    }
+    return true;
   });
   await check('writes work after restore (new request gets the next ref)', async () => {
     const r = await rpc('anon', `SELECT public.submit_service_request($1) r`, [reqPayload('0559000099', {})]);

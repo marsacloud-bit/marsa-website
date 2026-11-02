@@ -64,6 +64,9 @@
       MRS_UNKNOWN_RESULT: 'لم نتمكن من تأكيد نتيجة العملية بسبب انقطاع الاتصال. إعادة المحاولة آمنة ولن تُنشئ نسخة مكرّرة.',
       MRS_TIMEOUT: 'استغرق الخادم وقتًا أطول من المعتاد. حاول مرة أخرى.',
       MRS_DOCS_MISSING: 'لا يمكن الانتقال إلى هذه المرحلة قبل استكمال المستندات المطلوبة لها ({f}). ارفعها وصنّفها، أو تجاوز القاعدة بصلاحية مدير مع ذكر السبب.',
+      // G4 (docs/online/G4_SPEC.md)
+      MRS_OVER_ALLOCATED: 'مجموع التوزيع يتجاوز صافي البند؛ التوزيع لا يضاعف الفاتورة (المتبقي القابل للتوزيع: {f}).',
+      MRS_OVERPAID: 'المبلغ يتجاوز المتبقي من الإجمالي (المتبقي: {f}).',
       DUPLICATE: 'هذا السجل موجود من قبل (تكرار). إن كان ملفًا فقد رُفع سابقًا.',
       FK: 'مرجع غير صالح أو لا يخص مؤسستك.',
       CHECK: 'بعض القيم غير صحيحة.',
@@ -113,12 +116,110 @@
       use_reschedule_appointment: 'تغيير الموعد (استخدم «إعادة الجدولة»)', no_change: 'لا يوجد تغيير', backward: 'الرجوع إلى حالة سابقة',
       cancelled: 'سجل ملغى', resolved: 'استثناء مغلق', link: 'ربط البوليصة', reason: 'السبب', severity: 'الأهمية', packages: 'عدد الطرود',
       plate_no: 'رقم اللوحة', national_id_last4: 'آخر 4 أرقام من الهوية', ids: 'المعرّفات', transaction: 'المعاملة', org_id: 'المؤسسة',
+      // G4 fields / detail codes
+      supplier_id: 'المورد', invoice_number: 'رقم الفاتورة', invoice_date: 'تاريخ الفاتورة', due_date: 'تاريخ الاستحقاق',
+      subtotal: 'الإجمالي قبل الضريبة', vat_amount: 'مبلغ الضريبة', total_amount: 'الإجمالي', net_amount: 'الصافي', vat_rate: 'نسبة الضريبة',
+      quantity: 'الكمية', unit_price: 'سعر الوحدة', description: 'الوصف', service_code: 'الخدمة', line_id: 'البند', lines: 'بنود الفاتورة',
+      supplier_invoice_id: 'فاتورة المورد', finance_document_id: 'المستند المالي', adjusts_invoice_id: 'الفاتورة الأصلية للإشعار',
+      supplier_vat_number: 'الرقم الضريبي للمورد', amount: 'المبلغ', share_pct: 'نسبة التوزيع', trip_id: 'الرحلة', accrual_id: 'التكلفة المتوقعة',
+      demurrage_case_id: 'ملف الأرضيات / الغرامات', cost_allocation_id: 'توزيع التكلفة', charge_id: 'المبلغ المحمّل على العميل',
+      markup_pct: 'نسبة الإضافة', paid_at: 'تاريخ الدفع', collected_at: 'تاريخ التحصيل', method: 'طريقة الدفع', payer: 'الدافع',
+      operator_id: 'المشغّل', exception_id: 'الاستثناء التشغيلي', free_until: 'نهاية المهلة المجانية', charged_until: 'محسوب حتى',
+      estimated_amount: 'المبلغ التقديري', related_invoice_id: 'الفاتورة الأصلية', iban_last4: 'آخر 4 أرقام من الآيبان', bank_name: 'البنك',
+      payment_terms_days: 'مدة السداد (أيام)', default_currency: 'العملة الافتراضية', group_by: 'التجميع حسب', size_bytes: 'حجم الملف',
+      storage_path: 'مسار الملف', decision: 'القرار', basis: 'أساس التقدير', line_excluded: 'بند مستبعد', line_overhead: 'بند مصروف عام',
+      line_pending_review: 'بند بانتظار المراجعة', line_disputed: 'بند متنازع عليه', share_total: 'مجموع النسب (أكثر من 100%)',
       stage_skip: 'تخطي مرحلة', unknown_key: 'حقل غير معروف', operational_state: 'الحالة التشغيلية للحاوية', gross_weight_kg: 'الوزن الإجمالي'
+    },
+    // G4 detail-specific messages (error.field = the detail code); they replace the code's generic text
+    details: {
+      invoice_number_taken: 'رقم الفاتورة مسجّل من قبل لهذا المورد (بعد توحيد الصيغة). افتح الفاتورة الموجودة بدلًا من إدخالها مرة أخرى.',
+      file_duplicate: 'هذا الملف مرفوع من قبل كمستند مالي. افتح السجل الموجود بدلًا من رفعه مرة أخرى.',
+      duplicate_ref: 'يوجد سجل مطابق من قبل (رقم أو ملف مكرر). افتح السجل الموجود بدلًا من إنشاء نسخة جديدة.',
+      self_approval: 'لا يمكنك اعتماد سجل أنشأته بنفسك (مبدأ الأربعة أعين). يعتمده مسؤول آخر.',
+      paid_by_client: 'هذه التكلفة دفعها العميل للمورد مباشرة، فلا تُحمَّل عليه كمبلغ مسترد مرة أخرى.',
+      charged_to_client: 'هذه التكلفة محمّلة على العميل كمبلغ مسترد. ألغِ المبلغ المحمّل أولًا قبل تسجيل أن العميل دفعها مباشرة.',
+      g5_only: 'حالة «مفوترة» تُضبط من الفوترة (المرحلة القادمة) فقط.',
+      lines_pending_review: 'لا يمكن اعتماد الفاتورة وفيها بنود بانتظار المراجعة أو متنازع عليها.',
+      lines_unallocated: 'لا يمكن اعتماد الفاتورة قبل توزيع كل بنودها المقبولة بتوزيعات معتمدة ({x}).',
+      original_file: 'أرفق أصل الفاتورة (ملف) قبل اعتمادها.',
+      late_cost: 'هذه تكلفة متأخرة على معاملة في مرحلة الفوترة أو مغلقة؛ اكتب سبب الاعتماد.',
+      discrepancy: 'إجماليات رأس الفاتورة لا تطابق مجموع البنود؛ اكتب ملاحظة تشرح الفرق قبل الاعتماد.',
+      party_finance: 'البيانات المالية للجهة (البنك والآيبان وشروط الدفع والعملة) تُحفظ من «البيانات المالية» فقط.',
+      finance: 'هذه البيانات المالية متاحة لصلاحيات المالية فقط.',
+      invoice_locked: 'الفاتورة معتمدة أو ملغاة ولا تقبل التعديل. حوّلها إلى «متنازع عليها» أولًا.',
+      invoice_approved: 'لا يمكن عكس توزيع على فاتورة معتمدة. حوّل الفاتورة إلى «متنازع عليها» أولًا.',
+      has_payments: 'على الفاتورة دفعات مسجّلة؛ ألغِ الدفعات أولًا.',
+      has_approved_allocations: 'على الفاتورة توزيعات معتمدة؛ اعكسها أولًا.',
+      in_use: 'المستند هو أصل فاتورة قائمة ولا يمكن إلغاؤه.',
+      allocated: 'البند موزّع على معاملات؛ اعكس توزيعاته أو ارفضها قبل تعديله.',
+      cost_charged: 'هذه التكلفة (أو تكلفتها المتوقعة المرتبطة) محمّلة على العميل من قبل؛ لا تُحمَّل مرتين.',
+      trip_charged: 'رحلة النقل هذه محمّلة على العميل من قبل (بسعرها أو بتكلفتها)؛ لا تُحمَّل مرتين.',
+      credit_exceeds_invoice: 'الإشعار الدائن أكبر مما تبقى من الفاتورة الأصلية بعد الإشعارات السابقة (المتبقي: {x}).',
+      credit_target: 'بند الإشعار الدائن يخفّض فقط معاملة تحمل تكلفة الفاتورة الأصلية، ولا ينزل بها تحت الصفر (المتبقي: {x}).',
+      credit_note_link: 'الإشعار الدائن لا يُطابق رحلة أو أرضيات أو تكلفة متوقعة؛ خصّصه على المعاملة فقط.',
+      credit_allocated: 'إشعار دائن يخفّض هذه المعاملة؛ اعكس توزيع الإشعار أولًا.',
+      currency_in_use: 'لا تُغيَّر عملة الملف وعليه توزيعات أو مبالغ محمّلة.',
+      no_accrual: '«بلا مطابقة» لا يجتمع مع رحلة أو ملف أرضيات.'
     },
     banner: {
       staging: 'بيئة تجريبية (Staging) — البيانات للاختبار فقط'
     }
   };
+
+  // G4 English strings (the shared 'err' / 'field' namespaces of i18n.js; Arabic stays in AR above)
+  (function () {
+    var I = window.MarsaI18n;
+    if (!I || typeof I.register !== 'function') return;
+    try {
+      I.register('err', { en: {
+        MRS_OVER_ALLOCATED: 'The allocations exceed the line net; an allocation never doubles the invoice (remaining: {f}).',
+        MRS_OVERPAID: 'The amount exceeds what remains of the total (remaining: {f}).',
+        detail_invoice_number_taken: 'This invoice number is already registered for this supplier (after normalization). Open the existing invoice instead of entering it again.',
+        detail_file_duplicate: 'This file is already registered as a finance document. Open the existing record instead of uploading it again.',
+        detail_duplicate_ref: 'A matching record already exists (duplicate number or file). Open it instead of creating a copy.',
+        detail_self_approval: 'You cannot approve a record you created yourself (four-eyes rule). Another approver must do it.',
+        detail_paid_by_client: 'The client paid this cost to the supplier directly, so it cannot be charged to the client as a disbursement again.',
+        detail_charged_to_client: 'This cost is already charged to the client as a disbursement. Void that charge before recording a direct client payment.',
+        detail_g5_only: 'The "invoiced" status is set by billing (the next stage) only.',
+        detail_lines_pending_review: 'The invoice cannot be approved while lines are pending review or disputed.',
+        detail_lines_unallocated: 'The invoice cannot be approved before every accepted line is fully allocated with approved allocations ({x}).',
+        detail_original_file: 'Attach the original invoice file before approving it.',
+        detail_late_cost: 'This is a late cost on a transaction in billing or closed; give a reason for the approval.',
+        detail_discrepancy: 'The invoice header totals do not match the sum of the lines; add a note explaining the difference before approving.',
+        detail_party_finance: 'Party finance data (bank, IBAN, payment terms, currency) is saved from "Finance data" only.',
+        detail_finance: 'These finance figures are available to finance roles only.',
+        detail_invoice_locked: 'The invoice is approved or void and cannot be edited. Mark it disputed first.',
+        detail_invoice_approved: 'An allocation on an approved invoice cannot be reversed. Mark the invoice disputed first.',
+        detail_has_payments: 'The invoice has recorded payments; void them first.',
+        detail_has_approved_allocations: 'The invoice has approved allocations; reverse them first.',
+        detail_in_use: 'This document is the original of an active invoice and cannot be voided.',
+        detail_allocated: 'The line is allocated to transactions; reverse or reject its allocations before editing it.',
+        detail_cost_charged: 'This cost (or its linked expected cost) is already charged to the client; it is never charged twice.',
+        detail_trip_charged: 'This transport trip is already charged to the client (by its price or its cost); it is never charged twice.',
+        detail_credit_exceeds_invoice: 'The credit note is larger than what is left of the original invoice after earlier notes (remaining: {x}).',
+        detail_credit_target: 'A credit-note line only reduces a transaction that carries the original invoice cost, never below zero (remaining: {x}).',
+        detail_credit_note_link: 'A credit note is not matched to a trip, storage case or expected cost; allocate it to the transaction only.',
+        detail_credit_allocated: 'A credit note reduces this transaction; reverse the credit allocation first.',
+        detail_currency_in_use: 'The case currency cannot change while allocations or charges are linked to it.',
+        detail_no_accrual: '"No match" cannot be combined with a trip or storage case.'
+      } });
+      I.register('field', { en: {
+        supplier_id: 'Supplier', invoice_number: 'Invoice number', invoice_date: 'Invoice date', due_date: 'Due date',
+        subtotal: 'Subtotal (excl. VAT)', vat_amount: 'VAT amount', total_amount: 'Total', net_amount: 'Net', vat_rate: 'VAT rate',
+        quantity: 'Quantity', unit_price: 'Unit price', description: 'Description', service_code: 'Service', line_id: 'Line', lines: 'Invoice lines',
+        supplier_invoice_id: 'Supplier invoice', finance_document_id: 'Finance document', adjusts_invoice_id: 'Original invoice of the note',
+        supplier_vat_number: 'Supplier VAT number', amount: 'Amount', share_pct: 'Allocation share', trip_id: 'Trip', accrual_id: 'Expected cost',
+        demurrage_case_id: 'Storage / demurrage case', cost_allocation_id: 'Cost allocation', charge_id: 'Client charge',
+        markup_pct: 'Markup %', paid_at: 'Payment date', collected_at: 'Collection date', method: 'Payment method', payer: 'Payer',
+        operator_id: 'Operator', exception_id: 'Operational exception', free_until: 'Free time ends', charged_until: 'Charged until',
+        estimated_amount: 'Estimated amount', related_invoice_id: 'Original invoice', iban_last4: 'IBAN last 4 digits', bank_name: 'Bank',
+        payment_terms_days: 'Payment terms (days)', default_currency: 'Default currency', group_by: 'Group by', size_bytes: 'File size',
+        storage_path: 'File path', decision: 'Decision', basis: 'Estimate basis', line_excluded: 'Excluded line', line_overhead: 'Overhead line',
+        line_pending_review: 'Line pending review', line_disputed: 'Disputed line', share_total: 'Share total (over 100%)'
+      } });
+    } catch (e) { /* Arabic messages stay */ }
+  })();
 
   /* ------------------------------------------------------------------
      Mode detection (never crash; refuse secret keys)
@@ -163,16 +264,51 @@
     var label = fieldLabel(f);
     return String(tpl).replace(/\{f\}|\{field\}/g, label);
   }
-  function mkErr(code, field, raw) {
-    var tpl = i18nStr('err.' + code) || AR.errors[code] || i18nStr('err.UNKNOWN') || AR.errors.UNKNOWN;
-    return { code: code, field: field || null, message: fmt(tpl, field), raw: raw || null };
+  function mkErr(code, field, raw, extra) {
+    var tpl = null;
+    // G4: a detail code with its own message ({x} = the extra part, e.g. line numbers)
+    if (field && Object.prototype.hasOwnProperty.call(AR.details, field)) tpl = i18nStr('err.detail_' + field) || AR.details[field];
+    if (!tpl) tpl = i18nStr('err.' + code) || AR.errors[code] || i18nStr('err.UNKNOWN') || AR.errors.UNKNOWN;
+    var msg = fmt(tpl, field).replace(/\{x\}/g, extra == null ? '' : String(extra)).replace(/\s*\(\)/g, '');
+    return { code: code, field: field || null, message: msg, raw: raw || null };
+  }
+  // G4 details may carry a reference after the code ('invoice_number_taken:<uuid>', 'lines_unallocated:1,3'),
+  // a bare id (the existing duplicate) or a number (the remaining amount of MRS_OVER_ALLOCATED / MRS_OVERPAID)
+  var UUID_DETAIL = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  function splitDetail(code, det) {
+    var out = { field: det || null, ref: null, extra: null, remaining: null };
+    if (!det) return out;
+    var m = /^([a-z][a-z0-9_]*)\s*[:=\s]\s*(.+)$/.exec(det);
+    if (m && (Object.prototype.hasOwnProperty.call(AR.details, m[1]) || Object.prototype.hasOwnProperty.call(AR.fields, m[1]))) {
+      out.field = m[1];
+      var rest = m[2].trim();
+      if (UUID_DETAIL.test(rest)) out.ref = rest; else out.extra = rest.replace(/^\{|\}$/g, '');
+      return out;
+    }
+    if (UUID_DETAIL.test(det)) { out.ref = det; out.field = code === 'MRS_INVALID' ? 'duplicate_ref' : null; return out; }
+    if ((code === 'MRS_OVER_ALLOCATED' || code === 'MRS_OVERPAID') && /^-?[0-9]+(\.[0-9]+)?$/.test(det)) out.remaining = +det;
+    return out;
   }
   function normalizeError(e) {
     if (!e) return mkErr('UNKNOWN');
     if (e.code && /^MRS_/.test(e.code) && e.message && e.raw !== undefined) return e; // already ours
     var msg = String(e.message || e.error_description || e.msg || '');
     var det = e.details != null ? String(e.details) : (e.detail != null ? String(e.detail) : '');
-    if (/^MRS_[A-Z_]+$/.test(msg)) return mkErr(msg, det || null, e);
+    // G4 puts the existing row id / line numbers / remaining amount in the Postgres HINT (DETAIL keeps the code word)
+    var hint = e.hint != null ? String(e.hint).trim() : '';
+    if (/^MRS_[A-Z_]+$/.test(msg)) {
+      var sd = splitDetail(msg, det);
+      if (hint) {
+        if (!sd.ref && UUID_DETAIL.test(hint)) sd.ref = hint;
+        else if (sd.extra == null && !UUID_DETAIL.test(hint)) sd.extra = hint;
+      }
+      var out = mkErr(msg, sd.field, e, sd.extra);
+      if (sd.ref) out.refId = sd.ref;
+      if (sd.extra != null) out.extra = sd.extra;
+      // the remaining amount fills the message's {f}; it is not a field name
+      if (sd.remaining != null) { out.remaining = sd.remaining; out.field = null; }
+      return out;
+    }
     var pg = e.code || '';
     if (pg === '23505') return mkErr('DUPLICATE', null, e);
     if (pg === '23503') return mkErr('FK', null, e);
@@ -1624,6 +1760,218 @@
   }
 
   /* ------------------------------------------------------------------
+     G4 — suppliers & operating costs (docs/online/G4_SPEC.md)
+     Every G4 write is an RPC (the tables are SELECT-only for the API); the
+     creating RPCs are idempotent (p_idem_key, kept across retries; pass
+     opts.idemKey to keep one across a page-level retry). Org-level readers
+     take the active org (or f.orgId) as p_org and the remaining filter keys
+     as p_filters (empty values dropped). Results are returned as the server
+     shapes them ({items, total, …} / row json). Finance originals live in the
+     private 'finance' bucket, never in 'documents'. Clients see nothing (G4-7).
+     ------------------------------------------------------------------ */
+  function finFilters(f) {
+    var out = {};
+    Object.keys(f || {}).forEach(function (k) {
+      var v = f[k];
+      if (k === 'orgId' || v == null || v === '' || typeof v === 'function') return;
+      out[k] = v;
+    });
+    if (out.limit != null) out.limit = Math.max(1, Math.min(200, parseInt(out.limit, 10) || 50));
+    if (out.offset != null) out.offset = Math.max(0, parseInt(out.offset, 10) || 0);
+    return out;
+  }
+  // org-level reader: name(p_org, p_filters)
+  function finOrgRpc(name, f) {
+    f = f || {};
+    return inActiveOrg(f.orgId, function (oid) { return rpc(name, { p_org: oid, p_filters: finFilters(f) }); });
+  }
+  // idempotent create: name(p_payload, p_idem_key) — idempotencyKey never travels inside the payload
+  function finCreate(name, p, opts) {
+    if (!configured) return demoOnly();
+    opts = opts || {};
+    return idemRpc(name, opts.idemKey, function (k) { return { p_payload: withKey(p, null), p_idem_key: k }; });
+  }
+  function txRpc(name, txId) {
+    if (!configured) return demoOnly();
+    if (!isUuid(txId)) return Promise.resolve(fail('MRS_INVALID', 'transaction_id'));
+    return rpc(name, { p_tx: txId });
+  }
+  function reasonRpc(name, id, reason) { return rpc(name, { p_id: id, p_reason: reason == null ? null : String(reason) }); }
+
+  /* party finance columns (iban_last4, bank_name, payment_terms_days, default_currency) — only through this RPC */
+  function savePartyFinance(partyId, p) { return rpc('save_party_finance', { p_party: partyId, p_payload: p || {} }); }
+
+  /* finance originals (supplier invoices, credit notes, payment / collection / adjustment / demurrage evidence)
+     o = { file, branchId, kind } → sha256 in the browser → register_finance_document → upload to the returned path.
+     → { data: { id, storage_bucket, storage_path, sha256, original_name } }. A duplicate file (same sha256, not voided)
+     is refused by the server (MRS_INVALID 'file_duplicate', error.refId = the existing document). When the row is saved
+     but the bytes are not, the result carries both data and error MRS_UPLOAD; retrying with the same opts.idemKey
+     replays the registration and uploads again. */
+  var FIN_DOC_KINDS = ['supplier_invoice', 'credit_note', 'payment_evidence', 'collection_evidence', 'adjustment_evidence', 'demurrage_evidence', 'other'];
+  function uploadFinanceDocument(o, opts) {
+    if (!configured) return demoOnly();
+    o = o || {}; opts = opts || {};
+    var file = o.file;
+    if (!file) return Promise.resolve(fail('MRS_REQUIRED', 'finance_document_id'));
+    if (!file.size) return Promise.resolve(fail('MRS_INVALID', 'size_bytes'));
+    if (file.size > 26214400) return Promise.resolve(fail('MRS_FILE_TOO_LARGE'));
+    if (!isUuid(o.branchId)) return Promise.resolve(fail('MRS_REQUIRED', 'branch_id'));
+    var kind = FIN_DOC_KINDS.indexOf(o.kind) !== -1 ? o.kind : 'other';
+    return sha256Hex(file).then(function (hash) {
+      var payload = {
+        branch_id: o.branchId, kind: kind, original_name: String(file.name || 'file').slice(0, 255),
+        mime_type: file.type || null, size_bytes: file.size, sha256: hash
+      };
+      return idemRpc('register_finance_document', opts.idemKey, function (k) { return { p_payload: payload, p_idem_key: k }; })
+        .then(function (r) {
+          if (r.error || !r.data) return r;
+          var doc = Object.assign({ sha256: hash, original_name: payload.original_name }, r.data), key = r.idemKey;
+          var path = doc.storage_path;
+          if (!path || String(path).split('/').length !== 3 || String(path).indexOf('..') !== -1) {
+            return { data: doc, error: mkErr('MRS_UPLOAD', 'storage_path'), idemKey: key };
+          }
+          return online(function (c) {
+            return c.storage.from('finance').upload(path, file, { upsert: false, contentType: file.type || 'application/octet-stream' });
+          }).then(function (u) {
+            // a replayed registration whose bytes are already there: the object exists → fine
+            var exists = u.error && /already exists|duplicate|409/i.test(String((u.error.raw && (u.error.raw.message || u.error.raw.statusCode)) || ''));
+            if (u.error && !exists) return { data: doc, error: mkErr('MRS_UPLOAD', null, u.error.raw || u.error), idemKey: key };
+            return { data: doc, error: null, idemKey: key };
+          });
+        });
+    }, function (e) { return { data: null, error: normalizeError(e) }; });
+  }
+  function financeDocumentUrl(docOrPath, expiresIn) {
+    var p = typeof docOrPath === 'string' ? docOrPath : docOrPath && docOrPath.storage_path;
+    if (!p) return Promise.resolve(fail('MRS_NOT_FOUND'));
+    return online(function (c) { return c.storage.from('finance').createSignedUrl(p, expiresIn || 300); })
+      .then(function (r) {
+        if (r.error) return r;
+        var u = r.data && r.data.signedUrl, base = '';
+        try { base = new URL(cfg.supabaseUrl).origin; if (new URL(u, base).origin !== base) u = null; } catch (e) { u = null; }
+        return u ? ok(u) : fail('MRS_INVALID', 'signed_url');
+      });
+  }
+  function voidFinanceDocument(id, reason) { return reasonRpc('void_finance_document', id, reason); }
+
+  /* supplier invoices (+ lines) */
+  // p = { supplier_id, invoice_number, invoice_date, total_amount, doc_type?, sha256? } → { exact[], possible[], file[] }
+  function checkInvoiceDuplicate(p) {
+    p = Object.assign({}, p || {});
+    var explicit = p.orgId; delete p.orgId;
+    return inActiveOrg(explicit, function (oid) { return rpc('check_supplier_invoice_duplicate', { p_org: oid, p_payload: finFilters(p) }); });
+  }
+  // f = { status, payment_status, supplier_id, branch_id, from, to, q, needs_review, limit ≤ 200, offset, orgId }
+  function listSupplierInvoices(f) { return finOrgRpc('list_supplier_invoices', f); }
+  function getSupplierInvoice(id) { return rpc('get_supplier_invoice', { p_id: id }); }
+  // p = { branch_id, supplier_id, doc_type, adjusts_invoice_id, invoice_number, invoice_date, due_date, currency, subtotal,
+  //       vat_amount, total_amount, reference, supplier_vat_number, finance_document_id, source_document_id, notes, lines[] }
+  function createSupplierInvoice(p, opts) { return finCreate('create_supplier_invoice', p, opts); }
+  function updateSupplierInvoice(id, p) { return rpc('update_supplier_invoice', { p_id: id, p_payload: p || {} }); }
+  function setSupplierInvoiceStatus(id, s, note) { return rpc('set_supplier_invoice_status', { p_id: id, p_status: s, p_note: note || null }); }
+  // lines = [{ description, quantity, unit, unit_price, net_amount, vat_rate, vat_amount, total_amount, service_code,
+  //            container_no_hint, reference_hint }] (≤ 200); source 'manual' | 'ocr' | 'import'
+  function addInvoiceLines(invoiceId, lines, source, opts) {
+    if (!configured) return demoOnly();
+    opts = opts || {};
+    lines = Array.isArray(lines) ? lines : [];
+    if (!lines.length) return Promise.resolve(fail('MRS_REQUIRED', 'lines'));
+    if (lines.length > 200) return Promise.resolve(fail('MRS_TOO_LONG', 'lines'));
+    return idemRpc('add_invoice_lines', opts.idemKey, function (k) {
+      return { p_invoice: invoiceId, p_lines: lines, p_source: source || 'manual', p_idem_key: k };
+    });
+  }
+  function updateInvoiceLine(id, p) { return rpc('update_invoice_line', { p_id: id, p_payload: p || {} }); }
+  // decision ok | overhead | excluded | disputed (a note is required except for ok)
+  function reviewInvoiceLine(id, decision, note, serviceCode) {
+    return rpc('review_invoice_line', { p_id: id, p_decision: decision, p_note: note || null, p_service_code: serviceCode || null });
+  }
+
+  /* cost allocations (never more than the line's net; approval is four-eyes) */
+  // targets = [{ transaction_id, container_id?, trip_id?, demurrage_case_id?, accrual_id?, amount? | share_pct?, service_code?, note? }]
+  function allocateInvoiceLine(lineId, targets, opts) {
+    if (!configured) return demoOnly();
+    opts = opts || {};
+    return idemRpc('allocate_invoice_line', opts.idemKey, function (k) {
+      return { p_line: lineId, p_targets: Array.isArray(targets) ? targets : [], p_idem_key: k };
+    });
+  }
+  function approveAllocations(ids, note) {
+    ids = (Array.isArray(ids) ? ids : [ids]).filter(isUuid);
+    if (!ids.length) return Promise.resolve(configured ? fail('MRS_REQUIRED', 'ids') : fail(misconfigured ? 'MRS_CONFIG' : 'MRS_DEMO_MODE'));
+    if (ids.length > 100) return Promise.resolve(fail('MRS_TOO_LONG', 'ids'));
+    return rpc('approve_allocations', { p_ids: ids, p_note: note || null });
+  }
+  function rejectAllocation(id, reason) { return reasonRpc('reject_allocation', id, reason); }
+  function reverseAllocation(id, reason) { return reasonRpc('reverse_allocation', id, reason); }
+  // f = { branch_id, kind, orgId }
+  function costReviewQueue(f) { return finOrgRpc('cost_review_queue', f); }
+
+  /* accruals (expected costs; never a payment) */
+  // f = { transaction_id, status, source, supplier_id, limit, offset, orgId }
+  function listAccruals(f) { return finOrgRpc('list_accruals', f); }
+  // p = { transaction_id, container_id, supplier_id, service_code, amount, currency, basis, note }
+  function createAccrual(p, opts) { return finCreate('create_accrual', p, opts); }
+  // decision accept | keep_open | accept_new_amount | keep_amount (note required)
+  function reviewAccrualVariance(id, decision, note) { return rpc('review_accrual_variance', { p_id: id, p_decision: decision, p_note: note || null }); }
+  function voidAccrual(id, reason) { return reasonRpc('void_accrual', id, reason); }
+
+  /* supplier payments (evidence; paid ≠ due ≠ revenue) */
+  // f = { supplier_id, branch_id, payer, status, from, to, limit, offset, orgId }
+  function listSupplierPayments(f) { return finOrgRpc('list_supplier_payments', f); }
+  // p = { supplier_invoice_id, amount, currency, paid_at, method, payer, client_id, reference, evidence_document_id }
+  function recordSupplierPayment(p, opts) { return finCreate('record_supplier_payment', p, opts); }
+  function voidSupplierPayment(id, reason) { return reasonRpc('void_supplier_payment', id, reason); }
+
+  /* client charges (sell side) + collections evidence */
+  function listClientCharges(txId) { return txRpc('list_client_charges', txId); }
+  function suggestClientCharges(txId) { return txRpc('suggest_client_charges', txId); }
+  // p = { transaction_id, container_id, kind, service_code, description, quantity, unit_price, vat_rate, currency, source,
+  //       cost_allocation_id, accrual_id, trip_id, demurrage_case_id, markup_pct, note }
+  function createClientCharge(p, opts) { return finCreate('create_client_charge', p, opts); }
+  function updateClientCharge(id, p) { return rpc('update_client_charge', { p_id: id, p_payload: p || {} }); }
+  // s draft | approved | void ('invoiced' is G5 only)
+  function setChargeStatus(id, s, note) { return rpc('set_charge_status', { p_id: id, p_status: s, p_note: note || null }); }
+  // p = { charge_id, amount, currency, collected_at, method, reference, evidence_document_id }
+  function recordChargeCollection(p, opts) { return finCreate('record_charge_collection', p, opts); }
+  function voidChargeCollection(id, reason) { return reasonRpc('void_charge_collection', id, reason); }
+
+  /* storage / demurrage / detention cases */
+  // f = { transaction_id, status, kind, operator_id, limit, offset, orgId }
+  function listDemurrage(f) { return finOrgRpc('list_demurrage', f); }
+  // p = { transaction_id, container_id, kind, operator_id, exception_id, free_until, charged_until, days,
+  //       estimated_amount, estimated_vat_rate, currency, status_note }
+  function createDemurrageCase(p, opts) { return finCreate('create_demurrage_case', p, opts); }
+  function updateDemurrageCase(id, p) { return rpc('update_demurrage_case', { p_id: id, p_payload: p || {} }); }
+  function setDemurrageStatus(id, s, note) { return rpc('set_demurrage_status', { p_id: id, p_status: s, p_note: note || null }); }
+
+  /* exceptional fees & adjustments */
+  // f = { transaction_id, supplier_invoice_id, status, kind, limit, offset, orgId }
+  function listCostAdjustments(f) { return finOrgRpc('list_cost_adjustments', f); }
+  // p = { kind, transaction_id, container_id, supplier_invoice_id, related_invoice_id, exception_id, supplier_id,
+  //       service_code, amount, currency, finance_document_id, document_id, reason }
+  function createCostAdjustment(p, opts) { return finCreate('create_cost_adjustment', p, opts); }
+  // decision approved | rejected (note required; four eyes)
+  function reviewCostAdjustment(id, decision, note) { return rpc('review_cost_adjustment', { p_id: id, p_decision: decision, p_note: note || null }); }
+
+  /* reports (analytical, per currency — not accounting profit) */
+  function txCosts(txId) { return txRpc('tx_costs', txId); }
+  function txMargin(txId) { return txRpc('tx_margin', txId); }
+  // f = { branch_id, client_id, from, to, operational_status, level, currency, limit ≤ 200, offset, orgId }
+  function marginReport(f) { return finOrgRpc('margin_report', f); }
+  // f = { group_by (required): transaction | client | supplier | service | branch | level, from, to, branch_id, client_id,
+  //       supplier_id, service_code, level, currency, include_overhead, orgId }
+  function costReport(f) {
+    f = f || {};
+    if (['transaction', 'client', 'supplier', 'service', 'branch', 'level'].indexOf(f.group_by) === -1) {
+      return Promise.resolve(configured ? fail('MRS_REQUIRED', 'group_by') : fail(misconfigured ? 'MRS_CONFIG' : 'MRS_DEMO_MODE'));
+    }
+    // cost_report is not paged (one row per group): limit / offset are outside its filter whitelist
+    var g = {}; Object.keys(f).forEach(function (k) { if (k !== 'limit' && k !== 'offset') g[k] = f[k]; });
+    return finOrgRpc('cost_report', g);
+  }
+
+  /* ------------------------------------------------------------------
      App shell: global search (command palette) + dashboard counters.
      Plain RLS-scoped PostgREST reads, limited to the active org (or o.orgId).
      ------------------------------------------------------------------ */
@@ -1864,6 +2212,23 @@
     listTrips: listTrips, createTrip: createTrip, updateTrip: updateTrip, setTripStatus: setTripStatus, tripFinance: tripFinance,
     listExceptions: listExceptions, createException: createException, resolveException: resolveException,
     listAlerts: listAlerts, ackAlert: ackAlert, resolveAlert: resolveAlert, refreshAlerts: refreshAlerts,
+    // G4 suppliers & operating costs (docs/online/G4_SPEC.md)
+    savePartyFinance: savePartyFinance,
+    uploadFinanceDocument: uploadFinanceDocument, financeDocumentUrl: financeDocumentUrl, voidFinanceDocument: voidFinanceDocument,
+    checkInvoiceDuplicate: checkInvoiceDuplicate, listSupplierInvoices: listSupplierInvoices, getSupplierInvoice: getSupplierInvoice,
+    createSupplierInvoice: createSupplierInvoice, updateSupplierInvoice: updateSupplierInvoice, setSupplierInvoiceStatus: setSupplierInvoiceStatus,
+    addInvoiceLines: addInvoiceLines, updateInvoiceLine: updateInvoiceLine, reviewInvoiceLine: reviewInvoiceLine,
+    allocateInvoiceLine: allocateInvoiceLine, approveAllocations: approveAllocations, rejectAllocation: rejectAllocation,
+    reverseAllocation: reverseAllocation, costReviewQueue: costReviewQueue,
+    listAccruals: listAccruals, createAccrual: createAccrual, reviewAccrualVariance: reviewAccrualVariance, voidAccrual: voidAccrual,
+    listSupplierPayments: listSupplierPayments, recordSupplierPayment: recordSupplierPayment, voidSupplierPayment: voidSupplierPayment,
+    listClientCharges: listClientCharges, suggestClientCharges: suggestClientCharges, createClientCharge: createClientCharge,
+    updateClientCharge: updateClientCharge, setChargeStatus: setChargeStatus,
+    recordChargeCollection: recordChargeCollection, voidChargeCollection: voidChargeCollection,
+    listDemurrage: listDemurrage, createDemurrageCase: createDemurrageCase, updateDemurrageCase: updateDemurrageCase,
+    setDemurrageStatus: setDemurrageStatus,
+    listCostAdjustments: listCostAdjustments, createCostAdjustment: createCostAdjustment, reviewCostAdjustment: reviewCostAdjustment,
+    txCosts: txCosts, txMargin: txMargin, marginReport: marginReport, costReport: costReport,
     // app shell
     globalSearch: globalSearch, dashboardStats: dashboardStats,
     // utils

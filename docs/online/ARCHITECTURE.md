@@ -110,11 +110,48 @@ erDiagram
   documents |o--o{ operational_exceptions : "supporting doc"
   transactions ||--o{ operational_alerts : "G3.16"
   organizations ||--o| operational_alert_runs : "refresh rate limit"
+  branches ||--o{ finance_documents : "G4: originals (bucket finance)"
+  parties ||--o{ supplier_invoices : "G4: supplier"
+  branches ||--o{ supplier_invoices : "receiving branch"
+  finance_documents |o--o{ supplier_invoices : "original file"
+  documents |o--o{ supplier_invoices : "operator_invoice (source)"
+  supplier_invoices |o--o{ supplier_invoices : "adjusts / duplicate_of"
+  supplier_invoices ||--o{ supplier_invoice_lines : "lines (never dropped)"
+  supplier_invoice_lines ||--o{ cost_allocations : "Σ ≤ line net"
+  transactions ||--o{ cost_allocations : "allocated to"
+  containers |o--o{ cost_allocations : "container"
+  transport_trips |o--o{ cost_allocations : "trip"
+  demurrage_cases |o--o{ cost_allocations : "case"
+  cost_accruals |o--o{ cost_allocations : "matches"
+  transactions ||--o{ cost_accruals : "G4: expected costs"
+  transport_trips |o--o| cost_accruals : "one live per trip"
+  demurrage_cases |o--o| cost_accruals : "one live per case"
+  cost_adjustments |o--o| cost_accruals : "approved fee"
+  supplier_invoices ||--o{ supplier_payments : "payment evidence"
+  clients |o--o{ supplier_payments : "payer = client"
+  transactions ||--o{ client_charges : "G4: sell side"
+  cost_allocations |o--o| client_charges : "from_cost / markup"
+  cost_accruals |o--o| client_charges : "from_cost / markup"
+  transport_trips |o--o| client_charges : "from_trip"
+  demurrage_cases |o--o{ client_charges : "case"
+  client_charges ||--o{ charge_collections : "collected evidence"
+  transactions ||--o{ demurrage_cases : "G4: storage / demurrage"
+  parties |o--o{ demurrage_cases : "operator"
+  operational_exceptions |o--o{ demurrage_cases : "G3 exception"
+  transactions |o--o{ cost_adjustments : "G4: fees / adjustments"
+  supplier_invoices |o--o{ cost_adjustments : "invoice / related"
+  finance_documents |o--o{ cost_adjustments : "evidence"
 ```
 
 `schema_versions` (G2) جدول مستقل بلا علاقات: صف لكل ملف ترحيل.
 
 جداول G3 كلها تتبع القواعد العامة أدناه: `org_id` في كل صف، ومفاتيح أجنبية مركّبة `(x_id, org_id)` إلى الأب، وRLS، وتريغر تدقيق. في `operational_alerts` يُدقَّق UPDATE فقط، لأن `last_seen_at` يتغير كل 15 دقيقة. `drivers` و`trucks` يمكن أن يكون الناقل فيهما فارغًا.
+
+جداول G4 العشرة (`20261104000100`، العقد في `G4_SPEC.md`) تتبع القواعد نفسها، ويُضاف إليها:
+- **القراءة:** SELECT فقط لأدوار `fin_read_roles`. نطاق الفرع يأتي من المعاملة الأم (`app.has_tx_role`) أو من فرع فاتورة المورد.
+- **الكتابة:** عبر دوال SECURITY DEFINER فقط. لا DELETE في أي جدول، و«الحذف» إلغاء (`void` / `rejected` / `reversed`) بسبب، والصف يبقى.
+- **المال والعملة:** المال `numeric(14,2)` موجب دائمًا (الإشارة من نوع المستند)، والكمية `numeric(14,3)`، والعملة `char(3)` افتراضيًا `SAR`، والضريبة عمود منفصل. لا تحويل عملات.
+- **التدقيق والمراجع:** `trg_audit` على الجداول العشرة، ومراجع الأب مركّبة `(x_id, org_id)` أو `(x_id, transaction_id)`، فكل هدف تخصيص داخل المعاملة نفسها.
 
 **قواعد عامة:**
 - كل جدول تشغيلي يحمل `org_id`، ويرتبط بالأب عبر **مفتاح أجنبي مركّب `(parent_id, org_id)`**؛ لذلك يستحيل ربط معاملة في مؤسسة بعميل أو فرع من مؤسسة أخرى حتى لو أُدخل المعرّف يدويًا.
@@ -154,6 +191,17 @@ erDiagram
 | `operational_exceptions` (G3.14) | الحالات الاستثنائية | `kind` (10 أنواع)، `occurred_at` و`source` و`reason` إلزامية، `document_id` أو `amount` إلزامي لـ demurrage/repair_fee/cleaning_fee، `status` (open/in_progress/resolved/waived)، `resolution_note` |
 | `operational_alerts` (G3.16) | التنبيهات التشغيلية | `kind` (7 أنواع)، `severity` (info/warning/critical)، `branch_id` يتبع المعاملة، `dedupe_key` فريد داخل المؤسسة، `first_seen_at/last_seen_at`، `status` (open/acknowledged/resolved)، `resolution` (auto/manual) |
 | `operational_alert_runs` (G3.16) | آخر تحديث للتنبيهات لكل مؤسسة | حد «مرة في الدقيقة». داخلي، بلا صلاحية API |
+| `parties` (إضافات G4.1) | البيانات الرسمية والمالية للجهة | `address`، `contact_name` (كتابة مباشرة كبقية الحقول). أعمدة مالية: `iban_last4` (آخر 4 أرقام فقط)، `bank_name`، `payment_terms_days` (0–365)، `default_currency`. لا تتغير إلا عبر `save_party_finance` (تريغر `app.tg_parties_fin_guard` ← `MRS_FORBIDDEN 'party_finance'`) |
+| `finance_documents` (G4) | أصول الفواتير والأدلة المالية | `branch_id`، `kind` (supplier_invoice/credit_note/payment_evidence/collection_evidence/adjustment_evidence/demurrage_evidence/other)، `storage_bucket = 'finance'`، `storage_path` = `{org}/{id}/{file}`، `sha256` فريد بين غير الملغاة، `original_name`، `mime_type`، `size_bytes` (≤ 25 MB)، الإلغاء بدل الحذف. لا يُرفق إلا بسجل من فرعه نفسه (`app.fin_check_findoc`) |
+| `supplier_invoices` (G4) | فواتير الموردين والإشعارات | `supplier_id`، `branch_id` (ثابت)، `doc_type` (invoice/credit_note/debit_note) + `adjusts_invoice_id`، `invoice_number` + `number_norm` (`app.fin_norm_no`؛ فريد لكل مورد ونوع بين غير الملغاة)، التواريخ، `currency`، `subtotal + vat_amount = total_amount`، `reference`، `supplier_vat_number`، `finance_document_id` / `source_document_id`، `status` (received/under_review/approved/disputed/void)، `discrepancy_note`، ذاكرة سداد يحدّثها التريغر فقط (`company_paid_amount`، `client_paid_amount`، `payment_status`)، `duplicate_of_id` |
+| `supplier_invoice_lines` (G4) | بنود الفاتورة، لا تُحذف أبدًا | `line_no` فريد في الفاتورة، `description` (أو «(بند غير مقروء)»)، `quantity`، `unit_price`، `net + vat = total`، `vat_rate`، `service_code` (`fin_service`)، `source` (manual/ocr/import)، `review_status` (pending_review/ok/overhead/excluded/disputed) و`review_reasons[]` آلية |
+| `cost_allocations` (G4) | تخصيص البند للمعاملات | `line_id`، `transaction_id`، واختياريًا `container_id` / `trip_id` / `demurrage_case_id` / `accrual_id` من المعاملة نفسها، `amount` (صافٍ، بعملة الفاتورة)، `share_pct`، `is_late`، `status` (proposed/approved/rejected/reversed). تريغر `app.tg_alloc_cap`: Σ (proposed + approved) ≤ صافي البند (`MRS_OVER_ALLOCATED`) |
+| `cost_accruals` (G4) | التكاليف المتوقعة (استحقاق الناقل) | `source` (trip/demurrage/adjustment/manual)، استحقاق حي واحد لكل مصدر (فهارس جزئية)، `supplier_id`، `amount` (NULL = مجهول)، `basis` (agreed/estimated)، `matched_amount` (من التخصيصات المعتمدة)، `status` (open/matched/variance/void)، `variance_reason`، `pending_amount`. تريغر `trg_g4_accrual` على `transport_trips` |
+| `supplier_payments` (G4) | أدلة السداد، إضافة فقط | `amount`، `paid_at`، `method`، `payer` (company/client) + `client_id`، `reference` أو `evidence_document_id` (والعميل يتطلب دليلًا)، `status` (recorded/void). التريغر يحسب حالة السداد على `app.fin_invoice_payable` ويرفض الزائد (`MRS_OVERPAID`) |
+| `client_charges` (G4) | المبالغ المحمّلة على العميل | `kind` (service/internal_service/reimbursable)، `source` (manual/from_cost/markup/from_trip) + مرجع واحد للمصدر، `quantity × unit_price = net`، `vat_rate`، `total`، `markup_pct`، `cost_snapshot`، `status` (draft/approved/invoiced/void؛ `invoiced` لـ G5 وحده). فهارس فريدة تمنع تحميل المصدر مرتين |
+| `charge_collections` (G4) | أدلة التحصيل من العميل، إضافة فقط | `charge_id` (معتمد)، `amount`، `collected_at`، `method`، `reference` أو دليل، `status` (recorded/void). Σ ≤ إجمالي المبلغ المحمّل. ليست سند قبض |
+| `demurrage_cases` (G4) | الأرضيات والغرامات | `kind` (storage/demurrage/detention)، `container_id`، `operator_id`، `exception_id` (G3)، `free_until`، `charged_until`، `days`، `estimated_amount` (يزامن استحقاق `source='demurrage'`)، `currency`، `status` (open/closed/waived/void). أربعة أرقام محسوبة: المحمّل، والمحصَّل، والمدفوع للمشغّل، والمتبقي |
+| `cost_adjustments` (G4) | الرسوم الاستثنائية والتسويات | `kind` (late_cost/empty_fee/washing/repair/amendment/duplicate_invoice/other)، المعاملة أو الفاتورة، `related_invoice_id`، `exception_id`، `amount`، `reason` إلزامي، ربط إلزامي بمستند (CHECK)، `status` (proposed/approved/rejected)، `accrual_id` عند الاعتماد |
 
 ## 4. الأدوار ومصفوفة الصلاحيات (Role matrix)
 
@@ -209,12 +257,22 @@ erDiagram
 | transport_trips (G3) | — | R · RPC | R · RPC (بلا التكلفة والبيع) | R + التكلفة والبيع | R + التكلفة والبيع | R · RPC + التكلفة والبيع | R · RPC + التكلفة والبيع | R · RPC + التكلفة والبيع | R · RPC + التكلفة والبيع |
 | operational_exceptions (G3) | — | R · RPC | R · RPC | R | R | R · RPC | R · RPC | R · RPC | R · RPC |
 | operational_alerts (G3) | — | R · RPC | R · RPC | R · RPC | R · RPC | R · RPC | R · RPC | R · RPC | R · RPC |
+| جداول G4 العشرة (finance_documents … cost_adjustments) | — | — | — | R · RPC (إنشاء) | R · RPC (إنشاء + اعتماد) | — | R · RPC (إنشاء + اعتماد، فرعه) | R | R · RPC (إنشاء + اعتماد) |
+| أعمدة parties المالية (G4) | — | R | R | R · RPC | R · RPC | R | R · RPC | R | R · RPC |
 
 \* تعديل المستند يقتصر على التصنيف والظهور والإلغاء؛ الأصل (المسار، البصمة، الاسم، الحجم) لا يتغير أبدًا. لا يوجد DELETE لأي مستند أو حدث أو سجل تدقيق.
 
 - عمود branch_mgr مقيّد بفرعه عبر `has_branch_role` في كل ما يحمل `branch_id`؛ وما لا يحمله امتداد على مستوى المؤسسة (القرار المفتوح 10 أعلاه).
 - مدير المنصة ليس في الجدول: لا يقرأ أي جدول تشغيلي، ويعمل عبر `platform_*` فقط.
 - `client_errors` و`idempotency_keys` و`schema_versions` و`platform_admins`: لا صلاحية لأي دور عبر API؛ القراءة عبر RPC (`admin_recent_errors`، `platform_recent_errors`، `health_check`).
+
+**G4 — أدوار المالية التشغيلية** (`app.fin_*_roles`، ومرآتها `R.finRead/finWrite/finApprove` في `admin.js` و`app-shell.js`):
+- **القراءة `fin_read_roles`:** accountant، accounts_manager، branch_manager، supervisor، admin. تشمل التكاليف، وأسعار الموردين، والسداد، والمبالغ المحمّلة، والهامش، وأرقام الأرضيات.
+- **الإنشاء `fin_write_roles`:** accountant، accounts_manager، branch_manager، admin. يشمل الفواتير، والبنود، والتخصيصات، والسداد، والمبالغ المحمّلة، والحالات، والتسويات.
+- **الاعتماد `fin_approve_roles`:** accounts_manager، branch_manager، admin. يشمل اعتماد الفواتير والتخصيصات والمبالغ والتسويات والفروقات، وإلغاء السداد.
+- **العينان الأربع:** المعتمِد غير منشئ الصف، إلا `admin` (`MRS_FORBIDDEN 'self_approval'`). الاعتماد في فرع **المعاملة** (`app.fin_can_decide`)، والقراءات تعيد لكل صف `branch_id` و`can_approve` / `can_review`، فلا تعتمد الواجهة على «دور في أي فرع».
+- **المشرف على مستوى المؤسسة إلزاميًا:** القيدان `memberships_supervisor_no_branch` و`invitations_supervisor_no_branch`، لأن `audit_log` يعرض عليه مبالغ G4 في كل الفروع.
+- **خارج المالية:** `operations_manager` (يبقى له `trip_finance` من G3)، و`clearance_staff`، و`transport_staff`، والعميل: صفر صفوف، و`MRS_FORBIDDEN` / `MRS_NOT_FOUND` من كل دالة مالية.
 
 لا يكتب أي دور الحقول `ref` و`org_id` و`operational_status` و`financial_status` و`tracking_token_hash` مباشرة؛ تريغرات الحماية ترفض ذلك (`MRS_IMMUTABLE`) وتمر التغييرات عبر RPC.
 
@@ -257,7 +315,7 @@ erDiagram
 
 المرحلتان 8 و9 تبقيان معالم في المسار كما في الرؤية، لكن لا يحرّكهما إلا أدوار المالية، ولا تعنيان إصدار فاتورة ضريبية داخل النظام.
 
-**الحالة المالية `financial_status`** — **مؤقتة (Placeholder) إلى G4**، ومستقلة تمامًا عن التشغيلية، ولا تظهر للعميل: `not_started` لم تبدأ، `estimate_only` تقدير غير ضريبي فقط، `draft_pending` مسودة قيد الإعداد، `invoiced` صدرت الفاتورة (خارج النظام)، `settled` مسددة.
+**الحالة المالية `financial_status`** — **مؤقتة (Placeholder) إلى G5** (لا يغيّرها G4، القرار G4-9)، ومستقلة تمامًا عن التشغيلية، ولا تظهر للعميل: `not_started` لم تبدأ، `estimate_only` تقدير غير ضريبي فقط، `draft_pending` مسودة قيد الإعداد، `invoiced` صدرت الفاتورة (خارج النظام)، `settled` مسددة.
 
 **حالات أخرى:** الطلب `request_status` (new، under_review، converted، rejected). إرجاع الحاوية `container_return_status` (pending، evidence_submitted، returned_verified، disputed، waived). تصنيف المستند `classification_status` (unreviewed، confirmed، reclassified، ambiguous). الرسالة `contact_status`. صف الاستيراد `import_row_status`.
 
@@ -270,6 +328,14 @@ erDiagram
 - `trip_status`، `cost_basis`.
 - `exception_kind`، `exception_source`، `exception_status`.
 - `alert_kind`، `alert_severity`، `alert_status`.
+
+**قواميس G4** (كلها `client_visible = false`، بالعربية والإنجليزية):
+- الفواتير والبنود: `fin_invoice_status`، `fin_invoice_doc_type`، `fin_payment_status`، `fin_line_review`.
+- التخصيص والاستحقاق: `fin_alloc_status`، `fin_accrual_status`، `fin_accrual_source`، `fin_variance_reason`.
+- المبالغ المحمّلة والسداد: `fin_charge_kind`، `fin_charge_status`، `fin_charge_source`، `fin_payment_method`، `fin_payer`.
+- الأرضيات والتسويات: `fin_demurrage_kind`، `fin_demurrage_status`، `fin_adjustment_kind`، `fin_adjustment_status`.
+- عامة: `fin_level` (confirmed/estimated/unknown)، `fin_doc_kind`.
+- `fin_service`: كتالوج من 14 خدمة (customs_clearance، transport، port_charges، delivery_order، storage، demurrage، detention، inspection، empty_handling، washing، repair، documentation، saber، other). يتحقق منه `app.fin_check_service`.
 
 **أنواع المستندات `document_kind`:** bill_of_lading، commercial_invoice، packing_list، certificate_of_origin، saber_certificate، customs_declaration، delivery_order، appointment، container_delivery_eir، empty_return_note، **empty_return_receipt**، operator_invoice، government_doc، import_file، other.
 
@@ -314,6 +380,7 @@ sequenceDiagram
 - **الرفع:** (1) إدخال صف `documents` بمعرّف يولّده المتصفح، وبصمة SHA-256 محسوبة في المتصفح. (2) رفع الملف إلى المسار نفسه بالضبط. سياسة INSERT على `storage.objects` تسمح فقط بمسار صف سجّله المستخدم نفسه خلال 24 ساعة.
 - **القراءة:** سياسة SELECT تسمح بالكائن إذا كان المستخدم يستطيع قراءة صف `documents` المطابق؛ أي أن RLS على `documents` هي الحكم. التنزيل عبر Signed URL قصير العمر (`MarsaApi.documentUrl`، افتراضيًا 5 دقائق).
 - **لا UPDATE ولا DELETE:** الأصل لا يُستبدل. النسخة الجديدة صف جديد بـ`supersedes_id` و`version + 1`. الخطأ يُعالج بالإلغاء (`voided_at` + `void_reason`).
+- **G4 — bucket خاص `finance`** (25 ميغابايت، الأنواع نفسها) لأصول الفواتير وأدلة السداد والتحصيل والتسويات، ولا تدخل `documents` أبدًا. المسار `{org_id}/{finance_document_id}/{file}`. القراءة (`marsa_finance_read`) لصف `finance_documents` مرئي تحت RLS، والإدراج (`marsa_finance_insert`) لصف المستخدم نفسه غير الملغى خلال 24 ساعة. لا UPDATE ولا DELETE. الملف المكرر (البصمة نفسها) يُرفض `file_duplicate`، إلا تسجيل المستخدم نفسه غير المرفق بعد، فيُعاد له (`reused: true`). `MarsaApi.uploadFinanceDocument` و`financeDocumentUrl`.
 - **حد معروف في Staging:** البصمة يحسبها المتصفح ولا يتحقق منها الخادم. كان مخططًا إضافة Edge Function في G2 تتحقق من الحجم والبصمة بعد الرفع، و**لم تُنفَّذ بعد** (حد معروف في `G2_REPORT_AR.md`). العزل بين المؤسسات في التخزين مختبر في `rls-tests.js` (قراءة كائن مؤسسة أخرى بالمسار مرفوضة).
 
 ## 9. التدقيق والأحداث (Audit & events)
@@ -321,9 +388,10 @@ sequenceDiagram
 - **`transaction_events`** خط زمني للأعمال: `created`، `request_converted`، `operational_status`، `financial_status`، `container_return`، `document`، `note`، `tracking_token`. أضاف G3 الأنواع `declaration` و`bl` و`container` و`appointment` و`trip` و`exception` و`docs_override`.
 - **ما يراه العميل من أحداث G3:** حالة البيان، والحاوية (`operational_state` والإرجاع)، والموعد المؤكد. حدث الموعد يحمل الوقت والنافذة ورقم الحاوية و`appointment_ref` معتمًا، ثم `withdrawn` أو `completed` عند خروج الموعد من «مؤكد».
 - **ما يبقى داخليًا:** أحداث البوليصة (ومنها `conflict`)، والرحلات، والاستثناءات، و`docs_override`.
+- **G4:** نوع جديد `finance`، أُعيد إنشاء `transaction_events_event_type_check` ليشمل قائمة G3 كاملة + `'finance'`. هذه الأحداث `visible_to_client = false` دائمًا، و**لا تحمل مبالغ أبدًا**: الحمولة `{op, entity, id, …ids}`. أمثلة `op`: `allocation_proposed/approved/rejected/reversed`، `late_cost`، `accrual_created/reviewed/voided`، `charge_created`، `charge_status`، `collection_recorded/voided`، `demurrage_created/updated/status`، `adjustment_created/reviewed`. مزامنة استحقاق الرحلة أو الحالة لا تكتب أحداثًا. المبالغ قبل وبعد تبقى في `audit_log` وحده.
 
 الإضافة تأتي من RPC وتريغرات الخادم. المستخدم يضيف مباشرة نوع `note` فقط، ويُختم بـ`auth.uid()`.
-- **`audit_log`** أثر تقني عام لكل INSERT/UPDATE/DELETE على: organizations، branches، memberships، clients، client_users، service_requests، transactions، containers، documents، import_batches، contact_messages، و(منذ G2) invitations وplatform_admins (صفوف الأخيرة `org_id` فيها فارغ، فلا يراها إلا من SQL Editor). يحفظ القيم قبل وبعد (jsonb)، والحقول المتغيرة، و`actor` و`actor_role`. التحديث الذي لا يغير شيئًا لا يُسجَّل. `import_rows` مستثنى لأنه كثيف، وتصحيحاته محفوظة داخله في `corrections`.
+- **`audit_log`** أثر تقني عام لكل INSERT/UPDATE/DELETE على: organizations، branches، memberships، clients، client_users، service_requests، transactions، containers، documents، import_batches، contact_messages، و(منذ G2) invitations وplatform_admins (صفوف الأخيرة `org_id` فيها فارغ، فلا يراها إلا من SQL Editor). يحفظ القيم قبل وبعد (jsonb)، والحقول المتغيرة، و`actor` و`actor_role`. التحديث الذي لا يغير شيئًا لا يُسجَّل. `import_rows` مستثنى لأنه كثيف، وتصحيحاته محفوظة داخله في `corrections`. منذ G3 وG4 يشمل التدقيق جداولهما أيضًا: الجداول المالية العشرة كلها، و`parties` ومعها الأعمدة المالية. الاستحقاقات المرحَّلة عند تطبيق G4 لها صف INSERT، لأن التريغر يُركَّب قبل الترحيل.
 - **Append-only:** لا سياسات UPDATE/DELETE، وسحب الامتياز من `authenticated`، وتريغر `BEFORE UPDATE OR DELETE` وآخر `BEFORE TRUNCATE` يرفضان حتى مالك الجدول (`MRS_APPEND_ONLY`).
 - **التصحيح لا يمحو التاريخ:** الرجوع بالحالة حدث جديد بسبب إلزامي. إلغاء التحقق من حاوية يحتفظ بالدليل، ويسجل حدثًا. تعديل البيانات العادية يحفظ قبل وبعد في `audit_log`.
 - **قراءة السجل (G2.12):** `admin_audit_log(p_org, p_filters)` لمدير المؤسسة والمشرف: مرشحات `table_name، actor، from، to، row_id`، وحد أقصى 200 صف، وترقيم بـ`before_id`، مع بريد المنفّذ. تبويب «سجل التدقيق» في `admin.html`.
@@ -350,7 +418,8 @@ sequenceDiagram
 
 ## 12. ما هو خارج النطاق عمدًا
 
-- المحاسبة: دفتر الأستاذ، القيود، سندات القبض والصرف، العهد، الأرضيات، الربحية (G4+).
+- المحاسبة: دفتر الأستاذ، القيود، سندات القبض والصرف، العهد (G5+). ~~الأرضيات، الربحية~~ **أُنجزت تحليليًا في G4**: متابعة الأرضيات، والتكاليف، والهامش التحليلي (ليس ربحًا محاسبيًا)، دون دفتر حسابات ثانٍ (`G4_REPORT_AR.md`).
+- G4 أيضًا خارج نطاقه: تحويل العملات، وقواعد الإضافة الآلية، واستخراج بنود الفاتورة آليًا (OCR)، وأي رقم مالي في بوابة العميل، وتغيير `financial_status`.
 - تكامل دفترة والإصدار الضريبي ZATCA/فاتورة، وأي فاتورة ضريبية داخل النظام. `financial_status` مجرد مؤشر مؤقت.
 - كتالوج البنود والضرائب والتسعير لكل مؤسسة. تقدير الحاسبة يُحفظ في `estimate` ويُوسم `is_tax_document = false`.
 - تكاملات فسح/سابر الحكومية، والإشعارات (واتساب/بريد)، وRealtime. **إرسال الدعوات بالبريد غير موصول:** الرابط يظهر مرة واحدة ويُنسخ يدويًا.
@@ -387,6 +456,13 @@ sequenceDiagram
     - من يتجاوز نقص المستندات؛ ومن يعدّل القواعد؛ والقواعد الافتراضية وشهادة المنشأ الاختيارية؛
     - حدود التنبيهات؛ ومواعيد العميل عبر الأحداث فقط؛ وإخفاء التكلفة والبيع عن موظف النقل؛
     - من يسجّل الاستثناءات؛ ورموز اللوحات وصيغ الجهات؛ وخيار «تلقائي» في تحويل الطلب.
+16. **G4 (G0 لم يُغلق):** القرارات G4-1 إلى G4-15 في `G4_REPORT_AR.md` §5، والافتراض مطبَّق في كل منها:
+    - الضريبة: التكلفة = الصافي، وضريبة المبالغ المحمّلة لكل مبلغ، ولا فاتورة ضريبية؛
+    - نسبة الإضافة بلا قواعد؛ ومن يعتمد (مع العينين الأربع)؛ ولا تحويل عملات؛ واستحقاق الرحلة منذ إنشائها؛
+    - العميل لا يرى شيئًا؛ والتحصيل دليل فقط؛ و`financial_status` لا يتغير؛
+    - المشرف على مستوى المؤسسة؛ و`operations_manager` خارج المالية؛
+    - منع رسوم الخدمة على تكلفة دفعها العميل مباشرة (يحتاج تأكيدًا)؛
+    - حدود الإشعار الدائن؛ والربط التلقائي بالاستحقاق؛ وتطبيع رقم الفاتورة.
 
 ## 14. الربط بمبادئ G0
 
@@ -483,7 +559,28 @@ sequenceDiagram
 
 دوال `app.*` داخلية بلا EXECUTE لأي دور API، ما عدا مساعدَي السياسات `app.is_bl_client` و`app.can_read_bl` (authenticated). `app.seed_document_requirements(p_org)` تُستدعى للمؤسسات الموجودة ومن `platform_create_org` (أُعيد إنشاؤها في B). `app.refresh_all_alerts()` تُجدول بـ `pg_cron` كل 15 دقيقة إن وُجد. الكتابة المباشرة المسموحة عبر RLS: `parties` و`drivers` و`trucks` (كتّاب النقل)، و`client_aliases` (إضافة وحذف لكتّاب العمليات)، و`document_requirements` (مدير المؤسسة)، و`containers` كما في G1.
 
-المجموع: 6 دوال لـ anon و**56** لـ authenticated (31 + 25 في G3)، ويتحقق `rls-tests.js` من القائمتين حرفيًا (لا زائد ولا ناقص).
+المجموع بعد G3: 6 دوال لـ anon و**56** لـ authenticated (31 + 25 في G3).
+
+**RPCs في G4** (`20261104000100`، التفاصيل في `G4_SPEC.md` «RPC list»). القواعد نفسها: `SECURITY DEFINER`، `search_path = ''`، التحقق من الهوية أولًا، `REVOKE … FROM PUBLIC, anon, authenticated` ثم `GRANT` لـ authenticated. «قراءة / إنشاء / اعتماد» = `fin_read_roles` / `fin_write_roles` / `fin_approve_roles` (القسم 4)، في فرع المعاملة أو فرع الفاتورة. «idem» = `p_idem_key uuid` مع `app.idem_begin/finish`. مفاتيح الحمولة تُفحص بـ `app.only_keys`، وترتيب الأقفال ثابت: المعاملة ثم الفاتورة ثم البند.
+
+| المجموعة | الدوال | الدور | ملاحظات |
+|---|---|---|---|
+| الجهة | `save_party_finance(p_party, p_payload)` | إنشاء (المؤسسة) | الأعمدة المالية الأربعة فقط |
+| الأصول | `register_finance_document(p_payload, p_idem_key)`، `void_finance_document(p_id, p_reason)` | إنشاء @الفرع / اعتماد | يعيد `{id, storage_bucket, storage_path, reused?}` · `in_use` إن كان أصل فاتورة حية |
+| الفواتير | `create_supplier_invoice(p_payload, p_idem_key)` (مع `lines` اختياريًا)، `update_supplier_invoice(p_id, p_payload)`، `set_supplier_invoice_status(p_id, p_status, p_note)`، `check_supplier_invoice_duplicate(p_org, p_payload)`، `list_supplier_invoices(p_org, p_filters)`، `get_supplier_invoice(p_id)` | إنشاء؛ الاعتماد والإلغاء = اعتماد؛ القراءة = قراءة | بوابة الاعتماد: الأصل، والبنود، ولا بند معلّق، وكل بند `ok` مخصص بالكامل ومعتمد، وفرق الرأس = 0 أو ملاحظة. `possible_duplicates` تحذير لا يمنع |
+| البنود | `add_invoice_lines(p_invoice, p_lines, p_source, p_idem_key)` (≤ 200)، `update_invoice_line(p_id, p_payload)`، `review_invoice_line(p_id, p_decision, p_note, p_service_code)` | إنشاء | لا حذف؛ البند المخصص لا يُعدَّل (`allocated`) |
+| التخصيص | `allocate_invoice_line(p_line, p_targets, p_idem_key)`، `approve_allocations(p_ids, p_note)` (≤ 100)، `reject_allocation(p_id, p_reason)`، `reverse_allocation(p_id, p_reason)`، `cost_review_queue(p_org, p_filters)` | إنشاء @كل معاملة؛ اعتماد @المعاملة + العينان الأربع | `MRS_OVER_ALLOCATED`؛ التكلفة المتأخرة تحتاج ملاحظة وتنشئ تسوية؛ الربط التلقائي بالاستحقاق الوحيد أو `MRS_REQUIRED 'accrual_id'` |
+| الاستحقاقات | `create_accrual(p_payload, p_idem_key)`، `review_accrual_variance(p_id, p_decision, p_note)` (accept/keep_open/accept_new_amount/keep_amount)، `void_accrual(p_id, p_reason)`، `list_accruals(p_org, p_filters)` | إنشاء / اعتماد / قراءة | الإلغاء للمفتوح غير المطابق فقط، ولا يُلغى ما عليه مبلغ محمَّل حي |
+| السداد | `record_supplier_payment(p_payload, p_idem_key)`، `void_supplier_payment(p_id, p_reason)`، `list_supplier_payments(p_org, p_filters)` | إنشاء @فرع الفاتورة / اعتماد / قراءة | ثلاثة مجاميع منفصلة: `due_approved_unpaid`، `paid_by_company`، `paid_by_client_direct` |
+| المبالغ المحمّلة | `create_client_charge(p_payload, p_idem_key)`، `update_client_charge(p_id, p_payload)` (مسودة فقط)، `set_charge_status(p_id, p_status, p_note)`، `list_client_charges(p_tx)`، `suggest_client_charges(p_tx)` | إنشاء @المعاملة؛ كل تغيير حالة = اعتماد | `invoiced` ← `g5_only`؛ `paid_by_client`، `cost_charged`، `trip_charged` |
+| التحصيل | `record_charge_collection(p_payload, p_idem_key)`، `void_charge_collection(p_id, p_reason)` | إنشاء / اعتماد | على المبالغ المعتمدة فقط، Σ ≤ الإجمالي |
+| الأرضيات | `create_demurrage_case(p_payload, p_idem_key)`، `update_demurrage_case(p_id, p_payload)`، `set_demurrage_status(p_id, p_status, p_note)`، `list_demurrage(p_org, p_filters)` | إنشاء؛ `waived` و`void` = اعتماد | الأرقام الأربعة بعملة الحالة |
+| التسويات | `create_cost_adjustment(p_payload, p_idem_key)`، `review_cost_adjustment(p_id, p_decision, p_note)`، `list_cost_adjustments(p_org, p_filters)` | إنشاء / اعتماد + العينان الأربع / قراءة | الرسم المعتمد ← استحقاق؛ المكررة المعتمدة ← إلغاء الفاتورة |
+| التقارير | `tx_costs(p_tx)`، `tx_margin(p_tx)`، `margin_report(p_org, p_filters)`، `cost_report(p_org, p_filters)` | قراءة | `tx_margin` لمعاملة مرئية بلا دور مالي ← `MRS_FORBIDDEN 'finance'`؛ `cost_report` بلا ترقيم |
+
+المساعدات الداخلية (`app.fin_*`، ومنها `fin_cost_items`، `fin_invoice_payable`، `fin_client_share`، `fin_can_decide`، `fin_check_findoc`، `fin_norm_no`، `fin_possible_duplicates`، `sync_trip_accrual`) بلا EXECUTE لأي دور API، ما عدا مساعدَي السياسات `app.fin_read_roles` و`app.fin_can_read_invoice` (authenticated).
+
+المجموع الآن: **6** دوال لـ anon و**98** لـ authenticated (56 + 42 في G4)، ويتحقق `rls-tests.js` من القائمتين حرفيًا (لا زائد ولا ناقص).
 
 **طبقة MarsaApi (G2):** `newIdemKey`، والأغلفة idempotent تعيد المحاولة مرتين بالمفتاح نفسه عند انقطاع الشبكة أو المهلة أو أي 5xx بلا رمز PG، ثم تعيد `MRS_UNKNOWN_RESULT`. المفتاح المحفوظ يُنسى بعد دقيقتين أو عند أي جواب قاطع، و`issue_tracking_token` لا يعيد استخدام مفتاح محفوظ. الإعادة على مفتاح محفوظ تعيد `replayedEarlier:true`. الدوال الجديدة: `platformListOrgs`، `platformCreateOrg`، `platformSetOrgActive`، `platformReissueAdminInvitation`، `platformRecentErrors`، `updateOrg`، `createBranch`، `updateBranch`، `invite`، `listInvitations`، `revokeInvitation`، `reissueInvitation`، `invitationPreview`، `acceptInvitation`، `auditLog`، `recentErrors`، `healthCheck`، `setMyLocale`، `signOutEverywhere`، `activeOrgId`، `setActiveOrg`. دوال القوائم تقبل `orgId` اختياريًا. `addMembership` باقية للتوافق، وتعيد `MRS_FORBIDDEN` دون اتصال.
 
@@ -493,6 +590,17 @@ sequenceDiagram
 - `listTrips({anyAt})` يطابق `planned_at` أو `loaded_at` أو `unloaded_at`.
 - `globalSearch` يطابق البيانات بكل حالاتها وأرقام البوالص من الجداول الجديدة.
 - **وحدات الواجهة:** `window.MarsaOps = {views, txSections}` في `assets/js/ops/*.js`، وتُحمَّل قبل `admin.js`. المسارات `#alerts` و`#schedule` و`#exceptions` و`#parties` للموظفين، و`#requirements` لمدير المؤسسة، والقواميس في `assets/i18n/ops.js`.
+
+**طبقة MarsaApi (G4):** 42 اسمًا ثابتًا في `G4_SPEC.md` «Front end». كلها تعيد `{data, error}`، وفي وضع العرض `MRS_DEMO_MODE`. دوال الإنشاء تمر عبر `idemRpc` (`opts.idemKey`).
+- **الأسماء:**
+  - الجهة والأصول: `savePartyFinance`، `uploadFinanceDocument`، `financeDocumentUrl`، `voidFinanceDocument`.
+  - الفواتير والبنود: `checkInvoiceDuplicate`، `listSupplierInvoices`، `getSupplierInvoice`، `createSupplierInvoice`، `updateSupplierInvoice`، `setSupplierInvoiceStatus`، `addInvoiceLines`، `updateInvoiceLine`، `reviewInvoiceLine`.
+  - التخصيص والاستحقاق والسداد: `allocateInvoiceLine`، `approveAllocations`، `rejectAllocation`، `reverseAllocation`، `costReviewQueue`، `listAccruals`، `createAccrual`، `reviewAccrualVariance`، `voidAccrual`، `listSupplierPayments`، `recordSupplierPayment`، `voidSupplierPayment`.
+  - المبالغ والتحصيل والأرضيات والتسويات: `listClientCharges`، `suggestClientCharges`، `createClientCharge`، `updateClientCharge`، `setChargeStatus`، `recordChargeCollection`، `voidChargeCollection`، `listDemurrage`، `createDemurrageCase`، `updateDemurrageCase`، `setDemurrageStatus`، `listCostAdjustments`، `createCostAdjustment`، `reviewCostAdjustment`.
+  - التقارير: `txCosts`، `txMargin`، `marginReport`، `costReport`.
+- **الرفع:** `uploadFinanceDocument({file, branchId, kind})` يحسب SHA-256 في المتصفح، ثم يستدعي `register_finance_document`، ثم يرفع إلى `storage.from('finance')`.
+- **الحمولات:** ترسل مفاتيح الخادم فقط (`G4_SPEC.md` «As built»). لا `currency` في السداد والتحصيل، ولا `note` في الاستحقاق اليدوي، و`costReport` يحذف `limit` و`offset`.
+- **وحدات الواجهة:** `assets/js/fin/{invoices,payables,margins,demurrage,tx-fin}.js` بعد `ops/*.js` وقبل `admin.js`، عبر `MarsaOps` نفسه. المسارات `#costs` و`#costs/review` و`#costs/<id>` و`#payables` و`#margins` و`#demurrage` (`allow: 'finRead'`)، ومجموعة القائمة «المالية التشغيلية» بين العمليات والإدارة. قسما المعاملة `fin-costs` (80) و`fin-margin` (85). القواميس `fin` في `assets/i18n/fin.js`، و`fintx` داخل `tx-fin.js`، والأنماط في `assets/css/pages/fin.css`. البوابة لا تحمّل أي ملف مالي.
 
 **مفاتيح `payload` لطلب الخدمة** (هي أسماء حقول `request.html`): `fullName company phone email clientType taxId crNumber contactPref direction service mode country port goods hsCode declarationNo needAci value currency weight containerType containerNumbers count blNumber shippingLine eta docsLater notes documents[] calc terms branchCode orgSlug`. يقبل `MarsaApi.submitServiceRequest` السجل الحالي الذي يبنيه `request.js` (بالكائنين `client` و`shipment`) ويحوّله بنفسه.
 
@@ -511,13 +619,27 @@ sequenceDiagram
 
 لكل تفصيل تسمية بالعربية في `supa.js` وبالإنجليزية في `i18n.js`، ولـ `err.MRS_DOCS_MISSING` مفتاح باللغتين.
 
+**رموز G4:** رمزا خادم جديدان:
+- `MRS_OVER_ALLOCATED`: التخصيص يتجاوز صافي البند.
+- `MRS_OVERPAID`: السداد يتجاوز المستحق، أو التحصيل يتجاوز المبلغ المحمّل، أو دفع العميل المباشر يتجاوز إجمالي تخصيصاته.
+
+في كليهما `DETAIL` يحمل المبلغ المتبقي، و`field` في الواجهة فارغ. بقية الأخطاء رموز قائمة بتفاصيل جديدة، منها:
+- **التكرار:** `invoice_number_taken`، `file_duplicate`، `line_no_taken`.
+- **الصلاحية:** `self_approval`، `finance`، `party_finance` (`MRS_FORBIDDEN`).
+- **بوابة الاعتماد:** `original_file`، `lines` (`MRS_REQUIRED`)، `lines_pending_review`، `lines_unallocated` (`MRS_INVALID`)، `discrepancy`، `late_cost` (`MRS_NOTE_REQUIRED`).
+- **منع التحميل المزدوج:** `paid_by_client`، `cost_charged`، `trip_charged` (`MRS_INVALID`)، `charged_to_client` (`MRS_BAD_TRANSITION`).
+- **الإشعار الدائن:** `credit_exceeds_invoice`، `credit_target`، `credit_note_link`، `credit_allocated`.
+- **العملة والحالة:** `currency`، `currency_in_use`، `invoice_locked`، `invoice_approved`، `has_payments`، `has_approved_allocations`، `in_use`، `allocated`، `g5_only`، `line_<status>`.
+
+المعرّف الموجود (للتكرار) وأرقام البنود (للبوابة) ومعرّفات الاستحقاقات المرشحة تصل في **HINT** الخاص بـ Postgres. `normalizeError` في `supa.js` يقرؤها إلى `refId` و`extra`، ولكل تفصيل رسالة بالعربية والإنجليزية.
+
 **قواعد للمطورين:**
 - ترتيب السكربتات: `config.js` ← `i18n.js` ← [`assets/i18n/<page>.js`] ← `main.js` ← `supa.js` ← سكربت الصفحة، وكلها `defer`. الصفحات المترجمة تحمل `<html data-i18n-page>` وسكربتًا قصيرًا في `<head>` يضبط `lang/dir` قبل CSS؛ غيرها يُعرض بالعربية بلا زر لغة. لا تضف وسم supabase-js يدويًا؛ `supa.js` يحمّله عند الحاجة.
 - كل دالة في `MarsaApi` تعيد Promise بالشكل `{data, error}` ولا ترمي استثناءً. **لا تعرض شاشة نجاح أو رقمًا مرجعيًا إلا إذا كان `error` فارغًا.**
 - في وضع العرض: `submitServiceRequest` و`submitContactMessage` و`publicTrack` تحفظ وتقرأ من localStorage كما الآن (`publicTrack` يعيد السجل المحلي في `data.local`). بقية الدوال تعيد `MRS_DEMO_MODE`، فاعرض للمستخدم رسالة `error.message`.
 - `tracking_token` يظهر مرة واحدة فقط: اعرضه مع رابط `tracking.html?ref=…&t=…`، ونبّه المستخدم إلى حفظه. لا تحفظه في localStorage إلا بموافقة صريحة.
 - نص الفوتر عن «البيانات تبقى على جهازك» يجب أن يتغير في الوضع المتصل؛ العنصر `<html data-marsa-mode="online|demo">` متاح لذلك.
-- الاختبار المحلي: `cd /tmp/pgtest && NODE_PATH=/tmp/pgtest/node_modules node supabase/tests/<file>.js --quiet` للملفات `rls-tests` و`g2-tests` و`g2-ops-tests` و`restore-drill` و`g3-tests` و`g3-cycle-tests` (يحمّل shim ثم كل الترحيلات ثم البذرة). الأرقام الحالية في `G3_REPORT_AR.md` (813 / 222 / 110 / 19 / 578 / 70، بلا فشل).
+- الاختبار المحلي: `cd /tmp/pgtest && NODE_PATH=/tmp/pgtest/node_modules node supabase/tests/<file>.js --quiet` للملفات `rls-tests` و`g2-tests` و`g2-ops-tests` و`restore-drill` و`g3-tests` و`g3-cycle-tests` و`g4-tests` و`g4-cycle-tests` (يحمّل shim ثم كل الترحيلات ثم البذرة). الأرقام الحالية في `G4_REPORT_AR.md` (1123 / 222 / 110 / 22 / 578 / 70 / 300 / 87، بلا فشل، وتحذير واحد قديم في `rls-tests`).
 
 ## Security review (2026-10-31, staging)
 
@@ -583,3 +705,20 @@ Fixed in migrations A / B (tests: `g3-tests.js`, `g3-cycle-tests.js`, `rls-tests
 Still open (G3): not exercised against the real PostgREST (composite-FK embeds) or a browser; voiding a document that is still a container's evidence is allowed; the B/L `conflict` event has no alert or badge yet; `seed.sql` does not seed document requirements on a fresh database.
 
 Still open: server-side upload hash/size verification (Edge Function); MFA for app users; e-mail delivery of invitations; the `X-Forwarded-For` / `cf-connecting-ip` assumption must be confirmed on the real Supabase edge; the last-admin race fix is verified only by a source check (PGlite has one connection); none of the above was exercised against the real Staging project or in a browser.
+
+### G4 additions (2026-11-04, staging)
+Migration `20261104000100_g4_costs.sql` (spec: `G4_SPEC.md`). Paste-ready file for the live staging SQL Editor: **`g4_apply.sql` (the G4 file alone, after G3)**. The regenerated `supabase/all_migrations.sql` is for an **empty database (first install) only**: it replays G3 A, whose narrower `transaction_events_event_type_check` aborts the paste once any `'finance'` event exists.
+- **Ten finance tables** (`finance_documents`, `supplier_invoices`, `supplier_invoice_lines`, `cost_allocations`, `cost_accruals`, `supplier_payments`, `client_charges`, `charge_collections`, `demurrage_cases`, `cost_adjustments`):
+  - RLS on, SELECT for `fin_read_roles` only (accountant, accounts_manager, branch_manager, supervisor, admin). Branch scope comes through the parent transaction or the invoice branch.
+  - The API holds SELECT only; every write is a SECURITY DEFINER RPC (42 new). No DELETE anywhere; payments and collections are append-only (recorded → void).
+  - Composite tenant FKs, `trg_audit` on all ten, idempotent create RPCs.
+- **Client privacy (G4-7).** Clients and non-finance staff (clearance, transport, operations_manager) read 0 rows from every finance table and get `MRS_FORBIDDEN` / `MRS_NOT_FOUND` from every finance RPC. Finance timeline events are never client-visible and carry no amounts. The portal loads no finance script.
+- **Storage.** Originals live in the private `finance` bucket (`{org}/{doc}/{file}`), never in `documents`. Read = a finance_documents row visible under RLS; insert = the caller's own fresh row.
+- **Party finance columns** (`iban_last4`, `bank_name`, `payment_terms_days`, `default_currency`) change only through `save_party_finance` (guard trigger).
+- **Catalog.** anon still executes exactly 6 functions; authenticated exactly 98 (56 + 42). Only `app.fin_read_roles` and `app.fin_can_read_invoice` are granted to authenticated (policy helpers).
+- **Migration safety.** Preflight stops before any DDL unless G3 B (`20261103000200`) is applied. The backfill creates one accrual per non-cancelled trip and no events. Applying the file twice changes no row, policy, trigger or function count.
+  - **After G4, never re-paste `g3_apply.sql` or run G3 A (`20261103000100`) on its own.** Two outcomes: (a) finance events already exist → G3 A aborts on `transaction_events_event_type_check` and nothing changes; paste `g4_apply.sql` instead (it is the superset). (b) no finance event yet → G3 A succeeds and silently drops `'finance'` from the check, after which every G4 RPC that writes an event fails; paste `g4_apply.sql` straight after.
+  - Preflight also stops while an **active branch-scoped supervisor** membership exists (supervisors read every G4 row through `audit_log`, which is org-wide, so G4 makes them org-wide: `memberships_supervisor_no_branch` / `invitations_supervisor_no_branch`, NOT VALID until the data is clean).
+  - Backfilled trip accruals get their `audit_log` INSERT row (the audit trigger is attached before the backfill).
+
+Still open (G4): not exercised against the real PostgREST / Supabase Storage or a real browser; payload whitelists were checked against the SQL `app.only_keys` lists in jsdom only.
