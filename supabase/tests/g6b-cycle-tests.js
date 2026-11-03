@@ -24,7 +24,7 @@ const UNIT_ONLY = args.includes('--unit');
 const SUPA = path.join(ROOT, 'supabase');
 const FN = path.join(SUPA, 'functions', 'inbox-sync');
 const G6B_MIGRATION = '20261107000100_g6b_inbox.sql';
-const FILES = ['adapters.js', 'mock-email.js', 'mock-whatsapp.js', 'ai-mock.js', 'pipeline.js', 'worker.js'];
+const FILES = ['adapters.js', 'mock-email.js', 'mock-whatsapp.js', 'ai-mock.js', 'pipeline.js', 'worker.js', 'email-mime.js', 'email-live.js'];
 
 // No network anywhere: any fetch is a test failure (the worker is given no fetch).
 let fetchCalls = 0;
@@ -36,6 +36,8 @@ const MW = require(path.join(FN, 'mock-whatsapp.js'));
 const AI = require(path.join(FN, 'ai-mock.js'));
 const PL = require(path.join(FN, 'pipeline.js'));
 const WK = require(path.join(FN, 'worker.js'));
+const MI = require(path.join(FN, 'email-mime.js'));
+const EL = require(path.join(FN, 'email-live.js'));
 const DEPS = Object.assign({}, AD, AI, PL);
 
 let nPass = 0, nFail = 0;
@@ -61,13 +63,17 @@ async function unitChecks() {
   section('0. unit checks: adapters, mocks, rule provider, pipeline, worker (no DB)');
   const P = AI.createRuleProvider({ clock: FIXED_CLOCK });
 
-  await check('the six scripts expose the spec API', () => {
+  await check('the eight scripts expose the spec API', () => {
     const need = {
       adapters: [AD, ['CHANNEL_METHODS', 'CAPABILITY_KEYS', 'AdapterError', 'normalizeInbound', 'normalizeAddress', 'redact', 'scrubText', 'sha256Hex', 'estimateAiCost',
         'AI_PRICES', 'createLiveEmailAdapter', 'createLiveWhatsAppAdapter', 'createLlmProvider', 'LIVE_ENDPOINTS_TO_VERIFY']],
       'mock-email': [ME, ['createMockEmail', 'EMAIL_FIXTURES']], 'mock-whatsapp': [MW, ['createMockWhatsApp', 'WA_FIXTURES']],
       'ai-mock': [AI, ['createRuleProvider', 'RULES', 'DEFAULT_TEMPLATES', 'ACTIONS', 'iso6346CheckDigit', 'foldDigits', 'PROVIDER_VERSION']],
-      pipeline: [PL, ['processMessage', 'buildDraft', 'PIPELINE_VERSION']], worker: [WK, ['createWorker', 'runJob']]
+      pipeline: [PL, ['processMessage', 'buildDraft', 'PIPELINE_VERSION']], worker: [WK, ['createWorker', 'runJob']],
+      'email-mime': [MI, ['MIME_LIMITS', 'MimeError', 'parseMessage', 'parseAuthResults', 'parseDsn', 'parseDate', 'isMsgId', 'sanitizeText',
+        'buildMessage', 'mimeHtmlToText', 'decodeHeaderValue', 'decodeCharset', 'base64Encode', 'base64Decode']],
+      'email-live': [EL, ['EMAIL_LIVE_VERSION', 'createImapSmtpEmail', 'ImapClient', 'SmtpClient', 'classifySmtpReply', 'classifyImapStatus',
+        'parseAddressList', 'parseCursor', 'formatCursor', 'dotStuff', 'sha256HexPure']]
     };
     const miss = [];
     for (const k of Object.keys(need)) for (const n of need[k][1]) if (!(n in need[k][0])) miss.push(k + '.' + n);
@@ -96,7 +102,9 @@ async function unitChecks() {
     for (const f of FILES) vm.runInContext(fs.readFileSync(path.join(FN, f), 'utf8'), sandbox, { filename: f });
     const M = sandbox.MarsaInbox;
     return (M && typeof M.createWorker === 'function' && typeof M.createRuleProvider === 'function' && typeof M.createMockEmail === 'function' &&
-      typeof M.processMessage === 'function' && typeof M.normalizeInbound === 'function') || 'MarsaInbox incomplete';
+      typeof M.processMessage === 'function' && typeof M.normalizeInbound === 'function' && typeof M.createImapSmtpEmail === 'function' &&
+      typeof M.parseMessage === 'function' && typeof M.htmlToText === 'function' && typeof M.mimeHtmlToText === 'function' &&
+      M.htmlToText('<p>a</p>') === AD.htmlToText('<p>a</p>') && M.htmlToText !== M.mimeHtmlToText) || 'MarsaInbox incomplete';
   });
 
   // ---------------------------------------------------------------- ISO 6346, folding, addresses
@@ -305,6 +313,27 @@ async function unitChecks() {
     const r = await WK.runJob(ctx, null, { deps: DEPS, provider: P, clock: FIXED_CLOCK });
     if (!(r.outcome === 'failed' && r.error.kind === 'not_configured')) errs.push('llm job ' + J(r));
     if (AD.LIVE_ENDPOINTS_TO_VERIFY.length < 10) errs.push('endpoints list');
+    return errs.length === 0 || errs.join('; ');
+  });
+  await check('G6c createLiveEmailAdapter (review H1): connect + imap + smtp + explicit impl → the IMAP / SMTP adapter; any piece missing → stub', async () => {
+    const errs = [];
+    let dials = 0;
+    const cfg = { connect: async () => { dials++; throw new Error('no socket in g6b-cycle-tests'); }, deps: Object.assign({}, AD, MI, EL),
+      imap: { host: 'imap.test.invalid', port: 993, user: 'login@box.example', password: 'pw-not-real' },
+      smtp: { host: 'smtp.test.invalid', port: 465, user: 'login@box.example', password: 'pw-not-real' },
+      fromAddress: 'ops@box.example', timeouts: { connect: 200, cmd: 200 } };
+    const real = AD.createLiveEmailAdapter(Object.assign({ impl: EL.createImapSmtpEmail }, cfg));
+    if (!(real.mode === 'live' && real.provider === 'imap' && real.version === EL.EMAIL_LIVE_VERSION)) errs.push('real ' + J(real));
+    for (const c of [cfg, Object.assign({ impl: EL.createImapSmtpEmail }, cfg, { connect: undefined }), Object.assign({ impl: EL.createImapSmtpEmail }, cfg, { smtp: undefined }),
+      Object.assign({ impl: EL.createImapSmtpEmail }, cfg, { imap: null })]) {
+      const a = AD.createLiveEmailAdapter(c);
+      if (a.provider !== undefined) { errs.push('not a stub'); continue; }
+      try { await a.probe(); errs.push('stub probe ok'); } catch (e) { if (e.kind !== 'not_configured') errs.push('stub ' + e.kind); }
+    }
+    // the real path fails closed on the injected socket: a fixed-message AdapterError, applied 'no', no password in it
+    try { await real.probe(); errs.push('probe ok'); }
+    catch (e) { if (!AD.isAdapterError(e) || e.applied !== 'no' || JSON.stringify(e.toJSON()).includes('pw-not-real')) errs.push('probe ' + J(e)); }
+    if (dials !== 1) errs.push('dials ' + dials);
     return errs.length === 0 || errs.join('; ');
   });
 

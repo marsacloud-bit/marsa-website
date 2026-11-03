@@ -174,14 +174,16 @@ async function sqlTx(org, branch, client) {
 
 /* ================================================================== sections */
 let C0 = null;
+let C1M = null;   // the catalog right after the MFA file, before any later migration (G6c re-creates msg_* bodies on its own)
 
 async function secCatalog() {
   section('1. catalog: helpers, re-created functions, privileges, nothing else changed');
-  const C1 = await catalog();
-  await check('schema_versions row 20261109000100 mfa; health_check reports it (anon)', async () => {
+  const C1 = C1M;
+  await check('schema_versions row 20261109000100 mfa; health_check reports the latest migration file (anon)', async () => {
     const r = await one(`SELECT name FROM public.schema_versions WHERE version = '20261109000100'`);
     const h = await rpc('anon', null, `SELECT public.health_check() r`);
-    return (r && r.name === 'mfa' && h.schema_version === '20261109000100') || J({ r, h });
+    const latest = fs.readdirSync(MIG_DIR).filter(f => /^\d+_.*\.sql$/.test(f)).sort().pop().split('_')[0];
+    return (r && r.name === 'mfa' && latest >= '20261109000100' && h.schema_version === latest) || J({ r, h, latest });
   });
   const m0 = new Map(C0.fns.map(f => [f.sig, f]));
   const m1 = new Map(C1.fns.map(f => [f.sig, f]));
@@ -703,6 +705,7 @@ async function dbMain() {
   if (!await runFile(path.join(SUPA, 'seed.sql'))) return;
   C0 = await catalog();
   if (!await runFile(MFA_FILE)) return;
+  C1M = await catalog();
   for (const f of files.filter(f => f > MFA_MIGRATION)) if (!await runFile(path.join(MIG_DIR, f), QUIET)) return;
   try { await fixtures(); pass('fixtures: adminA, plat, both, clrA, mixed, same, clientA, optUser, pendingUser, oldAdmin, clrM, selfInv'); }
   catch (e) { fail('fixtures', errText(e)); return; }

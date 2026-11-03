@@ -17,8 +17,10 @@
     - redact / scrubText — mirror of app.msg_redact / app.msg_scrub_text (= the G5 app.bill_redact rules);
     - sha256Hex — lowercase hex SHA-256 of a UTF-8 string (globalThis.crypto.subtle);
     - estimateAiCost / AI_PRICES — the AI cost-estimate hook (rule_mock = 0; llm_pending = null = unknown → refused);
-    - createLiveEmailAdapter / createLiveWhatsAppAdapter — documented stubs: every method throws
-      AdapterError('not_configured'). They never read a key and never call fetch;
+    - createLiveEmailAdapter — G6c: the REAL IMAP / SMTP adapter only when the config carries connect + imap + smtp AND
+      an explicit factory (config.impl = email-live.js createImapSmtpEmail, passed by index.ts; review H1), else the
+      documented stub; createLiveWhatsAppAdapter — documented stub. Stubs throw AdapterError('not_configured'), never
+      read a key and never call fetch;
     - createLlmProvider — the AI provider interface whose every method throws not_configured (no LLM call in G6b);
     - LIVE_ENDPOINTS_TO_VERIFY — data only. Nothing here is ever called.
 */
@@ -273,12 +275,12 @@
 
   /* ---------------------------------------------------------------- live stubs (documented, never called) */
   const LIVE_ENDPOINTS_TO_VERIFY = Object.freeze([
-    { channel: 'email', capability: 'provider', note: "the org's own provider: Microsoft Graph / Gmail API / IMAP + SMTP (choice per org)" },
-    { channel: 'email', capability: 'auth', note: 'delegated OAuth consent scoped to ONE mailbox; credential in Vault msg_email_credential:<channel_id>, read by the worker only' },
-    { channel: 'email', capability: 'send', note: 'Message-ID <MRSO-…@marsa.invalid> as the idempotency key' },
-    { channel: 'email', capability: 'lookup_send', note: 'sent-items lookup by Message-ID' },
-    { channel: 'email', capability: 'status_events', note: 'DSN / bounce handling' },
-    { channel: 'email', capability: 'attachments', note: 'attachment download into bucket messages + size limits' },
+    { channel: 'email', capability: 'provider', note: 'G6c: Hostinger IMAP imap.hostinger.com:993 + SMTP smtp.hostinger.com:465, implicit TLS (TLS connect to both verified from Supabase staging 2026-11-03); 587 / STARTTLS refused (blocked on Supabase)' },
+    { channel: 'email', capability: 'auth', note: 'mailbox password in Edge Function secrets MARSA_EMAIL_IMAP_* / MARSA_EMAIL_SMTP_* (owner only; no OAuth at Hostinger); one channel MARSA_EMAIL_LIVE_CHANNEL; Vault msg_email_credential:<channel_id> per channel is phase 2' },
+    { channel: 'email', capability: 'send', note: 'SMTP 465 AUTH, From = MARSA_EMAIL_FROM_ADDRESS (the channel alias); Message-ID <MRSO-…@MARSA_EMAIL_MSGID_DOMAIN> as the idempotency key; envelope-only Bcc to the login mailbox' },
+    { channel: 'email', capability: 'lookup_send', note: 'IMAP UID SEARCH HEADER Message-ID in INBOX (the Bcc copy) and Sent; not found → unsupported (a human decides)' },
+    { channel: 'email', capability: 'status_events', note: 'DSN (multipart/report delivery-status) scanned in INBOX by its own cursor; bounced only when every recipient failed' },
+    { channel: 'email', capability: 'attachments', note: 'inbound metadata only (BODYSTRUCTURE); outbound attachments refused; download into bucket messages is phase 2' },
     { channel: 'whatsapp', capability: 'account', note: 'WhatsApp Business Platform (Cloud API): phone-number id per org' },
     { channel: 'whatsapp', capability: 'webhook', note: 'webhook verify token + X-Hub-Signature-256 (secret in Vault msg_webhook_secret:<channel_id>)' },
     { channel: 'whatsapp', capability: 'status_events', note: 'message status webhooks sent / delivered / read / failed' },
@@ -296,7 +298,17 @@
     for (const m of CHANNEL_METHODS) a[m] = async function () { throw notConfigured('live ' + kind + ' adapter'); };
     return Object.freeze(a);
   }
-  function createLiveEmailAdapter(config) { void config; return stub('email'); }
+  // G6c (review H1): the factory is passed explicitly (config.impl) so Node tests reach the real path; the call-time
+  // globalThis lookup is the Deno fallback only. Without connect + imap + smtp + a factory → the not_configured stub.
+  function createLiveEmailAdapter(config) {
+    const c = config || {};
+    const g = typeof globalThis === 'object' && globalThis.MarsaInbox ? globalThis.MarsaInbox.createImapSmtpEmail : null;
+    const impl = typeof c.impl === 'function' ? c.impl : (typeof g === 'function' ? g : null);
+    if (!impl || typeof c.connect !== 'function' || !c.imap || typeof c.imap !== 'object' || !c.smtp || typeof c.smtp !== 'object') return stub('email');
+    const cfg = Object.assign({}, c);
+    delete cfg.impl;
+    return impl(cfg);
+  }
   function createLiveWhatsAppAdapter(config) { void config; return stub('whatsapp'); }
   function createLlmProvider(config) {
     void config;

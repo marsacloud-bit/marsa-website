@@ -1,0 +1,25 @@
+Return-Path: <ops@gulf-agent.example>
+Authentication-Results: mx.marsa-mail.example; spf=pass smtp.mailfrom=gulf-agent.example; dkim=pass header.d=gulf-agent.example; dmarc=pass header.from=gulf-agent.example
+Received: from mail.gulf-agent.example (mail.gulf-agent.example [192.0.2.10])
+	by mx.marsa-mail.example with ESMTPS id abc123
+	for <ops@marsa.example>; Tue, 03 Nov 2026 10:00:02 +0300
+From: Gulf Shipping Agency <ops@gulf-agent.example>
+To: Marsa Ops <ops@marsa.example>
+Cc: "Docs, Team" <docs@gulf-agent.example>
+Subject: D/O ready - B/L MEDUJD481516
+Date: Tue, 3 Nov 2026 10:00:00 +0300
+Message-ID: <plain-0001@gulf-agent.example>
+In-Reply-To: <MRSO-0123456789ABCDEF@marsa.example>
+References: <root-0001@gulf-agent.example>
+ <MRSO-0123456789ABCDEF@marsa.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="us-ascii"
+Content-Transfer-Encoding: 7bit
+
+Dear Marsa team,
+
+The delivery order for B/L No. MEDUJD481516 is ready.
+Containers: MSKU7712050 and TGHU4829131.
+
+Regards,
+Gulf Shipping Agency

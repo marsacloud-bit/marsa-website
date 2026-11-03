@@ -1,0 +1,11 @@
+Authentication-Results: mx.marsa-mail.example; spf=softfail smtp.mailfrom=gulf-agent.example; dkim=fail header.d=x.example; dkim=pass header.d=gulf-agent.example; dmarc=fail header.from=gulf-agent.example
+Received: from attacker.example by mx.marsa-mail.example; Tue, 03 Nov 2026 10:00:00 +0300
+Authentication-Results: mx.marsa-mail.example; spf=pass; dkim=pass; dmarc=pass
+From: Gulf Shipping Agency <ops@gulf-agemt.example>
+To: ops@marsa.example
+Subject: Updated bank details
+Date: Tue, 03 Nov 2026 10:00:00 +0300
+Message-ID: <forged-0001@gulf-agemt.example>
+Content-Type: text/plain
+
+Please note our new account.

@@ -66,7 +66,12 @@
     if (r === null || r === undefined) return null;
     if (op === 'fetchInbound') {
       const msgs = Array.isArray(r.messages) ? r.messages : [];
-      return { messages: msgs.length, provider_message_ids: msgs.slice(0, 50).map(m => String((m && (m.id || m.provider_message_id)) || '').slice(0, 200)), next_cursor: r.next_cursor === undefined ? null : String(r.next_cursor) };
+      const out = { messages: msgs.length, provider_message_ids: msgs.slice(0, 50).map(m => String((m && (m.id || m.provider_message_id)) || '').slice(0, 200)), next_cursor: r.next_cursor === undefined ? null : String(r.next_cursor) };
+      // G6c (correctness review M5): what the adapter skipped (DSN, loop guard, bad From, parse / fetch refusal) is recorded
+      if (Array.isArray(r.skipped) && r.skipped.length) {
+        out.skipped = r.skipped.slice(0, 50).map(x => ({ uid: Number.isInteger(x && x.uid) ? x.uid : null, reason: String((x && x.reason) || 'unknown').replace(/[^a-z0-9_]/gi, '').slice(0, 40) }));
+      }
+      return out;
     }
     if (op === 'fetchStatusEvents') return { events: Array.isArray(r.events) ? r.events.length : 0, next_cursor: r.next_cursor === undefined ? null : String(r.next_cursor) };
     return safe(A, r);
@@ -146,7 +151,11 @@
       const v = r && r.capabilities && r.capabilities[k];
       caps[k] = { supported: !!(v && v.supported === true), evidence: v && v.evidence != null ? String(v.evidence).slice(0, 300) : null };
     }
-    return { outcome: 'ok', effects: { capabilities: caps, account: { address: r && r.account && r.account.address ? String(r.account.address).slice(0, 254) : null } } };
+    const effects = { capabilities: caps, account: { address: r && r.account && r.account.address ? String(r.account.address).slice(0, 254) : null } };
+    // G6c (correctness review M7): a live mailbox's position at connect time; SQL seeds empty poll / status cursors with it
+    const mc = r && r.mailbox && r.mailbox.cursor;
+    if (typeof mc === 'string' && /^v1:\d{1,10}:\d{1,10}:\d{1,6}$/.test(mc)) effects.mailbox = { cursor: mc };
+    return { outcome: 'ok', effects };
   }
 
   async function pollJob(R, ctx, A) {
