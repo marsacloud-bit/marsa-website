@@ -18,7 +18,7 @@
 
 ### 2.1 Demo — عرض محلي بلا خادم
 - `assets/js/config.js` بقيم فارغة لـ `supabaseUrl` و`supabaseAnonKey` (انظر القالب [`assets/js/config.example.js`](../../assets/js/config.example.js)).
-- لا يُرسل أي طلب شبكة سوى خط Google Fonts. يظهر شريط «نسخة عرض تجريبية».
+- لا يُرسل أي طلب شبكة خارجي: خط Cairo مستضاف على الموقع نفسه (`assets/fonts/cairo/`) منذ 2026-11-03، بعد أن كان من Google Fonts. يظهر شريط «نسخة عرض تجريبية».
 
 ### 2.2 Dev / Local PGlite — التطوير والاختبار
 - الواجهة تُفتح عبر خادم محلي:

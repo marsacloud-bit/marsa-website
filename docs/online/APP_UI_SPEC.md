@@ -59,5 +59,5 @@ Script order (all `defer`): `config.js → i18n.js → assets/i18n/<page>.js →
 ## Rules
 - Keep every existing feature and data flow working (all MarsaApi calls, demo mode without Supabase config, idempotency handling, invitations, OCR, bulk import).
 - Insert data with textContent / createElement (no innerHTML with server or user data).
-- No new external dependencies except what pages already load (supabase-js, Tesseract, pdf.js, jsQR from jsDelivr).
+- No new external dependencies except what pages already load (supabase-js self-hosted under assets/vendor with SRI since 2026-11-03; Tesseract, pdf.js, jsQR still loaded on demand from jsDelivr).
 - `node --check` every JS file touched.
