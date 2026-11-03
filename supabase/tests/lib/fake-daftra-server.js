@@ -9,7 +9,7 @@
   createFakeDaftraServer({apiKey, site, taxes, clientLimit, keywordsCoverBn1, poNumbers, renumberClients, forbidden,
                           echoItemDescription, inheritProductTax, clock}) → server
     inheritProductTax  an item sent WITHOUT tax1 / tax2 takes the product's taxes (the documented Daftra rule; null / 0 = none)
-    invoices.json      default order: invoice date DESC (documented); sort=id + direction honoured; external_source=api keeps
+    invoices.json      default order: invoice date DESC (documented); sort=id + direction honoured; external_source → 302 /error500.php like the real account; was: keeps
                        the invoices created through POST (control.addInvoice adds UI ones)
     summary            inclusive taxes are carved out of the line amount (not added on top)
     server.start() → {port, baseUrl};  server.stop()
@@ -170,7 +170,8 @@ function createFakeDaftraServer(opts) {
     if (method === 'GET' && path === 'invoices.json') {
       let list = S.invoices.slice().sort((a, b) => (a.Invoice.date < b.Invoice.date ? 1 : a.Invoice.date > b.Invoice.date ? -1 : Number(b.Invoice.id) - Number(a.Invoice.id)));
       if (query.sort === 'id') list.sort((a, b) => (Number(a.Invoice.id) - Number(b.Invoice.id)) * (String(query.direction).toUpperCase() === 'DESC' ? -1 : 1));
-      if (query.external_source) list = list.filter(x => String(x.Invoice.external_source || '') === String(query.external_source));
+      // the real account (2026-11-03) answers the documented external_source filter with 302 → /error500.php
+      if (query.external_source) return [302, ''];
       if (query.po_number && cfg.poNumbers) list = list.filter(x => String(x.Invoice.po_number || '') === String(query.po_number));
       if (query.keywords) {
         const k = lc(query.keywords);
@@ -245,7 +246,9 @@ function createFakeDaftraServer(opts) {
       const send = (status, obj) => {
         entry.status = status;
         const out = obj === undefined ? '' : (typeof obj === 'string' ? obj : JSON.stringify(obj));
-        res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(out) });
+        const hdr = { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(out) };
+        if (status === 302) hdr.location = '/error500.php';
+        res.writeHead(status, hdr);
         res.end(out);
       };
       if (!u.pathname.startsWith('/api2/')) return send(404, failed(404, 'Item not found'));

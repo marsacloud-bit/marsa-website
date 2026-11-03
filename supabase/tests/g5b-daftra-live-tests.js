@@ -172,9 +172,9 @@ async function secProbe() {
   const n = mark();
   const p = keep(await live().probe());
   const rq = since(n);
-  await check('probe sends only GETs: site_info, taxes, one page of clients / products / invoices / API invoices (id DESC)', () =>
+  await check('probe sends only GETs: site_info, taxes, one page of clients / products / invoices / all invoices (id DESC, no external_source: it 302s on the real account)', () =>
     (rq.every(r => r.method === 'GET') && rq.map(r => r.path).join(',') === 'site_info.json,taxes.json,clients.json,products.json,invoices.json,invoices.json'
-      && rq[5].query.external_source === 'api' && rq[5].query.sort === 'id' && rq[5].query.direction === 'DESC'
+      && !('external_source' in rq[5].query) && rq[5].query.sort === 'id' && rq[5].query.direction === 'DESC'
       && rq.every(r => r.apikey && !r.authorization)) || J(rq.map(r => r.method + ' ' + r.path)));
   await check('every CAPABILITY_KEYS key reported with evidence; invoices.issue and credit_notes.create false (policy)', () => {
     const k = Object.keys(p.capabilities);
@@ -205,6 +205,16 @@ async function secProbe() {
     const e = await keepErr(live({ expectSubdomain: 'other-co' }).probe());
     const ok2 = keep(await live({ expectSubdomain: 'marsa-fake' }).probe());
     return (e && e.kind === 'not_configured' && e.code === 'account_mismatch' && ok2.account.subdomain === 'marsa-fake') || J(e);
+  });
+  await check('identity binding: site_info giving the full host ("<sub>.daftra.com", seen on the real account) still matches', async () => {
+    const before = SRV.state.site.subdomain;
+    try {
+      SRV.state.site.subdomain = 'Marsa-Fake.daftra.com';
+      const ok = keep(await live({ expectSubdomain: 'marsa-fake' }).probe());
+      SRV.state.site.subdomain = 'other-co.daftra.com';
+      const e = await keepErr(live({ expectSubdomain: 'marsa-fake' }).probe());
+      return (ok && ok.account && e && e.code === 'account_mismatch') || J(e);
+    } finally { SRV.state.site.subdomain = before; }
   });
   await check('a bad key → 401 → not_configured auth_failed on the first call (probe job fails, never retried as transient)', async () => {
     const e = await keepErr(live({ apiKey: 'wrong-key' }).probe());
@@ -645,9 +655,9 @@ async function secReview() {
       for (let i = 0; i < 250; i++) F.srv.control.addInvoice({ api: true, client_id: F.cl.id, date: '2026-11-0' + (1 + (i % 9)), notes: '[MARSA-REF:OTHER-' + i + '/F]' });
       F.srv.faults.push({ method: 'POST', path: /^invoices\.json$/, drop: 'after' });
       const e = await keepErr(a.createDraftInvoice({ reference: 'H2-1/F', client_id: F.cl.id, currency: 'SAR', date: '2026-10-01', lines: [] }));
-      await check('H2: a back-dated lost create behind 250 later-dated drafts (PO numbers off) is found by the id-DESC API scan', async () => {
+      await check('H2: a back-dated lost create behind 250 later-dated drafts (PO numbers off) is found by the id-DESC invoice scan', async () => {
         const h = await a.findInvoiceByReference('H2-1/F');
-        const scan = F.srv.requests.filter(r => r.path === 'invoices.json' && r.query.external_source === 'api');
+        const scan = F.srv.requests.filter(r => r.path === 'invoices.json' && r.query.sort === 'id');
         return (e && e.applied === 'unknown' && h.length === 1 && scan.length >= 1 && scan.every(r => r.query.sort === 'id' && r.query.direction === 'DESC')) || J({ e, h });
       });
       for (let i = 0; i < 250; i++) F.srv.control.addInvoice({ api: true, client_id: F.cl.id, date: '2026-11-03', notes: '[MARSA-REF:LATER-' + i + '/F]' });

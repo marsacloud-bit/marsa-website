@@ -253,8 +253,9 @@
       return { items: out, complete: false, total };
     }
     const byId = (a, b) => (Number(a.id) || 0) - (Number(b.id) || 0);
-    // the bounded invoice scan: API-created invoices (documented external_source filter), newest id first
-    const INVOICE_SCAN_QUERY = Object.freeze({ external_source: 'api', sort: 'id', direction: 'DESC' });
+    // the bounded invoice scan: ALL invoices, newest id first. The documented external_source=api filter is not used:
+    // on the real account (2026-11-03) it answers 302 → /error500.php; Marsa's invoices are told apart by the notes marker.
+    const INVOICE_SCAN_QUERY = Object.freeze({ sort: 'id', direction: 'DESC' });
     const INVOICE_SCAN_QUERY_PAGE1 = limit => Object.assign({}, INVOICE_SCAN_QUERY, { page: 1, limit });
     // po_number is proven kept when one of Marsa's invoices (notes marker) carries the same value in po_number
     function poKeptOn(list) {
@@ -428,8 +429,9 @@
     const ops = {
       async probe(ctx) {
         const site = unwrap((await call(ctx, 'GET', 'site_info.json', {})).data, 'Site');
-        const siteSub = s(site.subdomain);
-        if (hostSub && siteSub && siteSub.toLowerCase() !== hostSub) {
+        // site_info may give the bare label or the full host ("<sub>.daftra.com"): compare the first label only
+        const siteSub = s(site.subdomain).toLowerCase().replace(/^https?:\/\//, '').split(/[./]/)[0];
+        if (hostSub && siteSub && siteSub !== hostSub) {
           throw err('not_configured', 'Daftra account does not match the configured subdomain', 'account_mismatch');
         }
         taxCache = null;
