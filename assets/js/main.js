@@ -4,12 +4,14 @@
    then page script:    <script src="assets/js/<page>.js" defer></script>
    Each feature runs only if its elements exist. Works on file://.
    Public API: window.Marsa = { toast, genRef, saveLocal, readLocal, formatSAR, formatNum, qs, qsa, icon,
-                                 mode, isOnlineConfigured, strings }
+                                 mode, isOnlineConfigured, isProduction, strings }
    Mode: "online" (STAGING) when window.MARSA_CONFIG (assets/js/config.js, loaded
    before this file) has supabaseUrl + supabaseAnonKey; otherwise "demo"
    (localStorage only). The chrome (demo banner, footer privacy line, clear-data
    confirm, «بوابتي» link) follows the mode. The «بوابتي» link is shown only on
    pages that also load supa.js (window.MarsaApi) and only for a signed-in user.
+   Environment: config.js environment 'production' (online only) sets html[data-marsa-env="production"]
+   (else "staging"); style.css then hides [data-show-env="staging"] and shows [data-show-env="production"].
    Language (G2.11): strings come from window.MarsaI18n (assets/js/i18n.js, loaded
    before this file). main.js tags the shared chrome outside <header>/<footer>
    (topbar, drawer, skip link, back-to-top) with data-i18n keys, injects the
@@ -125,7 +127,8 @@
     },
     privacy: {
       demo: '<strong>الخصوصية في نسخة العرض:</strong> ما تُدخله في النماذج والحاسبة يبقى في التخزين المحلي (localStorage) لهذا المتصفح فقط، دون تشفير ودون إرسال إلى أي خادم، فلا تُدخل بيانات حقيقية حساسة. خط الموقع ومكتبة الاتصال مستضافان على الموقع نفسه، فلا يتصل متصفحك بخوادم خارجية لتحميلهما.',
-      staging: '<strong>الخصوصية في البيئة التجريبية (Staging):</strong> هذه بيئة اختبار ببيانات تجريبية، فلا تُدخل بيانات حقيقية أو حساسة. طلبات التخليص ورسائل التواصل والرفع الجماعي وتسجيل الدخول والمستندات المرفوعة تُرسل عبر اتصال مشفّر (HTTPS) إلى قاعدة بيانات الموقع على خدمة Supabase، ويقتصر الاطلاع عليها على الموظفين المخوَّلين وصاحب الطلب وفق صلاحيات قاعدة البيانات. أما الحاسبة والمسودات وجلسة الدخول فتُحفظ في التخزين المحلي (localStorage) لهذا المتصفح. خط الموقع ومكتبة الاتصال مستضافان على الموقع نفسه، فلا يتصل متصفحك بخوادم خارجية لتحميلهما.'
+      staging: '<strong>الخصوصية في البيئة التجريبية (Staging):</strong> هذه بيئة اختبار ببيانات تجريبية، فلا تُدخل بيانات حقيقية أو حساسة. طلبات التخليص ورسائل التواصل والرفع الجماعي وتسجيل الدخول والمستندات المرفوعة تُرسل عبر اتصال مشفّر (HTTPS) إلى قاعدة بيانات الموقع على خدمة Supabase، ويقتصر الاطلاع عليها على الموظفين المخوَّلين وصاحب الطلب وفق صلاحيات قاعدة البيانات. أما الحاسبة والمسودات وجلسة الدخول فتُحفظ في التخزين المحلي (localStorage) لهذا المتصفح. خط الموقع ومكتبة الاتصال مستضافان على الموقع نفسه، فلا يتصل متصفحك بخوادم خارجية لتحميلهما.',
+      production: '<strong>الخصوصية:</strong> طلبات التخليص ورسائل التواصل والرفع الجماعي وتسجيل الدخول والمستندات المرفوعة تُرسل عبر اتصال مشفّر (HTTPS) إلى قاعدة بيانات الموقع على خدمة Supabase، ويقتصر الاطلاع عليها على الموظفين المخوَّلين وصاحب الطلب وفق صلاحيات قاعدة البيانات. أما الحاسبة والمسودات وجلسة الدخول فتُحفظ في التخزين المحلي (localStorage) لهذا المتصفح. خط الموقع ومكتبة الاتصال مستضافان على الموقع نفسه، فلا يتصل متصفحك بخوادم خارجية لتحميلهما.'
     },
     clear: {
       demo: 'سيتم حذف كل ما حفظه موقع مرسى في هذا المتصفح (الطلبات والحسابات والرسائل والمسودات). لا يمكن التراجع عن ذلك. هل تريد المتابعة؟',
@@ -134,11 +137,14 @@
     portal: 'بوابتي'   // staff are sent to admin.html, clients to portal.html
   };
   var STR_AR = JSON.parse(JSON.stringify(STR));
+  var PRIVACY_PRODUCTION_EN = '<strong>Privacy:</strong> clearance requests, contact messages, bulk uploads, sign-in and uploaded documents are sent over an encrypted connection (HTTPS) to the site database on Supabase, and only authorised staff and the requester can see them, as enforced by database permissions. The calculator, drafts and sign-in session are kept in this browser\'s local storage (localStorage). The site font and the connection library are hosted on this site, so your browser does not contact third-party servers to load them.';
   function refreshStrings() {
     STR.banner.demo = tr('banner.demo', STR_AR.banner.demo);
     STR.banner.staging = tr('banner.staging', STR_AR.banner.staging);
     STR.privacy.demo = tr('footer.privacyDemo', STR_AR.privacy.demo);
     STR.privacy.staging = tr('footer.privacyStaging', STR_AR.privacy.staging);
+    // production has no i18n.js key yet: English fallback kept here
+    STR.privacy.production = tr('footer.privacyProduction', I18N && I18N.lang() === 'en' ? PRIVACY_PRODUCTION_EN : STR_AR.privacy.production);
     STR.clear.demo = tr('common.clearConfirmDemo', STR_AR.clear.demo);
     STR.clear.staging = tr('common.clearConfirmStaging', STR_AR.clear.staging);
     STR.portal = tr('nav.portal', STR_AR.portal);
@@ -146,12 +152,16 @@
   refreshStrings();
   var CFG = window.MARSA_CONFIG || {};
   var MODE = (CFG.supabaseUrl && CFG.supabaseAnonKey) ? 'staging' : 'demo';
+  // config.js environment 'production': the same online mode ('staging' above) without the
+  // environment banner and with the production privacy line. Any other value = staging chrome.
+  var PROD = CFG.environment === 'production';
 
   window.Marsa = {
     toast: toast, genRef: genRef, saveLocal: saveLocal, readLocal: readLocal,
     formatSAR: formatSAR, formatNum: formatNum, qs: qs, qsa: qsa, icon: svgIcon,
     mode: function () { return MODE; },
     isOnlineConfigured: function () { return MODE === 'staging'; },
+    isProduction: function () { return PROD && MODE === 'staging'; },
     setMode: function (m) { MODE = m === 'staging' ? 'staging' : 'demo'; applyModeChrome(); },
     strings: STR
   };
@@ -386,11 +396,14 @@
     });
   }
 
-  /* ---- Mode chrome: banner text + footer privacy line follow demo / staging ---- */
+  /* ---- Mode chrome: banner text + footer privacy line follow demo / staging (production: no banner) ---- */
   function applyModeChrome() {
     document.documentElement.setAttribute('data-marsa-mode', MODE === 'staging' ? 'online' : 'demo');
+    var live = PROD && MODE === 'staging';
+    document.documentElement.setAttribute('data-marsa-env', live ? 'production' : 'staging');
+    qsa('[data-demo-banner]').forEach(function (b) { b.hidden = live; });
     qsa('[data-demo-banner-text]').forEach(function (p) { p.textContent = STR.banner[MODE]; });
-    qsa('[data-privacy-text]').forEach(function (el) { el.innerHTML = STR.privacy[MODE]; });
+    qsa('[data-privacy-text]').forEach(function (el) { el.innerHTML = STR.privacy[live ? 'production' : MODE]; });
     var close = qs('[data-demo-banner-close]');
     if (close) close.setAttribute('aria-label', MODE === 'staging'
       ? tr('banner.closeStaging', 'إخفاء تنبيه البيئة التجريبية لهذه الجلسة')

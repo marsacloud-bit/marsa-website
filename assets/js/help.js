@@ -13,7 +13,9 @@
        # / ## / ###, paragraphs, "- " and "1." lists, | tables (→ table.table.adm-table
        in .table-wrap), "> " notes (→ .card note), ``` fenced code (→ pre > code),
        **bold**, `code`, links [t](x.md) / [t](#id) to another guide only (→ in-page route).
-     Any other link, raw HTML and images stay plain text. No innerHTML anywhere.
+     A line that is only an HTML comment (<!-- env:staging --> / <!-- /env -->) is skipped:
+     scripts/build-release.sh drops the staging-only lines between those markers from the
+     production release. Any other link, raw HTML and images stay plain text. No innerHTML anywhere.
    ========================================================================== */
 (function () {
   'use strict';
@@ -142,7 +144,7 @@
         frag.appendChild(h('pre', { class: 'help-pre', dir: 'ltr' }, h('code', { text: code.join('\n') })));
         continue;
       }
-      if (/^\s*$/.test(line)) { flush(); i++; continue; }
+      if (/^\s*$/.test(line) || /^\s*<!--.*-->\s*$/.test(line)) { flush(); i++; continue; }
       var hm = /^(#{1,3})\s+(.+?)\s*#*\s*$/.exec(line);
       if (hm) {
         flush();

@@ -2,7 +2,9 @@
 
 For clients. The portal (`portal.html`) only shows what belongs to your company's client file. Back to the [guide index](index.md).
 
+<!-- env:staging -->
 > This is a staging environment: do not upload real or sensitive documents.
+<!-- /env -->
 
 ## How do I start?
 
@@ -56,5 +58,5 @@ The "Track a shipment" page (`tracking.html`): enter the reference and the track
 - It never shows internal costs, team notes, drivers, exceptions or alerts.
 - It never shows an invoice before Daftra issues it, and never shows drafts.
 - It never links your account to a client file automatically.
-- It does not send you e-mails or WhatsApp messages by itself in staging.
+- It does not send you e-mails or WhatsApp messages by itself.
 - If the organization is suspended, the portal and tracking stay closed until it is reactivated; your data is not deleted. During a suspension the portal may show "your account is not linked to a client file": do not ask to link a request then (it will be refused); contact the organization.

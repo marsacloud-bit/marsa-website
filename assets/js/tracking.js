@@ -508,6 +508,8 @@
   /* ---------- online (staging): public_track(ref, token) — minimal view only ---------- */
   var API = window.MarsaApi || null;
   var ONLINE = !!(API && API.isOnline && API.isOnline());
+  // config.js environment 'production' (main.js): no «Staging» footer under a result
+  function isProd() { return !!(window.Marsa && window.Marsa.isProduction && window.Marsa.isProduction()); }
   var OSTR = {
     reqHead: 'حالة الطلب',
     txHead: 'حالة المعاملة',
@@ -605,7 +607,7 @@
         '<p class="demo-note mt-3 mb-0">' + svg('<path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 16v-4M12 8h.01"/>') +
           '<span>' + esc(OSTR.privacyNote) + '</span></p>' +
       '</div>' +
-      '<div class="card-footer text-xs text-muted">' + esc(OSTR.staging) + '</div>' +
+      (isProd() ? '' : '<div class="card-footer text-xs text-muted">' + esc(OSTR.staging) + '</div>') +
     '</article>';
 
     var timeline = '';

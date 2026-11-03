@@ -114,7 +114,7 @@
         </nav>
         <h1 id="page-title">اطلب تخليص شحنتك أونلاين</h1>
         <p class="lead" data-show-mode="demo">أربع خطوات بسيطة: بياناتك، بيانات الشحنة، المستندات، ثم المراجعة والتأكيد. هذه نسخة عرض تجريبية: يُحفظ الطلب على جهازك فقط ولا يُرسل إلى أي جهة.</p>
-        <p class="lead" data-show-mode="online" hidden>أربع خطوات بسيطة: بياناتك، بيانات الشحنة، المستندات، ثم المراجعة والإرسال. هذه بيئة تجريبية متصلة (Staging): يُرسل الطلب إلى خادم الاختبار ليراجعه فريق مرسى، فاستخدم بيانات اختبار فقط.</p>
+        <p class="lead" data-show-mode="online" hidden>أربع خطوات بسيطة: بياناتك، بيانات الشحنة، المستندات، ثم المراجعة والإرسال. <span data-show-env="staging">هذه بيئة تجريبية متصلة (Staging): يُرسل الطلب إلى خادم الاختبار ليراجعه فريق مرسى، فاستخدم بيانات اختبار فقط.</span><span data-show-env="production">يُرسل الطلب إلى فريق مرسى ليراجعه ويتواصل معك.</span></p>
       </div>
       <svg class="page-hero-wave" viewBox="0 0 1440 120" preserveAspectRatio="none" aria-hidden="true">
         <path class="w-back" d="M0,40 C180,90 360,10 560,40 C760,70 900,20 1100,35 C1260,48 1360,70 1440,50 L1440,120 L0,120 Z"/>
@@ -652,7 +652,7 @@
               <div class="demo-note mt-3 success-note">
                 <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 16v-4M12 8h.01"/></svg>
                 <span data-show-mode="demo">نسخة عرض تجريبية: حُفظ الطلب في متصفحك فقط (localStorage) ولم يُرسل إلى أي خادم أو جهة، ولن يتواصل معك أحد بشأنه.</span>
-                <span data-show-mode="online" hidden>بيئة تجريبية متصلة (Staging): الطلب محفوظ على خادم الاختبار ببيانات تجريبية. لرفع المستندات أنشئ حسابًا في بوابة العملاء أو سجّل الدخول، ثم ارفعها بعد ربط الطلب بحسابك.</span>
+                <span data-show-mode="online" hidden><span data-show-env="staging">بيئة تجريبية متصلة (Staging): الطلب محفوظ على خادم الاختبار ببيانات تجريبية.</span><span data-show-env="production">وصل طلبك إلى فريق مرسى.</span> لرفع المستندات أنشئ حسابًا في بوابة العملاء أو سجّل الدخول، ثم ارفعها بعد ربط الطلب بحسابك.</span>
               </div>
             </div>
 
@@ -725,7 +725,7 @@
           <span class="eyebrow">في الخدمة الفعلية</span>
           <h2 id="next-title">ماذا يحدث بعد تقديم الطلب؟</h2>
           <p class="lead" data-show-mode="demo">هكذا تسير المعاملة عند تشغيل الخدمة الفعلية. أما نسخة العرض التجريبية الحالية فلا تُرسل الطلبات إلى أي جهة.</p>
-          <p class="lead" data-show-mode="online" hidden>هكذا تسير المعاملة في الخدمة الفعلية. هذه البيئة تجريبية (Staging) وتستخدم بيانات اختبار فقط.</p>
+          <p class="lead" data-show-mode="online" hidden>هكذا تسير المعاملة في الخدمة الفعلية.<span data-show-env="staging"> هذه البيئة تجريبية (Staging) وتستخدم بيانات اختبار فقط.</span></p>
         </div>
         <div class="steps">
           <div class="step-card reveal">

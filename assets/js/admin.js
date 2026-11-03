@@ -2857,7 +2857,8 @@
       var st = o.settings && typeof o.settings === 'object' ? o.settings : {};
       out.appendChild(dCard(t('org_identity'), dKv([
         [t('f_slug'), dLtr(o.slug)], [t('f_ref_prefix'), dLtr(o.ref_prefix)],
-        [t('f_environment'), dBadge('warning', o.environment === 'staging' ? t('env_staging') : String(o.environment || ''))],
+        [t('f_environment'), o.environment === 'production' ? dBadge('navy', t('env_production'))
+          : dBadge('warning', o.environment === 'staging' ? t('env_staging') : String(o.environment || ''))],
         [t('f_status'), o.is_active ? dBadge('success', t('active')) : dBadge('danger', t('suspended'))]
       ])));
 

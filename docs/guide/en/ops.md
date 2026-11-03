@@ -104,7 +104,7 @@ Arabic example of an inbound message: «نرجو إفادتنا بموعد إر�
 ## What the system does not do
 
 - It never sends a reply automatically: approval and send are two separate steps by different people.
-- Channels in staging are **mocks**; without the messaging worker, jobs stay "queued — the worker has not run", no messages arrive and no drafts are built.
+- Channels in **mock** mode send and receive nothing for real; without the messaging worker, jobs stay "queued — the worker has not run", no messages arrive and no drafts are built.
 - It never accepts the category, summary or extracted references without staff confirmation.
 - It never treats a return instruction or deadline as proof that a container was returned.
 - It never deletes a declaration, document or event; a cancellation with a reason stays in the history.

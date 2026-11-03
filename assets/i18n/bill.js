@@ -34,8 +34,8 @@
       not_connected_banner: 'دفترة غير متصلة ({status}). يجب فحص الإمكانات وتفعيل المزامنة من إعداد دفترة قبل الإرسال.',
       sync_disabled_banner: 'المزامنة موقوفة لهذه المنشأة؛ الطلبات تبقى في الانتظار حتى تُفعَّل.',
       open_settings: 'إعداد دفترة', open_clients: 'ربط العملاء', open_items: 'الأصناف',
-      worker_not_deployed: 'عامل المزامنة (Edge Function) غير منشور في بيئة التجربة؛ الطلبات تبقى «في الانتظار» حتى ينشره المالك.',
-      queued_no_worker: 'في الانتظار — لم يُشغَّل العامل. عامل المزامنة غير منشور في بيئة التجربة، لذلك يبقى الطلب في الطابور.',
+      worker_not_deployed: 'ما لم يُنشر عامل المزامنة (Edge Function) ويُشغَّل، تبقى الطلبات «في الانتظار» حتى ينشره المالك.',
+      queued_no_worker: 'في الانتظار — لم يُشغَّل العامل. يبقى الطلب في الطابور حتى يعمل عامل المزامنة.',
       queued_no_worker_short: 'لم يُشغَّل العامل',
 
       // #billing
@@ -241,8 +241,8 @@
       not_connected_banner: 'Daftra is not connected ({status}). Probe the capabilities and enable sync in Daftra settings before pushing.',
       sync_disabled_banner: 'Sync is disabled for this organization; requests stay queued until it is enabled.',
       open_settings: 'Daftra settings', open_clients: 'Client links', open_items: 'Items',
-      worker_not_deployed: 'The sync worker (Edge Function) is not deployed in staging; requests stay "queued" until the owner deploys it.',
-      queued_no_worker: 'Queued — the worker has not run. The sync worker is not deployed in staging, so the request stays in the queue.',
+      worker_not_deployed: 'Until the sync worker (Edge Function) is deployed and running, requests stay "queued" until the owner deploys it.',
+      queued_no_worker: 'Queued — the worker has not run. The request stays in the queue until the sync worker runs.',
       queued_no_worker_short: 'Worker not run',
 
       billing_title: 'Billing & Daftra', billing_sub: 'Billing intents per transaction and currency, their Daftra drafts, status and collection as Daftra reports them.',

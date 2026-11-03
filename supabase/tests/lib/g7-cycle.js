@@ -554,7 +554,10 @@ const KNOWN_SLUG_DEFAULTS = [
   { file: 'assets/js/config.example.js', re: /orgSlug:\s*'blue-sea'/, why: 'deployment config template' },
   { file: 'assets/js/supa.js', re: /cfg\.orgSlug \|\| 'blue-sea'/, why: 'fallback when config.js has no orgSlug (G2)' },
   { file: 'supabase/migrations/20261031000400_rpc.sql', re: /coalesce\(nullif\(payload ->> 'orgSlug', ''\), 'blue-sea'\)/, why: 'public intake default slug (G2, superseded by 0300)' },
-  { file: 'supabase/migrations/20261102000300_ops_observability.sql', re: /coalesce\(nullif\(payload ->> 'orgSlug', ''\), 'blue-sea'\)/, why: 'public intake default slug (G2)' }
+  { file: 'supabase/migrations/20261102000300_ops_observability.sql', re: /coalesce\(nullif\(payload ->> 'orgSlug', ''\), 'blue-sea'\)/, why: 'public intake default slug (G2)' },
+  // exclusions: the slug is named only to refuse / exclude the seed org (never a default)
+  { file: 'supabase/migrations/20261112000100_deploy_env.sql', re: /^SELECT o\.slug = 'blue-sea' OR /, why: 'production guard app.is_demo_org (refuses the seed org)', exclusion: true },
+  { file: 'assets/js/config.production.example.js', re: /^organization 'blue-sea'\)\.$|^\/\/.*never 'blue-sea'$/, why: 'production template comment (excludes the seed org)', exclusion: true }
 ];
 function scanSeedOrg(root, seedId, slug) {
   const dirs = ['assets/js', 'supabase/functions', 'supabase/migrations'];
@@ -574,7 +577,7 @@ function scanSeedOrg(root, seedId, slug) {
   const known = [], unknown = [];
   for (const h of hits) {
     const k = KNOWN_SLUG_DEFAULTS.find(x => x.file === h.file && x.re.test(h.text) && !h.text.includes(seedId));
-    if (k) known.push(Object.assign({ why: k.why }, h)); else if (/^\s*(\/\/|\*|--|\/\*)/.test(h.text) && /config\.js$/.test(h.file)) known.push(Object.assign({ why: 'comment in deployment config' }, h)); else unknown.push(h);
+    if (k) known.push(Object.assign({ why: k.why, exclusion: !!k.exclusion }, h)); else if (/^\s*(\/\/|\*|--|\/\*)/.test(h.text) && /config\.js$/.test(h.file)) known.push(Object.assign({ why: 'comment in deployment config' }, h)); else unknown.push(h);
   }
   return { hits, known, unknown };
 }

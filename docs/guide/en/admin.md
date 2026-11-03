@@ -68,4 +68,4 @@ The plan and its limits are managed by the platform admin. This release has no p
 - It does not e-mail invitations; the link is copied and sent by hand.
 - It never deletes a member, branch or record; deactivation only, the data stays.
 - It never reveals whether an e-mail has an account.
-- It does not connect a real mailbox or WhatsApp account in staging.
+- A channel in **mock** mode never connects to a real mailbox or WhatsApp account.

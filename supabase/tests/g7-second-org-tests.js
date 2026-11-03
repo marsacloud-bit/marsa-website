@@ -320,7 +320,7 @@ async function staticScan() {
     return idHits.length === 0 || idHits.map(h => h.file + ':' + h.line).join(', ');
   });
   await check('every listed legacy default is still a fallback only (coalesce / || on a caller-given orgSlug)', () => {
-    const bad = r.known.filter(k => !/coalesce\(nullif\(payload ->> 'orgSlug'|cfg\.orgSlug \|\||orgSlug:|^\s*(\/\/|\*)/.test(k.text));
+    const bad = r.known.filter(k => !k.exclusion && !/coalesce\(nullif\(payload ->> 'orgSlug'|cfg\.orgSlug \|\||orgSlug:|^\s*(\/\/|\*)/.test(k.text));
     return bad.length === 0 || J(bad);
   });
 }

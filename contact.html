@@ -177,7 +177,8 @@
               <div class="section-head mb-3">
                 <span class="eyebrow"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/><path d="M8 11h8M8 14h5"/></svg>راسلنا</span>
                 <h2 id="form-title">أرسل لنا رسالتك</h2>
-                <p class="lead">اكتب تفاصيل استفسارك. في نسخة العرض التجريبية تُحفظ الرسالة على جهازك فقط ولا تُرسل إلى الفريق.</p>
+                <p class="lead" data-show-mode="demo">اكتب تفاصيل استفسارك. في نسخة العرض التجريبية تُحفظ الرسالة على جهازك فقط ولا تُرسل إلى الفريق.</p>
+                <p class="lead" data-show-mode="online" hidden>اكتب تفاصيل استفسارك؛ تصل رسالتك إلى فريق مرسى.</p>
               </div>
 
               <form class="form" id="contact-form" novalidate>
@@ -278,7 +279,7 @@
                   <p class="demo-note mb-0">
                     <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 16v-4M12 8h.01"/></svg>
                     <span data-show-mode="demo">نسخة عرض تجريبية: تُحفظ الرسالة على جهازك فقط ولا تُرسل إلى أي خادم.</span>
-                    <span data-show-mode="online" hidden>بيئة تجريبية متصلة (Staging): تُرسل الرسالة إلى خادم الاختبار ويطّلع عليها فريق مرسى فقط. لا تُدخل بيانات حقيقية أو حساسة.</span>
+                    <span data-show-mode="online" hidden><span data-show-env="staging">بيئة تجريبية متصلة (Staging): تُرسل الرسالة إلى خادم الاختبار ويطّلع عليها فريق مرسى فقط. لا تُدخل بيانات حقيقية أو حساسة.</span><span data-show-env="production">تُرسل الرسالة عبر اتصال مشفّر إلى خادم مرسى ويطّلع عليها فريق مرسى فقط.</span></span>
                   </p>
                 </div>
                 <div class="alert alert-danger mt-3" id="cf-send-error" role="alert" tabindex="-1" hidden>
@@ -308,7 +309,7 @@
               <p class="demo-note mt-3 mx-auto success-note">
                 <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 16v-4M12 8h.01"/></svg>
                 <span data-show-mode="demo">نسخة عرض تجريبية: حُفظت الرسالة في متصفحك فقط (localStorage) ولم تُرسل فعليًا.</span>
-                <span data-show-mode="online" hidden>بيئة تجريبية متصلة (Staging): الرسالة محفوظة على خادم الاختبار ببيانات تجريبية فقط.</span>
+                <span data-show-mode="online" hidden><span data-show-env="staging">بيئة تجريبية متصلة (Staging): الرسالة محفوظة على خادم الاختبار ببيانات تجريبية فقط.</span><span data-show-env="production">وصلت رسالتك إلى فريق مرسى.</span></span>
               </p>
             </div>
           </div>

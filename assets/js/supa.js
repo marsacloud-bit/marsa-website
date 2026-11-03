@@ -2977,6 +2977,8 @@
     if (window.Marsa && typeof window.Marsa.setMode === 'function') { window.Marsa.setMode(configured ? 'staging' : 'demo'); return; }
     document.documentElement.setAttribute('data-marsa-mode', configured ? 'online' : 'demo');
     if (!configured) return;
+    var b = document.querySelector('[data-demo-banner]');
+    if (b && cfg.environment === 'production') { b.hidden = true; return; }   // production: no environment banner
     var p = document.querySelector('[data-demo-banner] p');
     if (p) p.textContent = AR.banner.staging;
   }
@@ -3016,8 +3018,8 @@
      Public API
      ------------------------------------------------------------------ */
   var api = {
-    version: '0.2.0-staging',
-    environment: cfg.environment || 'staging',
+    version: '0.2.0',
+    environment: cfg.environment || 'demo',
     orgSlug: ORG_SLUG,
     i18n: { ar: AR },
     client: null,                         // supabase client once ready() resolved (online only)

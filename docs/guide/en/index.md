@@ -1,8 +1,10 @@
 # MARSA user guide
 
-MARSA is a platform for customs-clearance and transport work: from the client's request to the customs declaration, containers, transport, empty return, costs, the Daftra draft invoice and reports. This guide is written for the staging environment.
+MARSA is a platform for customs-clearance and transport work: from the client's request to the customs declaration, containers, transport, empty return, costs, the Daftra draft invoice and reports.
 
+<!-- env:staging -->
 > This is a staging environment: test data only. Do not upload real or sensitive documents, and do not reuse a password from another service.
+<!-- /env -->
 
 ## Guides
 
@@ -21,7 +23,7 @@ MARSA is a platform for customs-clearance and transport work: from the client's 
 3. Enter your e-mail and password. Staff land on the "Staff console", clients on the "Client portal".
 4. If you received an invitation: open the invitation link, sign in (or create an account) **with the invited e-mail**, confirm the e-mail, then accept the invitation.
 
-> Staging never sends invitation e-mails. The link is shown once to the person who created it, and they send it to you themselves.
+> The system never sends invitation e-mails. The link is shown once to the person who created it, and they send it to you themselves.
 
 ## How do I find my way around?
 
@@ -56,7 +58,7 @@ MARSA is a platform for customs-clearance and transport work: from the client's 
 
 ## What the system does not do
 
-- It never sends an e-mail or WhatsApp message by itself. Every reply needs an approval and then a separate manual send, and in staging it goes through a **mock** channel only.
-- It does not connect to a real Daftra account in staging: the connection is a **mock** and sync jobs stay "queued" unless the worker runs.
+- It never sends an e-mail or WhatsApp message by itself. Every reply needs an approval and then a separate manual send, and while the channel is in **mock** mode nothing actually leaves.
+- It does not connect to a real Daftra account while the connection is in mock mode: the connection is a **mock** and sync jobs stay "queued" unless the worker runs.
 - It never treats automatic analysis (category, extracted references, summary, draft) as fact before a staff member confirms it.
 - It never deletes records: a correction is a new record or a cancellation with a reason, and everything stays in the history.

@@ -221,7 +221,7 @@
               <p class="demo-note mt-2">
                 <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
                 <span data-show-mode="demo">الملفات تُقرأ داخل متصفحك فقط ولا تُرفع إلى أي خادم. (نسخة عرض تجريبية: تُحفظ الطلبات على هذا الجهاز فقط ولا تُرسل إلى أي جهة.)</span>
-                <span data-show-mode="online" hidden>تُقرأ الملفات وتُراجَع داخل متصفحك أولًا. عند الرفع تُرسل إلى خادم الاختبار (Staging) قيم كل صف كما وردت في الملف، والقيم بعد التصحيح، وبصمة الملف (SHA-256) لمنع تكرار رفع الملف نفسه. لا يُرفع الملف نفسه.</span>
+                <span data-show-mode="online" hidden>تُقرأ الملفات وتُراجَع داخل متصفحك أولًا. عند الرفع تُرسل إلى خادم مرسى قيم كل صف كما وردت في الملف، والقيم بعد التصحيح، وبصمة الملف (SHA-256) لمنع تكرار رفع الملف نفسه. لا يُرفع الملف نفسه.</span>
               </p>
             </div>
 
@@ -351,7 +351,7 @@
             <p class="demo-note bu-success-note">
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 16v-4M12 8h.01"/></svg>
               <span data-show-mode="demo">نسخة عرض تجريبية: حُفظت الطلبات في متصفحك فقط (localStorage) ولم تُرسل إلى أي خادم أو جهة، ولن يتواصل معك أحد بشأنها.</span>
-              <span data-show-mode="online" hidden>بيئة تجريبية متصلة (Staging): أُنشئت الطلبات على خادم الاختبار ببيانات تجريبية. يحتوي ملف الأرقام المرجعية على رموز التتبع، ولا يمكن عرضها مرة أخرى؛ احفظه في مكان آمن ولا تشاركه إلا مع صاحب كل طلب.</span>
+              <span data-show-mode="online" hidden><span data-show-env="staging">بيئة تجريبية متصلة (Staging): أُنشئت الطلبات على خادم الاختبار ببيانات تجريبية.</span><span data-show-env="production">أُنشئت الطلبات على خادم مرسى.</span> يحتوي ملف الأرقام المرجعية على رموز التتبع، ولا يمكن عرضها مرة أخرى؛ احفظه في مكان آمن ولا تشاركه إلا مع صاحب كل طلب.</span>
             </p>
             <div class="alert alert-warning mt-2" id="bu-online-issues" role="note" hidden>
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18h.01"/></svg>

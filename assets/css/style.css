@@ -852,6 +852,10 @@ body.drawer-open { overflow: hidden; }
 .bg-white { background: #fff; } .bg-tint { background: var(--bg); }
 .divider { height: 1px; background: var(--border); border: 0; margin: 24px 0; }
 .hidden, [hidden] { display: none !important; }
+/* environment-specific text: main.js sets html[data-marsa-env] (production | staging); scripts/build-release.sh
+   writes data-marsa-env="production" into the release pages so the first paint is already right */
+html[data-marsa-env="production"] [data-show-env="staging"],
+html:not([data-marsa-env="production"]) [data-show-env="production"] { display: none !important; }
 @media (max-width: 640px) { .hide-sm { display: none !important; } }
 @media (min-width: 641px) { .show-sm { display: none !important; } }
 .sticky { position: sticky; top: calc(var(--header-h) + 20px); }

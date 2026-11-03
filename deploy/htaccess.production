@@ -1,0 +1,64 @@
+# =====================================================================
+# مرسى | MARSA — PRODUCTION .htaccess (Hostinger, public_html of the main domain)
+# Template: scripts/build-release.sh fills the placeholders (hashes, Supabase origin) and writes it to <out>/site/.htaccess.
+# Never upload this file itself. NO Basic Auth here (that is the staging-only .htaccess, which is not in git).
+#
+# Content-Security-Policy: the ENFORCED policy holds only directives that cannot break a page
+# (framing, <base>, plugins, form targets). The full policy is sent as Report-Only: the pages keep two
+# inline <script>s (the language snippet on 7 pages + offline.html, allowed by hash below), set
+# style="" attributes from JS, show data: / blob: images, and ocr.html loads Tesseract.js / pdf.js from
+# jsDelivr / cdnjs (blob workers + WebAssembly). Check the browser console for violations on every page
+# before moving any directive from Report-Only to the enforced header.
+# =====================================================================
+
+Options -Indexes
+DirectoryIndex index.html
+AddDefaultCharset UTF-8
+AddCharset utf-8 .html .css .js .json .md .webmanifest
+
+# ---- MIME types the host may not know
+AddType font/woff2 .woff2
+AddType application/manifest+json .webmanifest
+AddType text/markdown .md
+AddType application/javascript .js
+
+# ---- one origin: www. → the apex domain (its own storage / service worker / Supabase redirect URL otherwise), then HTTPS only
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTP_HOST} ^www\.(.+)$ [NC]
+  RewriteRule ^ https://%1%{REQUEST_URI} [L,R=301]
+  RewriteCond %{HTTPS} off
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+</IfModule>
+
+# ---- never served: dotfiles (except .well-known) and repo / build leftovers
+RedirectMatch 404 /\.(?!well-known/)
+<FilesMatch "\.(sql|sh|py|ts|bak|orig|zip|gz|log|env|pem|key|dump)$">
+  Require all denied
+</FilesMatch>
+
+<IfModule mod_headers.c>
+  Header always set Strict-Transport-Security "max-age=31536000"
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "DENY"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
+  Header always set Content-Security-Policy "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'"
+  Header always set Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' __INLINE_SCRIPT_HASHES__ https://cdn.jsdelivr.net https://cdnjs.cloudflare.com 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: __SUPABASE_ORIGIN__; font-src 'self'; connect-src 'self' __SUPABASE_ORIGIN__ __SUPABASE_WSS__ https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://tessdata.projectnaptha.com; worker-src 'self' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; frame-src 'self' blob: __SUPABASE_ORIGIN__; media-src 'self' blob: __SUPABASE_ORIGIN__; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+
+  # pages, scripts, styles, the worker and the guides: always revalidated (a release is visible at once)
+  <FilesMatch "\.(html|js|css|json|md|webmanifest)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+  <FilesMatch "\.(png|webp|jpg|jpeg|svg|ico)$">
+    Header set Cache-Control "public, max-age=604800"
+  </FilesMatch>
+  <FilesMatch "\.woff2$">
+    Header set Cache-Control "public, max-age=2592000"
+  </FilesMatch>
+
+  # signed-in / utility pages stay out of search engines (the public pages are indexable)
+  <FilesMatch "^(admin|platform|portal|login|bulk-upload|ocr|help|offline)\.html$">
+    Header set X-Robots-Tag "noindex, nofollow"
+  </FilesMatch>
+</IfModule>

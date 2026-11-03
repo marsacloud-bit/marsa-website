@@ -65,7 +65,7 @@ Accounts manager and organization admin, from "Daftra settings" with tabs "Conne
 ## What the system does not do
 
 - It never issues an official invoice: it prepares a draft only; issuing happens in Daftra.
-- It does not connect to a real Daftra account in staging: the mode is a **mock** and sync jobs stay "queued" unless the worker runs.
+- It does not connect to a real Daftra account while the connection is in mock mode: the mode is a **mock** and sync jobs stay "queued" unless the worker runs.
 - It never infers payment from an invoice status; payment comes from payment records or from Daftra.
 - It never converts currencies or adds amounts in different currencies.
 - It does not bill the subscription itself (plan billing is deferred).

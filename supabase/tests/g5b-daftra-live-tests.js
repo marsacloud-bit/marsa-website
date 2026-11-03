@@ -1085,10 +1085,11 @@ async function secSql() {
       && /INSERT INTO public\.schema_versions \(version, name\) VALUES \('20261111000100', 'g5b_daftra_live'\)/.test(src)
       && fnHeads.length === 1 && fnHeads.every(h => /SECURITY DEFINER SET search_path = ''/.test(h))) || J(fnHeads.length);
   });
-  await check('schema_versions row; health_check reports 20261111000100', async () => {
+  await check('schema_versions row; health_check reports the latest migration file (20261111000100 or a later phase)', async () => {
     const r = await one(`SELECT name FROM public.schema_versions WHERE version = '20261111000100'`);
     const h = (await one(`SELECT public.health_check() r`)).r;
-    return (r && r.name === 'g5b_daftra_live' && h.schema_version === '20261111000100') || J({ r, h });
+    const latest = fs.readdirSync(MIG_DIR).filter(f => /^\d+_.*\.sql$/.test(f)).sort().pop().split('_')[0];
+    return (r && r.name === 'g5b_daftra_live' && latest >= '20261111000100' && h.schema_version === latest) || J({ r, h, latest });
   });
   await check('constraints: mode IN (mock, live_pending, live); live ⇒ subdomain; label daftra_mode live (internal)', async () => {
     const c = await q(`SELECT conname, pg_get_constraintdef(oid) d FROM pg_constraint WHERE conrelid = 'public.daftra_connections'::regclass
@@ -1115,11 +1116,13 @@ async function secSql() {
     const m = await one(`SELECT status FROM public.daftra_connections WHERE org_id = $1`, [A]);
     return (before.mode === 'live' && c.status === 'not_connected' && J(c.capabilities) === '{}' && m.status === 'connected') || J({ c, m });
   });
-  await check('all_migrations.sql: this file appended verbatim at the end (marker once) + the header note', () => {
+  await check('all_migrations.sql: this file appended verbatim (marker once; later phases follow it) + the header note', () => {
     const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
     const marker = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(marker);
-    return (i > 0 && all.slice(i + marker.length).replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
+    const next = all.indexOf('\n-- ===== migrations/', i + marker.length);
+    const body = all.slice(i + marker.length, next < 0 ? undefined : next);
+    return (i > 0 && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
       && /pastes supabase\/migrations\/20261111000100_g5b_daftra_live\.sql/.test(all.slice(0, 3000))) || 'not appended verbatim';
   });
   await db.close();
