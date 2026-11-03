@@ -9,10 +9,12 @@
     - canonicalInvoice / contentHash — THE single definition of the invoice content hash
       (SQL never computes it; it only stores and compares the strings);
     - normalizeClient / normalizeName — shared normalisation for client snapshots and product names;
-    - createRealAdapter — documented stub of the live Daftra adapter: every method throws
-      AdapterError('not_configured'). It never reads a key and never calls fetch;
-    - REAL_ENDPOINTS_TO_VERIFY — data only (plan step ٢: capabilities must be proven on the real
-      account, not assumed). Nothing here is ever called.
+    - createRealAdapter — G5b: the REAL Daftra adapter (daftra-live.js createDaftraLive) only when the config carries
+      http + apiKey + baseUrl AND an explicit factory (config.impl, passed by index.ts and the tests; the globalThis
+      lookup is the Deno fallback only), else the documented stub: every method throws AdapterError('not_configured').
+      This file never reads a key and never calls fetch (HTTP is injected by index.ts);
+    - REAL_ENDPOINTS_TO_VERIFY — data only: the endpoints and what is verified on the account (2026-11-03) vs documented
+      only. Nothing here is ever called.
 */
 (function () {
   'use strict';
@@ -152,32 +154,34 @@
     return 'issued';
   }
 
-  /* ---------------------------------------------------------------- real adapter: documented stub */
-  // Data only — never called in G5. Plan step ٢ «إثبات الإمكانات من الحساب المعني؛ لا التخمين»: every item stays an
-  // open issue until the owner provides a real Daftra account and each one is proven there.
+  /* ---------------------------------------------------------------- real adapter */
+  // Data only — never called. G5b status per item: VERIFIED = answered 200 with the documented shape from Supabase staging
+  // on 2026-11-03 (GET clients / products / invoices / taxes / site_info .json, header APIKEY, envelope
+  // {result, code, data:[…], pagination:{…}}, site_info: data.Site); DOCUMENTED = official API reference
+  // (docs.daftara.dev), not exercised by Marsa yet; UNVERIFIED = open (docs/online/G5B_DAFTRA_LIVE_AR.md).
   const REAL_ENDPOINTS_TO_VERIFY = Object.freeze([
-    { capability: 'auth', method: '-', path: 'header APIKEY vs OAuth', note: 'auth header and key scope per account; key read only by the worker from Supabase Vault (daftra_api_key:<org_id>) or Edge secrets' },
-    { capability: 'auth', method: '-', path: 'https://<subdomain>.daftra.com/api2/…', note: 'subdomain base URL and rate limits' },
-    { capability: 'clients.search_by_ref', method: 'GET', path: '/api2/clients?client_number=<MRSC-…>', note: 'which client field stores and searches our reference (client_number?)' },
-    { capability: 'clients.search_by_ref', method: 'GET', path: '/api2/clients?bn1=<vat>', note: 'search by VAT number (field name to confirm)' },
-    { capability: 'clients.read', method: 'GET', path: '/api2/clients/{id}', note: 'client fields: name, VAT, CR, address, email, phone' },
-    { capability: 'clients.create', method: 'POST', path: '/api2/clients', note: 'create; response carries the id' },
-    { capability: 'clients.update', method: 'PUT', path: '/api2/clients/{id}', note: 'partial vs full update' },
-    { capability: 'products.search_by_code', method: 'GET', path: '/api2/products?product_code=<MRS-…>', note: 'search by product code' },
-    { capability: 'products.search_by_name', method: 'GET', path: '/api2/products?name=<…>', note: 'search by name (Arabic matching rules)' },
-    { capability: 'products.create', method: 'POST', path: '/api2/products', note: 'tax assignment: Daftra tax ids for 15 % / 0 % / exempt / out of scope' },
-    { capability: 'invoices.create_draft', method: 'POST', path: '/api2/invoices', note: 'create as DRAFT only (draft flag name to confirm); Marsa never issues' },
-    { capability: 'invoices.search_by_reference', method: 'GET', path: '/api2/invoices?<ref field>=<operational_ref>', note: 'a field that stores operational_ref and is searchable; consistency delay after create' },
-    { capability: 'invoices.line_reference_field', method: '-', path: 'InvoiceItem.<field>', note: 'a per-item field that stores line_ref and is returned on read' },
-    { capability: 'invoices.read', method: 'GET', path: '/api2/invoices/{id}', note: 'status, number, items, totals' },
-    { capability: 'invoices.update_draft', method: 'PUT', path: '/api2/invoices/{id}', note: 'update on a draft: replace vs merge of items; refusal on issued (Marsa never relies on it: it re-reads first)' },
-    { capability: 'invoices.version_token', method: '-', path: 'Invoice.modified / version', note: 'a version or modified token usable as optimistic check' },
-    { capability: 'invoices.multi_currency', method: '-', path: 'Invoice.currency_code', note: 'multi-currency support of the account' },
-    { capability: 'payments.read', method: 'GET', path: '/api2/invoice_payments?invoice_id={id}', note: 'invoice payments list / paid amount' }
+    { capability: 'auth', method: '-', path: 'header APIKEY', note: 'VERIFIED: APIKEY header (no Authorization header with it); key in Edge secret MARSA_DAFTRA_API_KEY (fallback secret "Marsa"), read by index.ts only; 401 bad key, 403 key role refuses the entity' },
+    { capability: 'auth', method: '-', path: 'https://<subdomain>.daftra.com/api2/…', note: 'VERIFIED base URL (MARSA_DAFTRA_SUBDOMAIN, ^[a-z0-9-]{1,63}$); rate limits UNVERIFIED (no 429 documented: backoff via retry)' },
+    { capability: 'clients.search_by_ref', method: 'GET', path: '/api2/clients.json?keywords=<MRSC-…>', note: 'DOCUMENTED: keywords covers client number (fuzzy) → exact client_number match client-side; no client_number filter on api2' },
+    { capability: 'clients.search_by_ref', method: 'GET', path: '/api2/clients.json?keywords=<vat>', note: 'UNVERIFIED: bn1 (VAT) not in the keywords field list → exact bn1 match, then a bounded full scan' },
+    { capability: 'clients.read', method: 'GET', path: '/api2/clients/{id}.json', note: 'DOCUMENTED data.Client: business_name, bn1 (VAT), bn2 (CR), address1/2, email, phone1, client_number; no English-name field' },
+    { capability: 'clients.create', method: 'POST', path: '/api2/clients.json', note: 'DOCUMENTED {"Client":{…}} → HTTP 202 {id, client_number}; 402 = clients plan limit' },
+    { capability: 'clients.update', method: 'PUT', path: '/api2/clients/{id}.json', note: 'DOCUMENTED partial update (only sent fields change; business_name never emptied)' },
+    { capability: 'products.search_by_code', method: 'GET', path: '/api2/products.json?product_code=<MRS-…>', note: 'DOCUMENTED exact filter (+ exact match client-side, keywords fallback)' },
+    { capability: 'products.search_by_name', method: 'GET', path: '/api2/products.json?keywords=<…>', note: 'DOCUMENTED keywords (name, code, barcode, tags); normalized name match client-side' },
+    { capability: 'products.create', method: 'POST', path: '/api2/products.json', note: 'DOCUMENTED {"Product":{…}} → 202 id; tax1/tax2 = Daftra TAX IDS (rate → id: one active exclusive tax of that value, or MARSA_DAFTRA_TAX_MAP)' },
+    { capability: 'invoices.create_draft', method: 'POST', path: '/api2/invoices.json', note: 'DOCUMENTED Invoice.draft = 1 (+ is_offline = 1) → 202 id; Marsa NEVER calls update_draft/{id}/0 (issuing) — refused by the request guard' },
+    { capability: 'invoices.search_by_reference', method: 'GET', path: '/api2/invoices.json?po_number=<operational_ref>', note: 'DOCUMENTED po_number filter (only when PO numbers are enabled: UNVERIFIED otherwise) → keywords → API-invoice scan (external_source=api, sort=id DESC; documented, untried); notes [MARSA-REF:] fallback; an unprovable "none" refuses (reference_lookup_incomplete)' },
+    { capability: 'invoices.line_reference_field', method: '-', path: 'InvoiceItem.item', note: 'item = "<line text> [MRSL-…]" marker (item is DOCUMENTED on read; description is not); tax1/tax2 always sent (missing = inherits the product taxes)' },
+    { capability: 'invoices.read', method: 'GET', path: '/api2/invoices/{id}.json', note: 'DOCUMENTED draft, no, summary_subtotal / _discount / _total, InvoiceItem[], InvoicePayment[], modified' },
+    { capability: 'invoices.update_draft', method: 'PUT', path: '/api2/invoices/{id}.json', note: 'DOCUMENTED full payload: items REPLACED; always draft = 1; Marsa re-reads first (draft, modified, no payments)' },
+    { capability: 'invoices.version_token', method: '-', path: 'Invoice.modified', note: 'DOCUMENTED "YYYY-MM-DD HH:MM:SS" (second granularity)' },
+    { capability: 'invoices.multi_currency', method: '-', path: 'Invoice.currency_code', note: 'DOCUMENTED; defaults to the account currency' },
+    { capability: 'payments.read', method: 'GET', path: '/api2/invoices/{id}.json InvoicePayment[]', note: 'DOCUMENTED (no invoice_id filter on invoice_payments.json); status 1 completed / 4 overpaid counted' }
   ]);
 
-  function createRealAdapter(config) {
-    void config; // the live configuration (subdomain, key reference) is intentionally unused in G5
+  // the documented stub: every method throws not_configured (no key read, no network)
+  function stub() {
     const a = { mode: 'live' };
     for (const m of ADAPTER_METHODS) {
       a[m] = async function () {
@@ -185,6 +189,18 @@
       };
     }
     return Object.freeze(a);
+  }
+  // G5b: the factory is passed explicitly (config.impl) so node tests reach the real path; the call-time globalThis lookup
+  // is the Deno fallback only. Without http + apiKey + baseUrl + a factory → the not_configured stub.
+  function createRealAdapter(config) {
+    const c = config || {};
+    const g = typeof globalThis === 'object' && globalThis.MarsaDaftra ? globalThis.MarsaDaftra.createDaftraLive : null;
+    const impl = typeof c.impl === 'function' ? c.impl : (typeof g === 'function' ? g : null);
+    if (!impl || typeof c.http !== 'function' || typeof c.apiKey !== 'string' || !c.apiKey || typeof c.baseUrl !== 'string' || !c.baseUrl) return stub();
+    const cfg = Object.assign({}, c);
+    delete cfg.impl;
+    if (!cfg.deps) cfg.deps = API;
+    return impl(cfg);
   }
 
   const API = {

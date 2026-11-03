@@ -186,12 +186,13 @@ async function unitChecks() {
     const miss = need.filter(k => !(k in AD));
     return (miss.length === 0 && typeof createMockAdapter === 'function' && typeof createWorker === 'function' && typeof runJob === 'function') || 'missing ' + miss;
   });
-  await check('the scripts never require another file, never use fetch, carry no key', () => {
+  await check('the scripts never require another file, never use fetch / Deno / process.env, carry no key (G5b: + daftra-live.js)', () => {
     const bad = [];
-    for (const f of ['adapter.js', 'mock-adapter.js', 'worker.js']) {
+    for (const f of ['adapter.js', 'mock-adapter.js', 'worker.js', 'daftra-live.js']) {
       const s = fs.readFileSync(path.join(FN, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"])\/\/.*$/gm, '$1');
       if (/\brequire\s*\(|^\s*import\s|^\s*export\s/m.test(s)) bad.push(f + ': import/require');
       if (/\bfetch\s*\(|XMLHttpRequest|WebSocket/.test(s)) bad.push(f + ': network');
+      if (/\bDeno\./.test(s) || /process\.env/.test(s)) bad.push(f + ': Deno / process.env');
       if (/(sk_live|eyJ[A-Za-z0-9_-]{20,}|apikey\s*[:=]\s*['"][^'"]+['"])/i.test(s)) bad.push(f + ': key-like literal');
     }
     return bad.length === 0 || bad.join('; ');

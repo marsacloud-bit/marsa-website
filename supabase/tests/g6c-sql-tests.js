@@ -192,11 +192,13 @@ async function secMigration() {
     const r = await one(`SELECT label_ar, label_en, client_visible FROM public.status_labels WHERE domain = 'msg_channel_mode' AND code = 'live'`);
     return (r && /IMAP/.test(r.label_en) && r.label_ar.length > 3 && r.client_visible === false) || J(r);
   });
-  await check('all_migrations.sql ends with this file verbatim (appended like the earlier phases)', () => {
+  await check('all_migrations.sql holds this file verbatim (appended like the earlier phases; later phases follow it)', () => {
     const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
     const marker = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(marker);
-    return (i > 0 && all.slice(i + marker.length).replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0) || 'not appended verbatim';
+    const next = all.indexOf('\n-- ===== migrations/', i + marker.length);
+    const body = all.slice(i + marker.length, next < 0 ? undefined : next);
+    return (i > 0 && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0) || 'not appended verbatim';
   });
 
   // a separate database: everything before G6c, then the preflight, then twice

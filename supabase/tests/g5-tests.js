@@ -455,7 +455,8 @@ async function secConnection() {
             && N(r.default_service_vat_rate) === 15 && r.reimbursable_tax_code === 'out_of_scope') || JSON.stringify(r);
   });
   for (const [label, p, re] of [
-    ['mode live → MRS_INVALID mode', { mode: 'live' }, /MRS_INVALID mode/],
+    // G5b (20261111000100) made 'live' a valid mode (tested in g5b-daftra-live-tests.js); an unknown mode is still refused
+    ['unknown mode → MRS_INVALID mode', { mode: 'production' }, /MRS_INVALID mode/],
     ['bad subdomain → MRS_INVALID subdomain', { subdomain: 'bad_sub!' }, /MRS_INVALID subdomain/],
     ['sync_enabled as string → MRS_INVALID', { sync_enabled: 'yes' }, /MRS_INVALID sync_enabled/],
     ['allowed rate above 100 → MRS_INVALID', { allowed_vat_rates: [0, 150] }, /MRS_INVALID allowed_vat_rates/],
