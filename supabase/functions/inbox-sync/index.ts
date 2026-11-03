@@ -2,7 +2,8 @@
 // SOURCE ONLY — NOT DEPLOYED. Until the owner deploys it (and sets a schedule), staging jobs stay `queued`
 // («في الانتظار — لم يُشغَّل العامل»).
 //
-// - Accepts only POST with `Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>` (constant-time comparison).
+// - Accepts only POST with `Authorization: Bearer <service_role key>`: the injected SUPABASE_SERVICE_ROLE_KEY (constant-time),
+//   or a legacy service_role JWT of this project, then used as the DB key so PostgREST verifies it (serviceToken).
 // - Routes:
 //     POST /run                    → msg_schedule + worker.runOnce({limit: 1}) in a loop: at most 5 jobs and no new job
 //                                    after 80 s (G6c review C3: 2 s CPU / 150 s wall clock per request)
@@ -48,6 +49,24 @@ function constantTimeEqual(a: string, b: string): boolean {
   const n = Math.max(ea.length, eb.length);
   for (let i = 0; i < n; i++) diff |= (ea[i % (ea.length || 1)] ?? 0) ^ (eb[i % (eb.length || 1)] ?? 0);
   return diff === 0 && ea.length > 0;
+}
+
+// The key the caller (pg_cron via Vault) presents. Accepted when it equals the injected SUPABASE_SERVICE_ROLE_KEY, or
+// when it is a legacy JWT whose claims say role = service_role for THIS project: on projects that moved to the new API
+// keys the injected legacy variable can differ from the dashboard's legacy key (seen on staging 2026-11-03). The token is
+// then used as the database key itself, so PostgREST verifies its signature on the first RPC: a forged token reaches
+// nothing (every RPC this function calls is granted to service_role only).
+function serviceToken(bearer: string, url: string): string | null {
+  const injected = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  if (injected && constantTimeEqual(bearer, injected)) return injected;
+  const parts = bearer.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const claims = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')
+      .padEnd(Math.ceil(parts[1].length / 4) * 4, '=')), c => c.charCodeAt(0))));
+    const ref = new URL(url).hostname.split('.')[0];
+    return claims && claims.role === 'service_role' && claims.ref === ref ? bearer : null;
+  } catch (_) { return null; }
 }
 
 function json(body: unknown, status = 200): Response {
@@ -145,11 +164,11 @@ function liveEmailFor(channel: any): { adapter?: any; refused?: string } {
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
   const url = Deno.env.get('SUPABASE_URL') ?? '';
   const auth = req.headers.get('authorization') ?? '';
   const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-  if (!serviceKey || !url || !constantTimeEqual(bearer, serviceKey)) return json({ error: 'unauthorized' }, 401);
+  const serviceKey = url ? serviceToken(bearer, url) : null;
+  if (!serviceKey) return json({ error: 'unauthorized' }, 401);
   if (!M || typeof M.createWorker !== 'function' || typeof M.createRuleProvider !== 'function') return json({ error: 'worker_not_loaded' }, 500);
 
   const sb = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
