@@ -7,6 +7,14 @@
 
 > **تحديث 2026-11-03 (بعد النشر على Staging):** التزام G7 `8dd4e05` على `online-staging` (ما زال بلا remote). طُبّقت ملفات g3…g7 بالترتيب على مشروع Supabase `cgzhidyxfpksfckwmauq` و`health_check()` = `{"ok":true,"environment":"staging","schema_version":"20261108000100"}`. نُشرت الواجهة (118 ملفًا) على Hostinger مع نسخة احتياطية للخادم `backup_public_html_20261102_pre_g7`. فحص دخان بحساب المالك: 28 قسمًا في `admin.html` وتفاصيل المعاملة و`platform.html` بلا أخطاء؛ `sw.js` يعمل في Chrome (84 ملفًا، صفحة «غير متصل» عند الانقطاع) وثُبّت التطبيق من `marsacloud.com`. فحص إعدادات Auth: Site URL كان `http://localhost:3000` بلا Redirect URLs، **وصُحّح في اليوم نفسه** (§4.4)، Confirm email مفعّل، SMTP خاص لم يكن مفعّلًا **وفُعّل في اليوم نفسه** ببريد Hostinger (§4.4)، TOTP مفعّل في الخادم بلا واجهة تسجيل في الموقع، الخطة المجانية (SMS MFA يحتاج Pro).
 
+> **تحديث 2026-11-03 (المساء) — البريد الحي ودفترة الحي وGitHub:**
+> - **GitHub:** المستودع الخاص `marsacloud-bit/marsa-website` (مفتاح نشر SSH خاص بالمستودع)، الفرع الافتراضي `online-staging`.
+> - **G6c البريد الحي** (`98c6320`): IMAP 993 + SMTP 465 لصندوق Hostinger واحد (الدخول `no-reply@`، والعنوان `ops@marsacloud.com` اسم بديل عليه). ترحيل `20261110000100` مطبَّق على Staging، و`inbox-sync` منشور (يرفض المفتاح العام 401)، **والوضع الحي مطفأ** حتى يُدخل المالك أسرار البريد (`G6C_LIVE_EMAIL.md`). ثبت قبلها بدالة مؤقتة (حُذفت) أن Supabase يصل إلى المنفذين 993 و465.
+> - **G5b دفترة الحي** (`5874e0e` + `63fdc89`): محوّل حقيقي لـ API v2 **مسودات فقط** (حارس يرفض الإصدار `update_draft` وأي فاتورة غير مسودة وأي دفعة). ترحيل `20261111000100` مطبَّق، و`daftra-sync` منشور بالنسخة المصلحة، **والوضع الحي مطفأ** حتى يضبط المالك `MARSA_DAFTRA_LIVE_ORG` و`MARSA_DAFTRA_SUBDOMAIN` (`G5B_DAFTRA_LIVE_AR.md`). فحص قراءة فقط على حساب `marsacloud.daftra.com` الحقيقي: كل الإمكانات المطلوبة متاحة؛ الحساب **مصري (EG) بعملة EGP وضريبة VAT 14 %**؛ وكشف خللين أُصلحا (صيغة النطاق في site_info، وفلتر `external_source` الذي يعيد 302). حُذفت كل الدوال المؤقتة.
+> - **pg_cron:** المهام الثلاث نفّذت تلقائيًا بنجاح (تحديث التنبيهات كل 15 دقيقة، والتنظيف 03:17 و03:27 UTC).
+> - **الاختبارات:** 27 مجموعة، 6 743 فحصًا، 0 فشل. `health_check()` = `20261111000100`، و0 جداول بلا RLS.
+> - **قرار مفتوح جديد:** المشروع مصمم للسوق السعودي (15 %، SAR، ZATCA، PDPL)، وحساب دفترة مصري (14 %، EGP، منظومة الفاتورة الإلكترونية المصرية). المحوّل يرفض قبل أي كتابة أي نسبة لا تطابق ضريبة في الحساب، فلا خطر، لكن يلزم قرار السوق قبل أول فاتورة.
+
 ---
 
 ## 1) الملخص حسب المرحلة
@@ -113,7 +121,7 @@
 
 ### 4.1 مراجعة الكود والالتزام
 - [x] (2026-11-03، `8dd4e05`) مراجعة كل ملفات G7 غير الملتزمة ثم `git commit` على `online-staging` (خطة الإطلاق، الخطوة 0). الملف `supabase/make_admin.sql` غير متتبَّع وليس من هذا العمل: يقرر المالك مصيره.
-- [ ] ضبط remote (GitHub) وحماية الفرع (G2 الخطوة ١، قرار المالك).
+- [x] (2026-11-03) remote على GitHub: `marsacloud-bit/marsa-website` (خاص). حماية الفرع مؤجلة: لا تعمل على المستودعات الخاصة في الخطة المجانية.
 
 ### 4.2 قبل أي لصق على Staging
 - [x] (2026-11-03) نسخة احتياطية من Staging (`scripts/backup-staging.sh` وفق `BACKUP_RESTORE_AR.md`، أو من لوحة Supabase).
@@ -160,11 +168,11 @@
 - [ ] فحص بحسابين حقيقيين عبر PostgREST للعزل (`G7_READINESS_REVIEW_AR.md`).
 
 ### 4.7 الخدمات الحقيقية (لم يُتصل بأي منها)
-- [ ] **دفترة:** حساب تجريبي، المفتاح في أسرار Edge أو Vault (`daftra_api_key:<org_id>`)، كتابة `createRealAdapter` مقابل `REAL_ENDPOINTS_TO_VERIFY`، نشر `daftra-sync` وجدولته، فحص الإمكانات (G5 الخطوة ٢)، ربط هوية الحساب بالمؤسسة (`G5_REPORT_AR.md` §3.4).
-- [ ] **البريد:** اختيار المزوّد (Graph / Gmail / IMAP+SMTP)، موافقة OAuth لصندوق واحد لكل مؤسسة، الاعتماد في Vault، اختبار صندوق حقيقي (`G6B_REPORT_AR.md` §3.3).
+- [~] **دفترة (2026-11-03):** المحوّل الحي مبني ومنشور ومطفأ؛ فحص القراءة نجح على الحساب الحقيقي. المتبقي للمالك: الأسرار، وقرار السوق والضريبة، وأول مسودة اختبار واحدة (`G5B_DAFTRA_LIVE_AR.md`). (كان: حساب تجريبي، المفتاح في أسرار Edge أو Vault (`daftra_api_key:<org_id>`)، كتابة `createRealAdapter` مقابل `REAL_ENDPOINTS_TO_VERIFY`، نشر `daftra-sync` وجدولته، فحص الإمكانات (G5 الخطوة ٢)، ربط هوية الحساب بالمؤسسة (`G5_REPORT_AR.md` §3.4).)
+- [~] **البريد (2026-11-03):** IMAP/SMTP لـ Hostinger مبني ومنشور ومطفأ؛ المتبقي للمالك: الأسرار والقناة الحية وأول رسالة (`G6C_LIVE_EMAIL.md`). (كان: اختيار المزوّد (Graph / Gmail / IMAP+SMTP)، موافقة OAuth لصندوق واحد لكل مؤسسة، الاعتماد في Vault، اختبار صندوق حقيقي (`G6B_REPORT_AR.md` §3.3).)
 - [ ] **WhatsApp Business Platform:** حساب ورقم لكل مؤسسة، الرمز وسر webhook في Vault، التحقق من التوقيع.
 - [ ] **نموذج لغوي:** اختيار المزوّد وشروط المعالجة والميزانية، تنفيذ `createLlmProvider`، **إعادة تشغيل مجموعة التقييم نفسها** (`g7-ai-eval` + `fixtures/g7-ai-eval-set.json`) على النموذج الحقيقي.
-- [ ] نشر `inbox-sync` وجدولته؛ جلب بايتات المرفقات وفحص الفيروسات (مؤجل).
+- [~] `inbox-sync` و`daftra-sync` منشوران (2026-11-03)؛ جدولتهما بعد إدخال الأسرار؛ جلب بايتات المرفقات وفحص الفيروسات (مؤجل).
 - [ ] قرار البريد لإرسال الدعوات (SMTP / Edge Function) أو إبقاء النسخ اليدوي.
 
 ### 4.8 التجربة والمؤسسة الثانية (G7 الخطوتان ١ و٢)
@@ -226,8 +234,8 @@
 ---
 
 ## 7) حالة git
-- الفرع `online-staging`؛ الالتزامات: G2 (`efa96c9`)، التطبيق المثبّت (`23e99c8`)، G3 (`eec5db1`)، G4 (`6531d06`)، G5 (`60fd879`)، G6a (`71831da`)، G6b (`566e952`). **لا remote مضبوط.**
-- أعمال G7 كلها غير ملتزمة (13 ملفًا معدّلًا + الملفات الجديدة المذكورة في `G7_REPORT_AR.md` §7، ومنها هذه الوثيقة). لم يُنفَّذ أي commit أو branch أو stash أو reset في G7.
+- الفرع `online-staging`؛ الالتزامات: G2 (`efa96c9`)، التطبيق المثبّت (`23e99c8`)، G3 (`eec5db1`)، G4 (`6531d06`)، G5 (`60fd879`)، G6a (`71831da`)، G6b (`566e952`)، G7 (`8dd4e05`)، MFA (`2bb9125`)، G6c (`98c6320`)، G5b (`5874e0e`، `63fdc89`). **remote:** `git@github.com:marsacloud-bit/marsa-website.git` (منذ 2026-11-03).
+- كل الأعمال ملتزمة؛ الملف `supabase/make_admin.sql` خارج git عمدًا.
 
 ## 8) المراجع
-`ARCHITECTURE.md` · `G2_REPORT_AR.md` … `G7_REPORT_AR.md` · `G7_SPEC.md` (As built) · `G7_ACCEPTANCE_AR.md` · `G7_READINESS_REVIEW_AR.md` · `G7_RELEASE_PLAN_AR.md` · `G7_PILOT_PLAN_AR.md` · `BACKUP_RESTORE_AR.md` · `ENVIRONMENTS_AR.md` · `scratchpad/ALL_PENDING_apply_ORDER.txt`.
+`ARCHITECTURE.md` · `G6C_LIVE_EMAIL.md` · `G5B_DAFTRA_LIVE_AR.md` · `G2_REPORT_AR.md` … `G7_REPORT_AR.md` · `G7_SPEC.md` (As built) · `G7_ACCEPTANCE_AR.md` · `G7_READINESS_REVIEW_AR.md` · `G7_RELEASE_PLAN_AR.md` · `G7_PILOT_PLAN_AR.md` · `BACKUP_RESTORE_AR.md` · `ENVIRONMENTS_AR.md` · `scratchpad/ALL_PENDING_apply_ORDER.txt`.
