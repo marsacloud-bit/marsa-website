@@ -9,7 +9,7 @@
 |---|---|---|---|---|
 | **Demo (عرض محلي)** | الملفات مباشرة أو `http://127.0.0.1:8000` | لا شيء — `localStorage` في المتصفح | ما يُدخله المستخدم على جهازه | قائمة |
 | **Dev / Local PGlite** | خادم محلي `python3 -m http.server` | PGlite ‏(Postgres 16 في الذاكرة) داخل الاختبارات فقط | بيانات `seed.sql` + بيانات الاختبارات، تُمسح بعد كل تشغيل | قائمة |
-| **Staging** | `https://marsacloud.com` على Hostinger، محمي بكلمة مرور (HTTP Basic Auth) | مشروع Supabase التجريبي (المعرّف `cgzhidyxfpksfckwmauq`) | بيانات وهمية فقط (`@example.com`) — `organizations.environment = 'staging'` | قائمة، الهدف الحالي |
+| **Staging** | `https://marsacloud.com` على Hostinger، مفتوح بلا كلمة مرور للموقع منذ 2026-11-04 (الدخول عبر حسابات مرسى فقط، ومحجوب عن محركات البحث) | مشروع Supabase التجريبي (المعرّف `cgzhidyxfpksfckwmauq`) | بيانات وهمية فقط (`@example.com`) — `organizations.environment = 'staging'` | قائمة، الهدف الحالي |
 | **Production** | لم يُحدد | مشروع Supabase منفصل (مستقبلًا) | بيانات حقيقية | **غير موجودة** |
 
 القاعدة الحاكمة: **كل بيئة لها مشروع Supabase مستقل ومفاتيح مستقلة.** لا تُشارك قاعدة بيانات بين Staging والإنتاج، ولا تُنسخ بيانات حقيقية إلى Staging.
@@ -35,7 +35,7 @@
 - اختياري لاحقًا: Supabase CLI ‏(`supabase start`) لتشغيل نسخة Supabase كاملة على Docker محليًا. غير مُعدّ حاليًا.
 
 ### 2.3 Staging — البيئة التجريبية المتصلة
-- **الواجهة:** ملفات ثابتة على Hostinger بالنطاق `marsacloud.com`. الموقع كله محمي بـ HTTP Basic Auth عبر ملف `.htaccess` موجود في نسخة النشر فقط (`~/Downloads/marsa-deploy`، وهي ليست مستودع git). كلمة مرور الحماية في مدير كلمات المرور فقط، ولا تُكتب في أي ملف أو رسالة أو مستند.
+- **الواجهة:** ملفات ثابتة على Hostinger بالنطاق `marsacloud.com`. كان الموقع محميًا بـ HTTP Basic Auth عبر `.htaccess`، وأُزيلت الحماية في 2026-11-04 بطلب المالك؛ صار الوصول للبيانات بتسجيل الدخول في مرسى فقط (Supabase Auth + RLS). يبقى الموقع محجوبًا عن الفهرسة (`X-Robots-Tag: noindex` و`robots.txt: Disallow`). النسخة السابقة من `.htaccess` محفوظة على الخادم في `backup_public_html_20261103_pre_envaware/.htaccess.with-basic-auth`.
 - **قاعدة البيانات:** مشروع Supabase التجريبي. عنوانه والمفتاح العام في `assets/js/config.js` (قيم عامة بطبيعتها؛ الحماية بسياسات RLS).
 - **Auth:** ‏Site URL وRedirect URLs في Supabase مضبوطة على عنوان Staging. البريد الحقيقي/واتساب لا يُرسلان من النظام في هذه المرحلة.
 - **البيانات:** وهمية فقط. لا يُدخل أي بيانات عملاء أو هويات أو سجلات تجارية حقيقية.
