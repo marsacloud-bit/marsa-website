@@ -996,20 +996,30 @@ async function main() {
   }, 'public.public_track');
   await check('public_track accepts upper-case token / padded ref', async () =>
     !!(await as('anon', `SELECT public.public_track($1, $2) r`, [' ' + trk.ref.toLowerCase() + ' ', trk.tracking_token.toUpperCase()]))[0].r.request);
-  await expectErr('public_track wrong token → MRS_NOT_FOUND', () => as('anon', `SELECT public.public_track($1, $2)`, [trk.ref, 'f'.repeat(64)]), /MRS_NOT_FOUND/);
-  await expectErr('public_track missing token → MRS_NOT_FOUND', () => as('anon', `SELECT public.public_track($1, NULL)`, [trk.ref]), /MRS_NOT_FOUND/);
-  await expectErr('public_track empty token → MRS_NOT_FOUND', () => as('anon', `SELECT public.public_track($1, '')`, [trk.ref]), /MRS_NOT_FOUND/);
-  await expectErr('public_track token hash instead of token → MRS_NOT_FOUND', async () => {
+  // 20261113000100: a miss is the value {"not_found": true} — identical for every cause (no oracle) — instead of the
+  // MRS_NOT_FOUND error, so that failed guesses are rate-counted (a raise rolls the counter back). supa.js maps it back.
+  const trackMiss = async (name, fn) => check(name, async () => {
+    const r = await fn();
+    return (r && r.length === 1 && JSON.stringify(r[0].r) === '{"not_found":true}') || JSON.stringify(r);
+  }, 'public.public_track');
+  await trackMiss('public_track wrong token → {"not_found": true}', () => as('anon', `SELECT public.public_track($1, $2) r`, [trk.ref, 'f'.repeat(64)]));
+  await trackMiss('public_track missing token → {"not_found": true}', () => as('anon', `SELECT public.public_track($1, NULL) r`, [trk.ref]));
+  await trackMiss('public_track empty token → {"not_found": true}', () => as('anon', `SELECT public.public_track($1, '') r`, [trk.ref]));
+  await trackMiss('public_track token hash instead of token → {"not_found": true}', async () => {
     const h = (await q(`SELECT tracking_token_hash h FROM public.service_requests WHERE ref = $1 AND org_id = $2`, [trk.ref, A]))[0].h;
-    return as('anon', `SELECT public.public_track($1, $2)`, [trk.ref, h]);
-  }, /MRS_NOT_FOUND/);
-  await expectErr('public_track unknown ref → same MRS_NOT_FOUND (no oracle)', () => as('anon', `SELECT public.public_track('REQ-2099-999999', $1)`, [trk.tracking_token]), /MRS_NOT_FOUND/);
-  await expectErr('public_track SQL-ish / oversized input → MRS_NOT_FOUND', () => as('anon', `SELECT public.public_track($1, $2)`, ["REQ-2026-000001' OR 1=1 --", 'x'.repeat(10000)]), /MRS_NOT_FOUND/);
+    return as('anon', `SELECT public.public_track($1, $2) r`, [trk.ref, h]);
+  });
+  await trackMiss('public_track unknown ref → same {"not_found": true} (no oracle)', () => as('anon', `SELECT public.public_track('REQ-2099-999999', $1) r`, [trk.tracking_token]));
+  await trackMiss('public_track SQL-ish / oversized input → {"not_found": true}', () => as('anon', `SELECT public.public_track($1, $2) r`, ["REQ-2026-000001' OR 1=1 --", 'x'.repeat(10000)]));
   await check('same ref number in two orgs: token selects the right one', async () => {
     const b = (await as('anon', `SELECT public.submit_service_request($1) r`, [P({ orgSlug: 'org-b' })]))[0].r;
     const sameRefInA = (await q(`SELECT count(*)::int n FROM public.service_requests WHERE ref = $1 AND org_id = $2`, [b.ref, A]))[0].n;
     let crossOk = true;
-    if (sameRefInA) { try { await as('anon', `SELECT public.public_track($1, $2)`, [b.ref, SEED_TOKEN]); crossOk = b.ref === (await q(`SELECT ref FROM public.service_requests WHERE id = $1`, [REQ_SEED]))[0].ref; } catch (e) { crossOk = true; } }
+    if (sameRefInA) {
+      // the seed token on B's ref: either A's seed row (same ref) or a miss — never B's row
+      const x = (await as('anon', `SELECT public.public_track($1, $2) r`, [b.ref, SEED_TOKEN]))[0].r;
+      crossOk = x.not_found === true || b.ref === (await q(`SELECT ref FROM public.service_requests WHERE id = $1`, [REQ_SEED]))[0].ref;
+    }
     const t = (await as('anon', `SELECT public.public_track($1, $2) r`, [b.ref, b.tracking_token]))[0].r;
     return t.request && t.request.ref === b.ref && crossOk;
   });
@@ -1023,14 +1033,14 @@ async function main() {
       .filter(v => s.includes(v));
     return (t.transaction && t.transaction.ref === conv.ref && extra.length === 0 && leaked.length === 0) || 'extra ' + extra + ' leaked ' + leaked;
   });
-  await expectErr('transaction ref without issued token → MRS_NOT_FOUND', () => as('anon', `SELECT public.public_track($1, $2)`, [conv.ref, SEED_TOKEN]), /MRS_NOT_FOUND/);
+  await trackMiss('transaction ref without issued token → {"not_found": true}', () => as('anon', `SELECT public.public_track($1, $2) r`, [conv.ref, SEED_TOKEN]));
   await check('issued transaction token works; re-issue invalidates the old one', async () => {
     const t1 = (await as('staffA', `SELECT public.issue_tracking_token($1) r`, [TX1]))[0].r;
     const ref = t1.ref;
     const ok1 = !!(await as('anon', `SELECT public.public_track($1, $2) r`, [ref, t1.tracking_token]))[0].r.transaction;
     const t2 = (await as('staffA', `SELECT public.issue_tracking_token($1) r`, [TX1]))[0].r;
     let oldRejected = false;
-    try { await as('anon', `SELECT public.public_track($1, $2)`, [ref, t1.tracking_token]); } catch (e) { oldRejected = /MRS_NOT_FOUND/.test(errText(e)); }
+    oldRejected = (await as('anon', `SELECT public.public_track($1, $2) r`, [ref, t1.tracking_token]))[0].r.not_found === true;
     const ok2 = !!(await as('anon', `SELECT public.public_track($1, $2) r`, [ref, t2.tracking_token]))[0].r.transaction;
     const stored = (await q(`SELECT tracking_token_hash h FROM public.transactions WHERE id = $1`, [TX1]))[0].h;
     return ok1 && oldRejected && ok2 && stored !== t2.tracking_token;
@@ -1106,7 +1116,36 @@ async function main() {
     try { await as('anon', `SELECT public.submit_service_request($1)`, [P({ orgSlug: 'org-flood' })]); return '121st accepted'; }
     catch (e) { return /MRS_RATE_LIMITED.*org/.test(errText(e)) || errText(e); }
   });
-  warn('rate guard design', 'Limits are per phone (attacker rotates numbers) and a global 120/10 min per org: one script can fill the org bucket and block genuine visitors for 10 minutes (intake DoS). Needs edge rate-limit by IP / CAPTCHA (open owner decision) — app.insert_service_request.');
+  // Formerly WARN 'rate guard design' (per phone + 120/10 min per org only: one script could fill the org bucket).
+  // Resolved by 20261113000100_public_antispam.sql (docs/online/ANTISPAM_AR.md), which runs before these guards:
+  //   visitor  5 / 10 min per IP (cf-connecting-ip, the edge-set header; forged x-real-ip / XFF ignored), IPv6 /48 15;
+  //   signed-in account that is not a member / client of the target org (self sign-up is open): 20 / 10 min per
+  //   account whatever its IPs, and its IP budget × 4.
+  // So neither one source nor one throw-away account can exhaust the org bucket. Full coverage: antispam-tests.js.
+  // Left to the edge (documented there, not a code defect): a botnet of many IPs, or many throw-away accounts.
+  const hdr = async v => db.query(`SELECT set_config('request.headers', $1, false)`, [v]);
+  await check('rate guard design: one IP (rotating phones, forged X-Forwarded-For) is stopped by the per-IP layer long before the org-wide bucket', async () => {
+    try {
+      let n = 0, last = '';
+      for (let i = 0; i < 8; i++) {
+        await hdr(JSON.stringify({ 'cf-connecting-ip': '203.0.113.200', 'x-forwarded-for': '10.0.0.' + i, 'x-real-ip': '10.1.0.' + i }));
+        try { await as('anon', `SELECT public.submit_service_request($1)`, [P({ orgSlug: 'org-b' })]); n++; }
+        catch (e) { last = errText(e); break; }
+      }
+      return (n === 5 && /MRS_RATE_LIMITED.*try_later/.test(last)) || JSON.stringify({ n, last });
+    } finally { await hdr(''); }
+  }, 'app.antispam_gate (20261113000100)');
+  await check('rate guard design: one signed-in non-member account rotating IPs and phones is stopped at 20 (user bucket), far below 120', async () => {
+    try {
+      let n = 0, last = '';
+      for (let i = 0; i < 30; i++) {
+        await hdr(JSON.stringify({ 'cf-connecting-ip': '198.51.100.' + (100 + i) }));
+        try { await as('staffA', `SELECT public.submit_service_request($1)`, [P({ orgSlug: 'org-b' })]); n++; }   // staff of A, not of B
+        catch (e) { last = errText(e); break; }
+      }
+      return (n === 20 && /MRS_RATE_LIMITED.*try_later/.test(last)) || JSON.stringify({ n, last });
+    } finally { await hdr(''); }
+  }, 'app.antispam_gate (20261113000100)');
   section('submit_contact_message: validation');
   const CM = { name: 'زائر تجريبي', phone: '0126000000', email: 'v@example.com', subject: 'quote', message: 'رسالة اختبار طويلة بما يكفي', consent: true };
   for (const [name, over, re] of [

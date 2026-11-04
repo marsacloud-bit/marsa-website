@@ -261,6 +261,8 @@
     },
     // G6b: messages for a detail word under one code only ('CODE:detail'); checked before details / the code text
     codeDetails: {
+      // public anti-spam (20261113000100): one generic refusal for the per-IP limits and the form signals
+      'MRS_RATE_LIMITED:try_later': 'عدد كبير من الطلبات، حاول بعد قليل.',
       // G7 subscriptions (platform RPCs)
       'MRS_BAD_TRANSITION:subscription_suspended': 'الاشتراك موقوف: أعد التفعيل من إدارة الاشتراكات.',
       'MRS_BAD_TRANSITION:use_suspend': 'لتعليق الاشتراك أو إلغائه استخدم «تعليق» بدلًا من تغيير الباقة.',
@@ -666,8 +668,8 @@
     Object.keys(args || {}).sort().forEach(function (k) {
       var v = args[k];
       if (k === 'p_idem_key') return;
-      if (v && typeof v === 'object' && !Array.isArray(v) && v.idempotencyKey !== undefined) {
-        v = Object.assign({}, v); delete v.idempotencyKey;
+      if (v && typeof v === 'object' && !Array.isArray(v) && (v.idempotencyKey !== undefined || v.antispam !== undefined)) {
+        v = Object.assign({}, v); delete v.idempotencyKey; delete v.antispam;   // the form signals change on every submit
       }
       copy[k] = v;
     });
@@ -1122,17 +1124,47 @@
   // idempotent: record.idempotencyKey (or opts.idemKey) is used when given, otherwise one is
   // generated and kept for the automatic retries (and for a resubmit of the same data after
   // MRS_UNKNOWN_RESULT). The result carries it as r.idemKey.
+  // opts.antispam = formSignals(form): {hp, elapsedMs} → payload.antispam (20261113000100; the server strips it before
+  // the idempotency hash, so a retry with the same key still replays)
   function submitServiceRequest(record, opts) {
     var key = (opts && opts.idemKey) || (record && record.idempotencyKey);
-    var base = toRequestPayload(record);
+    var base = withSignals(toRequestPayload(record), opts);
     return idemRpc('submit_service_request', key, function (k) { return { payload: withKey(base, k) }; },
-      function () { return demoSubmitRequest(record); });
+      function () { return demoSubmitRequest(record); }).then(noteRefusal('submit_service_request'));
   }
   function submitContactMessage(entry, opts) {
     var key = (opts && opts.idemKey) || (entry && entry.idempotencyKey);
-    var base = toContactPayload(entry);
+    var base = withSignals(toContactPayload(entry), opts);
     return idemRpc('submit_contact_message', key, function (k) { return { payload: withKey(base, k) }; },
-      function () { return demoSubmitContact(entry); });
+      function () { return demoSubmitContact(entry); }).then(noteRefusal('submit_contact_message'));
+  }
+  /* ---- public anti-spam: decoy field + render time (docs/online/ANTISPAM_AR.md) ----
+     armForm(form) once when the form is shown; formSignals(form) at submit → {hp, elapsedMs}.
+     The decoy is the form's [data-hp] input (hidden from people and assistive tech; bots fill it). */
+  function armForm(form) {
+    if (form && form.setAttribute && !form.getAttribute('data-rendered-at')) form.setAttribute('data-rendered-at', String(Date.now()));
+    return form;
+  }
+  function formSignals(form) {
+    if (!form || !form.getAttribute) return null;
+    // no render time (form not armed): elapsedMs null → the server skips the fill-time check (never a false 0 ms)
+    var t0 = +form.getAttribute('data-rendered-at');
+    var hp = form.querySelector ? form.querySelector('[data-hp]') : null;
+    return { hp: hp ? String(hp.value || '').slice(0, 200) : '',
+      elapsedMs: t0 > 0 ? Math.max(0, Math.min(Math.round(Date.now() - t0), 2000000000)) : null };
+  }
+  function withSignals(payload, opts) {
+    var a = opts && opts.antispam;
+    if (!a || typeof a !== 'object' || !payload || typeof payload !== 'object') return payload;
+    var ms = a.elapsedMs == null || !isFinite(+a.elapsedMs) ? null : Math.max(0, Math.min(Math.round(+a.elapsedMs), 2000000000));
+    return Object.assign({}, payload, { antispam: { hp: String(a.hp == null ? '' : a.hp).slice(0, 200), elapsedMs: ms } });
+  }
+  // a refusal is counted for monitoring through the error beacon (code only, no form data; deduped, capped per page)
+  function noteRefusal(name) {
+    return function (r) {
+      if (r && r.error && r.error.code === 'MRS_RATE_LIMITED') reportError('MRS_RATE_LIMITED', 'public refusal: ' + name + (r.error.field ? ' ' + r.error.field : ''));
+      return r;
+    };
   }
   function healthCheck() { return rpc('health_check'); }
   // client error log (anon + authenticated); the server truncates, scrubs and rate-limits
@@ -1162,7 +1194,14 @@
     });
   }
   function publicTrack(ref, token) {
-    return rpc('public_track', { p_ref: String(ref || '').trim(), p_token: String(token || '').trim() }, function () { return demoTrack(ref); });
+    return rpc('public_track', { p_ref: String(ref || '').trim(), p_token: String(token || '').trim() }, function () { return demoTrack(ref); })
+      .then(trackMiss).then(noteRefusal('public_track'));
+  }
+  // 20261113000100: a miss is the value {not_found: true} (so the server counts failed guesses) → the same
+  // MRS_NOT_FOUND error the pages already show
+  function trackMiss(r) {
+    if (r && !r.error && r.data && r.data.not_found === true) return fail('MRS_NOT_FOUND');
+    return r;
   }
   var labelCache = {};
   function statusLabels(domain) {
@@ -3036,7 +3075,7 @@
     isPlatformAdmin: isPlatformAdmin, activeOrgId: activeOrgId, setActiveOrg: setActiveOrg, setMyLocale: setMyLocale,
     // public
     submitServiceRequest: submitServiceRequest, submitContactMessage: submitContactMessage, publicTrack: publicTrack,
-    statusLabels: statusLabels, healthCheck: healthCheck, logClientError: logClientError,
+    statusLabels: statusLabels, healthCheck: healthCheck, logClientError: logClientError, armForm: armForm, formSignals: formSignals,
     invitationPreview: invitationPreview, acceptInvitation: acceptInvitation,
     // idempotency
     newIdemKey: newIdemKey,

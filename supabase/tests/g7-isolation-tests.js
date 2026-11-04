@@ -544,7 +544,11 @@ async function suspendedSweep(tables, g7) {
       return bad.length === 0 || bad.join('; ');
     });
   }
-  await expectErr('suspended: public tracking of B refused (MRS_NOT_FOUND)', () => rpc('anon', `SELECT public.public_track($1, $2) r`, [b.reqRef, b.token]), /MRS_NOT_FOUND/);
+  // 20261113000100: a miss is the value {"not_found": true} (no longer the MRS_NOT_FOUND error)
+  await check('suspended: public tracking of B refused ({"not_found": true})', async () => {
+    const r = await rpc('anon', `SELECT public.public_track($1, $2) r`, [b.reqRef, b.token]);
+    return (r && r.not_found === true && Object.keys(r).length === 1) || JSON.stringify(r);
+  });
   await expectErr('suspended: public intake into B closed', () => rpc('anon', `SELECT public.submit_service_request($1) r`, [{ orgSlug: 'org-g7b', fullName: 'زائر', phone: '0509990001', email: 'v@x.example', company: 'x',
     direction: 'import', service: 'clearance', mode: 'sea', country: 'x', port: 'x', goods: 'بضاعة', terms: true }]), /MRS_INTAKE_CLOSED/);
   await expectErr('platform_set_org_active(B, true) refused while suspended (subscription_suspended)', () => rpc('P', `SELECT public.platform_set_org_active($1, true) r`, [ORG_B.id]), /subscription_suspended/);

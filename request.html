@@ -146,6 +146,11 @@
               </div>
 
               <form id="request-form" class="req-form" novalidate>
+                <!-- anti-spam decoy (docs/online/ANTISPAM_AR.md): hidden from people and screen readers; bots fill it -->
+                <div class="hp-field" aria-hidden="true">
+                  <label for="rq-hp">اترك هذا الحقل فارغًا</label>
+                  <input type="text" id="rq-hp" name="mrs_hp" data-hp tabindex="-1" autocomplete="off" value="">
+                </div>
 
                 <!-- ============ STEP 1: client ============ -->
                 <div class="form-step is-active" data-step="1" id="step-1">

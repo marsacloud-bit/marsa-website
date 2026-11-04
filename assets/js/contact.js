@@ -66,6 +66,7 @@
   function initForm() {
     var form = $('#contact-form');
     if (!form) return;
+    if (API && API.armForm) API.armForm(form);   // anti-spam: render time (+ the [data-hp] decoy in the markup)
     var wrap = $('#contact-form-wrap');
     var success = $('#contact-success');
     var msg = $('#cf-message');
@@ -193,7 +194,7 @@
 
       // Online (staging): submit_contact_message RPC. A reference is shown only when error is null.
       if (isOnline()) {
-        API.submitContactMessage(entry).then(function (res) {
+        API.submitContactMessage(entry, { antispam: API.formSignals ? API.formSignals(form) : null }).then(function (res) {
           restoreBtn();
           if (res && !res.error && res.data && res.data.ref) showSuccess(res.data.ref, true);
           else showSendError(res && res.error);
@@ -215,6 +216,8 @@
 
     $('#new-message').addEventListener('click', function () {
       form.reset();
+      form.removeAttribute('data-rendered-at');
+      if (API && API.armForm) API.armForm(form);
       $$('.form-group', form).forEach(function (g) { g.classList.remove('has-error', 'has-success'); });
       $$('[aria-invalid]', form).forEach(function (el) { el.removeAttribute('aria-invalid'); });
       updateCount();

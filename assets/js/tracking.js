@@ -635,10 +635,12 @@
   function renderOnlineNotFound(err) {
     var li = function (t) { return '<li>' + svg(IC.check) + '<span>' + t + '</span></li>'; };
     var generic = !err || err.code === 'MRS_NOT_FOUND';
+    // too many lookups (20261113000100): the message alone — the "check the reference" hints would mislead
+    var limited = !!err && err.code === 'MRS_RATE_LIMITED';
     return '<div class="card shadow track-empty" role="alert">' +
       '<div class="empty-icon">' + svg(IC.search) + '</div>' +
       '<h2 tabindex="-1" id="empty-h">' + esc(generic ? OSTR.notFoundH : (err.message || OSTR.notFoundH)) + '</h2>' +
-      '<ul>' + li(OSTR.notFound1) + li(OSTR.notFound2) + li(OSTR.notFound3) + '</ul>' +
+      (limited ? '' : '<ul>' + li(OSTR.notFound1) + li(OSTR.notFound2) + li(OSTR.notFound3) + '</ul>') +
       '<div class="btn-group">' +
         '<a class="btn btn-primary" href="request.html">ابدأ طلب تخليص جديد</a>' +
         '<a class="btn btn-ghost" href="contact.html">تواصل مع فريق المتابعة</a>' +

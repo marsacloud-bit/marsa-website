@@ -93,6 +93,9 @@ async function runFile(dbx, file) {
   catch (e) { fail('load ' + path.relative(ROOT, file), errText(e) + (e.position ? ' @line ' + sql.slice(0, +e.position).split('\n').length : '')); return false; }
 }
 const migFiles = () => fs.readdirSync(MIG_DIR).filter(f => /^\d+_.*\.sql$/.test(f)).sort();
+// phases added after this file (each has its own suite); schema_version then reports the latest of them
+const LATER_PHASES = ['20261113000100_public_antispam.sql'];
+const LATEST = migFiles().pop().slice(0, 14);
 async function freshDb(upTo) {
   const d = new PGlite();
   await d.exec(fs.readFileSync(path.join(SUPA, 'tests', 'shim.sql'), 'utf8'));
@@ -170,12 +173,17 @@ async function secFile() {
       && /INSERT INTO public\.schema_versions \(version, name\) VALUES \('20261112000100', 'deploy_env'\)/.test(src)
       && fnHeads.length === 8 && bad.length === 0) || J({ n: fnHeads.length, bad: bad.map(b => b.slice(0, 80)) });
   });
-  await check('this is the latest migration file', () => migFiles().pop() === MIG || 'latest: ' + migFiles().pop());
-  await check('all_migrations.sql holds this file verbatim (appended like the earlier phases, last) + a header line', () => {
+  // later phases may follow this file (20261113000100 public_antispam); none may sort before it unnoticed
+  await check('this file is present; only the listed later phases follow it', () => {
+    const later = migFiles().filter(f => f > MIG);
+    return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
+  });
+  await check('all_migrations.sql holds this file verbatim (appended like the earlier phases; later phases follow it) + a header line', () => {
     const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
     const marker = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(marker);
-    const body = all.slice(i + marker.length);
+    const next = all.indexOf('\n-- ===== migrations/', i + marker.length);
+    const body = all.slice(i + marker.length, next < 0 ? undefined : next);
     return (i > 0 && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
       && all.slice(0, 3000).includes(MIG)) || 'not appended verbatim / no header line';
   });
@@ -250,9 +258,9 @@ async function secPreflight() {
 
 async function secStaging() {
   section('3. staging (default): behaviour unchanged');
-  await check('app.deploy_settings = staging; health_check (anon) environment staging + schema_version 20261112000100', async () => {
+  await check('app.deploy_settings = staging; health_check (anon) environment staging + schema_version = the latest file', async () => {
     const h = await rpc('anon', `SELECT public.health_check() r`);
-    return ((await env()) === 'staging' && h.ok === true && h.environment === 'staging' && h.schema_version === '20261112000100'
+    return ((await env()) === 'staging' && h.ok === true && h.environment === 'staging' && h.schema_version === LATEST
       && J(Object.keys(h).sort()) === J(['db_time', 'environment', 'ok', 'schema_version'])) || J(h);
   });
   await check('seed org blue-sea is staging', async () => (await one(`SELECT environment e FROM public.organizations WHERE id = $1`, [A])).e === 'staging');
@@ -508,8 +516,8 @@ async function secChecks() {
     return J(Object.keys(c).sort()) === J(KEYS) || J(Object.keys(c).sort());
   });
   if (!c) return;
-  await check('values: staging, schema 20261112000100, RLS on every public table, demo org + seed rows present', () =>
-    (c.deploy_environment === 'staging' && c.schema_version === '20261112000100' && c.health_check.ok === true
+  await check('values: staging, schema = the latest file, RLS on every public table, demo org + seed rows present', () =>
+    (c.deploy_environment === 'staging' && c.schema_version === LATEST && c.health_check.ok === true
       && c.public_tables_without_rls === 0 && c.demo_org_present === true && c.seed_rows >= 10) || J(c));
   await check('platform admins: count + masked e-mail + TOTP flag (none verified here)', () =>
     (c.platform_admins_count === 1 && c.platform_admins[0].email === 'p***@env.example.com' && c.platform_admins[0].totp_verified === false) || J(c.platform_admins));

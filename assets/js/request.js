@@ -26,6 +26,7 @@
     /* Mode: online (staging, window.MarsaApi → submit_service_request) or local demo */
     var API = window.MarsaApi || null;
     var ONLINE = !!(API && API.isOnline && API.isOnline());
+    if (API && API.armForm) API.armForm(form);   // anti-spam: render time (+ the [data-hp] decoy in the markup)
     qsa('[data-show-mode]').forEach(function (n) {
       n.hidden = n.getAttribute('data-show-mode') !== (ONLINE ? 'online' : 'demo');
     });
@@ -902,7 +903,7 @@
           outRec.shipment.service = 'clearance';
           outRec.notes = ('الخدمة المطلوبة: ' + record.shipment.serviceLabel + (record.notes ? '\n' + record.notes : '')).slice(0, 2000);
         }
-        API.submitServiceRequest(outRec).then(done, function () { done(null); });
+        API.submitServiceRequest(outRec, { antispam: API.formSignals ? API.formSignals(form) : null }).then(done, function () { done(null); });
         return;
       }
 
@@ -1001,6 +1002,8 @@
 
     qs('#btn-new-request').addEventListener('click', function () {
       form.reset();
+      form.removeAttribute('data-rendered-at');
+      if (API && API.armForm) API.armForm(form);
       Object.keys(files).forEach(function (k) { files[k] = []; renderFiles(k); });
       qsa('.has-error', form).forEach(clearError);
       qs('#goods-count').textContent = '0';

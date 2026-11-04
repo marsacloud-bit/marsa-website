@@ -294,6 +294,8 @@
       MRS_REQUIRED: 'حقل «{f}» مطلوب.',
       MRS_TOO_LONG: 'النص في حقل «{f}» أطول من المسموح.',
       MRS_RATE_LIMITED: 'وصلنا عدد كبير من الطلبات خلال وقت قصير. حاول مرة أخرى بعد ساعة.',
+      // public anti-spam (20261113000100): per-IP limits / form signals — one generic message
+      cdetail_MRS_RATE_LIMITED_try_later: 'عدد كبير من الطلبات، حاول بعد قليل.',
       MRS_NOT_FOUND: 'لم نعثر على بيانات مطابقة. تحقّق من الرقم المرجعي ورمز التتبع.',
       MRS_FORBIDDEN: 'لا تملك صلاحية تنفيذ هذا الإجراء.',
       MRS_AUTH_REQUIRED: 'يلزم تسجيل الدخول أولًا.',
@@ -343,6 +345,7 @@
       MRS_REQUIRED: 'The “{f}” field is required.',
       MRS_TOO_LONG: 'The text in the “{f}” field is too long.',
       MRS_RATE_LIMITED: 'We received many requests in a short time. Please try again in an hour.',
+      cdetail_MRS_RATE_LIMITED_try_later: 'Too many requests. Please try again shortly.',
       MRS_NOT_FOUND: 'No matching data found. Check the reference number and tracking code.',
       MRS_FORBIDDEN: 'You do not have permission to perform this action.',
       MRS_AUTH_REQUIRED: 'Please sign in first.',

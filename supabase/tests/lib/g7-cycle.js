@@ -555,6 +555,7 @@ const KNOWN_SLUG_DEFAULTS = [
   { file: 'assets/js/supa.js', re: /cfg\.orgSlug \|\| 'blue-sea'/, why: 'fallback when config.js has no orgSlug (G2)' },
   { file: 'supabase/migrations/20261031000400_rpc.sql', re: /coalesce\(nullif\(payload ->> 'orgSlug', ''\), 'blue-sea'\)/, why: 'public intake default slug (G2, superseded by 0300)' },
   { file: 'supabase/migrations/20261102000300_ops_observability.sql', re: /coalesce\(nullif\(payload ->> 'orgSlug', ''\), 'blue-sea'\)/, why: 'public intake default slug (G2)' },
+  { file: 'supabase/migrations/20261113000100_public_antispam.sql', re: /coalesce\(nullif\(payload ->> 'orgSlug', ''\), 'blue-sea'\)/, why: 'public intake default slug (0300 bodies re-created with the anti-spam gate)' },
   // exclusions: the slug is named only to refuse / exclude the seed org (never a default)
   { file: 'supabase/migrations/20261112000100_deploy_env.sql', re: /^SELECT o\.slug = 'blue-sea' OR /, why: 'production guard app.is_demo_org (refuses the seed org)', exclusion: true },
   { file: 'assets/js/config.production.example.js', re: /^organization 'blue-sea'\)\.$|^\/\/.*never 'blue-sea'$/, why: 'production template comment (excludes the seed org)', exclusion: true }

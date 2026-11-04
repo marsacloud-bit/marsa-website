@@ -555,10 +555,16 @@ async function secContext() {
 async function secFail() {
   section('8. app.fail rewrite');
   await expectErr('owner session (no claims): app.fail(MRS_FORBIDDEN) unchanged', () => q(`SELECT app.fail('MRS_FORBIDDEN', 'x')`), /^MRS_FORBIDDEN x/);
-  await expectErr('service role: app.fail(MRS_NOT_FOUND) unchanged', () =>
-    asRole('service', null, () => q(`SELECT public.public_track('MRS-2026-000001', repeat('0', 64)) r`)), /^MRS_NOT_FOUND/);
-  await expectErr('anon: public_track not found → MRS_NOT_FOUND unchanged', () =>
-    rpc('anon', null, `SELECT public.public_track('MRS-2026-000001', repeat('0', 64)) r`), /^MRS_NOT_FOUND/);
+  // 20261113000100: a public_track miss is the value {"not_found": true} (failed guesses are rate-counted); only an
+  // MFA-pending admin still gets the app.fail rewrite (below)
+  await check('service role: public_track miss → {"not_found": true} (20261113000100), no MFA rewrite', async () => {
+    const r = (await asRole('service', null, () => q(`SELECT public.public_track('MRS-2026-000001', repeat('0', 64)) r`)))[0].r;
+    return J(r) === '{"not_found":true}' || J(r);
+  });
+  await check('anon: public_track miss → {"not_found": true} (20261113000100)', async () => {
+    const r = await rpc('anon', null, `SELECT public.public_track('MRS-2026-000001', repeat('0', 64)) r`);
+    return J(r) === '{"not_found":true}' || J(r);
+  });
   await expectErr('pending admin aal1: MRS_NOT_FOUND → MRS_MFA_REQUIRED', () =>
     as('pendingUser', 'aal1', `SELECT app.fail('MRS_NOT_FOUND')`), MFA_RE);
   await expectErr('pending admin aal1: public_track not found → MRS_MFA_REQUIRED', () =>

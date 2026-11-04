@@ -182,6 +182,11 @@
               </div>
 
               <form class="form" id="contact-form" novalidate>
+                <!-- anti-spam decoy (docs/online/ANTISPAM_AR.md): hidden from people and screen readers; bots fill it -->
+                <div class="hp-field" aria-hidden="true">
+                  <label for="cf-hp">اترك هذا الحقل فارغًا</label>
+                  <input type="text" id="cf-hp" name="mrs_hp" data-hp tabindex="-1" autocomplete="off" value="">
+                </div>
                 <div class="form-row">
                   <div class="form-group">
                     <label class="form-label" for="cf-name">الاسم بالكامل <span class="req" aria-hidden="true">*</span></label>

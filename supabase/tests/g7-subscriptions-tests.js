@@ -843,7 +843,11 @@ async function secSuspend() {
   await expectErr('suspended: org admin RPC (admin_list_members) → MRS_FORBIDDEN', () => rpc('adminT', `SELECT public.admin_list_members($1) r`, [S.T]), /MRS_FORBIDDEN/);
   await expectErr('suspended: org_subscription for the org admin → MRS_NOT_FOUND', () => P.orgSub('adminT', S.T), /MRS_NOT_FOUND/);
   await check('suspended: client portal sees nothing', async () => (await as('clientT', `SELECT id FROM public.transactions`)).length === 0);
-  await expectErr('suspended: public tracking → MRS_NOT_FOUND', () => rpc('anon', `SELECT public.public_track($1, $2) r`, [tok.ref, tok.tracking_token]), /MRS_NOT_FOUND/);
+  // 20261113000100: a miss is the value {"not_found": true} (no longer the MRS_NOT_FOUND error)
+  await check('suspended: public tracking → {"not_found": true}', async () => {
+    const r = await rpc('anon', `SELECT public.public_track($1, $2) r`, [tok.ref, tok.tracking_token]);
+    return (r && r.not_found === true && Object.keys(r).length === 1) || JSON.stringify(r);
+  });
   await check('suspended: data kept (transactions, documents, memberships untouched)', async () =>
     (await num(`SELECT count(*) n FROM public.transactions WHERE org_id = $1`, [S.T])) === 6 && (await num(`SELECT count(*) n FROM public.memberships WHERE org_id = $1 AND is_active`, [S.T])) >= 5);
   await expectErr('platform_set_org_active(true) on a suspended subscription → MRS_BAD_TRANSITION subscription_suspended', () => P.setActive('pa', S.T, true), /MRS_BAD_TRANSITION subscription_suspended/);

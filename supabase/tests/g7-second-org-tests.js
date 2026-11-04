@@ -250,7 +250,8 @@ async function afterCycle(W, g7) {
     const tb = await rpc('anon', `SELECT public.public_track($1, $2) r`, [b.reqRef, b.token]);
     const seedTok = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
     let ta = null; try { ta = await rpc('anon', `SELECT public.public_track($1, $2) r`, [b.reqRef, seedTok]); } catch (e) { ta = { err: errText(e) }; }
-    let bad = null; try { await rpc('anon', `SELECT public.public_track($1, $2) r`, [b.reqRef, 'ab'.repeat(32)]); bad = 'accepted'; } catch (e) { bad = /MRS_NOT_FOUND/.test(errText(e)) ? null : errText(e); }
+    // 20261113000100: a miss is the value {"not_found": true} (no longer the MRS_NOT_FOUND error)
+    let bad = null; try { const m = await rpc('anon', `SELECT public.public_track($1, $2) r`, [b.reqRef, 'ab'.repeat(32)]); bad = m && m.not_found === true ? null : 'accepted: ' + J(m); } catch (e) { bad = errText(e); }
     const tbs = J(tb), tas = J(ta);
     return (!bad && tbs.includes(b.txRef) && !tbs.includes(a.txRef) && !tas.includes(b.txRef)) || J({ tb, ta, bad });
   });
