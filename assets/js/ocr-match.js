@@ -1,0 +1,1319 @@
+/* ==========================================================================
+   مرسى | MARSA — ocr.html: invoice ↔ B/L ↔ customs declaration matching (AI)
+   Plain IIFE, no modules. Depends on window.MarsaDocMatch (doc-match.js, the pure
+   engine), window.MarsaApi (supa.js), window.XlsxLite (xlsx-lite.js), optional
+   window.MarsaShell (app-shell.js) and window.MarsaI18n (strings 'ocr.m_*').
+
+   - Shown only online, to signed-in staff, when MarsaApi.aiAccess says the org may use
+     AI reading (same gate as the AI engine in ocr.js). Each document is one AI reading
+     (MarsaApi.aiExtract, run in parallel): 2 readings, or 3 with the declaration.
+   - Result: MarsaDocMatch.compare → banner + table (values editable → instant
+     recompute, flagged 'corrected'), items / warnings, per-row "reviewed" ticks.
+   - Save: MarsaApi.saveExtraction for each reading (engine claude, ai_usage_id,
+     optional transaction link / original upload as in ocr.js), then
+     MarsaApi.saveDocumentMatch, then reviewDocumentMatch when approved. Readings that
+     were saved are never saved twice (a retry continues where it stopped).
+   - Exports: PNG drawn on a <canvas> here (no library), print (print CSS keeps only
+     the report), Excel (XlsxLite), JSON.
+   - Untrusted values (readings, file names, server rows) only ever via textContent /
+     value. The backend functions (saveDocumentMatch …) are feature-detected.
+   ========================================================================== */
+(function () {
+  'use strict';
+
+  function ready(fn) {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
+    else fn();
+  }
+
+  ready(function () {
+    var section = document.getElementById('ocr-match-section');
+    var E = window.MarsaDocMatch;
+    if (!section || !E) return;
+    var API = window.MarsaApi || null;
+    var X = window.XlsxLite || null;
+    var Shell = window.MarsaShell || null;
+    var I18N = window.MarsaI18n || null;
+    var $ = function (id) { return document.getElementById(id); };
+    var qsa = function (s, c) { return Array.prototype.slice.call((c || document).querySelectorAll(s)); };
+    var M = window.Marsa || {};
+    var toast = Shell && typeof Shell.toast === 'function' ? function (m, t) { Shell.toast(m, t); }
+      : (M.toast || function (m) { try { console.log(m); } catch (e) { /* noop */ } });
+
+    function T(key, vars) {
+      var k = 'ocr.' + key;
+      return I18N && typeof I18N.t === 'function' && (!I18N.has || I18N.has(k)) ? I18N.t(k, vars) : key;
+    }
+    function lang() { return I18N && typeof I18N.lang === 'function' && I18N.lang() === 'en' ? 'en' : 'ar'; }
+    function L(row, base) { return lang() === 'en' ? row[base + '_en'] : row[base + '_ar']; }
+
+    /* ---------------------------------------------------------------
+       Constants (same limits as the AI engine in ocr.js / supa.js)
+       --------------------------------------------------------------- */
+    var ENGINE_AI = 'claude-opus-5-5';
+    var AI_MAX_FILE = 10 * 1024 * 1024;           // PDF
+    var AI_MAX_IMAGE = 5 * 1024 * 1024;           // image
+    var AI_MEDIA = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', pdf: 'application/pdf' };
+    var SLOTS = ['invoice', 'bl', 'declaration'];
+    var DOC_TYPE = { invoice: 'commercial_invoice', bl: 'bill_of_lading', declaration: 'customs_declaration' };
+    var PAIR_DOCS = { inv_bl: ['invoice', 'bl'], inv_decl: ['invoice', 'declaration'], bl_decl: ['bl', 'declaration'] };
+    var LOW_CONF = 0.6;
+    var STATUS_CLS = { match: 'is-match', mismatch: 'is-mismatch', partial: 'is-partial', missing: 'is-missing', info: 'is-info' };
+    var OVERALL_CLS = { match: 'is-match', review: 'is-partial', mismatch: 'is-mismatch' };
+    var COLORS = {
+      match: ['#0D6B44', '#E3F5EC'], mismatch: ['#A0252E', '#FDECEE'], partial: ['#8A5E04', '#FFF4DC'], missing: ['#475569', '#EEF2F6'],
+      info: ['#0E7F84', '#E3F6F6'], review: ['#8A5E04', '#FFF4DC']
+    };
+
+    /* ---------------------------------------------------------------
+       State
+       --------------------------------------------------------------- */
+    var ONLINE = !!(API && API.isOnline && API.isOnline());
+    var STAFF = false;
+    var AI = { enabled: false, remaining: null };
+    var S = null;
+    function fresh() {
+      var s = { slots: {}, result: null, reviewed: {}, approved: false, orgId: null, saving: false, running: false,
+        saved: { extractions: {}, match: null }, readAt: null };
+      SLOTS.forEach(function (k) { s.slots[k] = { file: null, sha256: '', status: 'empty', res: null, fields: null, orig: null, items: [], error: '' }; });
+      return s;
+    }
+    S = fresh();
+
+    /* ---------------------------------------------------------------
+       Small helpers
+       --------------------------------------------------------------- */
+    function el(tag, cls, text) {
+      var n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text != null) n.textContent = text;
+      return n;
+    }
+    function ext(name) { var i = String(name || '').lastIndexOf('.'); return i > 0 ? String(name).slice(i + 1).toLowerCase() : ''; }
+    function mediaType(f) {
+      var t = String(f.type || '').toLowerCase();
+      var byType = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'].indexOf(t) !== -1 ? t : null;
+      return byType || AI_MEDIA[ext(f.name)] || null;
+    }
+    function fmtSize(b) { return b < 1024 * 1024 ? Math.max(1, Math.round(b / 1024)) + ' KB' : (b / 1024 / 1024).toFixed(1) + ' MB'; }
+    function fmtDate(iso) {
+      try {
+        if (I18N && I18N.fmtDate) return I18N.fmtDate(iso, { time: true });
+        return new Date(iso).toLocaleString(lang() === 'en' ? 'en-GB' : 'ar-SA-u-nu-latn-ca-gregory');
+      } catch (e) { return String(iso || ''); }
+    }
+    function stamp() {
+      var d = new Date();
+      function p(n) { return (n < 10 ? '0' : '') + n; }
+      return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes());
+    }
+    function announce(msg) { var s = $('ocr-match-live'); if (s) s.textContent = msg; }
+    function errMsg(err) { return (err && err.message) || (API && API.errorMessage ? API.errorMessage(err) : T('m_err_generic')); }
+    function download(blob, name) {
+      var url = URL.createObjectURL(blob);
+      var a = el('a'); a.href = url; a.download = name; a.rel = 'noopener';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+    }
+    function fileB64(file) {
+      return new Promise(function (resolve, reject) {
+        var fr = new FileReader();
+        fr.onload = function () { var s = String(fr.result || ''); var i = s.indexOf(','); resolve(i >= 0 ? s.slice(i + 1) : ''); };
+        fr.onerror = function () { reject(new Error('read')); };
+        fr.readAsDataURL(file);
+      });
+    }
+    function sha256(file) {
+      if (API && API.util && API.util.sha256Hex) return API.util.sha256Hex(file).catch(function () { return ''; });
+      if (!(window.crypto && crypto.subtle)) return Promise.resolve('');
+      return file.arrayBuffer().then(function (b) { return crypto.subtle.digest('SHA-256', b); }).then(function (h) {
+        return Array.prototype.map.call(new Uint8Array(h), function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+      }).catch(function () { return ''; });
+    }
+    function docName(k) { return T('m_doc_' + k); }
+    function activeOrg() {
+      if (!ONLINE || !API || !API.activeOrgId) return Promise.resolve(null);
+      return API.activeOrgId().then(function (r) { return r && !r.error ? r.data || null : null; }, function () { return null; });
+    }
+    function shellOrg() {
+      if (!Shell || typeof Shell.orgId !== 'function') return null;
+      try { var o = Shell.orgId(); return typeof o === 'string' && o ? o : null; } catch (e) { return null; }
+    }
+    function orgName(id) {
+      if (!Shell || typeof Shell.orgs !== 'function') return '';
+      try { var o = Shell.orgs().filter(function (x) { return x.org_id === id; })[0]; return o ? o.name || '' : ''; } catch (e) { return ''; }
+    }
+    function reviewerName() {
+      if (Shell && typeof Shell.user === 'function') {
+        try { var u = Shell.user(); if (u && u.name) return u.name; } catch (e) { /* noop */ }
+      }
+      return S.userEmail || '';
+    }
+    function has(fn) { return !!(API && typeof API[fn] === 'function'); }
+
+    /* ---------------------------------------------------------------
+       Access gate (same rule as the AI engine in ocr.js)
+       --------------------------------------------------------------- */
+    function initRole() {
+      if (!ONLINE || !API) return Promise.resolve(false);
+      return API.getSession().then(function (s) {
+        if (s.error || !s.data) return false;
+        if (s.data.user && s.data.user.email) S.userEmail = s.data.user.email;
+        return API.isStaff().then(function (r) { return !r.error && !!r.data; });
+      }).catch(function () { return false; });
+    }
+    function initAi() {
+      AI.enabled = false; AI.remaining = null;
+      if (!ONLINE || !STAFF || !API || typeof API.aiAccess !== 'function' || typeof API.aiExtract !== 'function') { syncGate(); return Promise.resolve(false); }
+      return activeOrg().then(function (oid) { return API.aiAccess(oid || undefined); }).then(function (r) {
+        AI.enabled = !!(r && !r.error && r.data && r.data.can_use === true);
+        AI.remaining = AI.enabled && r.data.daily_remaining != null ? Number(r.data.daily_remaining) : null;
+        syncGate();
+        return AI.enabled;
+      }, function () { syncGate(); return false; });
+    }
+    function syncGate() {
+      var show = ONLINE && STAFF && AI.enabled;
+      // a result on screen stays visible (it can still be exported / saved) even if access changed meanwhile
+      section.hidden = !show && !S.result;
+      showRemaining();
+      syncRun();
+      if (show) loadRecent();
+    }
+    function showRemaining() {
+      var n = $('ocr-match-remaining');
+      if (n) n.textContent = AI.remaining == null ? '' : T('ai_remaining', { n: AI.remaining });
+    }
+
+    /* ---------------------------------------------------------------
+       Upload slots
+       --------------------------------------------------------------- */
+    function setFile(k, file) {
+      var s = S.slots[k];
+      if (S.running) return;
+      if (!file) return;
+      var mt = mediaType(file);
+      if (!mt) { slotError(k, T('ai_unsupported')); return; }
+      if (file.size > (mt === 'application/pdf' ? AI_MAX_FILE : AI_MAX_IMAGE)) { slotError(k, T('ai_too_large')); return; }
+      if (S.result) clearResult();
+      s.file = file; s.mime = mt; s.status = 'ready'; s.res = null; s.fields = null; s.orig = null; s.items = []; s.error = ''; s.sha256 = '';
+      delete S.saved.extractions[k];
+      sha256(file).then(function (h) { if (s.file === file) s.sha256 = h; });
+      renderSlot(k);
+      syncRun();
+    }
+    function slotError(k, msg) {
+      var s = S.slots[k];
+      s.error = msg;
+      renderSlot(k);
+      announce(docName(k) + ': ' + msg);
+    }
+    function renderSlot(k) {
+      var s = S.slots[k];
+      var fn = qsa('[data-fname="' + k + '"]')[0], stEl = qsa('[data-status="' + k + '"]')[0], pr = qsa('[data-progress="' + k + '"]')[0];
+      var clr = qsa('[data-clear="' + k + '"]')[0], drop = qsa('[data-drop="' + k + '"]')[0];
+      fn.textContent = s.file ? s.file.name + ' · ' + fmtSize(s.file.size) : T('m_formats');
+      stEl.textContent = '';
+      stEl.className = 'ocr-match-slot-status';
+      var msg = s.error || (s.status === 'reading' ? T('ai_reading') : s.status === 'sending' ? T('ai_sending') : s.status === 'done' ? T('m_read_done') : '');
+      if (msg) {
+        stEl.textContent = msg;
+        stEl.classList.add(s.error ? 'is-error' : (s.status === 'done' ? 'is-done' : 'is-busy'));
+      }
+      if (s.status === 'done' && s.res) {
+        var mism = (s.res.warnings || []).filter(function (w) { return w && w.code === 'doc_type_mismatch'; })[0];
+        if (mism) {
+          var w = el('div', 'alert alert-warning ocr-match-type-warn', T('m_type_mismatch', { doc: docName(k), kind: kindName(s.res.detected_type || s.res.doc_type) }));
+          w.setAttribute('role', 'note');
+          stEl.appendChild(w);
+        }
+        if (s.res.mean_confidence != null) stEl.appendChild(el('span', 'ocr-match-slot-conf', ' · ' + T('ai_conf', { n: Math.round(Number(s.res.mean_confidence)) })));
+      }
+      var pct = s.status === 'sending' ? 15 : s.status === 'reading' ? 55 : s.status === 'done' ? 100 : 0;
+      pr.hidden = !(s.status === 'sending' || s.status === 'reading');
+      pr.setAttribute('aria-valuenow', String(pct));
+      pr.firstElementChild.style.width = pct + '%';
+      clr.hidden = !s.file || S.running;
+      drop.classList.toggle('has-file', !!s.file);
+      drop.classList.toggle('is-error', !!s.error);
+      var inp = $('ocr-match-file-' + k); if (inp) inp.disabled = S.running;
+    }
+    function kindName(kind) {
+      var map = { commercial_invoice: 'm_kind_invoice', bill_of_lading: 'm_kind_bl', customs_declaration: 'm_kind_declaration', supplier_invoice: 'm_kind_supplier',
+        operator_invoice: 'm_kind_supplier', packing_list: 'm_kind_packing', certificate_of_origin: 'm_kind_origin' };
+      return map[kind] ? T(map[kind]) : String(kind || T('m_kind_other'));
+    }
+    function needed() { return SLOTS.filter(function (k) { return S.slots[k].file && S.slots[k].status !== 'done'; }).length; }
+    function syncRun() {
+      var b = $('ocr-match-run');
+      var ok = !!(S.slots.invoice.file && S.slots.bl.file) && !S.running && ONLINE && STAFF && AI.enabled;
+      var n = needed();
+      b.disabled = !ok || (n === 0 && !!S.result);
+      $('ocr-match-reset').disabled = S.running;
+    }
+    SLOTS.forEach(function (k) {
+      var inp = $('ocr-match-file-' + k), drop = qsa('[data-drop="' + k + '"]')[0];
+      inp.addEventListener('change', function () { if (this.files && this.files[0]) setFile(k, this.files[0]); this.value = ''; });
+      ['dragenter', 'dragover'].forEach(function (ev) { drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('is-dragover'); }); });
+      ['dragleave', 'dragend'].forEach(function (ev) { drop.addEventListener(ev, function () { drop.classList.remove('is-dragover'); }); });
+      drop.addEventListener('drop', function (e) {
+        e.preventDefault(); drop.classList.remove('is-dragover');
+        var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if (f) setFile(k, f);
+      });
+      qsa('[data-clear="' + k + '"]')[0].addEventListener('click', function () {
+        if (S.running) return;
+        var s = S.slots[k];
+        s.file = null; s.status = 'empty'; s.res = null; s.fields = null; s.orig = null; s.items = []; s.error = ''; s.sha256 = '';
+        delete S.saved.extractions[k];
+        if (S.result) { if (S.slots.invoice.res && S.slots.bl.res) recompute(); else clearResult(); }
+        renderSlot(k); syncRun();
+        inp.focus();
+      });
+      renderSlot(k);
+    });
+
+    /* ---------------------------------------------------------------
+       Reading (parallel AI readings)
+       --------------------------------------------------------------- */
+    function readSlot(k, orgId) {
+      var s = S.slots[k];
+      s.status = 'sending'; s.error = ''; renderSlot(k);
+      return fileB64(s.file).then(function (b64) {
+        s.status = 'reading'; renderSlot(k);
+        return API.aiExtract({ orgId: orgId || undefined, docType: DOC_TYPE[k], file: { media_type: s.mime, data_b64: b64 }, lang: lang() });
+      }).then(function (r) {
+        if (!r || r.error || !r.data) throw (r && r.error) || new Error(T('m_err_generic'));
+        if (AI.remaining != null) { AI.remaining = Math.max(0, AI.remaining - 1); showRemaining(); }
+        takeReading(k, r.data);
+        s.status = 'done'; renderSlot(k);
+        return true;
+      }).catch(function (e) {
+        s.status = 'ready'; s.error = errMsg(e); renderSlot(k);
+        return false;
+      });
+    }
+    // the Edge Function's answer → editable fields {key: {value, score}} (strings only)
+    function takeReading(k, res) {
+      var s = S.slots[k], fields = {}, orig = {};
+      (res.fields || []).forEach(function (f) {
+        if (!f || typeof f.name !== 'string' || typeof f.value !== 'string' || !/^[a-z_]{2,40}$/.test(f.name)) return;
+        var c = Number(f.confidence); if (!isFinite(c)) c = null;
+        fields[f.name] = { value: f.value, score: c };
+        orig[f.name] = f.value;
+      });
+      s.res = res; s.fields = fields; s.orig = orig;
+      s.items = Array.isArray(res.line_items) ? res.line_items.slice(0, 500) : [];
+    }
+    $('ocr-match-run').addEventListener('click', run);
+    function run() {
+      if (S.running || !(S.slots.invoice.file && S.slots.bl.file)) return;
+      if (!(ONLINE && STAFF && AI.enabled)) { showError(T('m_err_access')); return; }
+      var todo = SLOTS.filter(function (k) { return S.slots[k].file && S.slots[k].status !== 'done'; });
+      if (!todo.length) { recompute(); return; }
+      if (AI.remaining != null && AI.remaining < todo.length) { showError(T('m_err_quota', { n: todo.length, r: AI.remaining })); return; }
+      if (!S.hashWaited && todo.some(function (k) { return !S.slots[k].sha256; })) {
+        // hashing may still be running for a large file: wait for it once (saving needs it)
+        S.hashWaited = true;
+        return Promise.all(todo.map(function (k) { return sha256(S.slots[k].file).then(function (h) { S.slots[k].sha256 = h; }); })).then(run);
+      }
+      showError('');
+      S.running = true; syncRun();
+      SLOTS.forEach(renderSlot);
+      announce(T('m_reading_n', { n: todo.length }));
+      var orgP = S.orgId ? Promise.resolve(S.orgId) : Promise.resolve(shellOrg()).then(function (o) { return o || activeOrg(); });
+      orgP.then(function (oid) {
+        S.orgId = oid || null;
+        return Promise.all(todo.map(function (k) { return readSlot(k, S.orgId); }));
+      }).then(function (oks) {
+        S.running = false;
+        SLOTS.forEach(renderSlot);
+        S.readAt = new Date().toISOString();
+        var failed = todo.filter(function (k, i) { return !oks[i]; });
+        if (S.slots.invoice.res && S.slots.bl.res && (!S.slots.declaration.file || S.slots.declaration.res)) {
+          recompute(true);
+        } else if (failed.length) {
+          showError(T('m_err_failed', { docs: failed.map(docName).join('، ') }));
+        }
+        if (failed.length && S.result) showError(T('m_err_failed', { docs: failed.map(docName).join('، ') }));
+        syncRun();
+      }).catch(function (e) {
+        S.running = false; SLOTS.forEach(renderSlot); syncRun();
+        showError(errMsg(e));
+      });
+    }
+    function showError(msg) {
+      $('ocr-match-error-text').textContent = msg || '';
+      $('ocr-match-error').hidden = !msg;
+      if (msg) announce(msg);
+    }
+
+    /* ---------------------------------------------------------------
+       Compare + render
+       --------------------------------------------------------------- */
+    function engineInput() {
+      var o = {};
+      SLOTS.forEach(function (k) {
+        var s = S.slots[k];
+        if (s.res && s.fields) o[k] = { fields: s.fields, items: s.items };
+      });
+      return o;
+    }
+    function recompute(focus, patch) {
+      S.result = E.compare(engineInput());
+      // ticks survive a recompute for rows that still exist
+      var keys = {}; S.result.rows.forEach(function (r) { keys[r.key] = 1; });
+      Object.keys(S.reviewed).forEach(function (k) { if (!keys[k]) delete S.reviewed[k]; });
+      render(patch);
+      $('ocr-match-result').hidden = false;
+      section.hidden = false;
+      if (focus) {
+        var b = $('ocr-match-banner');
+        try { b.focus({ preventScroll: false }); } catch (e) { b.focus(); }
+      }
+    }
+    function clearResult() {
+      S.result = null; S.reviewed = {}; S.approved = false; S.saved.match = null; S.idem = null;
+      $('ocr-match-result').hidden = true;
+      setSaveMsg('', '');
+    }
+    function cols() { return SLOTS.filter(function (k) { return S.result && S.result.documents.indexOf(k) !== -1; }); }
+    function correctedKeys(row) {
+      var any = false;
+      cols().forEach(function (k) {
+        var src = row.src && row.src[k], f = src && S.slots[k].fields && S.slots[k].fields[src];
+        if (f && f.corrected) any = true;
+      });
+      return any || !!row.corrected;
+    }
+    function render(patch) {
+      var R = S.result;
+      if (!R) return;
+      // meta (report head)
+      var meta = $('ocr-match-meta'); meta.textContent = '';
+      function mrow(label, value) {
+        if (!value) return;
+        var d = el('div', 'ocr-match-meta-item'), dd = el('dd', null, value); dd.dir = 'auto';
+        d.appendChild(el('dt', null, label)); d.appendChild(dd); meta.appendChild(d);
+      }
+      mrow(T('m_meta_date'), fmtDate(S.readAt || new Date().toISOString()));
+      mrow(T('m_meta_org'), orgName(S.orgId));
+      cols().forEach(function (k) { mrow(docName(k), S.slots[k].file ? S.slots[k].file.name : ''); });
+      mrow(T('m_meta_mode'), R.mode === 'three_way' ? T('m_mode_three') : T('m_mode_two'));
+      // banner
+      var ov = $('ocr-match-overall');
+      ov.textContent = T('m_overall_' + R.overall);
+      ov.className = 'ocr-match-overall ' + OVERALL_CLS[R.overall];
+      $('ocr-match-banner').className = 'ocr-match-banner ' + OVERALL_CLS[R.overall];
+      var cs = $('ocr-match-counts'); cs.textContent = '';
+      ['match', 'partial', 'missing', 'mismatch'].forEach(function (st) {
+        var c = el('span', 'ocr-match-chip ' + STATUS_CLS[st], T('m_st_' + st) + ': ' + R.counts[st]);
+        cs.appendChild(c);
+      });
+      announce(T('m_overall_' + R.overall));
+      // alerts: document type mismatches
+      var al = $('ocr-match-alerts'); al.textContent = '';
+      cols().forEach(function (k) {
+        var res = S.slots[k].res;
+        var w = res && (res.warnings || []).filter(function (x) { return x && x.code === 'doc_type_mismatch'; })[0];
+        if (w) {
+          var a = el('div', 'alert alert-warning', T('m_type_mismatch', { doc: docName(k), kind: kindName(res.detected_type || res.doc_type) }));
+          a.setAttribute('role', 'note'); al.appendChild(a);
+        }
+      });
+      if (!(patch && patchTable())) renderTable();
+      renderItems();
+      renderWarnings();
+      renderReview();
+      renderSaveState();
+    }
+    function renderTable() {
+      var R = S.result, C = cols();
+      var thead = $('ocr-match-thead'), tbody = $('ocr-match-tbody');
+      thead.textContent = ''; tbody.textContent = '';
+      var hr = el('tr');
+      [T('m_col_field')].concat(C.map(docName)).concat([T('m_col_status'), T('m_col_conf'), T('m_col_reviewed')]).forEach(function (h) {
+        var th = el('th', null, h); th.scope = 'col'; hr.appendChild(th);
+      });
+      thead.appendChild(hr);
+      R.rows.forEach(function (row) { tbody.appendChild(rowEl(row, R, C)); });
+    }
+    // one table row (the cells are rebuilt in place by patchTable after a correction)
+    function rowEl(row, R, C) {
+        var tr = el('tr', 'ocr-match-row ' + STATUS_CLS[row.status]);
+        tr.setAttribute('data-key', row.key);
+        var th = el('th', 'ocr-match-field'); th.scope = 'row';
+        th.appendChild(el('span', null, L(row, 'label')));
+        if (row.critical) {
+          var cr = el('span', 'ocr-match-crit', '★'); cr.title = T('m_critical');
+          cr.setAttribute('aria-hidden', 'true'); th.appendChild(cr);
+          th.appendChild(el('span', 'sr-only', ' (' + T('m_critical') + ')'));
+        }
+        if (correctedKeys(row)) th.appendChild(el('span', 'badge badge-sm badge-blue ocr-match-corr', T('m_corrected')));
+        tr.appendChild(th);
+        C.forEach(function (k) {
+          var td = el('td', 'ocr-match-val');
+          var v = row.values[k];
+          var editable = row.src && row.src[k] && row.key !== 'items' && row.key !== 'invoice_totals';
+          if (v === undefined) {
+            td.appendChild(el('span', 'ocr-match-na', '—'));
+          } else if (editable) {
+            var inp = el('input', 'ocr-match-input-val');
+            inp.type = 'text'; inp.value = v == null ? '' : v; inp.dir = 'auto'; inp.maxLength = 2000;
+            inp.placeholder = T('m_not_read');
+            inp.setAttribute('data-doc', k); inp.setAttribute('data-src', row.src[k]); inp.setAttribute('data-row', row.key);
+            inp.setAttribute('aria-label', L(row, 'label') + ' — ' + docName(k));
+            var f = S.slots[k].fields && S.slots[k].fields[row.src[k]];
+            if (f && f.corrected) inp.classList.add('is-corrected');
+            td.appendChild(inp);
+            var pv = el('span', 'ocr-match-print-val', v == null ? '—' : v); pv.dir = 'auto';
+            td.appendChild(pv);
+          } else {
+            var sv = el('span', null, v == null ? '—' : v); sv.dir = 'auto';
+            td.appendChild(sv);
+          }
+          tr.appendChild(td);
+        });
+        var tdS = el('td', 'ocr-match-st');
+        tdS.appendChild(el('span', 'ocr-match-chip ' + STATUS_CLS[row.status], T('m_st_' + row.status)));
+        var det = L(row, 'detail');
+        if (det) tdS.appendChild(el('span', 'ocr-match-detail', det));
+        if (R.mode === 'three_way') {
+          var pw = el('span', 'ocr-match-pairs');
+          Object.keys(PAIR_DOCS).forEach(function (p) {
+            var ps = row.pairs && row.pairs[p];
+            // a document that simply does not carry an optional field is not worth a chip
+            if (!ps || (ps === 'missing' && row.status !== 'missing')) return;
+            var chip = el('span', 'ocr-match-pair ' + (STATUS_CLS[ps] || ''));
+            chip.title = T('m_pair_' + p) + ': ' + T('m_st_' + ps);
+            var vis = el('span', null, T('m_pair_' + p) + ' ' + pairMark(ps)); vis.setAttribute('aria-hidden', 'true');
+            chip.appendChild(vis);
+            chip.appendChild(el('span', 'sr-only', chip.title));
+            pw.appendChild(chip);
+          });
+          if (pw.childNodes.length) tdS.appendChild(pw);
+        }
+        tr.appendChild(tdS);
+        var tdC = el('td', 'ocr-match-conf');
+        var lows = C.filter(function (k) { return row.conf && row.conf[k] != null && row.conf[k] < LOW_CONF; });
+        var vals = C.map(function (k) { return row.conf && row.conf[k]; }).filter(function (x) { return x != null; });
+        if (vals.length) {
+          var mn = Math.min.apply(null, vals);
+          var cEl = el('span', 'ocr-match-confv' + (lows.length ? ' is-low' : ''));
+          cEl.title = lows.length ? T('m_low_conf', { docs: lows.map(docName).join('، ') }) : T('m_conf_min');
+          if (lows.length) { var wi = el('span', null, '⚠ '); wi.setAttribute('aria-hidden', 'true'); cEl.appendChild(wi); }
+          cEl.appendChild(document.createTextNode(Math.round(mn * 100) + '%'));
+          tdC.appendChild(cEl);
+          // visible (also on touch screens, and read by screen readers): which reading is unsure
+          if (lows.length) tdC.appendChild(el('span', 'ocr-match-detail', T('m_low_conf', { docs: lows.map(docName).join('، ') })));
+        } else tdC.appendChild(el('span', 'ocr-match-na', '—'));
+        tr.appendChild(tdC);
+        var tdR = el('td', 'ocr-match-rev');
+        var lab = el('label', 'check');
+        var cb = el('input'); cb.type = 'checkbox'; cb.checked = !!S.reviewed[row.key]; cb.setAttribute('data-review', row.key);
+        cb.setAttribute('aria-label', T('m_reviewed_aria', { field: L(row, 'label') }));
+        lab.appendChild(cb);
+        lab.appendChild(el('span', 'ocr-match-print-val', cb.checked ? '✓' : ''));
+        tdR.appendChild(lab);
+        tr.appendChild(tdR);
+        return tr;
+    }
+    // after a correction: same rows → update the cells around the inputs / checkboxes without replacing them, so the
+    // focus (Tab) and a click that started on another input or a "reviewed" box are not lost; other rows → rebuild
+    function patchTable() {
+      var R = S.result, C = cols(), tbody = $('ocr-match-tbody');
+      var trs = qsa('tr[data-key]', tbody);
+      var same = trs.length === R.rows.length && R.rows.every(function (r, i) { return trs[i].getAttribute('data-key') === r.key; });
+      if (!same) return false;
+      R.rows.forEach(function (row, i) {
+        var tr = trs[i], fresh = rowEl(row, R, C);
+        tr.className = fresh.className;
+        var oc = tr.children, nc = fresh.children;
+        for (var j = 0; j < nc.length && j < oc.length; j++) {
+          var keep = oc[j].querySelector('input');
+          if (!keep) { tr.replaceChild(nc[j].cloneNode(true), oc[j]); continue; }
+          // a cell with a control: keep the control, refresh its state and the printed copy
+          var ni = nc[j].querySelector('input');
+          if (keep.type === 'checkbox') keep.checked = !!(ni && ni.checked);
+          else if (ni) {
+            if (keep !== document.activeElement && keep.value !== ni.value) keep.value = ni.value;
+            keep.classList.toggle('is-corrected', ni.classList.contains('is-corrected'));
+          }
+          var op = oc[j].querySelector('.ocr-match-print-val'), np = nc[j].querySelector('.ocr-match-print-val');
+          if (op && np) op.textContent = np.textContent;
+        }
+      });
+      return true;
+    }
+    function ctlKey(n) {
+      if (!n || !n.getAttribute) return null;
+      if (n.hasAttribute('data-review')) return 'input[data-review="' + n.getAttribute('data-review') + '"]';
+      if (n.hasAttribute('data-row')) return 'input[data-row="' + n.getAttribute('data-row') + '"][data-doc="' + n.getAttribute('data-doc') + '"]';
+      return null;
+    }
+    function pairMark(s) { return s === 'match' ? '✓' : s === 'mismatch' ? '✗' : s === 'partial' ? '≈' : '—'; }
+    // reviewer correction → the reading's field (flagged) → recompute; the same input gets the focus back
+    $('ocr-match-tbody').addEventListener('change', function (e) {
+      var t = e.target;
+      if (t.matches && t.matches('input[data-review]')) {
+        var key = t.getAttribute('data-review');
+        if (t.checked) S.reviewed[key] = true; else delete S.reviewed[key];
+        var pv = t.parentNode.querySelector('.ocr-match-print-val'); if (pv) pv.textContent = t.checked ? '✓' : '';
+        if (S.approved) { S.approved = false; }
+        renderReview();
+        return;
+      }
+      if (!(t.matches && t.matches('input[data-src]'))) return;
+      var k = t.getAttribute('data-doc'), src = t.getAttribute('data-src'), rowKey = t.getAttribute('data-row');
+      var s = S.slots[k];
+      if (!s.fields) return;
+      var v = String(t.value || '').replace(/[\u0000-\u001F\u007F]+/g, ' ').trim().slice(0, 2000);
+      var cur = s.fields[src] ? s.fields[src].value : null;
+      if ((cur == null ? '' : String(cur)) === v) { enterKey = null; return; }       // nothing changed (e.g. Enter then blur)
+      var orig = s.orig && Object.prototype.hasOwnProperty.call(s.orig, src) ? s.orig[src] : null;
+      if (orig != null && v === orig) {
+        s.fields[src] = { value: orig, score: s.fields[src] && s.fields[src].corrected ? s.fields[src].origScore : (s.fields[src] || {}).score };
+      } else {
+        var prev = s.fields[src];
+        s.fields[src] = { value: v, score: 1, corrected: true, origScore: prev && !prev.corrected ? prev.score : (prev ? prev.origScore : null) };
+      }
+      delete S.reviewed[rowKey];
+      S.approved = false;
+      S.idem = null;
+      if (S.saved.match) {
+        // the saved match no longer reflects the table: the next save replaces it (the old one is voided then)
+        if (S.saved.match.id) S.saved.prevMatch = S.saved.match.id;
+        S.saved.match = null; setSaveMsg('warning', T('m_changed_after_save'));
+      }
+      recompute(false, true);
+      // rows were added / removed (full rebuild): give the focus back to the control that had it, by its attributes
+      if (!t.isConnected) {
+        var sel = enterKey === t ? ctlKey(t) : null;
+        setTimeout(function () {
+          var want = sel || ctlKey(lastFocus) || ctlKey(t);
+          var n = want && qsa('#ocr-match-tbody ' + want)[0];
+          if (n && document.activeElement !== n && (!document.activeElement || document.activeElement === document.body || !document.activeElement.isConnected)) n.focus();
+        }, 0);
+      }
+      enterKey = null;
+      announce(T('m_recomputed', { overall: T('m_overall_' + S.result.overall) }));
+    });
+    // the control that gets the focus next (Tab / click) — restored after a full rebuild; Enter keeps the edited input
+    var lastFocus = null, enterKey = null;
+    $('ocr-match-tbody').addEventListener('focusin', function (e) { lastFocus = e.target; });
+    $('ocr-match-tbody').addEventListener('keydown', function (e) {
+      // Enter commits a text input (the browser fires 'change'): that input keeps the focus
+      if (e.key === 'Enter' && e.target.matches && e.target.matches('input[data-src]')) enterKey = e.target;
+    });
+    function renderItems() {
+      var R = S.result, it = R.items, box = $('ocr-match-items-box');
+      var head = $('ocr-match-items-head'), body = $('ocr-match-items-body'), note = $('ocr-match-items-note');
+      head.textContent = ''; body.textContent = ''; note.textContent = '';
+      var C = cols();
+      var hr = el('tr');
+      [T('m_item_hs'), T('m_item_desc')].concat(C.map(function (k) { return T('m_item_qty') + ' — ' + docName(k); })).concat([T('m_col_status')])
+        .forEach(function (h) { var th = el('th', null, h); th.scope = 'col'; hr.appendChild(th); });
+      head.appendChild(hr);
+      var groups = it.groups.length ? it.groups : (it.invoice || []).map(function (x) {
+        return { hs6: E.hs6Set(x.hs_code)[0] || '', description: x.description, quantity: { invoice: x.quantity }, status: null };
+      });
+      groups.forEach(function (g) {
+        var tr = el('tr');
+        tr.appendChild(el('td', 'num', g.hs6 || '—'));
+        var dtd = el('td', null, g.description || '—'); dtd.dir = 'auto'; tr.appendChild(dtd);
+        C.forEach(function (k) { var q = g.quantity ? g.quantity[k] : null; tr.appendChild(el('td', 'num', q == null ? '—' : E.fmtNum(q))); });
+        var td = el('td');
+        if (g.status) td.appendChild(el('span', 'ocr-match-chip ' + STATUS_CLS[g.status], T('m_st_' + g.status)));
+        else td.textContent = '—';
+        tr.appendChild(td);
+        body.appendChild(tr);
+      });
+      var parts = [];
+      if (it.totals) {
+        parts.push(T('m_items_sum', { sum: E.fmtNum(it.totals.items_sum), ref: it.totals.reference == null ? '—' : E.fmtNum(it.totals.reference) }));
+      }
+      if (!it.groups.length && C.length > 1) parts.push(T('m_items_only_invoice'));
+      note.textContent = parts.join(' ');
+      box.hidden = !groups.length && !it.totals;
+    }
+    // server checks (extract.js W('server', code, English text, field)) → this page's language; model notes as written
+    var SERVER_WARN = ['container_check_digit', 'hs_format', 'conflicting_values', 'vat_format', 'date_format', 'amount_format',
+      'currency_format', 'iban_format', 'weight_format', 'weight_range', 'packages_format', 'packages_range', 'incoterms_format',
+      'totals_mismatch', 'vat_rate', 'net_over_gross'];
+    function warnText(w) {
+      if (w.source !== 'server' || SERVER_WARN.indexOf(w.code) === -1) return w.text;
+      var i = w.text.indexOf(': ');
+      var val = (w.code === 'container_check_digit' || w.code === 'hs_format') && i !== -1 ? w.text.slice(i + 2) : '';
+      return T('m_w_' + w.code) + (val ? ': ' + val : '');
+    }
+    var FIELD_NAMES = {};
+    (E.FIELDS || []).forEach(function (f) { FIELD_NAMES[f.key] = f; });
+    function fieldLabel(key) {
+      var f = FIELD_NAMES[key];
+      if (f) return lang() === 'en' ? f.label_en : f.label_ar;
+      var k = 'ocr.f_' + key;
+      if (I18N && typeof I18N.t === 'function' && I18N.has && I18N.has(k)) return I18N.t(k);
+      return String(key);
+    }
+    function renderWarnings() {
+      var ul = $('ocr-match-warn'); ul.textContent = '';
+      var n = 0;
+      cols().forEach(function (k) {
+        var res = S.slots[k].res;
+        (res && res.warnings || []).slice(0, 60).forEach(function (w) {
+          if (!w || typeof w.text !== 'string') return;
+          if (w.code === 'doc_type_mismatch') return;                 // shown localized on the slot and in the alerts
+          var li = el('li');
+          li.appendChild(el('strong', null, docName(k) + ': '));
+          li.appendChild(el('span', null, (w.field ? fieldLabel(w.field) + ' — ' : '') + warnText(w)));
+          li.lastChild.dir = 'auto';
+          ul.appendChild(li); n++;
+        });
+      });
+      $('ocr-match-warn-count').textContent = n ? '(' + n + ')' : '';
+      $('ocr-match-warn-box').hidden = !n;
+    }
+    function reviewedRows() { return S.result ? S.result.rows.filter(function (r) { return S.reviewed[r.key]; }).map(function (r) { return r.key; }) : []; }
+    function renderReview() {
+      $('ocr-match-reviewer').value = reviewerName();
+      var n = reviewedRows().length, total = S.result ? S.result.rows.length : 0;
+      var st = $('ocr-match-review-state');
+      var savedReviewed = S.saved.match && S.saved.match.status === 'reviewed';
+      st.textContent = (S.approved || savedReviewed ? T('m_review_approved') : T('m_review_pending')) + ' · ' + T('m_reviewed_n', { n: n, total: total });
+      st.className = 'ocr-match-review-state ' + (S.approved || savedReviewed ? 'is-match' : 'is-missing');
+    }
+    $('ocr-match-tick-all').addEventListener('click', function () {
+      if (!S.result) return;
+      S.result.rows.forEach(function (r) { S.reviewed[r.key] = true; });
+      renderTable(); renderReview();
+      announce(T('m_reviewed_n', { n: S.result.rows.length, total: S.result.rows.length }));
+    });
+    $('ocr-match-approve').addEventListener('click', function () {
+      if (!S.result) return;
+      var btn = this;
+      // the reviewer ticks what was checked (or «تحديد الكل»): nothing is ticked on their behalf
+      if (!reviewedRows().length) {
+        var st = $('ocr-match-review-state');
+        st.textContent = T('m_review_need_tick'); st.className = 'ocr-match-review-state is-partial';
+        announce(T('m_review_need_tick'));
+        return;
+      }
+      S.approved = true;
+      renderReview();
+      if (S.saved.match && S.saved.match.id && has('reviewDocumentMatch')) {
+        setSaveMsg('info', T('m_saving'));
+        btn.disabled = true;
+        var id = S.saved.match.id;
+        API.reviewDocumentMatch(id, reviewedRows(), noteText()).then(function (r) {
+          if (r.error) { setSaveMsg('error', T('m_save_failed', { msg: errMsg(r.error) })); return; }
+          if (S.saved.match && S.saved.match.id === id) S.saved.match.status = (r.data && r.data.status) || 'reviewed';
+          setSaveMsg('success', T('m_review_saved'));
+          renderReview(); loadRecent();
+        }).catch(function (e) {
+          setSaveMsg('error', T('m_save_failed', { msg: errMsg(e) }));
+        }).then(function () { btn.disabled = false; });
+      } else {
+        toast(T('m_review_local'), 'info');
+      }
+    });
+    function noteText() { return String($('ocr-match-note-text').value || '').trim().slice(0, 1000); }
+
+    /* ---------------------------------------------------------------
+       Save in the system
+       --------------------------------------------------------------- */
+    function setSaveMsg(type, text) {
+      var box = $('ocr-match-save-msg');
+      box.className = 'alert mt-2 alert-' + (type === 'error' ? 'danger' : type === 'success' ? 'success' : type === 'warning' ? 'warning' : 'info');
+      $('ocr-match-save-msg-text').textContent = text || '';
+      box.hidden = !text;
+    }
+    function renderSaveState() {
+      var done = !!(S.saved.match && S.saved.match.id);
+      $('ocr-match-save-label').textContent = done ? T('m_saved_label') : T('m_save');
+      $('ocr-match-save-btn').disabled = done || S.saving;
+      var anyExt = Object.keys(S.saved.extractions).length > 0;
+      $('ocr-match-tx').disabled = $('ocr-match-tx-q').disabled = $('ocr-match-tx-search').disabled = done || anyExt;
+      $('ocr-match-attach').disabled = done || anyExt;
+    }
+    function plainFields(s) {
+      var o = {};
+      Object.keys(s.fields || {}).forEach(function (k) { var v = s.fields[k] && s.fields[k].value; if (typeof v === 'string' && v) o[k] = v; });
+      return o;
+    }
+    function extractionRow(k, txId, attach) {
+      var s = S.slots[k], res = s.res || {};
+      var maxPage = 0;
+      (res.fields || []).forEach(function (f) { if (f && f.page > maxPage) maxPage = f.page; });
+      var row = {
+        doc_type: DOC_TYPE[k], source_name: String(s.file ? s.file.name : docName(k)).slice(0, 255), source_sha256: s.sha256 || '',
+        source_mime: s.mime || null, source_size: s.file ? s.file.size : null, source_pages: maxPage ? Math.min(Math.max(maxPage, 1), 200) : null,
+        engine: ENGINE_AI, languages: 'auto', mean_confidence: res.mean_confidence == null ? null : Math.min(100, Math.max(0, Number(res.mean_confidence))),
+        raw_text: String(res.raw_text || '').slice(0, 200000), extracted_fields: res.extracted_fields && typeof res.extracted_fields === 'object' ? res.extracted_fields : (s.orig || {}),
+        qr_payload: null, line_items: (res.line_items || []).map(function (x) { return Object.assign({}, x); }), ai_usage_id: res.usage_id
+      };
+      if (txId && !attach) row.transaction_id = txId;
+      else if (S.orgId) row.org_id = S.orgId;
+      return row;
+    }
+    // the reading's current values (to know whether corrections changed since the last save)
+    function fieldsSnap(k) {
+      var o = plainFields(S.slots[k]);
+      return JSON.stringify(Object.keys(o).sort().map(function (f) { return [f, o[f]]; }));
+    }
+    // insert the reading; the same file already saved for this org / transaction (document_extractions_dedupe_uidx →
+    // MRS_EXTRACTION_DUPLICATE) is reused when it is the same kind of document — one invoice may serve several matches
+    function insertOrReuse(k, txId, attach) {
+      var row = extractionRow(k, txId, attach);
+      var lookup = function (tx) {
+        return has('findExtractionBySource')
+          ? API.findExtractionBySource({ orgId: S.orgId || undefined, sha256: row.source_sha256, transactionId: tx || null })
+          : Promise.resolve({ data: null, error: null });
+      };
+      var reuse = function (hit) {
+        if (!hit) return null;
+        if (hit.doc_type !== DOC_TYPE[k]) {
+          return { data: null, error: { code: 'MRS_EXTRACTION_DUPLICATE', message: T('m_err_dup_kind', { doc: docName(k), kind: kindName(hit.doc_type) }) } };
+        }
+        return { data: hit, error: null, reused: true };
+      };
+      // with "attach", the reading is inserted unlinked and then linked: one already on that transaction is reused first
+      var first = attach && txId ? lookup(txId).then(function (f) { return f && !f.error ? reuse(f.data) : null; }) : Promise.resolve(null);
+      return first.then(function (got) {
+        if (got) return got;
+        return API.saveExtraction(row).then(function (r) {
+          if (!r.error || r.error.code !== 'MRS_EXTRACTION_DUPLICATE') return r;
+          return lookup(row.transaction_id || null).then(function (f) {
+            if (f.error) return r;
+            return reuse(f.data) || r;
+          });
+        });
+      });
+    }
+    function slotCorrected(k) {
+      var s = S.slots[k];
+      return Object.keys(s.fields || {}).some(function (f) { return s.fields[f] && s.fields[f].corrected; });
+    }
+    function payloadRows() {
+      return S.result.rows.map(function (r) {
+        var o = { key: r.key, label_ar: r.label_ar, label_en: r.label_en, values: {}, status: r.status, detail_ar: r.detail_ar, detail_en: r.detail_en,
+          critical: !!r.critical, conf: {}, pairs: {} };
+        // only the documents / pairs of this mode (the database refuses a declaration key in a two-way match)
+        Object.keys(PAIR_DOCS).forEach(function (p) {
+          var d = PAIR_DOCS[p];
+          if (S.result.documents.indexOf(d[0]) !== -1 && S.result.documents.indexOf(d[1]) !== -1) o.pairs[p] = r.pairs ? (r.pairs[p] || null) : null;
+        });
+        S.result.documents.forEach(function (k) {
+          o.values[k] = r.values[k] === undefined ? null : r.values[k];
+          o.conf[k] = r.conf ? (r.conf[k] == null ? null : r.conf[k]) : null;
+        });
+        if (correctedKeys(r)) o.corrected = true;
+        return o;
+      });
+    }
+    // one key per result to save: a retry after a lost answer does not store the match twice
+    function idemKey() {
+      if (!S.idem) S.idem = API && API.util && API.util.uuid ? API.util.uuid() : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      return S.idem;
+    }
+    $('ocr-match-save-btn').addEventListener('click', save);
+    function save() {
+      if (!S.result || S.saving) return;
+      if (!(ONLINE && STAFF)) { setSaveMsg('error', T('m_err_access')); return; }
+      if (!has('saveExtraction') || !has('saveDocumentMatch')) { setSaveMsg('error', T('m_save_unavailable')); return; }
+      var docs = S.result.documents.filter(function (k) { return S.slots[k].res; });
+      if (docs.indexOf('invoice') === -1 || docs.indexOf('bl') === -1) { setSaveMsg('error', T('m_err_need_two')); return; }
+      if (docs.some(function (k) { return !/^[0-9a-f]{64}$/.test(S.slots[k].sha256 || ''); })) { setSaveMsg('error', T('m_err_hash')); return; }
+      S.saving = true; renderSaveState();
+      setSaveMsg('info', T('m_saving'));
+      var txId = $('ocr-match-tx').value || '';
+      var attach = !!(txId && $('ocr-match-attach').checked && has('attachExtractionDocument'));
+      var notes = [];
+      var chain = Promise.resolve();
+      docs.forEach(function (k) {
+        chain = chain.then(function () {
+          var saved = S.saved.extractions[k];
+          if (saved) {
+            // already saved (earlier save of this result): only push the corrections made since then
+            var snap = fieldsSnap(k);
+            if (snap === saved.snap || !slotCorrected(k) || !has('reviewExtraction')) return null;
+            return API.reviewExtraction(saved.id, { reviewed_fields: plainFields(S.slots[k]) }).then(function (u) {
+              if (u.error) notes.push(T('m_note_review_failed', { doc: docName(k), msg: errMsg(u.error) }));
+              else saved.snap = snap;
+            });
+          }
+          return insertOrReuse(k, txId, attach).then(function (r) {
+            if (r.error) { var e = r.error; e.doc = k; throw e; }
+            var reused = !!r.reused;
+            S.saved.extractions[k] = { id: r.data.id, row: r.data, reused: reused, snap: slotCorrected(k) ? null : fieldsSnap(k) };
+            if (reused) notes.push(T('m_note_reused', { doc: docName(k) }));
+            renderSaveState();
+            var tasks = Promise.resolve();
+            if (slotCorrected(k) && has('reviewExtraction')) {
+              tasks = tasks.then(function () {
+                return API.reviewExtraction(r.data.id, { reviewed_fields: plainFields(S.slots[k]) }).then(function (u) {
+                  if (u.error) notes.push(T('m_note_review_failed', { doc: docName(k), msg: errMsg(u.error) }));
+                  else S.saved.extractions[k].snap = fieldsSnap(k);
+                });
+              });
+            }
+            // a reused reading that is already linked to the transaction / a document keeps its link
+            if (attach && S.slots[k].file && !(reused && r.data.document_id)) {
+              tasks = tasks.then(function () {
+                return API.attachExtractionDocument(r.data.id, { file: S.slots[k].file, transactionId: txId, kind: DOC_TYPE[k] }).then(function (a) {
+                  if (!a.error) return null;
+                  notes.push(T('m_note_attach_failed', { doc: docName(k), msg: errMsg(a.error) }));
+                  if (a.data) return null;
+                  // still link the transaction the user picked
+                  return has('reviewExtraction') ? API.reviewExtraction(r.data.id, { transaction_id: txId }).then(function () {}) : null;
+                });
+              });
+            }
+            return tasks;
+          });
+        });
+      });
+      chain.then(function () {
+        if (S.saved.match && S.saved.match.id) return null;
+        return API.saveDocumentMatch({
+          orgId: S.orgId || undefined, transactionId: txId || null,
+          invoiceExtractionId: S.saved.extractions.invoice.id, blExtractionId: S.saved.extractions.bl.id,
+          declarationExtractionId: S.saved.extractions.declaration ? S.saved.extractions.declaration.id : null,
+          mode: S.result.mode, engineVersion: S.result.version, overall: S.result.overall, counts: S.result.counts,
+          rows: payloadRows(), reviewedRows: reviewedRows(), note: noteText(), idempotencyKey: idemKey()
+        }).then(function (r) {
+          if (r.error) throw r.error;
+          S.saved.match = { id: r.data && r.data.id, status: (r.data && r.data.status) || 'saved', created_at: r.data && r.data.created_at };
+          var prev = S.saved.prevMatch;
+          var after = Promise.resolve();
+          if (prev && prev !== S.saved.match.id && has('voidDocumentMatch')) {
+            after = API.voidDocumentMatch(prev, T('m_void_superseded', { id: String(S.saved.match.id || '').slice(0, 8) })).then(function (v) {
+              if (v.error && !(v.error.code === 'MRS_MATCH_VOIDED')) notes.push(T('m_note_prev_void_failed', { id: String(prev).slice(0, 8), msg: errMsg(v.error) }));
+              else { S.saved.prevMatch = null; notes.push(T('m_note_prev_voided', { id: String(prev).slice(0, 8) })); }
+            });
+          }
+          return after.then(function () {
+            if (!(S.approved && has('reviewDocumentMatch'))) return null;
+            return API.reviewDocumentMatch(S.saved.match.id, reviewedRows(), noteText()).then(function (v) {
+              if (v.error) notes.push(T('m_note_review_match_failed', { msg: errMsg(v.error) }));
+              else S.saved.match.status = (v.data && v.data.status) || 'reviewed';
+            });
+          });
+        });
+      }).then(function () {
+        var ids = S.result.documents.filter(function (k) { return S.saved.extractions[k]; })
+          .map(function (k) { return docName(k) + ': ' + String(S.saved.extractions[k].id).slice(0, 8); }).join('، ');
+        setSaveMsg(notes.length ? 'warning' : 'success', T('m_saved', { id: String(S.saved.match.id || '').slice(0, 8), docs: ids }) + (notes.length ? ' ' + notes.join(' ') : ''));
+        toast(T('m_saved_toast'), 'success');
+        renderReview();
+        loadRecent();
+      }).catch(function (e) {
+        var where = e && e.doc ? docName(e.doc) + ': ' : '';
+        setSaveMsg('error', T('m_save_failed', { msg: where + errMsg(e) }));
+        try { $('ocr-match-save-msg').focus(); } catch (x) { /* noop */ }
+      }).then(function () { S.saving = false; renderSaveState(); });
+    }
+
+    /* transaction picker */
+    $('ocr-match-tx-search').addEventListener('click', searchTx);
+    $('ocr-match-tx-q').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); searchTx(); } });
+    function resetTx() {
+      var sel = $('ocr-match-tx'); sel.textContent = '';
+      var o0 = el('option', null, T('m_tx_none')); o0.value = ''; sel.appendChild(o0);
+    }
+    function searchTx() {
+      if (!API || !STAFF || !has('listTransactions')) return;
+      var q = $('ocr-match-tx-q').value.trim(), b = $('ocr-match-tx-search'), sel = $('ocr-match-tx');
+      b.disabled = true;
+      var orgP = S.orgId ? Promise.resolve(S.orgId) : activeOrg();
+      orgP.then(function (oid) { return API.listTransactions({ search: q, limit: 15, orgId: oid || undefined }); }).then(function (r) {
+        b.disabled = false;
+        resetTx();
+        if (r.error) { toast(errMsg(r.error), 'error'); return; }
+        (r.data || []).forEach(function (t) {
+          var o = el('option', null, [t.ref, t.bl_number, t.declaration_no, t.clients && t.clients.name_ar].filter(Boolean).join(' — '));
+          o.value = t.id; sel.appendChild(o);
+        });
+        if ((r.data || []).length) { sel.selectedIndex = 1; sel.focus(); }
+        announce((r.data || []).length ? T('m_tx_found', { n: r.data.length }) : T('m_tx_none_found'));
+      }, function () { b.disabled = false; });
+    }
+    // a B/L number read from the documents is a good first search
+    function suggestTxQuery() {
+      var q = $('ocr-match-tx-q');
+      if (q.value || !S.result) return;
+      var r = S.result.rows.filter(function (x) { return x.key === 'bl_number'; })[0];
+      var v = r && (r.values.bl || r.values.declaration || r.values.invoice);
+      if (v) q.value = String(v).slice(0, 60);
+    }
+
+    /* ---------------------------------------------------------------
+       Recent saved matches
+       --------------------------------------------------------------- */
+    $('ocr-match-recent-refresh').addEventListener('click', loadRecent);
+    var recentSeq = 0;
+    function loadRecent() {
+      var block = $('ocr-match-recent-block');
+      if (!(ONLINE && STAFF && has('listDocumentMatches'))) { block.hidden = true; return; }
+      block.hidden = false;
+      var seq = ++recentSeq;
+      activeOrg().then(function (oid) { return API.listDocumentMatches({ orgId: oid || undefined, limit: 10 }); }).then(function (r) {
+        if (seq !== recentSeq) return;
+        var ul = $('ocr-match-recent'); ul.textContent = '';
+        if (!r || r.error) {
+          var li = el('li'); li.appendChild(el('span', 'text-sm', T('m_recent_failed', { msg: errMsg(r && r.error) }))); ul.appendChild(li);
+          $('ocr-match-recent-empty').hidden = true;
+          return;
+        }
+        var rows = Array.isArray(r.data) ? r.data : [];
+        rows.forEach(function (m) { ul.appendChild(recentItem(m)); });
+        $('ocr-match-recent-empty').hidden = rows.length > 0;
+      }, function () { /* keep the old list */ });
+    }
+    function countsOf(m) {
+      var c = m.counts && typeof m.counts === 'object' ? m.counts : {};
+      return { match: Number(c.match != null ? c.match : m.match_count) || 0, mismatch: Number(c.mismatch != null ? c.mismatch : m.mismatch_count) || 0,
+        partial: Number(c.partial != null ? c.partial : m.partial_count) || 0, missing: Number(c.missing != null ? c.missing : m.missing_count) || 0 };
+    }
+    function recentItem(m) {
+      var li = el('li');
+      var ov = ['match', 'review', 'mismatch'].indexOf(m.overall) !== -1 ? m.overall : 'review';
+      li.appendChild(el('span', 'ocr-match-chip ' + OVERALL_CLS[ov], T('m_overall_' + ov)));
+      var main = el('div', 'ocr-h-main');
+      var title = m.transaction_ref ? T('m_recent_tx', { ref: m.transaction_ref }) : T('m_recent_no_tx');
+      main.appendChild(el('span', 'ocr-h-name', title));
+      var sub = el('div', 'ocr-h-sub');
+      sub.appendChild(el('span', null, fmtDate(m.created_at)));
+      sub.appendChild(el('span', null, m.mode === 'three_way' ? T('m_mode_three') : T('m_mode_two')));
+      var c = countsOf(m);
+      sub.appendChild(el('span', 'num', '✓' + c.match + ' ≈' + c.partial + ' ?' + c.missing + ' ✗' + c.mismatch));
+      sub.appendChild(el('span', null, m.status === 'reviewed' ? T('m_review_approved') : T('m_review_pending')));
+      main.appendChild(sub);
+      li.appendChild(main);
+      if (has('voidDocumentMatch') && m.id) {
+        var tools = el('div', 'ocr-h-tools');
+        var vd = el('button', 'btn btn-ghost btn-sm', T('m_void'));
+        vd.type = 'button'; vd.setAttribute('aria-label', T('m_void') + ' — ' + title);
+        vd.addEventListener('click', function () {
+          var reason = window.prompt(T('m_void_reason'), '');
+          if (reason == null) return;
+          if (!reason.trim()) { toast(T('m_void_reason_required'), 'warning'); return; }
+          API.voidDocumentMatch(m.id, reason.trim().slice(0, 500)).then(function (r) {
+            if (r.error) { toast(errMsg(r.error), 'error'); return; }
+            toast(T('m_voided'), 'info');
+            if (S.saved.match && S.saved.match.id === m.id) { S.saved.match = null; S.idem = null; renderSaveState(); renderReview(); }
+            if (S.saved.prevMatch === m.id) S.saved.prevMatch = null;
+            loadRecent();
+          });
+        });
+        tools.appendChild(vd);
+        li.appendChild(tools);
+      }
+      return li;
+    }
+
+    /* ---------------------------------------------------------------
+       Exports: JSON, Excel, print, PNG
+       --------------------------------------------------------------- */
+    function exportObj() {
+      var R = S.result;
+      var docs = {};
+      R.documents.forEach(function (k) {
+        var s = S.slots[k];
+        docs[k] = { file_name: s.file ? s.file.name : null, doc_type: DOC_TYPE[k], usage_id: s.res ? s.res.usage_id || null : null,
+          mean_confidence: s.res && s.res.mean_confidence != null ? Number(s.res.mean_confidence) : null,
+          extraction_id: S.saved.extractions[k] ? S.saved.extractions[k].id : null, fields: plainFields(s) };
+      });
+      return { app: 'marsa', kind: 'document_match', version: R.version, generated_at: new Date().toISOString(), read_at: S.readAt,
+        mode: R.mode, overall: R.overall, counts: R.counts, documents: docs, rows: payloadRows(), items: R.items,
+        reviewed_rows: reviewedRows(), approved: !!S.approved, reviewer: reviewerName() || null, note: noteText() || null,
+        match_id: S.saved.match ? S.saved.match.id : null };
+    }
+    $('ocr-match-json').addEventListener('click', function () {
+      if (!S.result) return;
+      try { download(new Blob([JSON.stringify(exportObj(), null, 2)], { type: 'application/json' }), 'marsa-match-' + stamp() + '.json'); }
+      catch (e) { toast(T('m_export_failed'), 'error'); }
+    });
+    $('ocr-match-xlsx').addEventListener('click', function () {
+      if (!S.result) return;
+      if (!X || typeof X.write !== 'function') { toast(T('m_export_failed'), 'error'); return; }
+      try {
+        var R = S.result, C = cols();
+        var rows = [[T('m_col_field')].concat(C.map(docName)).concat([T('m_col_status'), T('m_col_detail'), T('m_critical'), T('m_col_conf'), T('m_col_reviewed'), T('m_corrected')])];
+        R.rows.forEach(function (r) {
+          var vals = C.map(function (k) { return r.values[k] == null ? '' : r.values[k]; });
+          var cv = C.map(function (k) { return r.conf && r.conf[k]; }).filter(function (x) { return x != null; });
+          rows.push([L(r, 'label')].concat(vals).concat([T('m_st_' + r.status), L(r, 'detail') || '', r.critical ? '★' : '',
+            cv.length ? Math.round(Math.min.apply(null, cv) * 100) : '', S.reviewed[r.key] ? '✓' : '', correctedKeys(r) ? '✓' : '']));
+        });
+        var sum = [[T('m_sum_item'), T('m_sum_value')],
+          [T('m_report_title'), T('m_overall_' + R.overall)],
+          [T('m_meta_mode'), R.mode === 'three_way' ? T('m_mode_three') : T('m_mode_two')],
+          [T('m_meta_date'), fmtDate(S.readAt || new Date().toISOString())],
+          [T('m_meta_org'), orgName(S.orgId)]];
+        C.forEach(function (k) { sum.push([docName(k), S.slots[k].file ? S.slots[k].file.name : '']); });
+        ['match', 'partial', 'missing', 'mismatch'].forEach(function (st) { sum.push([T('m_st_' + st), R.counts[st]]); });
+        sum.push([T('m_reviewer'), reviewerName()]);
+        sum.push([T('m_review_state'), S.approved ? T('m_review_approved') : T('m_review_pending')]);
+        sum.push([T('m_note_label'), noteText()]);
+        sum.push([T('m_engine_version'), R.version]);
+        if (S.saved.match && S.saved.match.id) sum.push([T('m_match_id'), S.saved.match.id]);
+        download(X.write([{ name: T('m_sheet_rows'), rows: rows }, { name: T('m_sheet_summary'), rows: sum }]), 'marsa-match-' + stamp() + '.xlsx');
+      } catch (e) { toast(T('m_export_failed'), 'error'); }
+    });
+    $('ocr-match-print').addEventListener('click', function () {
+      if (!S.result) return;
+      document.body.classList.add('ocr-print-match');
+      var mq = window.matchMedia ? window.matchMedia('print') : null;
+      var timer = null;
+      var done = function () {
+        document.body.classList.remove('ocr-print-match');
+        window.removeEventListener('afterprint', done);
+        if (mq && mq.removeListener) mq.removeListener(onMq);
+        if (timer) clearTimeout(timer);
+      };
+      // window.print() does not block on some mobile browsers: the class stays until the print is over
+      var onMq = function (e) { if (!e.matches) done(); };
+      window.addEventListener('afterprint', done);
+      if (mq && mq.addListener) mq.addListener(onMq);
+      try { window.print(); } catch (e) { /* noop */ }
+      // a long safety net only (a browser without afterprint / print media events)
+      timer = setTimeout(done, 'onafterprint' in window ? 120000 : 60000);
+    });
+
+    /* PNG: the report drawn on a canvas (RTL aware, wrapped text, coloured chips) */
+    $('ocr-match-png').addEventListener('click', function () {
+      if (!S.result) return;
+      var b = this; b.disabled = true;
+      var fontP = document.fonts && document.fonts.load
+        ? Promise.all([document.fonts.load('700 18px Cairo'), document.fonts.load('400 15px Cairo')]).catch(function () {}) : Promise.resolve();
+      function encode(canvas) {
+        return new Promise(function (resolve, reject) {
+          if (canvas.toBlob) canvas.toBlob(function (blob) { blob ? resolve(blob) : reject(new Error('png')); }, 'image/png');
+          else {
+            var d = canvas.toDataURL('image/png'), bin = atob(d.split(',')[1]), arr = new Uint8Array(bin.length);
+            for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+            resolve(new Blob([arr], { type: 'image/png' }));
+          }
+        });
+      }
+      fontP.then(function () { return encode(drawReport()); }).catch(function () {
+        // the browser could not encode the large canvas (memory): once more at 1×
+        return encode(drawReport(1));
+      }).then(function (blob) {
+        download(blob, 'marsa-match-' + stamp() + '.png');
+      }).catch(function () { toast(T('m_export_failed'), 'error'); }).then(function () { b.disabled = false; });
+    });
+    // maxScale: upper bound of the pixel ratio (a retry after a failed encode passes 1)
+    function drawReport(maxScale) {
+      var R = S.result, C = cols(), rtl = lang() !== 'en';
+      var W = 1400, PAD = 40, SCALE = Math.min(maxScale || 2, Math.max(1, window.devicePixelRatio || 1));
+      var FONT = 'Cairo, "Segoe UI", Tahoma, Arial, sans-serif';
+      var canvas = document.createElement('canvas');
+      var ctx = canvas.getContext('2d');
+      function font(size, weight) { return (weight || 400) + ' ' + size + 'px ' + FONT; }
+      function wrap(text, width, f) {
+        ctx.font = f;
+        var out = [];
+        String(text == null ? '' : text).split('\n').forEach(function (para) {
+          var words = para.split(/\s+/).filter(Boolean), line = '';
+          if (!words.length) { out.push(''); return; }
+          words.forEach(function (w) {
+            var t = line ? line + ' ' + w : w;
+            if (ctx.measureText(t).width <= width || !line) {
+              // a single word longer than the column is cut by characters
+              if (!line && ctx.measureText(t).width > width) {
+                var part = '';
+                for (var i = 0; i < w.length; i++) {
+                  if (ctx.measureText(part + w[i]).width > width && part) { out.push(part); part = ''; }
+                  part += w[i];
+                }
+                line = part;
+              } else line = t;
+            } else { out.push(line); line = w; }
+          });
+          if (line) out.push(line);
+        });
+        if (out.length <= 12) return out;
+        // cut to 12 lines; the last one ends with an ellipsis so the missing text is visible
+        var last = out[11], ell = '…';
+        while (last && ctx.measureText(last + ell).width > width) last = last.slice(0, -1);
+        out = out.slice(0, 11); out.push(last.replace(/\s+$/, '') + ell);
+        return out;
+      }
+      // columns (logical order: field, docs…, status, conf, reviewed) with widths
+      var spec = [{ id: 'field', w: 230 }];
+      var docW = Math.floor((W - 2 * PAD - 230 - 330 - 80 - 70) / C.length);
+      C.forEach(function (k) { spec.push({ id: k, w: docW }); });
+      spec.push({ id: 'status', w: 330 }, { id: 'conf', w: 80 }, { id: 'rev', w: 70 });
+      // x of each column (from the right in RTL)
+      var x = rtl ? W - PAD : PAD;
+      spec.forEach(function (c) {
+        if (rtl) { c.x1 = x; c.x0 = x - c.w; x -= c.w; } else { c.x0 = x; c.x1 = x + c.w; x += c.w; }
+      });
+      var CELL_PAD = 10, LH = 22, F_CELL = font(15), F_HEAD = font(15, 700), F_SMALL = font(13);
+      function lines(row) {
+        var out = {};
+        out.field = wrap(L(row, 'label') + (row.critical ? ' ★' : '') + (correctedKeys(row) ? ' (' + T('m_corrected') + ')' : ''), spec[0].w - 2 * CELL_PAD, font(15, 700));
+        C.forEach(function (k, i) { var v = row.values[k]; out[k] = wrap(v === undefined ? '—' : (v == null || v === '' ? '—' : v), spec[i + 1].w - 2 * CELL_PAD, F_CELL); });
+        var det = L(row, 'detail') || '';
+        out.detail = det ? wrap(det, 330 - 2 * CELL_PAD, F_SMALL) : [];
+        if (R.mode === 'three_way') {
+          var pp = Object.keys(PAIR_DOCS).filter(function (p) { return row.pairs && row.pairs[p] && (row.pairs[p] !== 'missing' || row.status === 'missing'); })
+            .map(function (p) { return T('m_pair_' + p) + ' ' + pairMark(row.pairs[p]); }).join('   ');
+          if (pp) out.detail = out.detail.concat(wrap(pp, 330 - 2 * CELL_PAD, F_SMALL));
+        }
+        var hh = Math.max(out.field.length * LH, 30 + out.detail.length * 20);
+        C.forEach(function (k) { hh = Math.max(hh, out[k].length * LH); });
+        out.h = Math.ceil(hh + 2 * CELL_PAD + 6);
+        return out;
+      }
+      var L2 = R.rows.map(lines);
+      var metaLines = [];
+      metaLines.push(T('m_meta_date') + ': ' + fmtDate(S.readAt || new Date().toISOString()));
+      if (orgName(S.orgId)) metaLines.push(T('m_meta_org') + ': ' + orgName(S.orgId));
+      C.forEach(function (k) { if (S.slots[k].file) metaLines.push(docName(k) + ': ' + S.slots[k].file.name); });
+      metaLines.push(T('m_meta_mode') + ': ' + (R.mode === 'three_way' ? T('m_mode_three') : T('m_mode_two')));
+      var revLines = [T('m_reviewer') + ': ' + (reviewerName() || '—') + '   ·   ' + T('m_review_state') + ': '
+        + (S.approved || (S.saved.match && S.saved.match.status === 'reviewed') ? T('m_review_approved') : T('m_review_pending'))
+        + '   ·   ' + T('m_reviewed_n', { n: reviewedRows().length, total: R.rows.length })];
+      var noteL = noteText() ? wrap(T('m_note_label') + ': ' + noteText(), W - 2 * PAD, F_CELL) : [];
+      var headH = 70 + metaLines.length * 24 + 20;
+      var bannerH = 64;
+      var tableH = 44 + L2.reduce(function (s, l) { return s + l.h; }, 0);
+      var footH = 30 + (revLines.length + noteL.length) * 26 + 50;
+      var H = PAD + headH + bannerH + 20 + tableH + footH + PAD;
+      // keep the canvas under the iOS Safari limit (16.7 Mpx) and every browser's side limit
+      SCALE = Math.min(SCALE, Math.sqrt(16e6 / (W * H)), 16000 / H);
+      SCALE = Math.max(0.25, SCALE);
+      canvas.width = Math.round(W * SCALE); canvas.height = Math.round(H * SCALE);
+      ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+      try { ctx.direction = rtl ? 'rtl' : 'ltr'; } catch (e) { /* older browsers */ }
+      ctx.textBaseline = 'top';
+      function text(t, xPos, yPos, f, color, align) {
+        ctx.font = f; ctx.fillStyle = color || '#0B2545';
+        // a Latin-only value keeps its own order ("12,500 KGS", "Co., Ltd.") inside the RTL layout
+        try { ctx.direction = /[\u0600-\u06FF]/.test(String(t)) ? 'rtl' : (rtl && !/[A-Za-z0-9]/.test(String(t)) ? 'rtl' : 'ltr'); } catch (e) { /* noop */ }
+        ctx.textAlign = align || (rtl ? 'right' : 'left');
+        ctx.fillText(String(t), xPos, yPos);
+      }
+      function start(c) { return rtl ? c.x1 - CELL_PAD : c.x0 + CELL_PAD; }
+      function rrect(x0, y0, w, h, r, fill, stroke) {
+        ctx.beginPath();
+        ctx.moveTo(x0 + r, y0); ctx.lineTo(x0 + w - r, y0); ctx.quadraticCurveTo(x0 + w, y0, x0 + w, y0 + r);
+        ctx.lineTo(x0 + w, y0 + h - r); ctx.quadraticCurveTo(x0 + w, y0 + h, x0 + w - r, y0 + h);
+        ctx.lineTo(x0 + r, y0 + h); ctx.quadraticCurveTo(x0, y0 + h, x0, y0 + h - r);
+        ctx.lineTo(x0, y0 + r); ctx.quadraticCurveTo(x0, y0, x0 + r, y0); ctx.closePath();
+        if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+        if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
+      }
+      function chip(label, status, xStart, yPos) {   // xStart = the reading-start edge
+        ctx.font = font(14, 700);
+        var w = ctx.measureText(label).width + 22, col = COLORS[status] || COLORS.info;
+        var x0 = rtl ? xStart - w : xStart;
+        rrect(x0, yPos, w, 26, 13, col[1], null);
+        text(label, x0 + w / 2, yPos + 3, font(14, 700), col[0], 'center');
+        return w;
+      }
+      // background
+      ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#0B3A6E'; ctx.fillRect(0, 0, W, 8);
+      var y = PAD;
+      var sx = rtl ? W - PAD : PAD;
+      text(T('m_report_title'), sx, y, font(28, 800), '#0B2545');
+      text('MARSA · مرسى', rtl ? PAD : W - PAD, y + 8, font(16, 700), '#14A3A8', rtl ? 'left' : 'right');
+      y += 54;
+      metaLines.forEach(function (m) { text(m, sx, y, font(15), '#475569'); y += 24; });
+      y += 20;
+      // banner
+      var oc = COLORS[R.overall] || COLORS.review;
+      rrect(PAD, y, W - 2 * PAD, bannerH, 14, oc[1], null);
+      text(T('m_overall_' + R.overall), rtl ? W - PAD - 20 : PAD + 20, y + 16, font(22, 800), oc[0]);
+      var cx = rtl ? PAD + 20 : W - PAD - 20;
+      ['mismatch', 'missing', 'partial', 'match'].forEach(function (st) {
+        var lbl = T('m_st_' + st) + ': ' + R.counts[st];
+        ctx.font = font(14, 700);
+        var w = ctx.measureText(lbl).width + 22;
+        // counts from the far edge inwards
+        var x0 = rtl ? cx : cx - w;
+        rrect(x0, y + 19, w, 26, 13, '#FFFFFF', null);
+        text(lbl, x0 + w / 2, y + 22, font(14, 700), (COLORS[st] || COLORS.info)[0], 'center');
+        cx = rtl ? cx + w + 8 : cx - w - 8;
+      });
+      y += bannerH + 20;
+      // table head
+      rrect(PAD, y, W - 2 * PAD, 44, 8, '#0B3A6E', null);
+      var heads = { field: T('m_col_field'), status: T('m_col_status'), conf: T('m_col_conf'), rev: T('m_col_reviewed_short') };
+      C.forEach(function (k) { heads[k] = docName(k); });
+      spec.forEach(function (c) { text(heads[c.id], start(c), y + 11, F_HEAD, '#FFFFFF'); });
+      y += 44;
+      // rows
+      R.rows.forEach(function (row, i) {
+        var l = L2[i];
+        if (i % 2) { ctx.fillStyle = '#F7F9FC'; ctx.fillRect(PAD, y, W - 2 * PAD, l.h); }
+        var col = COLORS[row.status] || COLORS.info;
+        ctx.fillStyle = col[0]; ctx.fillRect(rtl ? W - PAD - 4 : PAD, y, 4, l.h);
+        var ty = y + CELL_PAD;
+        l.field.forEach(function (ln, j) { text(ln, start(spec[0]), ty + j * LH, font(15, 700), '#0B2545'); });
+        C.forEach(function (k, ci) { l[k].forEach(function (ln, j) { text(ln, start(spec[ci + 1]), ty + j * LH, F_CELL, '#1E293B'); }); });
+        var stc = spec[C.length + 1];
+        chip(T('m_st_' + row.status), row.status, start(stc), ty - 2);
+        l.detail.forEach(function (ln, j) { text(ln, start(stc), ty + 30 + j * 20, F_SMALL, '#475569'); });
+        var cv = C.map(function (k) { return row.conf && row.conf[k]; }).filter(function (v) { return v != null; });
+        if (cv.length) {
+          var mn = Math.min.apply(null, cv);
+          text((mn < LOW_CONF ? '⚠ ' : '') + Math.round(mn * 100) + '%', start(spec[C.length + 2]), ty, F_CELL, mn < LOW_CONF ? '#8A5E04' : '#475569');
+        }
+        if (S.reviewed[row.key]) text('✓', start(spec[C.length + 3]), ty, font(18, 800), '#0D6B44');
+        ctx.fillStyle = '#E2E8F0'; ctx.fillRect(PAD, y + l.h - 1, W - 2 * PAD, 1);
+        y += l.h;
+      });
+      // reviewer + note
+      y += 30;
+      revLines.forEach(function (ln) { text(ln, sx, y, font(15, 700), '#0B2545'); y += 26; });
+      noteL.forEach(function (ln) { text(ln, sx, y, F_CELL, '#1E293B'); y += 26; });
+      y += 14;
+      text(T('m_png_footer', { v: R.version }), sx, y, F_SMALL, '#94A3B8');
+      return canvas;
+    }
+
+    /* ---------------------------------------------------------------
+       Reset
+       --------------------------------------------------------------- */
+    $('ocr-match-reset').addEventListener('click', function () {
+      if (S.running) return;
+      S = fresh();
+      clearResult();
+      showError('');
+      $('ocr-match-note-text').value = '';
+      $('ocr-match-tx-q').value = '';
+      resetTx();
+      SLOTS.forEach(renderSlot);
+      syncRun();
+      renderSaveState();
+      syncGate();
+      $('ocr-match-file-invoice').focus();
+    });
+
+    /* ---------------------------------------------------------------
+       Init
+       --------------------------------------------------------------- */
+    // the first search suggestion once a result exists
+    $('ocr-match-tx-q').addEventListener('focus', suggestTxQuery);
+    function boot() {
+      return initRole().then(function (st) { STAFF = st; return initAi(); });
+    }
+    boot();
+    // org switcher: access and quota follow the active org; a result already read keeps the org it was read in
+    window.addEventListener('marsa:orgchange', function () {
+      if (!ONLINE) return;
+      if (!S.result && !S.running) { S.orgId = null; resetTx(); }
+      boot();
+    });
+    if (ONLINE && API && API.onAuth) {
+      API.onAuth(function () { initRole().then(function (st) { if (st !== STAFF) { STAFF = st; initAi(); } }); });
+    }
+    window.addEventListener('marsa:langchange', function () { SLOTS.forEach(renderSlot); if (S.result) render(); });
+    // test hook (no state is exposed beyond the pure engine)
+    window.MarsaOcrMatch = { version: E.VERSION };
+  });
+})();

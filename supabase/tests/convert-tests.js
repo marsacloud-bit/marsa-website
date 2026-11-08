@@ -176,14 +176,21 @@ async function secFile() {
       && !/\bDROP\s+(TABLE|FUNCTION|SCHEMA)/i.test(code) && !/session_replication_role/.test(code)
       && (code.match(/DISABLE TRIGGER/g) || []).length === 1 && /FOREACH v_g IN ARRAY app\.convert_delete_guards\(\) LOOP\s+EXECUTE format\('ALTER TABLE %s DISABLE TRIGGER %I'/.test(code)) || 'body';
   });
-  await check('this is the latest migration file', () => migFiles().pop() === MIG || 'latest: ' + migFiles().pop());
-  await check('all_migrations.sql holds this file verbatim (appended last) + a header line', () => {
+  // later phases may follow this file (20261116000100 doc_match: re-creates convert_delete_tables / convert_delete_guards
+  // with public.document_matches); none may sort before it unnoticed
+  const LATER_PHASES = ['20261116000100_doc_match.sql'];
+  await check('this file is present; only the listed later phases follow it', () => {
+    const later = migFiles().filter(f => f > MIG);
+    return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
+  });
+  await check('all_migrations.sql holds this file verbatim (followed only by the listed later phases) + a header line', () => {
     const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
     const marker = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(marker);
     const next = all.indexOf('\n-- ===== migrations/', i + marker.length);
     const body = all.slice(i + marker.length, next < 0 ? undefined : next);
-    return (i > 0 && next < 0 && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
+    const after = next < 0 ? [] : (all.slice(next).match(/^-- ===== migrations\/(\S+) =====$/gm) || []).map(l => l.split('/')[1].split(' ')[0]);
+    return (i > 0 && after.every(f => LATER_PHASES.includes(f)) && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
       && all.slice(0, 6000).includes(MIG)) || 'not appended verbatim / no header line';
   });
 }
@@ -280,6 +287,15 @@ async function populate() {
                         extracted_fields, line_items, created_by, ai_usage_id)
                        VALUES ($1, 'bill_of_lading', 'bl.pdf', $2, 'claude-opus-5-5', 'auto', '[claude-opus-5-5] bill_of_lading',
                                '{"bl_number":"MEDU1234567"}', '[]', $3, $4)`, [A, 'c0e'.padEnd(64, 'a'), U.A_ops, rid]);
+    // a saved invoice ↔ B/L match (20261116000100 doc_match) on that reading + an invoice reading
+    const mx = await as('A_ops', `INSERT INTO public.document_extractions (org_id, doc_type, source_name, source_sha256, engine, languages, raw_text,
+                        extracted_fields, line_items, created_by)
+                       VALUES ($1, 'commercial_invoice', 'inv.pdf', $2, 'tesseract.js@5.1.1', 'ara+eng', 'فاتورة', '{"bl_number":"MEDU1234567"}', '[]', $3)
+                       RETURNING id`, [A, 'c0e'.padEnd(64, 'b'), U.A_ops]);
+    const bx = await one(`SELECT id FROM public.document_extractions WHERE org_id = $1 AND ai_usage_id = $2`, [A, rid]);
+    await rpc('A_ops', `SELECT public.save_document_match($1, $2) r`, [A, { invoice_extraction_id: mx[0].id, bl_extraction_id: bx.id, mode: 'two_way',
+      engine_version: 'match-v1', overall: 'match', counts: { match: 1 }, rows: [{ key: 'bl_number', status: 'match', critical: true,
+      values: { invoice: 'MEDU1234567', bl: 'MEDU1234567' } }] }]);
     await q(`INSERT INTO storage.objects (bucket_id, name, metadata) VALUES
                ('documents', $1 || '/tx/doc/bl.pdf', '{"size": 1000}'), ('finance', $1 || '/fin/inv.pdf', '{"size": 2000}'),
                ('messages', $1 || '/m/a/b/x.pdf', '{"size": 10}'), ('documents', 'ffffffff-0000-4000-8000-000000000000/x/y/z.pdf', '{"size": 1}')`, [A]);
@@ -424,7 +440,7 @@ async function secRefusals() {
   });
   await check('every listed guard is enabled (no refusal left a guard disabled)', async () =>
     (await num(`SELECT count(*) n FROM unnest(app.convert_delete_guards()) g JOIN pg_trigger t
-                  ON t.tgrelid = split_part(g, ':', 1)::regclass AND t.tgname = split_part(g, ':', 2) WHERE t.tgenabled = 'O'`)) === 23);
+                  ON t.tgrelid = split_part(g, ':', 1)::regclass AND t.tgname = split_part(g, ':', 2) WHERE t.tgenabled = 'O'`)) === 24);   // 23 + document_matches (20261116000100)
 }
 
 /* ================================================================== 6. org-level refusals (SIDE database) */
@@ -474,8 +490,8 @@ async function secConvert() {
   PRE.catalog = await L.catalogFingerprint(H);
   PRE.sub = await one(`SELECT plan_code, status FROM public.org_subscriptions WHERE org_id = $1`, [A]);
   const must = ['service_requests', 'clients', 'client_users', 'invitations', 'idempotency_keys', 'contact_messages', 'transactions', 'transaction_events',
-    'transaction_bls', 'bills_of_lading', 'customs_declarations', 'containers', 'documents', 'document_extractions', 'parties', 'drivers', 'trucks',
-    'transport_trips', 'port_appointments', 'supplier_invoices', 'supplier_invoice_lines', 'cost_allocations', 'client_charges', 'finance_documents',
+    'transaction_bls', 'bills_of_lading', 'customs_declarations', 'containers', 'documents', 'document_extractions', 'document_matches', 'parties', 'drivers',
+    'trucks', 'transport_trips', 'port_appointments', 'supplier_invoices', 'supplier_invoice_lines', 'cost_allocations', 'client_charges', 'finance_documents',
     'billing_intents', 'billing_intent_lines', 'billing_sync_jobs', 'billing_sync_attempts', 'daftra_client_links',
     'msg_threads', 'msg_messages', 'msg_jobs', 'msg_job_attempts', 'msg_thread_links', 'msg_contacts', 'msg_contact_addresses'];
   await check('the populated org holds test rows in every core business table (' + must.length + ' tables)', () => {
@@ -487,11 +503,11 @@ async function secConvert() {
   await setAck(PRE.ack);
   try { R = await convert(A, NEW_SLUG, NAME_AR, NAME_EN, CONFIRM); pass('convert_org_to_production runs (' + (Date.now() - t0) + ' ms)'); }
   catch (e) { fail('convert_org_to_production runs', errText(e)); return; }
-  await check('summary: deleted per table = the rows the org had; total; memberships 8; counters reset; 2 mock channels switched off; 23 guards', () => {
+  await check('summary: deleted per table = the rows the org had; total; memberships 8; counters reset; 2 mock channels switched off; 24 guards (23 + document_matches)', () => {
     const diff = Object.keys(PRE.counts).filter(k => R.deleted[k] !== PRE.counts[k]);
     const total = Object.values(PRE.counts).reduce((a, b) => a + b, 0) + 8;
     return (diff.length === 0 && R.deleted.memberships === 8 && R.deleted_total === total && R.reset.org_counters >= 3 && R.reset.org_usage_counters >= 1
-      && R.mock_channels_disabled === 2 && R.guards_bypassed === 23 && R.from_slug === 'blue-sea' && R.slug === NEW_SLUG) || J({ diff, R: Object.assign({}, R, { deleted: undefined }) });
+      && R.mock_channels_disabled === 2 && R.guards_bypassed === 24 && R.from_slug === 'blue-sea' && R.slug === NEW_SLUG) || J({ diff, R: Object.assign({}, R, { deleted: undefined }) });
   });
   await check('[D1] summary.daftra_cleared = the acknowledged list (counts, ack, invoice / client lists); the acknowledgement setting is cleared', async () => {
     const d = R.daftra_cleared;

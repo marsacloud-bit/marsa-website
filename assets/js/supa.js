@@ -73,6 +73,10 @@
       MRS_AI_UNSUPPORTED: 'صيغة الملف غير مدعومة للقراءة بالذكاء الاصطناعي. استخدم JPG أو PNG أو WEBP أو GIF أو PDF.',
       MRS_AI_UNAVAILABLE: 'خدمة القراءة بالذكاء الاصطناعي غير متاحة الآن. حاول لاحقًا أو استخدم القراءة داخل المتصفح.',
       MRS_AI_FAILED: 'تعذّرت القراءة بالذكاء الاصطناعي. حاول مرة أخرى أو استخدم القراءة داخل المتصفح.',
+      // document matching (20261116000100): invoice ↔ B/L ↔ customs declaration
+      MRS_MATCH_DOC_KIND: 'المستند المحفوظ في خانة «{f}» ليس من النوع المطلوب (فاتورة تجارية، بوليصة شحن، بيان جمركي). تحقّق من نوع المستند ثم أعد القراءة.',
+      MRS_MATCH_DOC_VOIDED: 'قراءة «{f}» مُلغاة، فلا يمكن حفظ المطابقة عليها. اقرأ المستند من جديد ثم احفظ.',
+      MRS_MATCH_VOIDED: 'هذه المطابقة مُلغاة ولا يمكن مراجعتها أو تعديلها.',
       MRS_EXPIRED: 'انتهت صلاحية هذا الرابط أو الدعوة. اطلب دعوة جديدة.',
       MRS_EMAIL_MISMATCH: 'هذه الدعوة موجّهة إلى بريد إلكتروني آخر. سجّل الدخول بالبريد المدعو نفسه.',
       MRS_EMAIL_UNCONFIRMED: 'يلزم تأكيد بريدك الإلكتروني أولًا من الرسالة المرسلة إليك، ثم أعد المحاولة.',
@@ -105,6 +109,10 @@
       UNKNOWN: 'حدث خطأ غير متوقع. حاول مرة أخرى.'
     },
     fields: {
+      // document matching (20261116000100)
+      invoice_extraction_id: 'الفاتورة التجارية', bl_extraction_id: 'بوليصة الشحن', declaration_extraction_id: 'البيان الجمركي',
+      reviewed_rows: 'الحقول المراجَعة', engine_version: 'إصدار المطابقة', overall: 'النتيجة العامة', counts: 'عدد النتائج',
+      rows: 'حقول المطابقة', document_match: 'المطابقة',
       fullName: 'الاسم الكامل', company: 'اسم الشركة', phone: 'رقم الجوال', email: 'البريد الإلكتروني',
       clientType: 'نوع العميل', taxId: 'الرقم الضريبي', crNumber: 'السجل التجاري', contactPref: 'طريقة التواصل',
       direction: 'نوع العملية', service: 'الخدمة', mode: 'وسيلة الشحن', country: 'البلد', port: 'المنفذ',
@@ -296,7 +304,15 @@
       'MRS_INVALID:document': 'المستند لا يخص المعاملة المربوطة بالمحادثة أو أنه ملغى.',
       'MRS_INVALID:extraction': 'القيمة لا تطابق صيغة هذا النوع من المراجع.',
       'MRS_REQUIRED:transaction': 'اربط المحادثة بمعاملة أولًا.',
-      'MRS_REQUIRED:body': 'اكتب نص الرد.'
+      'MRS_REQUIRED:body': 'اكتب نص الرد.',
+      // document matching (20261116000100)
+      'MRS_NOT_FOUND:document_match': 'المطابقة غير موجودة أو لا تملك صلاحية عرضها.',
+      'MRS_NOT_FOUND:invoice_extraction_id': 'قراءة الفاتورة التجارية غير موجودة أو لا تملك صلاحية عرضها.',
+      'MRS_NOT_FOUND:bl_extraction_id': 'قراءة بوليصة الشحن غير موجودة أو لا تملك صلاحية عرضها.',
+      'MRS_NOT_FOUND:declaration_extraction_id': 'قراءة البيان الجمركي غير موجودة أو لا تملك صلاحية عرضها.',
+      'MRS_INVALID:overall': 'النتيجة العامة لا تتفق مع نتائج الحقول (اختلاف في حقل أساسي يعني «يوجد اختلاف»). أعد المطابقة ثم احفظ.',
+      'MRS_INVALID:transaction_id': 'المستندات المقروءة مرتبطة بمعاملة أخرى. اختر المعاملة نفسها أو احفظ بدون معاملة.',
+      'MRS_REQUIRED:reviewed_rows': 'علّم حقلًا واحدًا على الأقل بأنه «تمت مراجعته» قبل اعتماد المراجعة.'
     },
     banner: {
       staging: 'بيئة تجريبية (Staging) — البيانات للاختبار فقط'
@@ -336,6 +352,17 @@
         MRS_AI_UNSUPPORTED: 'This file type is not supported for AI reading. Use JPG, PNG, WEBP, GIF or PDF.',
         MRS_AI_UNAVAILABLE: 'The AI reading service is not available right now. Try later or use in-browser reading.',
         MRS_AI_FAILED: 'AI reading failed. Try again or use in-browser reading.',
+        // document matching (20261116000100)
+        MRS_MATCH_DOC_KIND: 'The document saved as “{f}” is not of the expected type (commercial invoice, bill of lading, customs declaration). Check the document type and read it again.',
+        MRS_MATCH_DOC_VOIDED: 'The “{f}” reading is void, so the match cannot be saved on it. Read the document again, then save.',
+        MRS_MATCH_VOIDED: 'This match is void and cannot be reviewed or changed.',
+        'cdetail_MRS_NOT_FOUND_document_match': 'The match does not exist or you may not view it.',
+        'cdetail_MRS_NOT_FOUND_invoice_extraction_id': 'The commercial invoice reading does not exist or you may not view it.',
+        'cdetail_MRS_NOT_FOUND_bl_extraction_id': 'The bill of lading reading does not exist or you may not view it.',
+        'cdetail_MRS_NOT_FOUND_declaration_extraction_id': 'The customs declaration reading does not exist or you may not view it.',
+        'cdetail_MRS_INVALID_overall': 'The overall result contradicts the field results (a difference in a key field means “differences found”). Match again, then save.',
+        'cdetail_MRS_INVALID_transaction_id': 'The documents read are linked to another transaction. Choose that transaction or save without one.',
+        'cdetail_MRS_REQUIRED_reviewed_rows': 'Tick at least one field as “reviewed” before approving the review.',
         plan_metric_users: 'users', plan_metric_branches: 'branches', plan_metric_transactions_month: 'transactions per month',
         plan_metric_storage_mb: 'storage', plan_metric_storage_bytes: 'storage', plan_metric_messages_month: 'messages per month',
         plan_metric_ai_runs_month: 'automated-processing runs per month',
@@ -449,6 +476,10 @@
         'cdetail_MRS_REQUIRED_body': 'Write the reply text.'
       } });
       I.register('field', { en: {
+        // document matching (20261116000100)
+        invoice_extraction_id: 'Commercial invoice', bl_extraction_id: 'Bill of lading', declaration_extraction_id: 'Customs declaration',
+        reviewed_rows: 'Reviewed fields', engine_version: 'Match version', overall: 'Overall result', counts: 'Result counts',
+        rows: 'Match fields', document_match: 'Match',
         supplier_id: 'Supplier', invoice_number: 'Invoice number', invoice_date: 'Invoice date', due_date: 'Due date',
         subtotal: 'Subtotal (excl. VAT)', vat_amount: 'VAT amount', total_amount: 'Total', net_amount: 'Net', vat_rate: 'VAT rate',
         quantity: 'Quantity', unit_price: 'Unit price', description: 'Description', service_code: 'Service', line_id: 'Line', lines: 'Invoice lines',
@@ -1801,6 +1832,101 @@
     });
   }
 
+  /* ------------------------------------------------------------------
+     Document matching (مطابقة المستندات) — migration 20261116000100. The comparison runs in the browser
+     (assets/js/doc-match.js); these calls store the reviewed result of 2 (invoice + B/L) or 3 (+ customs declaration)
+     saved extractions. Staff only; RPCs only (the table is read-only to the API).
+     ------------------------------------------------------------------ */
+  var MATCH_MODES = ['two_way', 'three_way'];
+  var MATCH_OVERALL = ['match', 'mismatch', 'review'];
+  var MATCH_COLS = 'id,org_id,transaction_id,invoice_extraction_id,bl_extraction_id,declaration_extraction_id,mode,engine_version,' +
+    'overall,match_count,mismatch_count,partial_count,missing_count,reviewed_rows,note,status,reviewed_by,reviewed_at,review_note,' +
+    'created_by,created_at,voided_at,void_reason';
+  function matchCount(n) { n = Number(n); return isFinite(n) && n >= 0 && Math.floor(n) === n ? n : 0; }
+  // o = { orgId?, transactionId?, invoiceExtractionId, blExtractionId, declarationExtractionId?, mode?, engineVersion,
+  //       overall, counts {match, mismatch, partial, missing}, rows [...], reviewedRows [...]?, note?, idempotencyKey? }
+  //   (mode defaults to three_way when a declaration is given) → { id, created_at, status, transaction_id, mode, overall }
+  function saveDocumentMatch(o) {
+    o = o || {};
+    if (!configured) return demoOnly();
+    if (!isUuid(o.invoiceExtractionId)) return Promise.resolve(fail('MRS_REQUIRED', 'invoice_extraction_id'));
+    if (!isUuid(o.blExtractionId)) return Promise.resolve(fail('MRS_REQUIRED', 'bl_extraction_id'));
+    if (o.declarationExtractionId != null && !isUuid(o.declarationExtractionId)) return Promise.resolve(fail('MRS_INVALID', 'declaration_extraction_id'));
+    if (o.transactionId != null && !isUuid(o.transactionId)) return Promise.resolve(fail('MRS_INVALID', 'transaction_id'));
+    var mode = o.mode || (o.declarationExtractionId ? 'three_way' : 'two_way');
+    if (MATCH_MODES.indexOf(mode) === -1) return Promise.resolve(fail('MRS_INVALID', 'mode'));
+    if (MATCH_OVERALL.indexOf(o.overall) === -1) return Promise.resolve(fail('MRS_INVALID', 'overall'));
+    if (!Array.isArray(o.rows) || !o.rows.length || o.rows.length > 60) return Promise.resolve(fail('MRS_INVALID', 'rows'));
+    if (o.reviewedRows != null && !Array.isArray(o.reviewedRows)) return Promise.resolve(fail('MRS_INVALID', 'reviewed_rows'));
+    if (o.note != null && String(o.note).length > 1000) return Promise.resolve(fail('MRS_TOO_LONG', 'note'));
+    var c = o.counts || {};
+    var payload = {
+      invoice_extraction_id: o.invoiceExtractionId, bl_extraction_id: o.blExtractionId,
+      declaration_extraction_id: o.declarationExtractionId || null, transaction_id: o.transactionId || null,
+      mode: mode, engine_version: String(o.engineVersion || 'match-v1'), overall: o.overall,
+      counts: { match: matchCount(c.match), mismatch: matchCount(c.mismatch), partial: matchCount(c.partial), missing: matchCount(c.missing) },
+      rows: o.rows, reviewed_rows: o.reviewedRows || [], note: o.note == null || o.note === '' ? null : String(o.note)
+    };
+    return aiOrg(o.orgId).then(function (r) {
+      if (r.error) return r;
+      var oid = r.data;
+      return idemRpc('save_document_match', o.idempotencyKey, function (k) { return { p_org: oid, p_payload: withKey(payload, k) }; });
+    });
+  }
+  // reviewedRows = the row keys the reviewer ticked (at least one) → { id, status 'reviewed', reviewed_at, reviewed_by, reviewed_rows }
+  function reviewDocumentMatch(id, reviewedRows, note) {
+    if (!configured) return demoOnly();
+    if (!isUuid(id)) return Promise.resolve(fail('MRS_INVALID', 'document_match'));
+    if (!Array.isArray(reviewedRows) || !reviewedRows.length) return Promise.resolve(fail('MRS_REQUIRED', 'reviewed_rows'));
+    if (note != null && String(note).length > 1000) return Promise.resolve(fail('MRS_TOO_LONG', 'note'));
+    return rpc('review_document_match', { p_id: id, p_reviewed_rows: reviewedRows, p_note: note == null || note === '' ? null : String(note) });
+  }
+  function voidDocumentMatch(id, reason) {
+    var why = String(reason || '').trim();
+    if (!configured) return demoOnly();
+    if (!isUuid(id)) return Promise.resolve(fail('MRS_INVALID', 'document_match'));
+    if (!why) return Promise.resolve(fail('MRS_REQUIRED', 'void_reason'));
+    if (why.length > 500) return Promise.resolve(fail('MRS_TOO_LONG', 'void_reason'));
+    return rpc('void_document_match', { p_id: id, p_reason: why });
+  }
+  // o = { orgId?, transactionId?, limit (default 10, max 100), includeVoided? } → newest first:
+  //   [{ id, created_at, overall, mode, transaction_id, transaction_ref, counts {match, mismatch, partial, missing},
+  //      match_count …, status ('saved' | 'reviewed' | 'voided'), reviewed_at, … }] (rows are not listed: getDocumentMatch)
+  function listDocumentMatches(o) {
+    o = o || {};
+    if (!configured) return demoOnly();
+    var limit = Math.min(Math.max(parseInt(o.limit, 10) || 10, 1), 100);
+    return aiOrg(o.orgId).then(function (r) {
+      if (r.error) return r;
+      var oid = r.data;
+      return online(function (c) {
+        var q = c.from('document_matches').select(MATCH_COLS + ',transactions(ref)').eq('org_id', oid)
+          .order('created_at', { ascending: false }).limit(limit);
+        if (o.transactionId) q = q.eq('transaction_id', o.transactionId);
+        if (!o.includeVoided) q = q.is('voided_at', null);
+        return q;
+      }).then(function (res) {
+        if (res.error) return res;
+        return { data: (res.data || []).map(matchRow), error: null };
+      });
+    });
+  }
+  function getDocumentMatch(id) {
+    if (!configured) return demoOnly();
+    if (!isUuid(id)) return Promise.resolve(fail('MRS_INVALID', 'document_match'));
+    return online(function (c) { return c.from('document_matches').select(MATCH_COLS + ',rows,transactions(ref)').eq('id', id).maybeSingle(); })
+      .then(function (r) { return r.error ? r : (r.data ? ok(matchRow(r.data)) : fail('MRS_NOT_FOUND', 'document_match')); });
+  }
+  function matchRow(m) {
+    var out = Object.assign({}, m);
+    var tx = out.transactions;
+    delete out.transactions;
+    out.transaction_ref = tx && tx.ref ? tx.ref : null;
+    out.counts = { match: m.match_count || 0, mismatch: m.mismatch_count || 0, partial: m.partial_count || 0, missing: m.missing_count || 0 };
+    if (m.voided_at) out.status = 'voided';
+    return out;
+  }
+
   // row = { org_id?, transaction_id?, document_id?, doc_type, source_name, source_sha256, source_mime, source_size,
   //         source_pages, engine, languages, mean_confidence, raw_text, extracted_fields, qr_payload, line_items }
   // created_by / created_at are stamped by the server. Review fields go through reviewExtraction().
@@ -1836,6 +1962,28 @@
           '%,extracted_fields->>bl_number.ilike.%' + s + '%,extracted_fields->>supplier_name.ilike.%' + s + '%');
       }
       return range(q, o);
+    });
+  }
+  // The saved, non-voided extraction of the same file (org + source_sha256 + transaction, the key of
+  // document_extractions_dedupe_uidx): used to reuse a reading after MRS_EXTRACTION_DUPLICATE.
+  // o = { orgId?, sha256, transactionId? (null/'' = not linked) } → { data: row | null }
+  function findExtractionBySource(o) {
+    o = o || {};
+    var sha = String(o.sha256 || '');
+    if (!/^[0-9a-f]{64}$/.test(sha)) return Promise.resolve(fail('MRS_INVALID', 'source_sha256'));
+    var tx = o.transactionId || null;
+    if (!configured) {
+      var hit = extLocalRead().filter(function (x) { return !x.voided_at && x.source_sha256 === sha && (x.transaction_id || null) === tx; })[0];
+      return Promise.resolve(ok(hit || null));
+    }
+    return online(function (c) {
+      var q = c.from('document_extractions').select(EXT_COLS).eq('source_sha256', sha).is('voided_at', null);
+      if (o.orgId) q = q.eq('org_id', o.orgId);
+      q = tx ? q.eq('transaction_id', tx) : q.is('transaction_id', null);
+      return q.order('created_at', { ascending: false }).limit(1);
+    }).then(function (r) {
+      if (r.error) return r;
+      return ok(Array.isArray(r.data) ? (r.data[0] || null) : (r.data || null));
     });
   }
   function getExtraction(id) {
@@ -3204,11 +3352,13 @@
     updateImportRow: updateImportRow, findBatchByFingerprint: findBatchByFingerprint,
     cancelImportBatch: cancelImportBatch, importCommit: importCommit,
     // document extractions (OCR)
-    saveExtraction: saveExtraction, listExtractions: listExtractions, getExtraction: getExtraction,
+    saveExtraction: saveExtraction, listExtractions: listExtractions, getExtraction: getExtraction, findExtractionBySource: findExtractionBySource,
     reviewExtraction: reviewExtraction, voidExtraction: voidExtraction, attachExtractionDocument: attachExtractionDocument,
     localExtractions: localExtractions,
     // AI document reading (Claude, Edge Function ai-extract; 20261114000100)
     aiAccess: aiAccess, aiExtract: aiExtract, aiGetSettings: aiGetSettings, aiSaveSettings: aiSaveSettings,
+    saveDocumentMatch: saveDocumentMatch, reviewDocumentMatch: reviewDocumentMatch, voidDocumentMatch: voidDocumentMatch,
+    listDocumentMatches: listDocumentMatches, getDocumentMatch: getDocumentMatch,
     // inbox / audit
     listContactMessages: listContactMessages, setContactStatus: setContactStatus, listAudit: listAudit,
     // G3 operations (docs/online/G3_SPEC.md)

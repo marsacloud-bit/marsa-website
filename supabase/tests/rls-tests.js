@@ -224,6 +224,19 @@ async function fixtures() {
     [A, B, hex('e'), hex('f'), U.adminA, U.staffB]);
 }
 
+// document matching (20261116000100): one saved match per org, written by each org's own staff through the RPC
+// (org A: EXT_A + an unlinked B/L reading; org B: B_EXT + a B/L reading of the same transaction B_TX)
+async function matchFixtures() {
+  const blA = (await q(`INSERT INTO public.document_extractions (org_id, doc_type, source_name, source_sha256, engine, languages, raw_text, extracted_fields, created_by)
+                        VALUES ($1, 'bill_of_lading', 'a-bl.jpg', $2, 'tesseract.js@5.1.1', 'eng', 'BL A', '{"bl_number":"ABL1"}', $3) RETURNING id`, [A, hex('9'), U.staffA]))[0].id;
+  const blB = (await q(`INSERT INTO public.document_extractions (org_id, transaction_id, doc_type, source_name, source_sha256, engine, languages, raw_text, extracted_fields, created_by)
+                        VALUES ($1, $2, 'bill_of_lading', 'b-bl.jpg', $3, 'tesseract.js@5.1.1', 'eng', 'BL B', '{"bl_number":"BBL0001"}', $4) RETURNING id`, [B, B_TX, hex('8'), U.staffB]))[0].id;
+  const p = (inv, bl) => ({ invoice_extraction_id: inv, bl_extraction_id: bl, mode: 'two_way', engine_version: 'match-v1', overall: 'review',
+    counts: { partial: 1 }, rows: [{ key: 'bl_number', status: 'partial', critical: false, values: { invoice: 'X', bl: 'Y' } }] });
+  await as('staffA', `SELECT public.save_document_match($1, $2)`, [A, p(EXT_A, blA)]);
+  await as('staffB', `SELECT public.save_document_match($1, $2)`, [B, p(B_EXT, blB)]);
+}
+
 // G3 (20261103000100 / 0200): one row per org in every new tenant table, written through the real
 // RLS-guarded inserts / RPCs by each org's own staff. Org A uses TX3 (air, no containers) so the
 // G1/G2 status tests below are unaffected; document requirements are export-only so nothing is gated.
@@ -477,6 +490,8 @@ const TENANT_TABLES = [
   ['contact_messages',   `SELECT id::text id FROM public.contact_messages WHERE org_id = $1 LIMIT 1`,   'id::text',  'org_id = org_id'],
   ['audit_log',          `SELECT id::text id FROM public.audit_log WHERE org_id = $1 LIMIT 1`,          'id::text',  'table_name = table_name'],
   ['document_extractions', `SELECT id::text id FROM public.document_extractions WHERE org_id = $1 LIMIT 1`, 'id::text', 'review_note = review_note'],
+  // document matching (20261116000100): staff SELECT only (branch-scoped like the extractions), written only through RPCs
+  ['document_matches',   `SELECT id::text id FROM public.document_matches WHERE org_id = $1 LIMIT 1`,   'id::text',  'review_note = review_note'],
   ['invitations',        `SELECT id::text id FROM public.invitations WHERE org_id = $1 LIMIT 1`,        'id::text',  'email = email'],
   // G3 registry (20261103000100)
   ['parties',            `SELECT id::text id FROM public.parties WHERE org_id = $1 LIMIT 1`,            'id::text',  'name_ar = name_ar'],
@@ -554,6 +569,8 @@ async function main() {
   let G6B;
   try { G6B = await g6bFixtures(); pass('G6b fixtures: a row per org in every msg_* table (channel … delivery, mock mailbox)'); }
   catch (e) { fail('G6b fixtures', errText(e)); return finish(); }
+  try { await matchFixtures(); pass('doc-match fixtures: a document_matches row per org (invoice ↔ B/L, through save_document_match)'); }
+  catch (e) { fail('doc-match fixtures', errText(e)); return finish(); }
 
   /* ---------------------------------------------------------------- catalog */
   section('catalog: RLS, grants, function privileges');
@@ -636,9 +653,11 @@ async function main() {
       'platform_list_plans', 'platform_save_plan', 'platform_list_subscriptions', 'platform_set_org_plan', 'platform_suspend_org',
       'platform_activate_org', 'platform_org_usage', 'platform_recount_usage', 'org_subscription',
       // AI document reading (20261114000100): staff ai_access + org-admin settings; ai_reserve / ai_settle are service_role only
-      'ai_access', 'ai_get_settings', 'ai_save_settings'];
+      'ai_access', 'ai_get_settings', 'ai_save_settings',
+      // document matching (20261116000100): save / review / void a match (staff)
+      'save_document_match', 'review_document_match', 'void_document_match'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 191) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 194) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');

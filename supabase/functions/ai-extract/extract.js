@@ -24,6 +24,10 @@
       before it); cost from usage.iterations (one entry per attempt, each priced at its own model) when present, else the
       top-level usage (which covers only the attempt that produced the message);
     - file limits: images 5 MB (the API's per-image limit), PDFs 10 MB.
+  Prompt v2 (ai-doc-v2, migration 20261116000100_doc_match.sql): + gross_weight / net_weight (kg), packages_count,
+  package_type, goods_description, incoterms — the fields the invoice ↔ B/L ↔ customs declaration match
+  (assets/js/doc-match.js) compares; the invoice also asks for the shipping fields it often prints (parties, vessel,
+  ports). Weights / package counts are normalised and range-checked here (warnings, never errors).
   The document is untrusted data: the system prompt tells the model to ignore instructions inside it.
 */
 (function () {
@@ -38,7 +42,7 @@
   const MAX_BYTES = 10 * 1024 * 1024;                    // decoded file size limit (10 MB: PDFs)
   const MAX_IMAGE_BYTES = 5 * 1024 * 1024;               // the API rejects a larger image (400) — refused here first
   const MAX_ATTEMPTS = 10;                               // usage.iterations entries passed to ai_settle
-  const PROMPT_VERSION = 'ai-doc-v1';
+  const PROMPT_VERSION = 'ai-doc-v2';
 
   const MEDIA_TYPES = Object.freeze(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf']);
   const DOC_TYPES = Object.freeze(['bill_of_lading', 'commercial_invoice', 'customs_declaration', 'supplier_invoice', 'auto']);
@@ -49,21 +53,33 @@
     supplier_invoice: 'operator_invoice', other: 'other'
   });
 
-  // the field keys of app.extraction_field_keys() (20261114000100)
+  // the field keys of app.extraction_field_keys() (20261114000100 + the 6 match keys of 20261116000100)
   const ALL_KEYS = Object.freeze(['invoice_number', 'invoice_date', 'supplier_name', 'supplier_vat', 'buyer_name', 'buyer_vat',
     'currency', 'subtotal', 'vat_amount', 'total', 'bl_number', 'container_numbers', 'declaration_number', 'hs_codes',
-    'country_of_origin', 'iban', 'vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'shipper', 'consignee']);
+    'country_of_origin', 'iban', 'vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'shipper', 'consignee',
+    'gross_weight', 'net_weight', 'packages_count', 'package_type', 'goods_description', 'incoterms']);
+  const MATCH_KEYS = Object.freeze(['gross_weight', 'net_weight', 'packages_count', 'package_type', 'goods_description', 'incoterms']);
   const KEYS_FOR = Object.freeze({
     bill_of_lading: ['bl_number', 'vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'container_numbers', 'shipper',
-      'consignee', 'hs_codes', 'country_of_origin', 'invoice_number'],
+      'consignee', 'hs_codes', 'country_of_origin', 'invoice_number', 'gross_weight', 'net_weight', 'packages_count',
+      'package_type', 'goods_description', 'incoterms'],
     commercial_invoice: ['invoice_number', 'invoice_date', 'supplier_name', 'supplier_vat', 'buyer_name', 'buyer_vat', 'currency',
-      'subtotal', 'vat_amount', 'total', 'hs_codes', 'country_of_origin', 'bl_number', 'container_numbers'],
+      'subtotal', 'vat_amount', 'total', 'hs_codes', 'country_of_origin', 'bl_number', 'container_numbers', 'shipper', 'consignee',
+      'vessel', 'port_of_loading', 'port_of_discharge', 'gross_weight', 'net_weight', 'packages_count', 'package_type',
+      'goods_description', 'incoterms'],
     supplier_invoice: ['invoice_number', 'invoice_date', 'supplier_name', 'supplier_vat', 'buyer_name', 'buyer_vat', 'currency',
       'subtotal', 'vat_amount', 'total', 'iban', 'bl_number', 'container_numbers'],
     customs_declaration: ['declaration_number', 'bl_number', 'container_numbers', 'hs_codes', 'country_of_origin', 'invoice_number',
-      'invoice_date', 'currency', 'total', 'vat_amount', 'vessel', 'port_of_loading', 'port_of_discharge', 'consignee', 'shipper'],
+      'invoice_date', 'currency', 'total', 'vat_amount', 'vessel', 'port_of_loading', 'port_of_discharge', 'consignee', 'shipper',
+      'gross_weight', 'net_weight', 'packages_count'],
     auto: ALL_KEYS
   });
+  // sane upper bounds of the numeric match fields (a value above → warning, kept for the reviewer)
+  const MAX_WEIGHT_KG = 500000000;                       // 500,000 t: above any single shipment
+  const MAX_PACKAGES = 10000000;
+  // Incoterms 2020 (+ the older / informal codes still printed on invoices)
+  const INCOTERMS = Object.freeze(['EXW', 'FCA', 'FAS', 'FOB', 'CFR', 'CIF', 'CPT', 'CIP', 'DAP', 'DPU', 'DDP', 'DAT', 'DDU',
+    'DAF', 'DES', 'DEQ', 'CNF', 'C&F']);
   const MULTI = Object.freeze(['container_numbers', 'hs_codes']);    // one entry per value, merged server-side
   const ITEM_KEYS = Object.freeze(['description', 'hs_code', 'quantity', 'unit_price', 'amount']);
   const FIELD_HINTS = Object.freeze({
@@ -76,8 +92,28 @@
     declaration_number: 'customs declaration number (digits)', hs_codes: 'ONE HS / tariff code per entry, digits with optional dots',
     country_of_origin: 'country of origin of the goods', iban: 'IBAN without spaces', vessel: 'vessel / ship name',
     voyage: 'voyage number', port_of_loading: 'port of loading', port_of_discharge: 'port of discharge',
-    shipper: 'shipper name (and city if printed)', consignee: 'consignee name (and city if printed)'
+    shipper: 'shipper name (and city if printed)', consignee: 'consignee name (and city if printed)',
+    gross_weight: 'total gross weight in KILOGRAMS, plain decimal (e.g. 18250.5); if printed in tonnes (MT) or lbs, convert to kg and say so in warnings',
+    net_weight: 'total net weight in KILOGRAMS, plain decimal; convert tonnes / lbs to kg and say so in warnings',
+    packages_count: 'total number of packages as a whole number (e.g. 1200)',
+    package_type: 'package type as printed, e.g. CTNS, PALLETS, BAGS, DRUMS, PKGS',
+    goods_description: 'short description of the goods (at most one sentence, as printed)',
+    incoterms: 'delivery term code + place if printed, e.g. FOB Shanghai, CIF Jeddah, CFR Dammam'
   });
+  // per-document overrides of FIELD_HINTS: on a customs declaration the "total" the match compares with the invoice is
+  // the DECLARED (customs / invoice) value of the goods — not the duties + VAT payable printed on the same form
+  const HINTS_FOR = Object.freeze({
+    customs_declaration: Object.freeze({
+      total: 'declared customs value / invoice value of the goods as declared (CIF or FOB as printed), plain decimal, ' +
+        'in the declared currency; NOT the duties, fees, VAT or the total amount payable',
+      vat_amount: 'import VAT amount assessed on the declaration, plain decimal',
+      currency: 'ISO 4217 code of the declared goods value (the invoice currency), e.g. USD, CNY, SAR'
+    })
+  });
+  function hintFor(docType, k) {
+    const o = HINTS_FOR[docType];
+    return (o && o[k]) || FIELD_HINTS[k];
+  }
 
   const SYSTEM = [
     'You read logistics and customs documents for a Saudi customs-clearance company: bills of lading, commercial invoices,',
@@ -222,7 +258,7 @@
     const text = [
       typeLine,
       'Fields to extract when present:',
-      keys.map(k => '- ' + k + ': ' + FIELD_HINTS[k]).join('\n'),
+      keys.map(k => '- ' + k + ': ' + hintFor(v.doc_type, k)).join('\n'),
       'Write warnings in ' + (v.lang === 'en' ? 'English' : 'Arabic') + '.'
     ].join('\n');
     return {
@@ -337,6 +373,17 @@
     const t = String(s == null ? '' : s).replace(/[,\s]/g, '');
     return /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : null;
   }
+  // a weight / count as printed by the model → number (thousands separators, a trailing unit and spaces dropped) or null
+  function measure(s) {
+    const t = String(s == null ? '' : s).replace(/[,\s]/g, '').replace(/(kgs?|kilos?|kilograms?|كجم|كغ|كيلو(غرام|جرام)?)$/i, '');
+    return /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : null;
+  }
+  // the term code of an incoterms value ('FOB Shanghai' → 'FOB', 'C&F JEDDAH' → 'C&F'), null when none
+  function incotermCode(s) {
+    const m = /^\s*([A-Za-z&]{3})(?![A-Za-z])/.exec(String(s || ''));
+    const c = m ? m[1].toUpperCase() : '';
+    return INCOTERMS.indexOf(c) !== -1 ? c : null;
+  }
   function clean(s, max) {
     return String(s == null ? '' : s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().slice(0, max || 2000);
   }
@@ -408,6 +455,29 @@
       } else if (k === 'iban') {
         value = value.replace(/\s/g, '').toUpperCase();
         if (!/^[A-Z]{2}[0-9]{2}[A-Z0-9]{10,30}$/.test(value)) { valid = false; W('server', 'iban_format', 'IBAN has an unexpected format.', k); }
+      } else if (k === 'gross_weight' || k === 'net_weight') {
+        const n = measure(value);
+        if (n == null) { valid = false; W('server', 'weight_format', 'Weight is not a plain number of kilograms.', k); }
+        else {
+          value = String(n);
+          if (n < 0 || n > MAX_WEIGHT_KG) { valid = false; W('server', 'weight_range', 'Weight is outside the expected range (0 to 500,000,000 kg).', k); }
+        }
+      } else if (k === 'packages_count') {
+        const n = measure(value);
+        if (n == null || !Number.isInteger(n)) { valid = false; W('server', 'packages_format', 'Number of packages is not a whole number.', k); }
+        else {
+          value = String(n);
+          if (n < 0 || n > MAX_PACKAGES) { valid = false; W('server', 'packages_range', 'Number of packages is outside the expected range.', k); }
+        }
+      } else if (k === 'package_type') {
+        value = value.slice(0, 80);
+      } else if (k === 'goods_description') {
+        value = value.slice(0, 500);
+      } else if (k === 'incoterms') {
+        value = value.slice(0, 120);
+        const code = incotermCode(value);
+        if (!code) { valid = false; W('server', 'incoterms_format', 'Delivery term is not a known Incoterms code (FOB, CIF, CFR, EXW …).', k); }
+        else value = code + value.replace(/^\s*[A-Za-z&]{3}/, '');
       }
       fields.push({ name: k, value, confidence: best.confidence, page: best.page, valid });
       extracted[k] = value;
@@ -420,6 +490,11 @@
     }
     if (st != null && va != null && st > 0 && extracted.currency === 'SAR' && Math.abs(va - st * 0.15) > Math.max(0.05, st * 0.001)) {
       W('server', 'vat_rate', 'VAT is not 15 % of the subtotal.', 'vat_amount');
+    }
+    // weights: the net weight cannot exceed the gross weight (both read as kg)
+    const gw = measure(extracted.gross_weight), nw = measure(extracted.net_weight);
+    if (gw != null && nw != null && gw >= 0 && nw > gw + 0.001) {
+      W('server', 'net_over_gross', 'Net weight is greater than the gross weight.', 'net_weight');
     }
 
     const items = [];
@@ -493,9 +568,10 @@
 
   const API = {
     MODEL, ENGINE, EFFORT, MAX_TOKENS, BETAS, FALLBACKS, MAX_BYTES, MAX_IMAGE_BYTES, PROMPT_VERSION, MEDIA_TYPES, DOC_TYPES,
-    DETECTED_TYPES, KIND_OF, ALL_KEYS, KEYS_FOR, SYSTEM,
+    DETECTED_TYPES, KIND_OF, ALL_KEYS, KEYS_FOR, MATCH_KEYS, INCOTERMS, MAX_WEIGHT_KG, MAX_PACKAGES, SYSTEM,
     AiError, outputSchema, validateRequest, buildRequest, callClaude, parseMessage, usageOf, postProcess, renderText,
-    estimateHoldUsd, classifyCallError, pdfPageCount, isValidContainer, iso6346CheckDigit, isSaudiVat, isHs, isIsoDate
+    estimateHoldUsd, classifyCallError, pdfPageCount, isValidContainer, iso6346CheckDigit, isSaudiVat, isHs, isIsoDate,
+    measure, incotermCode
   };
   (typeof module === 'object' && module.exports) ? (module.exports = API) : (globalThis.MarsaAiExtract = Object.assign(globalThis.MarsaAiExtract || {}, API));
 })();

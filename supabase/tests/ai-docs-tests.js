@@ -195,8 +195,8 @@ async function secFile() {
   });
   await check('no key, no Anthropic endpoint, no document content in the SQL file', () =>
     (!/sk-ant|ANTHROPIC_API_KEY\s*=|api\.anthropic\.com|x-api-key/i.test(src)) || 'secret-like text found');
-  // later phases may follow this file (20261115000100 convert_in_place); none may sort before it unnoticed
-  const LATER_PHASES = ['20261115000100_convert_in_place.sql'];
+  // later phases may follow this file (20261115000100 convert_in_place, 20261116000100 doc_match); none may sort before it unnoticed
+  const LATER_PHASES = ['20261115000100_convert_in_place.sql', '20261116000100_doc_match.sql'];
   await check('this file is present; only the listed later phases follow it', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -754,12 +754,12 @@ async function secHelper() {
     }
     return problems.length === 0 || J(problems.slice(0, 5));
   });
-  await check('schema: field name enum per doc type (B/L: vessel / voyage / ports / containers / parties; invoice: VAT / totals; auto: all 22)', () => {
+  await check('schema: field name enum per doc type (B/L: vessel / voyage / ports / containers / parties; invoice: VAT / totals; auto: all 28)', () => {
     const en = t => X.outputSchema(t).properties.fields.items.properties.name.enum;
     const bl = en('bill_of_lading'), inv = en('commercial_invoice'), sup = en('supplier_invoice'), cd = en('customs_declaration'), au = en('auto');
     return (['bl_number', 'vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'container_numbers', 'shipper', 'consignee'].every(k => bl.includes(k))
       && ['invoice_number', 'invoice_date', 'currency', 'subtotal', 'vat_amount', 'total', 'supplier_vat', 'hs_codes'].every(k => inv.includes(k))
-      && sup.includes('iban') && cd.includes('declaration_number') && cd.includes('hs_codes') && au.length === 22 && !bl.includes('iban')
+      && sup.includes('iban') && cd.includes('declaration_number') && cd.includes('hs_codes') && au.length === 28 && !bl.includes('iban')
       && J(X.outputSchema('auto').properties.doc_type.enum) === J(['bill_of_lading', 'commercial_invoice', 'customs_declaration', 'supplier_invoice', 'other'])) || J({ bl, inv });
   });
   await check('schema: line_items {description, hs_code, quantity, unit_price, amount} — the keys app.extraction_items_ok accepts', () =>
@@ -831,12 +831,12 @@ async function secHelper() {
       { name: 'supplier_vat', value: '3000 0000 0000 003', confidence: 0.95, page: 1 }, { name: 'buyer_vat', value: '123', confidence: 0.6, page: 1 },
       { name: 'currency', value: 'sar', confidence: 0.99, page: 1 }, { name: 'subtotal', value: '1,000.00', confidence: 0.9, page: 1 },
       { name: 'vat_amount', value: '100', confidence: 0.9, page: 1 }, { name: 'total', value: '1200', confidence: 0.9, page: 1 },
-      { name: 'vessel', value: 'not an invoice field', confidence: 0.9, page: 1 }] }, 'commercial_invoice');
+      { name: 'iban', value: 'SA0380000000608010167519', confidence: 0.9, page: 1 }] }, 'commercial_invoice');
     const c = r.warnings.map(w => w.code);
     const f = Object.fromEntries(r.fields.map(x => [x.name, x]));
     return (f.supplier_vat.value === '300000000000003' && f.supplier_vat.valid && f.buyer_vat.valid === false && c.includes('vat_format')
       && c.includes('date_format') && c.includes('totals_mismatch') && c.includes('vat_rate') && f.currency.value === 'SAR' && f.subtotal.value === '1000'
-      && !f.vessel && r.line_items.length === 1 && r.line_items[0].hs_code === '8708.30' && r.kind === 'commercial_invoice') || J({ c, f, items: r.line_items });
+      && !f.iban && r.line_items.length === 1 && r.line_items[0].hs_code === '8708.30' && r.kind === 'commercial_invoice') || J({ c, f, items: r.line_items });
   });
   await check('postProcess: supplier_invoice → kind operator_invoice; auto takes the detected type; mismatch warning; duplicates merged', () => {
     const a = X.postProcess({ doc_type: 'supplier_invoice', fields: [{ name: 'total', value: '5', confidence: 0.9, page: null },
@@ -853,7 +853,78 @@ async function secHelper() {
       line_items: Array.from({ length: 700 }, (_, i) => ({ description: 'item ' + i + '\u0007', hs_code: null, quantity: 1, unit_price: 1, amount: 1 })), warnings: [] }, 'auto');
     const keysOk = Object.keys(r.extracted_fields).every(k => X.ALL_KEYS.includes(k));
     return (keysOk && r.extracted_fields.shipper.length === 2000 && r.line_items.length === 500 && !/\u0007/.test(r.line_items[0].description)
-      && r.raw_text.length <= 200000 && /^\[claude-opus-5-5 · ai-doc-v1\]/.test(r.raw_text)) || J({ keysOk, n: r.line_items.length });
+      && r.raw_text.length <= 200000 && /^\[claude-opus-5-5 · ai-doc-v2\]/.test(r.raw_text)) || J({ keysOk, n: r.line_items.length });
+  });
+  // prompt v2 (20261116000100 doc_match): weights / packages / package type / goods / incoterms for the invoice ↔ B/L ↔ declaration match
+  await check('v2: PROMPT_VERSION ai-doc-v2; the 6 match keys in ALL_KEYS = app.extraction_field_keys() of the latest migration', () => {
+    const keys = ['gross_weight', 'net_weight', 'packages_count', 'package_type', 'goods_description', 'incoterms'];
+    const sql = fs.readFileSync(path.join(MIG_DIR, '20261116000100_doc_match.sql'), 'utf8');
+    const m = /FUNCTION app\.extraction_field_keys\(\)[\s\S]*?SELECT ARRAY\[([\s\S]*?)\]/.exec(sql);
+    const dbKeys = m ? m[1].match(/'([a-z_]+)'/g).map(x => x.slice(1, -1)) : [];
+    return (X.PROMPT_VERSION === 'ai-doc-v2' && X.ALL_KEYS.length === 28 && keys.every(k => X.ALL_KEYS.includes(k)) && J(X.MATCH_KEYS) === J(keys)
+      && J(dbKeys) === J(X.ALL_KEYS)) || J({ v: X.PROMPT_VERSION, n: X.ALL_KEYS.length, dbKeys: dbKeys.length });
+  });
+  await check('v2: keys per doc type — B/L + invoice get all 6 match keys, the invoice also the shipping fields; the declaration weights / packages; supplier invoice unchanged', () => {
+    const K = X.KEYS_FOR;
+    const six = ['gross_weight', 'net_weight', 'packages_count', 'package_type', 'goods_description', 'incoterms'];
+    return (six.every(k => K.bill_of_lading.includes(k)) && six.every(k => K.commercial_invoice.includes(k))
+      && ['shipper', 'consignee', 'vessel', 'port_of_loading', 'port_of_discharge'].every(k => K.commercial_invoice.includes(k))
+      && ['gross_weight', 'net_weight', 'packages_count'].every(k => K.customs_declaration.includes(k)) && !K.customs_declaration.includes('incoterms')
+      && !six.some(k => K.supplier_invoice.includes(k)) && Object.values(K).every(list => list.every(k => X.ALL_KEYS.includes(k)))) || J(K);
+  });
+  await check('v2: the request lists the new keys with their hints (kilograms, convert tonnes / lbs and say so; whole number of packages; Incoterms code + place)', () => {
+    const t = X.buildRequest(X.validateRequest(goodBody({ doc_type: 'commercial_invoice' }))).messages[0].content[1].text;
+    const d = X.buildRequest(X.validateRequest(goodBody({ doc_type: 'customs_declaration' }))).messages[0].content[1].text;
+    return (/- gross_weight: [^\n]*KILOGRAMS[^\n]*tonnes[^\n]*lbs[^\n]*warnings/.test(t) && /- packages_count: [^\n]*whole number/.test(t)
+      && /- incoterms: [^\n]*FOB/.test(t) && /- package_type: /.test(t) && /- goods_description: /.test(t) && /- shipper: /.test(t)
+      && /- net_weight: /.test(d) && !/- incoterms: /.test(d)) || t;
+  });
+  await check('v2: the customs declaration prompt asks for the declared customs value as total, not the VAT-inclusive grand total / amount payable', () => {
+    const t = X.buildRequest(X.validateRequest(goodBody({ doc_type: 'commercial_invoice' }))).messages[0].content[1].text;
+    const d = X.buildRequest(X.validateRequest(goodBody({ doc_type: 'customs_declaration' }))).messages[0].content[1].text;
+    const dt = (d.match(/^- total: .*$/m) || [''])[0];
+    return (/declared customs value/.test(dt) && /NOT the duties/.test(dt) && !/including VAT/.test(dt)
+      && /^- total: grand total including VAT/m.test(t)) || dt;
+  });
+  await check('v2 postProcess: weights → plain kg (separators / KGS dropped), packages a whole number, incoterms code upper-cased; no warning when sane', () => {
+    const r = X.postProcess({ doc_type: 'bill_of_lading', line_items: [], warnings: [], fields: [
+      { name: 'gross_weight', value: '18,250.50 KGS', confidence: 0.9, page: 1 }, { name: 'net_weight', value: '17 000', confidence: 0.9, page: 1 },
+      { name: 'packages_count', value: '1,200', confidence: 0.9, page: 1 }, { name: 'package_type', value: 'CTNS', confidence: 0.9, page: 1 },
+      { name: 'goods_description', value: 'x'.repeat(900), confidence: 0.8, page: 1 }, { name: 'incoterms', value: 'fob Shanghai', confidence: 0.9, page: 1 }] }, 'bill_of_lading');
+    const e = r.extracted_fields;
+    const server = r.warnings.filter(w => w.source === 'server');
+    return (e.gross_weight === '18250.5' && e.net_weight === '17000' && e.packages_count === '1200' && e.package_type === 'CTNS'
+      && e.goods_description.length === 500 && e.incoterms === 'FOB Shanghai' && server.length === 0 && r.fields.every(f => f.valid)) || J({ e, server });
+  });
+  await check('v2 postProcess: bad / out-of-range weights and counts, net > gross, unknown delivery term → warnings (values kept, valid false), never an error', () => {
+    const r = X.postProcess({ doc_type: 'commercial_invoice', line_items: [], warnings: [], fields: [
+      { name: 'gross_weight', value: '-5', confidence: 0.9, page: 1 }, { name: 'net_weight', value: 'about ten tonnes', confidence: 0.4, page: 1 },
+      { name: 'packages_count', value: '12.5', confidence: 0.9, page: 1 }, { name: 'incoterms', value: 'Free delivery', confidence: 0.7, page: 1 }] }, 'commercial_invoice');
+    const r2 = X.postProcess({ doc_type: 'bill_of_lading', line_items: [], warnings: [], fields: [
+      { name: 'gross_weight', value: '1000', confidence: 0.9, page: 1 }, { name: 'net_weight', value: '1200', confidence: 0.9, page: 1 },
+      { name: 'packages_count', value: '99999999', confidence: 0.9, page: 1 }, { name: 'gross_weight', value: '1000', confidence: 0.5, page: 2 }] }, 'bill_of_lading');
+    const c = r.warnings.map(w => w.code), c2 = r2.warnings.map(w => w.code);
+    const f = Object.fromEntries(r.fields.map(x => [x.name, x]));
+    return (J(c.sort()) === J(['incoterms_format', 'packages_format', 'weight_format', 'weight_range']) && f.gross_weight.value === '-5' && !f.gross_weight.valid
+      && f.net_weight.value === 'about ten tonnes' && !f.incoterms.valid && J(c2.sort()) === J(['net_over_gross', 'packages_range'])
+      && r2.extracted_fields.gross_weight === '1000') || J({ c, c2 });
+  });
+  await check('v2 postProcess: the declaration drops package_type / incoterms (not its keys); auto keeps all; helpers measure / incotermCode', () => {
+    const fields = [{ name: 'package_type', value: 'BAGS', confidence: 0.9, page: 1 }, { name: 'incoterms', value: 'CIF Jeddah', confidence: 0.9, page: 1 },
+      { name: 'packages_count', value: '40', confidence: 0.9, page: 1 }];
+    const d = X.postProcess({ doc_type: 'customs_declaration', line_items: [], warnings: [], fields }, 'customs_declaration');
+    const a = X.postProcess({ doc_type: 'customs_declaration', line_items: [], warnings: [], fields }, 'auto');
+    return (J(Object.keys(d.extracted_fields)) === J(['packages_count']) && J(Object.keys(a.extracted_fields).sort()) === J(['incoterms', 'package_type', 'packages_count'])
+      && X.measure('1,234.5 kg') === 1234.5 && X.measure('12 t') === null && X.incotermCode('C&F Dammam') === 'C&F' && X.incotermCode('CIFX') === null
+      && X.incotermCode('ddp') === 'DDP') || J({ d: d.extracted_fields, a: a.extracted_fields });
+  });
+  await check('v2 postProcess output with every new key is accepted by document_extractions (field keys of the latest migration)', async () => {
+    const out = X.postProcess({ doc_type: 'bill_of_lading', line_items: [], warnings: [], fields: [
+      { name: 'gross_weight', value: '100', confidence: 0.9, page: 1 }, { name: 'net_weight', value: '90', confidence: 0.9, page: 1 },
+      { name: 'packages_count', value: '4', confidence: 0.9, page: 1 }, { name: 'package_type', value: 'PALLETS', confidence: 0.9, page: 1 },
+      { name: 'goods_description', value: 'Brake pads', confidence: 0.9, page: 1 }, { name: 'incoterms', value: 'CFR Dammam', confidence: 0.9, page: 1 }] }, 'bill_of_lading');
+    const r = await tryErr(() => insertExt('staff', extRow({ engine: 'tesseract.js@5.1.1', languages: 'eng', extracted_fields: out.extracted_fields })));
+    return (r === 'ok' && Object.keys(out.extracted_fields).length === 6) || r;
   });
   await check('estimateHoldUsd: at the highest fallback price ($5 / $25), input × 2: image = $0.48; PDF grows with size and pages; capped ≤ $50', () => {
     const img = X.estimateHoldUsd('image/png', 2e6), small = X.estimateHoldUsd('application/pdf', 100000), large = X.estimateHoldUsd('application/pdf', 10 * 1024 * 1024);
@@ -1307,9 +1378,12 @@ async function secFrontEnd() {
   await check('ocr-parse.js: the 6 AI keys are known field keys (plainFields keeps them)', () => {
     const P = require(path.join(ROOT, 'assets', 'js', 'ocr-parse.js'));
     const out = P.plainFields({ vessel: { value: 'MSC' }, consignee: { value: 'C' }, secret: { value: 'x' } });
-    return (J(out) === J({ vessel: 'MSC', consignee: 'C' }) && P.FIELD_KEYS.length === 22) || J(out);
+    return (J(out) === J({ vessel: 'MSC', consignee: 'C' }) && P.FIELD_KEYS.length >= 22 && P.FIELD_KEYS.every(k => X.ALL_KEYS.includes(k))) || J(out);
   });
-  await check('sw.js: cache VERSION bumped for the changed assets', () => /^var VERSION = '2026-11-14\.2';/m.test(rd('sw.js')) || 'VERSION not bumped');
+  await check('sw.js: cache VERSION bumped for the changed assets (2026-11-14.2 or a later release)', () => {
+    const v = (/^var VERSION = '(\d{4}-\d{2}-\d{2}\.\d+)';/m.exec(rd('sw.js')) || [])[1] || '';
+    return v.localeCompare('2026-11-14.2', 'en', { numeric: true }) >= 0 || 'VERSION ' + v;
+  });
 }
 
 /* ================================================================== main */

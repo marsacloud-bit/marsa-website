@@ -414,6 +414,180 @@
       </div>
     </section>
 
+    <!-- ===== Invoice ↔ B/L ↔ customs declaration matching (AI): shown by ocr-match.js only online, to staff, when the org admin enabled AI reading ===== -->
+    <section class="section section-sm ocr-match-section" id="ocr-match-section" aria-labelledby="ocr-match-title" hidden>
+      <div class="container">
+        <div class="card shadow-lg ocr-card ocr-match-card" id="ocr-match-card">
+          <div class="ocr-block-head">
+            <span class="ocr-num" aria-hidden="true">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg>
+            </span>
+            <div>
+              <h2 id="ocr-match-title" tabindex="-1" data-i18n="ocr.m_title">مطابقة الفاتورة والبوليصة والبيان الجمركي بالذكاء الاصطناعي</h2>
+              <p data-i18n="ocr.m_lead">ارفع الفاتورة التجارية وبوليصة الشحن (والبيان الجمركي إن توفر)، فيقرأها Claude معًا ويطابق بياناتها حقلًا بحقل: الحاويات والأوزان وعدد الطرود ورموز HS والموانئ والأطراف والقيمة. راجع النتيجة ثم احفظها أو صدّرها.</p>
+            </div>
+          </div>
+
+          <div class="alert alert-warning" id="ocr-match-note" role="note">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18h.01"/></svg>
+            <span><span data-i18n="ocr.m_note">تُرسل الملفات إلى خادم مرسى ثم إلى شركة Anthropic (مزوّد نموذج Claude) لقراءتها. كل مستند قراءة مستقلة: المطابقة تستهلك قراءتين (أو ثلاثًا مع البيان الجمركي) من حصة مؤسستك اليومية. الحد: 5 ميغابايت للصورة و10 ميغابايت لملف PDF؛ JPG وPNG وWEBP وGIF وPDF.</span> <span id="ocr-match-remaining"></span></span>
+          </div>
+
+          <!-- three slots -->
+          <div class="ocr-match-slots" id="ocr-match-slots">
+            <div class="ocr-match-slot" data-slot="invoice">
+              <div class="dropzone ocr-dropzone ocr-match-drop" data-drop="invoice">
+                <input type="file" id="ocr-match-file-invoice" class="ocr-match-input" data-input="invoice" accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,image/jpeg,image/png,image/webp,image/gif,application/pdf" aria-describedby="ocr-match-sub-invoice">
+                <span class="ocr-match-slot-title" data-i18n="ocr.m_slot_invoice">الفاتورة التجارية</span>
+                <span class="badge badge-sm badge-navy ocr-match-req" data-i18n="ocr.m_required">مطلوب</span>
+                <label class="dropzone-title" for="ocr-match-file-invoice" data-i18n="ocr.m_drop">اسحب الملف وأفلته هنا، أو اضغط لاختياره</label>
+                <p class="dropzone-sub" id="ocr-match-sub-invoice"><span class="ocr-match-fname" data-fname="invoice"></span></p>
+              </div>
+              <div class="ocr-match-slot-status" data-status="invoice" aria-live="polite"></div>
+              <div class="progress ocr-mini-progress" data-progress="invoice" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="الفاتورة التجارية" hidden><div class="progress-bar"></div></div>
+              <button type="button" class="btn btn-ghost btn-sm ocr-match-clear-slot" data-clear="invoice" hidden data-i18n="ocr.m_remove_file">إزالة الملف</button>
+            </div>
+            <div class="ocr-match-slot" data-slot="bl">
+              <div class="dropzone ocr-dropzone ocr-match-drop" data-drop="bl">
+                <input type="file" id="ocr-match-file-bl" class="ocr-match-input" data-input="bl" accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,image/jpeg,image/png,image/webp,image/gif,application/pdf" aria-describedby="ocr-match-sub-bl">
+                <span class="ocr-match-slot-title" data-i18n="ocr.m_slot_bl">بوليصة الشحن</span>
+                <span class="badge badge-sm badge-navy ocr-match-req" data-i18n="ocr.m_required">مطلوب</span>
+                <label class="dropzone-title" for="ocr-match-file-bl" data-i18n="ocr.m_drop">اسحب الملف وأفلته هنا، أو اضغط لاختياره</label>
+                <p class="dropzone-sub" id="ocr-match-sub-bl"><span class="ocr-match-fname" data-fname="bl"></span></p>
+              </div>
+              <div class="ocr-match-slot-status" data-status="bl" aria-live="polite"></div>
+              <div class="progress ocr-mini-progress" data-progress="bl" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="بوليصة الشحن" hidden><div class="progress-bar"></div></div>
+              <button type="button" class="btn btn-ghost btn-sm ocr-match-clear-slot" data-clear="bl" hidden data-i18n="ocr.m_remove_file">إزالة الملف</button>
+            </div>
+            <div class="ocr-match-slot" data-slot="declaration">
+              <div class="dropzone ocr-dropzone ocr-match-drop" data-drop="declaration">
+                <input type="file" id="ocr-match-file-declaration" class="ocr-match-input" data-input="declaration" accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,image/jpeg,image/png,image/webp,image/gif,application/pdf" aria-describedby="ocr-match-sub-declaration">
+                <span class="ocr-match-slot-title" data-i18n="ocr.m_slot_declaration">البيان الجمركي</span>
+                <span class="badge badge-sm badge-muted ocr-match-req" data-i18n="ocr.m_optional">اختياري</span>
+                <label class="dropzone-title" for="ocr-match-file-declaration" data-i18n="ocr.m_drop">اسحب الملف وأفلته هنا، أو اضغط لاختياره</label>
+                <p class="dropzone-sub" id="ocr-match-sub-declaration"><span class="ocr-match-fname" data-fname="declaration"></span></p>
+              </div>
+              <div class="ocr-match-slot-status" data-status="declaration" aria-live="polite"></div>
+              <div class="progress ocr-mini-progress" data-progress="declaration" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="البيان الجمركي" hidden><div class="progress-bar"></div></div>
+              <button type="button" class="btn btn-ghost btn-sm ocr-match-clear-slot" data-clear="declaration" hidden data-i18n="ocr.m_remove_file">إزالة الملف</button>
+            </div>
+          </div>
+          <p class="text-sm text-muted mt-2" data-i18n="ocr.m_three_hint">مع البيان الجمركي تصبح المطابقة ثلاثية: يُطابق البيان مع الفاتورة (الرقم والتاريخ والعملة والقيمة) ومع البوليصة (الرقم والحاويات والأوزان والطرود).</p>
+
+          <div class="ocr-actions">
+            <button type="button" class="btn btn-ghost" id="ocr-match-reset" data-i18n="ocr.m_reset">مسح وبدء من جديد</button>
+            <button type="button" class="btn btn-primary btn-lg" id="ocr-match-run" disabled>
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg>
+              <span data-i18n="ocr.m_run">اقرأ وطابق</span>
+            </button>
+          </div>
+          <p class="sr-only" id="ocr-match-live" role="status" aria-live="polite" aria-atomic="true"></p>
+          <div class="alert alert-danger mt-2" id="ocr-match-error" role="alert" hidden><span id="ocr-match-error-text"></span></div>
+
+          <!-- ===== result (the report: printed / exported) ===== -->
+          <div class="ocr-match-result" id="ocr-match-result" hidden>
+            <div class="ocr-match-report" id="ocr-match-report">
+              <div class="ocr-match-report-head">
+                <h3 class="ocr-match-report-title" data-i18n="ocr.m_report_title">تقرير مطابقة المستندات</h3>
+                <dl class="ocr-match-meta" id="ocr-match-meta"></dl>
+              </div>
+              <div class="ocr-match-banner" id="ocr-match-banner" role="status" tabindex="-1">
+                <span class="ocr-match-overall" id="ocr-match-overall"></span>
+                <span class="ocr-match-counts" id="ocr-match-counts"></span>
+              </div>
+              <div class="ocr-match-alerts" id="ocr-match-alerts"></div>
+              <p class="text-sm text-muted ocr-match-hint" data-i18n="ocr.m_table_hint">القيم قابلة للتعديل: صحّح أي قيمة قرأها Claude خطأً فتُعاد المطابقة فورًا (يُعلَّم الحقل «مصحَّح» في الحفظ). الحقول الأساسية معلّمة بـ ★.</p>
+              <div class="table-wrap ocr-match-table-wrap">
+                <table class="table ocr-match-table" id="ocr-match-table">
+                  <caption class="sr-only" data-i18n="ocr.m_table_caption">نتيجة مطابقة الحقول بين المستندات</caption>
+                  <thead id="ocr-match-thead"></thead>
+                  <tbody id="ocr-match-tbody"></tbody>
+                </table>
+              </div>
+
+              <details class="ocr-match-details" id="ocr-match-items-box">
+                <summary data-i18n="ocr.m_items_title">البنود ورموز HS</summary>
+                <div class="table-wrap mt-2">
+                  <table class="table ocr-match-items">
+                    <caption class="sr-only" data-i18n="ocr.m_items_title">البنود ورموز HS</caption>
+                    <thead id="ocr-match-items-head"></thead>
+                    <tbody id="ocr-match-items-body"></tbody>
+                  </table>
+                </div>
+                <p class="text-sm text-muted mt-2" id="ocr-match-items-note"></p>
+              </details>
+              <details class="ocr-match-details" id="ocr-match-warn-box">
+                <summary><span data-i18n="ocr.m_warn_title">ملاحظات القراءة</span> <span class="num" id="ocr-match-warn-count"></span></summary>
+                <ul class="ocr-match-warn" id="ocr-match-warn"></ul>
+              </details>
+
+              <div class="ocr-match-reviewer">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label" for="ocr-match-reviewer" data-i18n="ocr.m_reviewer">المراجِع</label>
+                    <input class="form-control" id="ocr-match-reviewer" type="text" readonly>
+                  </div>
+                  <div class="form-group">
+                    <span class="form-label" data-i18n="ocr.m_review_state">حالة المراجعة</span>
+                    <span class="ocr-match-review-state" id="ocr-match-review-state"></span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="ocr-match-note-text"><span data-i18n="ocr.m_note_label">ملاحظة المراجِع</span> <span class="opt" data-i18n="ocr.m_opt">(اختياري)</span></label>
+                  <textarea class="form-control" id="ocr-match-note-text" rows="3" maxlength="1000"></textarea>
+                </div>
+                <div class="ocr-match-review-actions">
+                  <button type="button" class="btn btn-ghost btn-sm" id="ocr-match-tick-all" data-i18n="ocr.m_tick_all">تحديد كل الحقول كمُراجَعة</button>
+                  <button type="button" class="btn btn-secondary" id="ocr-match-approve" data-i18n="ocr.m_approve">اعتماد المراجعة</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- save + export -->
+            <div class="ocr-save ocr-match-save" id="ocr-match-save">
+              <h3 class="ocr-save-title" data-i18n="ocr.m_save_title">حفظ المطابقة في النظام</h3>
+              <p class="text-sm text-muted mb-2" data-i18n="ocr.m_save_where">تُحفظ القراءات (2–3 مستندات) في «المستندات المقروءة» ثم تُحفظ المطابقة ونتيجتها ومراجعتك ضمن مؤسستك. يمكن ربطها بمعاملة.</p>
+              <div class="form ocr-save-form">
+                <div class="form-group">
+                  <label class="form-label" for="ocr-match-tx-q"><span data-i18n="ocr.m_tx_label">ربط بمعاملة</span> <span class="opt" data-i18n="ocr.m_opt">(اختياري)</span></label>
+                  <div class="ocr-tx-search">
+                    <input class="form-control" id="ocr-match-tx-q" type="search" dir="ltr" autocomplete="off" placeholder="الرقم المرجعي أو رقم البوليصة أو البيان" data-i18n-attr="placeholder:ocr.m_tx_ph">
+                    <button type="button" class="btn btn-secondary" id="ocr-match-tx-search" data-i18n="ocr.m_tx_search">بحث</button>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="ocr-match-tx" data-i18n="ocr.m_tx">المعاملة</label>
+                  <select class="form-control" id="ocr-match-tx"><option value="" data-i18n="ocr.m_tx_none">حفظ بدون معاملة</option></select>
+                </div>
+                <label class="check"><input type="checkbox" id="ocr-match-attach" checked> <span data-i18n="ocr.m_attach">إرفاق الملفات الأصلية بمستندات المعاملة</span></label>
+              </div>
+              <div class="alert mt-2" id="ocr-match-save-msg" role="status" tabindex="-1" hidden><span id="ocr-match-save-msg-text"></span></div>
+              <div class="ocr-match-export" role="group" aria-label="حفظ وتصدير المطابقة" data-i18n-attr="aria-label:ocr.m_export_group">
+                <button type="button" class="btn btn-primary" id="ocr-match-save-btn">
+                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+                  <span id="ocr-match-save-label" data-i18n="ocr.m_save">حفظ في النظام</span>
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" id="ocr-match-png" data-i18n="ocr.m_png">حفظ كصورة (PNG)</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="ocr-match-print" data-i18n="ocr.m_print">طباعة / PDF</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="ocr-match-xlsx" data-i18n="ocr.m_xlsx">تصدير Excel</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="ocr-match-json" data-i18n="ocr.m_json">JSON</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- recent saved matches -->
+          <div class="ocr-block ocr-match-recent-block" id="ocr-match-recent-block" hidden>
+            <div class="ocr-history-tools">
+              <h3 class="ocr-save-title" data-i18n="ocr.m_recent">آخر المطابقات المحفوظة</h3>
+              <button type="button" class="btn btn-ghost btn-sm" id="ocr-match-recent-refresh" data-i18n="ocr.m_refresh">تحديث</button>
+            </div>
+            <ul class="ocr-history" id="ocr-match-recent" aria-label="آخر المطابقات المحفوظة" data-i18n-attr="aria-label:ocr.m_recent"></ul>
+            <p class="text-sm text-muted" id="ocr-match-recent-empty" data-i18n="ocr.m_recent_empty">لا توجد مطابقات محفوظة بعد.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="section section-sm" aria-labelledby="tips-title">
       <div class="container">
         <div class="section-head text-center">
@@ -518,5 +692,7 @@
   <script src="assets/js/xlsx-lite.js" defer></script>
   <script src="assets/js/ocr-parse.js" defer></script>
   <script src="assets/js/ocr.js" defer></script>
+  <script src="assets/js/doc-match.js" defer></script>
+  <script src="assets/js/ocr-match.js" defer></script>
 </body>
 </html>

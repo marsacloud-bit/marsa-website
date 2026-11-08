@@ -94,7 +94,8 @@ async function runFile(dbx, file) {
 }
 const migFiles = () => fs.readdirSync(MIG_DIR).filter(f => /^\d+_.*\.sql$/.test(f)).sort();
 // phases added after this file (each has its own suite); schema_version then reports the latest of them
-const LATER_PHASES = ['20261113000100_public_antispam.sql', '20261114000100_ai_documents.sql', '20261115000100_convert_in_place.sql'];
+const LATER_PHASES = ['20261113000100_public_antispam.sql', '20261114000100_ai_documents.sql', '20261115000100_convert_in_place.sql',
+  '20261116000100_doc_match.sql'];
 const LATEST = migFiles().pop().slice(0, 14);
 async function freshDb(upTo) {
   const d = new PGlite();

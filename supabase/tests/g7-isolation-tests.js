@@ -658,7 +658,10 @@ async function directApiSweep(tables) {
 const NOT_EXERCISED = ['accept_invitation', 'ack_alert', 'import_commit', 'portal_invoices', 'resolve_alert', 'resolve_billing_review',
   'resolve_exception', 'resolve_msg_send_unknown', 'retry_msg_send', 'review_cost_adjustment', 'review_msg_instruction', 'review_msg_template',
   'revoke_msg_authorization', 'set_demurrage_status', 'update_demurrage_case', 'update_demurrage_case[min]', 'void_charge_collection',
-  'void_supplier_payment', 'save_bl[min]', 'save_msg_channel[min]', 'save_msg_contact[min]'];
+  'void_supplier_payment', 'save_bl[min]', 'save_msg_channel[min]', 'save_msg_contact[min]',
+  // document matching (20261116000100): they take a match id (the builder sends a transaction id); isolation of the
+  // matches (org, branch, client, anon) is asserted by doc-match-sql-tests.js
+  'review_document_match', 'review_document_match[min]', 'void_document_match'];
 async function positiveControl() {
   section('8. positive control: the §1 argument builder with B\'s own staff');
   const fns = (await listRpcs()).filter(f => !PUBLIC_BY_DESIGN[f.proname] && !/^platform_/.test(f.proname));

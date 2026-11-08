@@ -331,6 +331,10 @@
       MRS_AI_UNSUPPORTED: 'صيغة الملف غير مدعومة للقراءة بالذكاء الاصطناعي. استخدم JPG أو PNG أو WEBP أو GIF أو PDF.',
       MRS_AI_UNAVAILABLE: 'خدمة القراءة بالذكاء الاصطناعي غير متاحة الآن. حاول لاحقًا أو استخدم القراءة داخل المتصفح.',
       MRS_AI_FAILED: 'تعذّرت القراءة بالذكاء الاصطناعي. حاول مرة أخرى أو استخدم القراءة داخل المتصفح.',
+      // document matching (20261116000100): invoice ↔ B/L ↔ customs declaration
+      MRS_MATCH_DOC_KIND: 'المستند المحفوظ في خانة «{f}» ليس من النوع المطلوب (فاتورة تجارية، بوليصة شحن، بيان جمركي). تحقّق من نوع المستند ثم أعد القراءة.',
+      MRS_MATCH_DOC_VOIDED: 'قراءة «{f}» مُلغاة، فلا يمكن حفظ المطابقة عليها. اقرأ المستند من جديد ثم احفظ.',
+      MRS_MATCH_VOIDED: 'هذه المطابقة مُلغاة ولا يمكن مراجعتها أو تعديلها.',
       MRS_IDEMPOTENCY_CONFLICT: 'تعارض في إعادة الإرسال: استُخدم مفتاح العملية نفسه لبيانات مختلفة أو انتهت صلاحيته. أعد تحميل الصفحة وحاول مرة أخرى.',
       MRS_IN_PROGRESS: 'العملية نفسها قيد التنفيذ الآن. انتظر لحظات ثم تحقّق من النتيجة قبل إعادة المحاولة.',
       MRS_UNKNOWN_RESULT: 'لم نتمكّن من تأكيد نتيجة العملية بسبب انقطاع الاتصال. إعادة المحاولة آمنة ولن تُنشئ نسخة مكرّرة.',
@@ -391,6 +395,10 @@
       MRS_AI_UNSUPPORTED: 'This file type is not supported for AI reading. Use JPG, PNG, WEBP, GIF or PDF.',
       MRS_AI_UNAVAILABLE: 'The AI reading service is not available right now. Try later or use in-browser reading.',
       MRS_AI_FAILED: 'AI reading failed. Try again or use in-browser reading.',
+      // document matching (20261116000100)
+      MRS_MATCH_DOC_KIND: 'The document saved as “{f}” is not of the expected type (commercial invoice, bill of lading, customs declaration). Check the document type and read it again.',
+      MRS_MATCH_DOC_VOIDED: 'The “{f}” reading is void, so the match cannot be saved on it. Read the document again, then save.',
+      MRS_MATCH_VOIDED: 'This match is void and cannot be reviewed or changed.',
       MRS_IDEMPOTENCY_CONFLICT: 'Resubmission conflict: the same operation key was used for different data or has expired. Reload the page and try again.',
       MRS_IN_PROGRESS: 'The same operation is in progress right now. Wait a moment and check the result before retrying.',
       MRS_UNKNOWN_RESULT: 'We could not confirm the result because the connection dropped. Retrying is safe and will not create a duplicate.',

@@ -35,7 +35,9 @@
     'currency', 'subtotal', 'vat_amount', 'total', 'bl_number', 'container_numbers', 'declaration_number',
     'hs_codes', 'country_of_origin', 'iban',
     // AI reading (Claude, 20261114000100): bill-of-lading voyage / parties — never produced by the text parser below
-    'vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'shipper', 'consignee'];
+    'vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'shipper', 'consignee',
+    // AI reading v2 (ai-doc-v2, 20261116000100): the fields the invoice ↔ B/L ↔ declaration match compares
+    'gross_weight', 'net_weight', 'packages_count', 'package_type', 'goods_description', 'incoterms'];
 
   /* ---------------------------------------------------------------
      Digits, amounts, dates

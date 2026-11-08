@@ -122,7 +122,14 @@
       { key: 'port_of_loading', label: T('f_port_of_loading'), kind: 'text', ai: true },
       { key: 'port_of_discharge', label: T('f_port_of_discharge'), kind: 'text', ai: true },
       { key: 'shipper', label: T('f_shipper'), kind: 'text', ai: true },
-      { key: 'consignee', label: T('f_consignee'), kind: 'text', ai: true }
+      { key: 'consignee', label: T('f_consignee'), kind: 'text', ai: true },
+      // AI reading v2 (ai-doc-v2): weights in kg, packages, goods, delivery term
+      { key: 'gross_weight', label: T('f_gross_weight'), kind: 'text', ltr: true, ai: true },
+      { key: 'net_weight', label: T('f_net_weight'), kind: 'text', ltr: true, ai: true },
+      { key: 'packages_count', label: T('f_packages_count'), kind: 'text', ltr: true, ai: true },
+      { key: 'package_type', label: T('f_package_type'), kind: 'text', ltr: true, ai: true },
+      { key: 'goods_description', label: T('f_goods_description'), kind: 'text', ai: true },
+      { key: 'incoterms', label: T('f_incoterms'), kind: 'text', ltr: true, ai: true }
     ];
     var FIELD_LABEL = {};
     FIELD_DEFS.forEach(function (d) { FIELD_LABEL[d.key] = d.label; });
