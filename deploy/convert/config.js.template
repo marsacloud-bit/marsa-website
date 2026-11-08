@@ -1,0 +1,25 @@
+/* ==========================================================================
+   مرسى | MARSA — runtime configuration (PRODUCTION, converted IN PLACE)
+   --------------------------------------------------------------------------
+   PLANNED content of assets/js/config.js after the in-place conversion
+   (docs/online/CONVERT_IN_PLACE_AR.md). Not loaded by any page.
+   The site keeps the SAME Supabase project (cgzhidyxfpksfckwmauq): same
+   Project URL, same publishable key (public by design; RLS protects the
+   data). Only two values change:
+     orgSlug      <NEW_SLUG> → the slug given to
+                  public.convert_org_to_production (never the old demo slug)
+     environment  'production' → main.js hides the environment banner, shows
+                  the production privacy line and wording (data-show-env)
+   scripts/build-release.sh OUT_DIR --in-place writes exactly this shape
+   (PROD_SUPABASE_URL / PROD_PUBLISHABLE_KEY = the values below,
+   PROD_ORG_SLUG = <NEW_SLUG>).
+   NEVER put the "secret" key (sb_secret_…), a service_role JWT, the
+   database password or a connection string here.
+   Load order on every page:  config.js → i18n.js → [assets/i18n/<page>.js] → main.js → supa.js → <page>.js
+   ========================================================================== */
+window.MARSA_CONFIG = {
+  supabaseUrl: 'https://cgzhidyxfpksfckwmauq.supabase.co',
+  supabaseAnonKey: 'sb_publishable_LDvCFb0-OLizS2e62cWsHg_xNSf9U5j',
+  orgSlug: '<NEW_SLUG>',
+  environment: 'production'
+};

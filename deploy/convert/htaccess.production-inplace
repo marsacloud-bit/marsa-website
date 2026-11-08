@@ -1,0 +1,69 @@
+# =====================================================================
+# مرسى | MARSA — PLANNED .htaccess for marsacloud.com after the IN-PLACE conversion (docs/online/CONVERT_IN_PLACE_AR.md)
+# Preview only, for review: the file actually uploaded is <out>/site/.htaccess written by
+#   scripts/build-release.sh OUT_DIR --in-place
+# (it recomputes the inline-script hashes from the pages of the commit being released; this copy holds the hashes of
+# the pages at the time it was written — supabase/tests/convert-tests.js checks they still match).
+# = deploy/htaccess.production filled with the current project (cgzhidyxfpksfckwmauq). Compared with the staging
+# .htaccess on the server it keeps: Options -Indexes, DirectoryIndex, HTTPS + www redirects (www first now), HSTS,
+# nosniff, X-Frame-Options DENY, Referrer-Policy, Permissions-Policy, no-cache for pages / scripts / styles, the hidden-
+# file / _headers deny. It REMOVES: the site-wide X-Robots-Tag "noindex, nofollow" (only the signed-in / utility pages
+# keep noindex) and any Basic Auth block. It ADDS: CSP (enforced minimal + Report-Only full), cache rules for images /
+# fonts, MIME types, repo-leftover deny.
+# =====================================================================
+
+Options -Indexes
+DirectoryIndex index.html
+AddDefaultCharset UTF-8
+AddCharset utf-8 .html .css .js .json .md .webmanifest
+
+# ---- MIME types the host may not know
+AddType font/woff2 .woff2
+AddType application/manifest+json .webmanifest
+AddType text/markdown .md
+AddType application/javascript .js
+
+# ---- one origin: www. → the apex domain (its own storage / service worker / Supabase redirect URL otherwise), then HTTPS only
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTP_HOST} ^www\.(.+)$ [NC]
+  RewriteRule ^ https://%1%{REQUEST_URI} [L,R=301]
+  RewriteCond %{HTTPS} off
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+</IfModule>
+
+# ---- never served: dotfiles (except .well-known) and repo / build leftovers
+RedirectMatch 404 /\.(?!well-known/)
+<FilesMatch "\.(sql|sh|py|ts|bak|orig|zip|gz|log|env|pem|key|dump)$">
+  Require all denied
+</FilesMatch>
+# the Netlify-style header file of the old staging deploy copy, if it is still in public_html
+<Files "_headers">
+  Require all denied
+</Files>
+
+<IfModule mod_headers.c>
+  Header always set Strict-Transport-Security "max-age=31536000"
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "DENY"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
+  Header always set Content-Security-Policy "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'"
+  Header always set Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'sha256-IE2UJnLQw3Rteu8xZT82+ma6Or8MUK9TxFEnAE0v+UY=' 'sha256-LuqLTWsFogtNX3PzUR3mSuqwzq5qaypTHsZ9n/AxEJ8=' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cgzhidyxfpksfckwmauq.supabase.co; font-src 'self'; connect-src 'self' https://cgzhidyxfpksfckwmauq.supabase.co wss://cgzhidyxfpksfckwmauq.supabase.co https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://tessdata.projectnaptha.com; worker-src 'self' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; frame-src 'self' blob: https://cgzhidyxfpksfckwmauq.supabase.co; media-src 'self' blob: https://cgzhidyxfpksfckwmauq.supabase.co; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+
+  # pages, scripts, styles, the worker and the guides: always revalidated (a release is visible at once)
+  <FilesMatch "\.(html|js|css|json|md|webmanifest)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+  <FilesMatch "\.(png|webp|jpg|jpeg|svg|ico)$">
+    Header set Cache-Control "public, max-age=604800"
+  </FilesMatch>
+  <FilesMatch "\.woff2$">
+    Header set Cache-Control "public, max-age=2592000"
+  </FilesMatch>
+
+  # signed-in / utility pages stay out of search engines (the public pages are indexable)
+  <FilesMatch "^(admin|platform|portal|login|bulk-upload|ocr|help|offline)\.html$">
+    Header set X-Robots-Tag "noindex, nofollow"
+  </FilesMatch>
+</IfModule>

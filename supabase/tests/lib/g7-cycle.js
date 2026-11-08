@@ -558,6 +558,7 @@ const KNOWN_SLUG_DEFAULTS = [
   { file: 'supabase/migrations/20261113000100_public_antispam.sql', re: /coalesce\(nullif\(payload ->> 'orgSlug', ''\), 'blue-sea'\)/, why: 'public intake default slug (0300 bodies re-created with the anti-spam gate)' },
   // exclusions: the slug is named only to refuse / exclude the seed org (never a default)
   { file: 'supabase/migrations/20261112000100_deploy_env.sql', re: /^SELECT o\.slug = 'blue-sea' OR /, why: 'production guard app.is_demo_org (refuses the seed org)', exclusion: true },
+  { file: 'supabase/migrations/20261115000100_convert_in_place.sql', re: /^IF v_slug = 'blue-sea' THEN PERFORM app\.fail\('MRS_INVALID', 'slug_demo'\); END IF;$/, why: 'in-place conversion refuses the seed slug as the new slug', exclusion: true },
   { file: 'assets/js/config.production.example.js', re: /^organization 'blue-sea'\)\.$|^\/\/.*never 'blue-sea'$/, why: 'production template comment (excludes the seed org)', exclusion: true }
 ];
 function scanSeedOrg(root, seedId, slug) {

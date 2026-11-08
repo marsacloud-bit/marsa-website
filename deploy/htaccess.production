@@ -36,6 +36,10 @@ RedirectMatch 404 /\.(?!well-known/)
 <FilesMatch "\.(sql|sh|py|ts|bak|orig|zip|gz|log|env|pem|key|dump)$">
   Require all denied
 </FilesMatch>
+# the Netlify-style header file of the old staging deploy copy, if it is still in public_html
+<Files "_headers">
+  Require all denied
+</Files>
 
 <IfModule mod_headers.c>
   Header always set Strict-Transport-Security "max-age=31536000"

@@ -94,7 +94,7 @@ async function runFile(dbx, file) {
 }
 const migFiles = () => fs.readdirSync(MIG_DIR).filter(f => /^\d+_.*\.sql$/.test(f)).sort();
 // phases added after this file (each has its own suite); schema_version then reports the latest of them
-const LATER_PHASES = ['20261113000100_public_antispam.sql', '20261114000100_ai_documents.sql'];
+const LATER_PHASES = ['20261113000100_public_antispam.sql', '20261114000100_ai_documents.sql', '20261115000100_convert_in_place.sql'];
 const LATEST = migFiles().pop().slice(0, 14);
 async function freshDb(upTo) {
   const d = new PGlite();
@@ -190,7 +190,9 @@ async function secFile() {
   await check('no function body of the live catalog still hard-codes the \'staging\' environment (only the deploy helpers)', async () => {
     const r = await q(`SELECT n.nspname || '.' || p.proname s FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                         WHERE n.nspname IN ('app','public') AND p.prosrc ~ '''staging''' ORDER BY 1`);
-    const ok = ['app.deploy_environment', 'app.tg_deploy_settings_guard', 'public.platform_create_org', 'public.set_deploy_environment'];
+    // + the in-place conversion (20261115000100): removes the 'staging' key from organizations.settings
+    const ok = ['app.deploy_environment', 'app.tg_deploy_settings_guard', 'public.convert_org_to_production', 'public.platform_create_org',
+      'public.set_deploy_environment'];
     const bad = r.map(x => x.s).filter(s => !ok.includes(s));
     return bad.length === 0 || 'still literal: ' + bad.join(', ');
   });
@@ -498,9 +500,9 @@ async function secProduction() {
   } finally { await d.close(); }
 }
 
-const KEYS = ['blockers', 'cron_jobs', 'daftra_connections_mock', 'demo_org_present', 'deploy_environment', 'extensions', 'health_check',
+const KEYS = ['auth_users_without_access', 'blockers', 'converted_orgs', 'cron_jobs', 'daftra_connections_mock', 'demo_org_present', 'deploy_environment', 'extensions', 'health_check',
   'min_schema_version', 'msg_channels_mock', 'orgs_by_environment', 'platform_admins', 'platform_admins_count',
-  'public_tables_without_rls', 'public_tables_without_rls_names', 'schema_version', 'seed_rows'];
+  'public_tables_without_rls', 'public_tables_without_rls_names', 'schema_version', 'seed_rows', 'warnings'];
 async function secChecks() {
   section('6a. post_install_checks.sql on staging (seed): read-only, expected keys, blockers');
   const src = fs.readFileSync(CHECKS_FILE, 'utf8');

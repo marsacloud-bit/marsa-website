@@ -6,7 +6,13 @@
 --   health_check, schema_version (+ the minimum this file needs), deploy_environment, public_tables_without_rls,
 --   demo_org_present, seed_rows, platform_admins [{email (masked), totp_verified}], msg_channels_mock,
 --   daftra_connections_mock, orgs_by_environment, extensions {pg_cron, pg_net, pg_trgm, supabase_vault}, cron_jobs,
---   blockers (empty = ready for real data)
+--   converted_orgs, auth_users_without_access, warnings, blockers (empty = ready for real data)
+-- auth_users_without_access: sign-in accounts that are not platform admins and have no active membership (after an
+-- in-place conversion: the test accounts, to delete in Authentication → Users). Reported in warnings, not a blocker
+-- (an invited person between sign-up and acceptance is one too).
+-- converted_orgs: the in-place conversions of 20261115000100_convert_in_place.sql (app.org_conversions; [] without that
+-- file). A converted org keeps the seed ids of its org row and branches (docs/online/CONVERT_IN_PLACE_AR.md): those two
+-- are then neither demo_org_present nor seed_rows; every other seed table still counts.
 -- cron_jobs lists jobid / jobname / schedule / active only: a job's command can hold a key, so it is never shown.
 -- Blockers beyond the data checks: pg_cron_missing (enable it BEFORE the install: the migrations schedule their jobs only
 -- when it exists), cron_job_missing:<name> (marsa_idem_purge / marsa_client_errors_purge / marsa_refresh_alerts absent or
@@ -19,14 +25,25 @@ rls AS (
   SELECT coalesce(jsonb_agg(c.relname ORDER BY c.relname), '[]'::jsonb) AS names
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
    WHERE n.nspname = 'public' AND c.relkind IN ('r','p') AND NOT c.relrowsecurity),
+-- app.org_conversions exists only with 20261115000100: read through query_to_xml (no parse error without it)
+conv AS (
+  SELECT CASE WHEN to_regclass('app.org_conversions') IS NULL THEN '[]'::jsonb
+              ELSE convert_from(decode(substring(query_to_xml(
+                     'SELECT encode(convert_to(coalesce(jsonb_agg(jsonb_build_object(''org_id'', c.org_id, ''from_slug'', c.from_slug, '
+                     || '''to_slug'', c.to_slug, ''converted_at'', c.converted_at) ORDER BY c.converted_at), ''[]''::jsonb)::text, ''UTF8''), ''hex'') x '
+                     || 'FROM app.org_conversions c', false, true, '')::text FROM '<x>([0-9a-f]*)</x>'), 'hex'), 'UTF8')::jsonb
+         END AS list),
+conv_ids AS (
+  SELECT coalesce(array_agg((e ->> 'org_id')::uuid), ARRAY[]::uuid[]) AS ids FROM conv, jsonb_array_elements(conv.list) e),
 demo AS (
   SELECT EXISTS (SELECT 1 FROM public.organizations o
-                  WHERE o.slug = 'blue-sea' OR o.id = '0b5e0000-0000-4000-8000-000000000001'::uuid
+                  WHERE o.slug = 'blue-sea'
+                     OR (o.id = '0b5e0000-0000-4000-8000-000000000001'::uuid AND NOT o.id = ANY (coalesce((SELECT ids FROM conv_ids), ARRAY[]::uuid[])))
                      OR coalesce(o.settings ->> 'demo', '') = 'true') AS present),
--- supabase/seed.sql uses fixed ids 0b5e0000-0000-4000-8000-…
+-- supabase/seed.sql uses fixed ids 0b5e0000-0000-4000-8000-… (a converted org keeps its org row and branches)
 seed AS (
-  SELECT (SELECT count(*) FROM public.organizations     WHERE id::text LIKE '0b5e0000-%')
-       + (SELECT count(*) FROM public.branches          WHERE id::text LIKE '0b5e0000-%')
+  SELECT (SELECT count(*) FROM public.organizations     WHERE id::text LIKE '0b5e0000-%' AND NOT id = ANY (coalesce((SELECT ids FROM conv_ids), ARRAY[]::uuid[])))
+       + (SELECT count(*) FROM public.branches          WHERE id::text LIKE '0b5e0000-%' AND NOT org_id = ANY (coalesce((SELECT ids FROM conv_ids), ARRAY[]::uuid[])))
        + (SELECT count(*) FROM public.clients           WHERE id::text LIKE '0b5e0000-%')
        + (SELECT count(*) FROM public.transactions      WHERE id::text LIKE '0b5e0000-%')
        + (SELECT count(*) FROM public.containers        WHERE id::text LIKE '0b5e0000-%')
@@ -38,6 +55,10 @@ adm AS (
                                      WHERE f.user_id = pa.user_id AND f.factor_type::text = 'totp' AND f.status::text = 'verified'))
            ORDER BY pa.created_at), '[]'::jsonb) AS list
     FROM public.platform_admins pa LEFT JOIN auth.users u ON u.id = pa.user_id),
+noacc AS (
+  SELECT count(*) AS n FROM auth.users u
+   WHERE NOT EXISTS (SELECT 1 FROM public.platform_admins pa WHERE pa.user_id = u.id)
+     AND NOT EXISTS (SELECT 1 FROM public.memberships m WHERE m.user_id = u.id AND m.is_active)),
 ext AS (
   SELECT jsonb_build_object(
            'pg_cron',        (SELECT e.extversion FROM pg_extension e WHERE e.extname = 'pg_cron'),
@@ -64,12 +85,14 @@ c AS (
          (SELECT present FROM demo) AS demo,
          (SELECT n FROM seed) AS seed,
          (SELECT list FROM adm) AS admins,
+         (SELECT n FROM noacc) AS noacc,
          (SELECT count(*) FROM public.msg_channels m WHERE m.mode = 'mock') AS msg_mock,
          (SELECT count(*) FROM public.daftra_connections d WHERE d.mode = 'mock') AS daftra_mock,
          (SELECT coalesce(jsonb_object_agg(x.environment, x.n), '{}'::jsonb)
             FROM (SELECT o.environment, count(*) n FROM public.organizations o GROUP BY 1) x) AS orgs,
          (SELECT j FROM ext) AS ext,
          (SELECT list FROM cron) AS cron,
+         (SELECT list FROM conv) AS conv,
          (SELECT ok FROM envfn) AS env_fns)
 SELECT jsonb_build_object(
          'health_check', c.health,
@@ -87,6 +110,11 @@ SELECT jsonb_build_object(
          'orgs_by_environment', c.orgs,
          'extensions', c.ext,
          'cron_jobs', c.cron,
+         'converted_orgs', c.conv,
+         'auth_users_without_access', c.noacc,
+         'warnings', to_jsonb(array_remove(ARRAY[
+           CASE WHEN c.noacc > 0 THEN 'auth_users_without_access:' || c.noacc END
+         ]::text[], NULL)),
          'blockers', to_jsonb(array_remove(ARRAY[
            CASE WHEN c.env IS DISTINCT FROM 'production' THEN 'deploy_environment_not_production' END,
            CASE WHEN coalesce(c.health ->> 'schema_version', '') < '20261112000100' THEN 'schema_version_too_old' END,

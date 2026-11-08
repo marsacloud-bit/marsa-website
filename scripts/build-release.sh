@@ -5,8 +5,13 @@
 #   export PROD_SUPABASE_URL='https://<prod-ref>.supabase.co'
 #   export PROD_PUBLISHABLE_KEY='sb_publishable_…'     # the PUBLIC key of the production project
 #   export PROD_ORG_SLUG='<slug>'                       # organizations.slug of the production tenant
-#   ./scripts/build-release.sh OUT_DIR [--allow-dirty]
+#   ./scripts/build-release.sh OUT_DIR [--allow-dirty] [--in-place]
 #   ./scripts/build-release.sh --self-test              # the key / page / guide checks below on built-in samples
+#
+# --in-place (docs/online/CONVERT_IN_PLACE_AR.md, owner decision 2026-11-08): the CURRENT project becomes production.
+#   PROD_SUPABASE_URL / PROD_PUBLISHABLE_KEY must then be exactly the values of assets/js/config.js (the same project);
+#   every other rule below stays, and the project ref / key may appear only in assets/js/config.js and .htaccess.
+#   Without --in-place the current project / key are refused (a NEW production project).
 #
 # Writes (OUT_DIR must be outside the repository and empty or missing):
 #   OUT_DIR/site/                    upload to an EMPTIED public_html (supabase/production/README.md «cutover»): the
@@ -24,7 +29,8 @@
 # blocks and visible data-show-mode="online" blocks (main.js / the page scripts set the same at runtime: first paint
 # and crawlers already see production); the guides lose their <!-- env:staging --> … <!-- /env --> lines.
 # Safety: refuses a secret key (sb_secret_…, a service_role JWT), an anon JWT of another project (its "ref" must be
-# the PROD_SUPABASE_URL ref), a key with characters outside [A-Za-z0-9._-], the staging project / key, the demo slug
+# the PROD_SUPABASE_URL ref), a key with characters outside [A-Za-z0-9._-], the staging project / key (unless --in-place,
+# which in turn refuses any OTHER project / key), the demo slug
 # 'blue-sea', and uncommitted changes to site files (unless --allow-dirty, for a local test build only). Fails when
 # staging wording (Staging, بيئة تجريبية, خادم الاختبار, test environment, …) is left in a page outside
 # data-show-mode="demo" / data-show-env="staging" / the demo banner, in a guide or in manifest.json.
@@ -37,9 +43,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUT=""
 ALLOW_DIRTY=0
+IN_PLACE=0
 
 usage() {
-  sed -n '2,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 die() { echo "build-release: $*" >&2; exit 1; }
@@ -199,6 +206,7 @@ pyl() { python3 -I -c "$PYLIB" "$@"; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --allow-dirty) ALLOW_DIRTY=1; shift ;;
+    --in-place) IN_PLACE=1; shift ;;
     --self-test) command -v python3 >/dev/null || die "needs python3"; pyl self-test; exit 0 ;;
     -h|--help) usage 0 ;;
     -*) echo "unknown option: $1" >&2; usage 1 ;;
@@ -227,8 +235,15 @@ REF="$(printf '%s' "$URL" | sed -n 's#^https://\([a-z0-9]\{1,40\}\)\.supabase\.c
 STAGING_CFG="$REPO/assets/js/config.js"
 STAGING_REF="$(sed -n "s#.*supabaseUrl:[[:space:]]*'https://\([a-z0-9]\{1,40\}\)\.supabase\.co'.*#\1#p" "$STAGING_CFG" | head -n 1)"
 STAGING_KEY="$(sed -n "s#.*supabaseAnonKey:[[:space:]]*'\([^']*\)'.*#\1#p" "$STAGING_CFG" | head -n 1)"
-[ "$REF" != "$STAGING_REF" ] || die "PROD_SUPABASE_URL is the STAGING project ($STAGING_REF)"
-[ "$KEY" != "$STAGING_KEY" ] || die "PROD_PUBLISHABLE_KEY is the STAGING key"
+if [ "$IN_PLACE" = 1 ]; then
+  # the current project becomes production: exactly the URL / key of assets/js/config.js, nothing else
+  [ -n "$STAGING_REF" ] && [ -n "$STAGING_KEY" ] || die "--in-place: assets/js/config.js holds no project URL / key"
+  [ "$REF" = "$STAGING_REF" ] || die "--in-place needs the CURRENT project ($STAGING_REF), got $REF"
+  [ "$KEY" = "$STAGING_KEY" ] || die "--in-place needs the CURRENT publishable key of assets/js/config.js"
+else
+  [ "$REF" != "$STAGING_REF" ] || die "PROD_SUPABASE_URL is the STAGING project ($STAGING_REF) (in-place conversion: --in-place)"
+  [ "$KEY" != "$STAGING_KEY" ] || die "PROD_PUBLISHABLE_KEY is the STAGING key"
+fi
 # the same test as supa.js looksSecret(), plus: only a publishable key or an anon JWT OF THIS PROJECT (payload "ref"),
 # and only [A-Za-z0-9._-] (the key is written into a JS string below)
 KEY_KIND="$(PROD_KEY="$KEY" pyl key-kind "$REF")"
@@ -325,8 +340,14 @@ BAD="$(find . -type f -name '*.md' ! -path './docs/guide/*' | sort)"
 [ "$(ls docs)" = "guide" ] || die "docs/ must hold guide/ only"
 [ "$(cat robots.txt)" = "$(printf 'User-agent: *\nAllow: /')" ] || die "robots.txt is not the production one"
 ! grep -qE 'sb_secret_|service_role' assets/js/config.js || die "secret marker in site/assets/js/config.js"
-! grep -rIlF -e "$STAGING_REF" -e "$STAGING_KEY" . >/dev/null \
-  || die "staging project ref / key in site/: $(grep -rIlF -e "$STAGING_REF" -e "$STAGING_KEY" . | tr '\n' ' ')"
+if [ "$IN_PLACE" = 1 ]; then
+  # the same project: its ref / key belong in config.js and the .htaccess CSP only
+  LEAK="$(grep -rIlF -e "$STAGING_REF" -e "$STAGING_KEY" . | grep -vxF -e './assets/js/config.js' -e './.htaccess' || true)"
+  [ -z "$LEAK" ] || die "project ref / key outside config.js / .htaccess in site/: $(printf '%s' "$LEAK" | tr '\n' ' ')"
+else
+  ! grep -rIlF -e "$STAGING_REF" -e "$STAGING_KEY" . >/dev/null \
+    || die "staging project ref / key in site/: $(grep -rIlF -e "$STAGING_REF" -e "$STAGING_KEY" . | tr '\n' ' ')"
+fi
 # staging wording a visitor of production would see (pages outside demo / staging-only blocks, guides, manifest.json)
 pyl scan "$SITE"
 # every local href / src of the pages exists
@@ -352,10 +373,16 @@ shasum -a 256 "$(basename "$ZIP")" >> SHA256SUMS
 
 echo "release built from commit $COMMIT$([ -n "$DIRTY" ] && echo ' (+ uncommitted changes)') → $OUT"
 echo "  site/: $(find site -type f | wc -l | tr -d ' ') files ($(du -sk site | cut -f1) KB)   edge/: $(ls edge | tr '\n' ' ')"
-echo "  config.js → $URL, orgSlug $SLUG, environment production ($KEY_KIND key)"
+echo "  config.js → $URL, orgSlug $SLUG, environment production ($KEY_KIND key)$([ "$IN_PLACE" = 1 ] && echo ', IN PLACE (current project)')"
 echo "  sw.js VERSION $(sed -n "s/^var VERSION = '\([^']*\)'.*/\1/p" site/sw.js)"
 echo "  zip:  $(basename "$ZIP")  sha256 $(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
 echo "  SHA256SUMS: $(wc -l < SHA256SUMS | tr -d ' ') entries"
+if [ "$IN_PLACE" = 1 ]; then
+  echo "Next (in place): docs/online/CONVERT_IN_PLACE_AR.md — the database conversion first (backup, preview, convert),"
+  echo "      then a backup of public_html, EMPTY it (keep nothing of the staging files: .htaccess, _headers, robots.txt),"
+  echo "      upload the zip and extract. The Edge Functions stay as they are; remove the test-only secrets (runbook)."
+  exit 0
+fi
 echo "Next: supabase/production/README.md «cutover» first (staging on its own subdomain, Auth URLs, a backup of"
 echo "      public_html), then EMPTY public_html of the production domain, upload the zip and extract; edge/*.ts go to"
 echo "      the PRODUCTION project's Edge Functions (their secrets are set there, never in a file; MARSA_ENV must not be"

@@ -195,14 +195,20 @@ async function secFile() {
   });
   await check('no key, no Anthropic endpoint, no document content in the SQL file', () =>
     (!/sk-ant|ANTHROPIC_API_KEY\s*=|api\.anthropic\.com|x-api-key/i.test(src)) || 'secret-like text found');
-  await check('this is the latest migration file', () => migFiles().pop() === MIG || 'latest: ' + migFiles().pop());
-  await check('all_migrations.sql holds this file verbatim (appended last) + a header line', () => {
+  // later phases may follow this file (20261115000100 convert_in_place); none may sort before it unnoticed
+  const LATER_PHASES = ['20261115000100_convert_in_place.sql'];
+  await check('this file is present; only the listed later phases follow it', () => {
+    const later = migFiles().filter(f => f > MIG);
+    return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
+  });
+  await check('all_migrations.sql holds this file verbatim (followed only by the listed later phases) + a header line', () => {
     const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
     const marker = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(marker);
     const next = all.indexOf('\n-- ===== migrations/', i + marker.length);
     const body = all.slice(i + marker.length, next < 0 ? undefined : next);
-    return (i > 0 && next < 0 && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
+    const after = next < 0 ? [] : (all.slice(next).match(/^-- ===== migrations\/(\S+) =====$/gm) || []).map(l => l.split('/')[1].split(' ')[0]);
+    return (i > 0 && after.every(f => LATER_PHASES.includes(f)) && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
       && all.slice(0, 5000).includes(MIG)) || 'not appended verbatim / no header line';
   });
 }

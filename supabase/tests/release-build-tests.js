@@ -8,7 +8,8 @@
   a key with a quote, the staging URL, the demo slug); a dummy build: config.js, sw.js '-prod', robots.txt Allow: /,
   .htaccess (no Basic Auth, www → apex, the inline-script hashes), every page with data-marsa-env="production", a hidden
   demo banner, data-show-mode flipped, no meta «(بيئة تجريبية)», guides without <!-- env:staging --> blocks, the zip
-  holding .htaccess + robots.txt, no staging ref / key anywhere; the repository unchanged.
+  holding .htaccess + robots.txt, no staging ref / key anywhere; --in-place (the current project becomes production:
+  its URL / key only, only in config.js + .htaccess, = deploy/convert/*); the repository unchanged.
 
   usage:
     node supabase/tests/release-build-tests.js [/path/to/marsa-website] [--quiet]
@@ -147,6 +148,52 @@ function main() {
     const l = execFileSync('unzip', ['-l', path.join(ok.out, zip)], { encoding: 'utf8' });
     return (/\s\.htaccess\n/.test(l) && /\srobots\.txt\n/.test(l)) || l.slice(0, 300);
   });
+
+  section('4. --in-place (docs/online/CONVERT_IN_PLACE_AR.md): the CURRENT project becomes production');
+  const SAME = { PROD_SUPABASE_URL: 'https://' + STAGING_REF + '.supabase.co', PROD_PUBLISHABLE_KEY: STAGING_KEY, PROD_ORG_SLUG: 'real-org' };
+  for (const [name, env, re] of [
+    ['--in-place with ANOTHER project URL', { PROD_SUPABASE_URL: PROD.PROD_SUPABASE_URL, PROD_PUBLISHABLE_KEY: STAGING_KEY }, /--in-place needs the CURRENT project/],
+    ['--in-place with another key of the current project', { PROD_SUPABASE_URL: SAME.PROD_SUPABASE_URL, PROD_PUBLISHABLE_KEY: 'sb_publishable_TESTONLY_other' }, /--in-place needs the CURRENT publishable key/],
+    ['--in-place with the demo slug blue-sea', Object.assign({}, SAME, { PROD_ORG_SLUG: 'blue-sea' }), /demo org 'blue-sea'/],
+    ['--in-place with a secret key', Object.assign({}, SAME, { PROD_PUBLISHABLE_KEY: 'sb_secret_TESTONLY' }), /SECRET key|CURRENT publishable key/]
+  ]) {
+    check('refused: ' + name, () => {
+      const r = build(env, ['--in-place']);
+      return (r.code === 1 && re.test(r.text) && !fs.existsSync(r.out)) || ('exit ' + r.code + ': ' + r.text.slice(-300));
+    });
+  }
+  const ip = build(SAME, ['--in-place']);
+  check('--in-place builds with the current URL / key', () => (ip.code === 0 && /IN PLACE \(current project\)/.test(ip.text)) || ip.text.slice(-600));
+  const ipSite = path.join(ip.out, 'site');
+  if (fs.existsSync(ipSite)) {
+    check('in place: config.js = the current URL / key, orgSlug real-org, environment production (deploy/convert/config.js.template shape)', () => {
+      const c = rd(path.join(ipSite, 'assets', 'js', 'config.js'));
+      const tpl = rd(path.join(ROOT, 'deploy', 'convert', 'config.js.template'));
+      const body = x => x.slice(x.indexOf('window.MARSA_CONFIG'));
+      return (c.includes("supabaseUrl: '" + SAME.PROD_SUPABASE_URL + "'") && c.includes("supabaseAnonKey: '" + STAGING_KEY + "'")
+        && c.includes("orgSlug: 'real-org'") && c.includes("environment: 'production'")
+        && body(c) === body(tpl).replace("'<NEW_SLUG>'", "'real-org'")) || c;
+    });
+    check('in place: the project ref / key appear ONLY in assets/js/config.js and .htaccess', () => {
+      const r = spawnSync('grep', ['-rIlF', '-e', STAGING_REF, '-e', STAGING_KEY, '.'], { cwd: ipSite, encoding: 'utf8' });
+      return r.stdout.trim().split('\n').sort().join(',') === './.htaccess,./assets/js/config.js' || r.stdout;
+    });
+    check('in place: .htaccess = deploy/convert/htaccess.production-inplace (rules + headers; the planned copy is current)', () => {
+      const strip = x => x.split('\n').filter(l => !/^\s*#/.test(l) && l.trim()).join('\n');
+      return strip(rd(path.join(ipSite, '.htaccess'))) === strip(rd(path.join(ROOT, 'deploy', 'convert', 'htaccess.production-inplace'))) || 'differs';
+    });
+    check('in place: robots.txt = deploy/convert/robots.txt (Allow: /), sw.js VERSION -prod, no Basic Auth, no site-wide noindex', () => {
+      const h = rd(path.join(ipSite, '.htaccess'));
+      return (rd(path.join(ipSite, 'robots.txt')) === rd(path.join(ROOT, 'deploy', 'convert', 'robots.txt'))
+        && /^var VERSION = '[^']+-prod';/m.test(rd(path.join(ipSite, 'sw.js'))) && !/AuthType|Require valid-user/.test(h)
+        && (h.match(/X-Robots-Tag/g) || []).length === 1) || 'in-place files';
+    });
+    check('in place: pages / manifest are the production ones (data-marsa-env, no «(بيئة تجريبية)»)', () => {
+      const ps = fs.readdirSync(ipSite).filter(f => f.endsWith('.html'));
+      const bad = ps.filter(f => !/<html data-marsa-env="production"/.test(rd(path.join(ipSite, f))) || /<meta[^>]*content="[^"]*بيئة تجريبية/.test(rd(path.join(ipSite, f))));
+      return (bad.length === 0 && !/بيئة تجريبية/.test(rd(path.join(ipSite, 'manifest.json')))) || bad.join(', ');
+    });
+  }
   finish(before);
 }
 function finish(before) {
