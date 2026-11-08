@@ -2909,7 +2909,72 @@
         });
       });
       out.appendChild(dCard(t('org_settings'), [dAlert('info', t('org_settings_info')), form]));
-      return out;
+      return aiSettingsCard().then(function (card) { if (card) out.appendChild(card); return out; });
+    });
+  }
+
+  /* ------------------------------------------------------------------
+     القراءة بالذكاء الاصطناعي — org admin (aal2): ai_get_settings / ai_save_settings (20261114000100).
+     Off by default; switching on needs the explicit consent checkbox (document contents go to Anthropic).
+     ------------------------------------------------------------------ */
+  function aiNum(v, digits) {
+    var n = Number(v);
+    if (!isFinite(n)) return T.common.none;
+    try { return n.toLocaleString(isEn() ? 'en-GB' : 'ar-SA-u-nu-latn', { maximumFractionDigits: digits == null ? 0 : digits, minimumFractionDigits: digits || 0 }); }
+    catch (e) { return String(digits ? n.toFixed(digits) : n); }
+  }
+  function aiSettingsCard() {
+    if (!api || typeof api.aiGetSettings !== 'function') return Promise.resolve(null);
+    return call('aiGetSettings', S.orgId).then(function (r) {
+      if (r.error) return dCard(t('ai_title'), [dAlert('danger', apiErr(r.error))]);
+      var a = r.data || {}, u = a.usage || {}, m = u.month || {};
+      var status = dKv([
+        [t('ai_status'), a.enabled ? dBadge('success', t('ai_on')) : dBadge('warning', t('ai_off'))],
+        [t('ai_model'), dLtr(a.model || 'claude-opus-5-5')],
+        [t('ai_consent_at'), a.consent_ack_at ? fmtWhen(a.consent_ack_at, true) : T.common.none]
+      ]);
+      var usage = dKv([
+        [t('ai_today'), t('ai_of', { a: aiNum(u.today_requests), b: aiNum(a.daily_request_cap) })],
+        [t('ai_month') + ' — ' + t('ai_requests'), aiNum(m.requests)],
+        [t('ai_ok') + ' / ' + t('ai_refused') + ' / ' + t('ai_errors'), aiNum(m.ok) + ' / ' + aiNum(m.refused) + ' / ' + aiNum(m.error)],
+        [t('ai_tokens'), aiNum(m.input_tokens) + ' / ' + aiNum(m.output_tokens)],
+        [t('ai_cost'), t('ai_of', { a: '$' + aiNum(Number(m.cost_usd || 0) + Number(m.held_usd || 0), 2), b: '$' + aiNum(a.monthly_budget_usd, 2) })]
+      ]);
+      var msg = el('p', { class: 'form-error', role: 'alert', hidden: true });
+      var saveBtn = el('button', { class: 'btn btn-primary', type: 'submit', text: T.common.save });
+      var consent = dField({ name: 'ai_consent', label: t('ai_consent'), type: 'checkbox', value: false, full: true });
+      var form = el('form', { class: 'adm-org-form adm-ai-form', novalidate: true }, [
+        dGrid([
+          dField({ name: 'ai_enabled', label: t('ai_enabled'), type: 'checkbox', value: !!a.enabled, full: true }),
+          consent,
+          dField({ name: 'daily_request_cap', label: t('ai_daily_cap'), type: 'number', value: a.daily_request_cap, ltr: true, hint: t('ai_daily_cap_hint') }),
+          dField({ name: 'monthly_budget_usd', label: t('ai_budget'), type: 'number', value: a.monthly_budget_usd, ltr: true, hint: t('ai_budget_hint') })
+        ]),
+        msg, el('div', { class: 'btn-group' }, saveBtn)
+      ]);
+      // the consent box is asked only when switching on (off → on)
+      var syncConsent = function () { consent.hidden = !!a.enabled || !form.elements.ai_enabled.checked; };
+      form.elements.ai_enabled.addEventListener('change', syncConsent); syncConsent();
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        msg.hidden = true;
+        var on = !!form.elements.ai_enabled.checked, ack = !!form.elements.ai_consent.checked;
+        var cap = Number(form.elements.daily_request_cap.value), budget = Number(form.elements.monthly_budget_usd.value);
+        var bad = !Number.isInteger(cap) || cap < 1 || cap > 1000 ? t('ai_err_cap')
+          : (!isFinite(budget) || budget < 0 || budget > 10000 || Math.round(budget * 100) !== budget * 100 ? t('ai_err_budget')
+            : (on && !a.enabled && !ack ? t('ai_consent_required') : null));
+        if (bad) { msg.textContent = bad; msg.hidden = false; return; }
+        var payload = { enabled: on, daily_request_cap: cap, monthly_budget_usd: budget };
+        if (on && !a.enabled) payload.consent_ack = true;
+        saveBtn.disabled = true;
+        call('aiSaveSettings', S.orgId, payload).then(function (res) {
+          saveBtn.disabled = false;
+          if (res.error) { msg.textContent = errCode(res.error) === 'MRS_REQUIRED' ? t('ai_consent_required') : apiErr(res.error); msg.hidden = false; return; }
+          toast(T.common.saved, 'success'); rerender();
+        });
+      });
+      return dCard(t('ai_title'), [el('p', { class: 'text-sm text-muted', text: t('ai_sub') }), status,
+        el('h4', { text: t('ai_usage') }), usage, form, dAlert('info', t('ai_privacy'))]);
     });
   }
 

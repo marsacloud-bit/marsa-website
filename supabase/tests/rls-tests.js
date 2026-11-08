@@ -599,7 +599,7 @@ async function main() {
   });
   await check('anon has no USAGE on schema app', async () =>
     (await q(`SELECT has_schema_privilege('anon', 'app', 'USAGE') u`))[0].u === false);
-  await check('authenticated can execute only the 188 documented public RPCs', async () => {
+  await check('authenticated can execute only the 191 documented public RPCs', async () => {
     const r = await q(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                         WHERE n.nspname = 'public' AND has_function_privilege('authenticated', p.oid, 'EXECUTE') ORDER BY 1`);
     const exp = ['admin_list_members', 'admin_set_member_active', 'convert_request_to_transaction', 'import_commit', 'issue_tracking_token', 'my_context', 'public_track',
@@ -634,9 +634,11 @@ async function main() {
       ...G6B_STAFF_RPCS,
       // G7 subscriptions (20261108000100): 8 platform-admin RPCs + org_subscription (org admin)
       'platform_list_plans', 'platform_save_plan', 'platform_list_subscriptions', 'platform_set_org_plan', 'platform_suspend_org',
-      'platform_activate_org', 'platform_org_usage', 'platform_recount_usage', 'org_subscription'];
+      'platform_activate_org', 'platform_org_usage', 'platform_recount_usage', 'org_subscription',
+      // AI document reading (20261114000100): staff ai_access + org-admin settings; ai_reserve / ai_settle are service_role only
+      'ai_access', 'ai_get_settings', 'ai_save_settings'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 188) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 191) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');

@@ -17,9 +17,13 @@
   missing-data 100 %. SOFT (WARN): classification macro P ≥ 0.80 / R ≥ 0.75; extraction P ≥ 0.95 / R ≥ 0.85;
   matching top-1 ≥ 0.85.
   --write → docs/online/G7_AI_EVAL_RESULTS.md (deterministic: no timestamp; mock provider only; LLM evaluation OWNER-PENDING).
+  --provider=claude → the unit part with the model-backed provider (llm-provider.js) on the LIVE Claude API. SKIPPED (exit 0,
+  nothing loaded, no network) unless MARSA_LIVE_AI=1 is set — the test suites never set it. Live mode needs
+  @anthropic-ai/sdk on NODE_PATH and ANTHROPIC_API_KEY in the environment (owner only; never in a file); the budget is
+  MARSA_LIVE_AI_BUDGET_USD (default 5). No DB part, no --write, no determinism check in live mode.
 
   usage:
-    NODE_PATH=/tmp/pgtest/node_modules node supabase/tests/g7-ai-eval.js [/path/to/marsa-website] [--quiet] [--unit] [--write]
+    NODE_PATH=/tmp/pgtest/node_modules node supabase/tests/g7-ai-eval.js [/path/to/marsa-website] [--quiet] [--unit] [--write] [--provider=rule_mock|claude]
 */
 'use strict';
 const fs = require('fs');
@@ -30,6 +34,14 @@ const ROOT = args.find(a => !a.startsWith('--')) || '/Users/apple/Downloads/mars
 const QUIET = args.includes('--quiet');
 const UNIT_ONLY = args.includes('--unit');
 const WRITE = args.includes('--write');
+const PROVIDER = (args.find(a => a.startsWith('--provider=')) || '--provider=rule_mock').slice('--provider='.length);
+if (!['rule_mock', 'claude'].includes(PROVIDER)) { console.log('unknown --provider=' + PROVIDER); process.exit(2); }
+const LIVE = PROVIDER === 'claude';
+if (LIVE && process.env.MARSA_LIVE_AI !== '1') {
+  console.log('SKIP  --provider=claude: live AI evaluation runs only with MARSA_LIVE_AI=1 (no live calls in tests)');
+  console.log('OK — 0 passed, 0 failed, 0 warnings (skipped)');
+  process.exit(0);
+}
 const SUPA = path.join(ROOT, 'supabase');
 const FN = path.join(SUPA, 'functions', 'inbox-sync');
 const SET_FILE = path.join(SUPA, 'tests', 'fixtures', 'g7-ai-eval-set.json');
@@ -38,7 +50,7 @@ const G7_MIGRATION = '20261108000100_g7_subscriptions.sql';
 
 // No network anywhere: any fetch is a test failure (the worker is given no fetch).
 let fetchCalls = 0;
-globalThis.fetch = async () => { fetchCalls++; throw new Error('network forbidden in g7-ai-eval'); };
+if (!LIVE) globalThis.fetch = async () => { fetchCalls++; throw new Error('network forbidden in g7-ai-eval'); };
 
 const AD = require(path.join(FN, 'adapters.js'));
 const ME = require(path.join(FN, 'mock-email.js'));
@@ -46,7 +58,28 @@ const MW = require(path.join(FN, 'mock-whatsapp.js'));
 const AI = require(path.join(FN, 'ai-mock.js'));
 const PL = require(path.join(FN, 'pipeline.js'));
 const WK = require(path.join(FN, 'worker.js'));
-const DEPS = Object.assign({}, AD, AI, PL);
+const LP = require(path.join(FN, 'llm-provider.js'));
+const DEPS = Object.assign({}, AD, AI, PL, LP);
+
+// live mode only (MARSA_LIVE_AI=1): the same request / response code as index.ts, over the Node SDK
+function liveCallModel() {
+  const Anthropic = require('@anthropic-ai/sdk');
+  const client = new (Anthropic.default || Anthropic)({ maxRetries: 1, timeout: 30000 });   // ANTHROPIC_API_KEY from the environment
+  return async req => LP.parseClaudeResponse(await client.beta.messages.create(LP.buildClaudeRequest(req), { timeout: 30000 }));
+}
+const LIVE_CALL = LIVE ? liveCallModel() : null;
+const LIVE_SETTINGS = { ai_monthly_budget_usd: Number(process.env.MARSA_LIVE_AI_BUDGET_USD || 5), month_to_date_usd: 0 };
+const liveSpent = { usd: 0 };
+// one provider per message / draft (as the worker does per job); the budget carries over between them
+function unitProvider() {
+  if (!LIVE) return AI.createRuleProvider({ clock: FIXED_CLOCK });
+  const p = AD.createLlmProvider({ impl: LP.createModelProvider, callModel: LIVE_CALL, deps: DEPS, clock: FIXED_CLOCK,
+    settings: Object.assign({}, LIVE_SETTINGS, { month_to_date_usd: liveSpent.usd }), deadlineMs: 300000 });
+  return p;
+}
+const settle = p => { if (p && typeof p.usage === 'function') liveSpent.usd += p.usage().cost_usd; };
+const unitSettings = () => (LIVE ? Object.assign({ ai_provider: 'claude', default_lang: 'ar' }, LIVE_SETTINGS, { month_to_date_usd: liveSpent.usd })
+  : { ai_provider: 'rule_mock', default_lang: 'ar', ai_monthly_budget_usd: 0, month_to_date_usd: 0 });
 
 let nPass = 0, nFail = 0, nWarn = 0;
 const fails = [], warns = [];
@@ -221,7 +254,7 @@ function setShape() {
 const UNIT = { rows: [], extr: [], inj: [], drafts: [], missing: [] };
 function unitCtx(m) {
   return {
-    job: { id: 'j-' + m.id, org_id: 'o', kind: 'process' }, settings: { ai_provider: 'rule_mock', default_lang: 'ar', ai_monthly_budget_usd: 0, month_to_date_usd: 0 },
+    job: { id: 'j-' + m.id, org_id: 'o', kind: 'process' }, settings: unitSettings(),
     channel: { id: 'c', kind: m.channel, address_norm: m.channel === 'whatsapp' ? CHANNEL_WA : CHANNEL_EMAIL },
     message: { id: 'm-' + m.id, thread_id: 't', direction: 'inbound', subject: m.subject, body_text: m.body,
       from: { address_norm: String(m.from).toLowerCase(), name: m.from_name || null }, to: [m.channel === 'whatsapp' ? CHANNEL_WA : CHANNEL_EMAIL],
@@ -237,10 +270,12 @@ function unitFacts(txKey) {
       appointment: null, return_deadlines: [], missing_documents: [] } };
 }
 async function unitPart() {
-  section('1. unit part: rule provider over the set (no DB)');
-  const P = AI.createRuleProvider({ clock: FIXED_CLOCK });
+  section('1. unit part: ' + (LIVE ? 'LIVE Claude provider' : 'rule provider') + ' over the set (no DB)');
+  const P = AI.createRuleProvider({ clock: FIXED_CLOCK });     // the fact-token checker (rules), whatever the provider
   for (const m of MSGS) {
-    const e = await PL.processMessage(unitCtx(m), P, DEPS);
+    const PM = unitProvider();
+    const e = await PL.processMessage(unitCtx(m), PM, DEPS);
+    settle(PM);
     UNIT.rows.push({ id: m.id, label: m.label.category, pred: e.classification.category });
     UNIT.extr.push({ id: m.id, label: m.label.refs, pred: e.extractions.filter(x => x.valid).map(x => ({ kind: x.kind, normalized: x.normalized })) });
     if (m.label.injection) {
@@ -259,7 +294,7 @@ async function unitPart() {
     const bad = UNIT.inj.filter(x => x.leaked.length);
     return bad.length === 0 || J(bad);
   });
-  await check('unit determinism: a second pass gives byte-identical process effects', async () => {
+  if (!LIVE) await check('unit determinism: a second pass gives byte-identical process effects', async () => {
     const P2 = AI.createRuleProvider({ clock: FIXED_CLOCK });
     const diff = [];
     for (const m of MSGS) {
@@ -274,10 +309,12 @@ async function unitPart() {
     const txKey = isMissing ? 'T5' : (TXK.includes(m.label.match) ? m.label.match : null);
     const facts = txKey ? unitFacts(txKey) : { public: {} };
     const ok = m.label.sender === 'verified';
-    const ctx = { job: { id: 'jd-' + m.id, org_id: 'o', kind: 'draft' }, settings: { ai_provider: 'rule_mock', default_lang: 'ar' },
+    const ctx = { job: { id: 'jd-' + m.id, org_id: 'o', kind: 'draft' }, settings: LIVE ? unitSettings() : { ai_provider: 'rule_mock', default_lang: 'ar' },
       draft: { reply_id: null, thread_id: 't-' + m.id, lang: m.draft.lang, template_key: m.draft.template_key, template: null, params: {}, category: m.label.category,
         recipient: { address_norm: String(m.from).toLowerCase(), contact_display_name: ok ? 'Counterpart' : null, verified: ok, authorized: ok }, facts } };
-    const d = await PL.buildDraft(ctx, P, DEPS);
+    const PD = unitProvider();
+    const d = await PL.buildDraft(ctx, PD, DEPS);
+    settle(PD);
     const inv = inventedTokens(P, d.subject + '\n' + d.body_text, facts, ['2026-11-02']);
     UNIT.drafts.push({ id: m.id, invented: inv, clarification: d.clarification, missing: d.missing });
     if (isMissing) {
@@ -838,11 +875,12 @@ async function main() {
   await setShape();
   await checkerSelfTest();
   await unitPart();
-  if (!UNIT_ONLY) {
+  if (LIVE) pass('live Claude evaluation: estimated cost $' + liveSpent.usd.toFixed(4) + ' (DB part, --write and determinism skipped)');
+  if (!UNIT_ONLY && !LIVE) {
     try { await dbPart(); } catch (e) { fail('DB evaluation', errText(e)); }
   }
   thresholds();
-  if (WRITE) writeDoc();
+  if (WRITE && !LIVE) writeDoc();
   finish();
 }
 

@@ -3,12 +3,16 @@
   Plain classic script (no import / export, no require). Every dependency is passed explicitly as `deps`
   (the merged API of adapters.js + pipeline.js; ai-mock.js provides the rule provider).
 
-  createWorker({ rpc, adapterFor, provider, workerId, clock, deps, beforeComplete, fenceWrites, callTimeoutMs }):
+  createWorker({ rpc, adapterFor, provider, llmFactory, aiLedger, workerId, clock, deps, beforeComplete, fenceWrites, callTimeoutMs }):
     rpc(name, args)               → Promise<jsonb>   (Deno: supabase-js service client; tests: PGlite as service_role)
     adapterFor(channel, orgId)    → channel adapter (one adapter per channel, built from that channel's row only)
     provider                      → the AI provider (rule mock); settings.ai_provider='llm_pending' → deps.createLlmProvider()
+    llmFactory(ctx, {holdUsd})    → optional: a model-backed provider for ONE job (settings.ai_provider='claude')
+    aiLedger                      → optional, required with llmFactory: {reserve(ctx, est_usd) → id, settle(id, status, usage)}
+                                    (index.ts: public.ai_reserve / ai_settle, purpose 'inbox' — the org's ONE AI switch,
+                                    consent and monthly budget, shared with document reading)
     runOnce({limit})              → {claimed, ok, retry, failed, unknown, conflict, errors, results}
-  runJob(ctx, adapter, {deps, provider, clock, beforeWrite, callTimeoutMs}) → p_result for msg_complete_job:
+  runJob(ctx, adapter, {deps, provider, llmFactory, aiLedger, clock, beforeWrite, callTimeoutMs}) → p_result for msg_complete_job:
     {outcome, error, calls, effects}
 
   Binding rules implemented here:
@@ -231,11 +235,41 @@
   // a write the recorder saw applied (or could not tell) — the job result must then be 'unknown'
   const wroteAny = (A, calls) => (calls || []).some(c => c && A.WRITE_METHODS.includes(c.op) && c.applied !== 'no');
 
+  // settings.ai_provider: 'rule_mock' (default) → the rule provider; 'claude' → opts.llmFactory(ctx, {holdUsd}) (index.ts
+  // builds it only when ANTHROPIC_API_KEY is set: one model-backed provider per job) inside a reservation of the shared
+  // AI ledger (opts.aiLedger: public.ai_reserve refuses unless the org admin enabled AI with the consent that covers
+  // message text — app.ai_settings, the same switch as document reading — and the monthly budget has room); anything else
+  // ('llm_pending', or 'claude' without a factory + ledger) → the stub, every method throws not_configured.
   function providerFor(ctx, opts, A) {
-    const p = (ctx.settings && ctx.settings.ai_provider) || 'rule_mock';
-    if (p !== 'rule_mock') return A.createLlmProvider();         // every method throws not_configured
-    if (!opts.provider) throw new A.AdapterError('not_configured', 'no rule provider given', { applied: 'no', code: 'not_configured' });
-    return opts.provider;
+    const s = ctx.settings || {};
+    const p = s.ai_provider || 'rule_mock';
+    if (p === 'rule_mock') {
+      if (!opts.provider) throw new A.AdapterError('not_configured', 'no rule provider given', { applied: 'no', code: 'not_configured' });
+      return opts.provider;
+    }
+    return A.createLlmProvider();         // every method throws not_configured
+  }
+  const usesModel = (ctx, o, A) => (ctx.settings || {}).ai_provider === 'claude' && typeof o.llmFactory === 'function' && !!o.aiLedger
+    && typeof o.aiLedger.reserve === 'function' && typeof o.aiLedger.settle === 'function' && typeof A.estimateJobHoldUsd === 'function';
+  // run(provider) for a process / draft job. With Claude: reserve the job's maximum spend first (row-locked in SQL:
+  // concurrent runs cannot overspend), cap the provider at it, and settle with the provider's real usage in EVERY case —
+  // refusal, schema failure, timeout, the pipeline's own budget check — so no spend escapes the budget.
+  async function withAiProvider(ctx, o, A, run) {
+    if (!usesModel(ctx, o, A)) return run(providerFor(ctx, o, A));
+    const hold = A.estimateJobHoldUsd(A, ctx);
+    const reservation = await o.aiLedger.reserve(ctx, hold);          // throws AdapterError (not_configured ai_disabled, ai_budget, …)
+    let P = null, status = 'ok';
+    try {
+      P = o.llmFactory(ctx, { holdUsd: hold });
+      return await run(P);
+    } catch (e) {
+      status = typeof A.ledgerStatusOf === 'function' ? A.ledgerStatusOf(e) : 'unknown';
+      throw e;
+    } finally {
+      const usage = P && typeof P.usage === 'function' ? P.usage() : null;
+      try { await o.aiLedger.settle(reservation, status, usage); }
+      catch (_) { /* left 'reserved': the next reservation's 15-minute sweep charges the hold */ }
+    }
   }
 
   function targetOf(ctx) {
@@ -258,8 +292,8 @@
       else if (kind === 'poll') res = await pollJob(Object.assign({ calls: R.calls }, R.api), ctx, A);
       else if (kind === 'status') res = await statusJob(R.api, ctx, A);
       else if (kind === 'send') res = await sendJob(R.api, ctx, A);
-      else if (kind === 'process') res = { outcome: 'ok', effects: await A.processMessage(ctx, providerFor(ctx, o, A), A) };
-      else if (kind === 'draft') res = { outcome: 'ok', effects: await A.buildDraft(ctx, providerFor(ctx, o, A), A) };
+      else if (kind === 'process') res = { outcome: 'ok', effects: await withAiProvider(ctx, o, A, P => A.processMessage(ctx, P, A)) };
+      else if (kind === 'draft') res = { outcome: 'ok', effects: await withAiProvider(ctx, o, A, P => A.buildDraft(ctx, P, A)) };
       else res = { outcome: 'failed', effects: {}, error: { kind: 'validation', code: 'job_kind', message: 'unknown job kind ' + kind, applied: 'no' } };
     } catch (e) {
       if (e instanceof Outcome) res = { outcome: e.outcome, effects: e.effects || {}, error: e.error };
@@ -300,7 +334,7 @@
         try {
           const adapter = CHANNEL_KINDS.includes(ctx.job.kind) ? await c.adapterFor(ctx.channel || {}, ctx.job.org_id) : null;
           const beforeWrite = c.fenceWrites === false ? null : () => c.rpc('msg_renew_lease', { p_attempt: ctx.attempt_id });
-          result = await runJob(ctx, adapter, { deps: A, provider: c.provider, clock, beforeWrite, callTimeoutMs: c.callTimeoutMs });
+          result = await runJob(ctx, adapter, { deps: A, provider: c.provider, llmFactory: c.llmFactory, aiLedger: c.aiLedger, clock, beforeWrite, callTimeoutMs: c.callTimeoutMs });
         } catch (e) {
           const m = mapAdapterError(A, e);
           result = { outcome: m.outcome, error: m.error, calls: [], effects: targetOf(ctx) };

@@ -9,6 +9,13 @@
        ara/eng language data), pdf.js 3.11.174 (cdnjs), jsQR 1.4.0 (jsDelivr).
    - A PDF page with a real text layer is used as-is (no OCR).
    - ZATCA e-invoice QR (base64 TLV) values are higher-trust and prefill fields.
+   - AI reading (Claude, 20261114000100): a second engine shown only online, to
+     signed-in staff, when MarsaApi.aiAccess says the org admin enabled it. The
+     file is then sent (base64) to the Edge Function ai-extract
+     (MarsaApi.aiExtract) and from there to Anthropic; the page says so before
+     the user picks it. Fields come back with a confidence 0..1 and server
+     warnings (ISO 6346, VAT, totals); saving uses the same flow with engine
+     'claude-opus-5-5' + ai_usage_id. Tesseract stays the default.
    - Save: signed-in staff (online) → MarsaApi.saveExtraction (+ optional
      transaction link and original upload); otherwise the local history
      "marsa_extractions" (MarsaApi.localExtractions).
@@ -72,6 +79,19 @@
     var LOW_CONF = 70;
     var PREFILL_KEY = 'marsa_ocr_prefill';
     var IMG_EXT = ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'heic', 'heif'];
+    // AI reading (Claude): what the Edge Function accepts
+    var ENGINE_AI = 'claude-opus-5-5';
+    var AI_MAX_FILE = 10 * 1024 * 1024;           // PDF
+    var AI_MAX_IMAGE = 5 * 1024 * 1024;           // image (the API's per-image limit)
+    var AI_MEDIA = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', pdf: 'application/pdf' };
+    // page doc type → the AI doc type (the others are detected: 'auto')
+    var AI_DOC = { commercial_invoice: 'commercial_invoice', operator_invoice: 'supplier_invoice', bill_of_lading: 'bill_of_lading',
+      customs_declaration: 'customs_declaration' };
+    var I18N = window.MarsaI18n || null;
+    function T(key, vars) {
+      var k = 'ocr.' + key;
+      return I18N && typeof I18N.t === 'function' && (!I18N.has || I18N.has(k)) ? I18N.t(k, vars) : key;
+    }
 
     var DOC_TYPES = [
       ['commercial_invoice', 'فاتورة تجارية'], ['operator_invoice', 'فاتورة مشغل / مورد'], ['bill_of_lading', 'بوليصة شحن'],
@@ -95,7 +115,14 @@
       { key: 'declaration_number', label: 'رقم البيان الجمركي', kind: 'digits', ltr: true },
       { key: 'hs_codes', label: 'رموز HS', kind: 'hs', ltr: true, ph: '8708.30, …' },
       { key: 'country_of_origin', label: 'بلد المنشأ', kind: 'text' },
-      { key: 'iban', label: 'رقم الآيبان (IBAN)', kind: 'iban', ltr: true }
+      { key: 'iban', label: 'رقم الآيبان (IBAN)', kind: 'iban', ltr: true },
+      // AI reading only (shown when the reading has them)
+      { key: 'vessel', label: T('f_vessel'), kind: 'text', ai: true },
+      { key: 'voyage', label: T('f_voyage'), kind: 'id', ltr: true, ai: true },
+      { key: 'port_of_loading', label: T('f_port_of_loading'), kind: 'text', ai: true },
+      { key: 'port_of_discharge', label: T('f_port_of_discharge'), kind: 'text', ai: true },
+      { key: 'shipper', label: T('f_shipper'), kind: 'text', ai: true },
+      { key: 'consignee', label: T('f_consignee'), kind: 'text', ai: true }
     ];
     var FIELD_LABEL = {};
     FIELD_DEFS.forEach(function (d) { FIELD_LABEL[d.key] = d.label; });
@@ -220,6 +247,7 @@
     function gated(p) { return cancelGate ? Promise.race([p, cancelGate.p]) : p; }
     var worker = null, workerLangs = '', logSink = null;
     var STAFF = false;
+    var AI = { enabled: false, remaining: null };     // ai_access of the active org (staff, online)
 
     var queueEl = $('ocr-queue');
     var fileInput = $('ocr-file');
@@ -688,6 +716,94 @@
       j.machineItems = res.lineItems;
     }
 
+    /* ---------------------------------------------------------------
+       AI reading (Claude) — the file leaves the browser only here
+       --------------------------------------------------------------- */
+    function engineMode() {
+      var r = $('ocr-engine-ai');
+      return ONLINE && STAFF && AI.enabled && r && r.checked ? 'ai' : 'tesseract';
+    }
+    function aiMediaType(f) {
+      var t = String(f.type || '').toLowerCase();
+      var byType = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'].indexOf(t) !== -1 ? t : null;
+      return byType || AI_MEDIA[ext(f.name)] || null;
+    }
+    function fileB64(file) {
+      return new Promise(function (resolve, reject) {
+        var fr = new FileReader();
+        fr.onload = function () { var s = String(fr.result || ''); var i = s.indexOf(','); resolve(i >= 0 ? s.slice(i + 1) : ''); };
+        fr.onerror = function () { reject(new Error('read')); };
+        fr.readAsDataURL(file);
+      });
+    }
+    function aiLevel(c) { return c >= 0.85 ? 'high' : (c >= 0.6 ? 'medium' : 'low'); }
+    function processAiJob(j) {
+      var mt = aiMediaType(j.file);
+      if (!mt) return Promise.reject(new Error(T('ai_unsupported')));
+      if (j.file.size > (mt === 'application/pdf' ? AI_MAX_FILE : AI_MAX_IMAGE)) return Promise.reject(new Error(T('ai_too_large')));
+      setProgress(j, 10, T('ai_sending'), true);
+      return fileB64(j.file).then(function (b64) {
+        setProgress(j, 30, T('ai_reading'), true);
+        return activeOrg().then(function (oid) {
+          return API.aiExtract({ orgId: oid || undefined, docType: AI_DOC[j.docType] || 'auto', file: { media_type: mt, data_b64: b64 },
+            lang: I18N && I18N.lang ? I18N.lang() : 'ar' });
+        });
+      }).then(function (r) {
+        if (r.error) throw new Error(r.error.message || T('ai_unsupported'));
+        if (AI.remaining != null) { AI.remaining = Math.max(0, AI.remaining - 1); showAiRemaining(); }
+        return r.data;
+      });
+    }
+    // the Edge Function's answer → the job (same shape as an OCR job; untrusted values are only ever set as text)
+    function finishAiJob(j, res) {
+      var fields = {};
+      (res.fields || []).forEach(function (f) {
+        if (!f || typeof f.name !== 'string' || typeof f.value !== 'string') return;
+        var c = Number(f.confidence); if (!isFinite(c)) c = 0;
+        fields[f.name] = { value: f.value, confidence: aiLevel(c), source: 'ai', score: c, page: f.page || null, valid: f.valid !== false };
+      });
+      j.fields = fields;
+      j.items = (res.line_items || []).map(function (x) { return Object.assign({}, x); });
+      j.machineItems = (res.line_items || []).map(function (x) { return Object.assign({}, x); });
+      j.extracted = P.plainFields(fields);
+      j.text = String(res.raw_text || '').slice(0, MAX_TEXT);
+      j.confidence = res.mean_confidence == null ? null : Number(res.mean_confidence);
+      j.engine = ENGINE_AI; j.langs = 'auto';
+      var maxPage = 0;
+      (res.fields || []).forEach(function (f) { if (f && f.page > maxPage) maxPage = f.page; });
+      j.pages = maxPage || null; j.pageCount = j.pages;
+      // a type the AI was not told (packing list, other …) takes the detected one
+      if (!AI_DOC[j.docType] && DOC_TYPES.some(function (t) { return t[0] === res.kind; })) j.docType = res.kind;
+      j.ai = { usageId: res.usage_id, model: res.model || ENGINE_AI, warnings: (res.warnings || []).slice(0, 60),
+        costUsd: res.usage && res.usage.cost_usd != null ? Number(res.usage.cost_usd) : null };
+      j.status = 'done'; j.progress = 100;
+    }
+    function showAiRemaining() {
+      var n = $('ocr-ai-remaining');
+      if (n) n.textContent = AI.remaining == null ? '' : T('ai_remaining', { n: AI.remaining });
+    }
+    function syncEngineUi() {
+      var g = $('ocr-engine-group');
+      var show = ONLINE && STAFF && AI.enabled;
+      if (g) g.hidden = !show;
+      if (!show && $('ocr-engine-tesseract')) $('ocr-engine-tesseract').checked = true;
+      var note = $('ocr-ai-note');
+      if (note) note.hidden = !(show && $('ocr-engine-ai') && $('ocr-engine-ai').checked);
+      showAiRemaining();
+    }
+    qsa('input[name="ocr-engine"]').forEach(function (r) { r.addEventListener('change', syncEngineUi); });
+    // the AI mode exists only for staff of an org whose admin enabled it (MarsaApi.aiAccess = public.ai_access)
+    function initAi() {
+      AI.enabled = false; AI.remaining = null;
+      if (!ONLINE || !STAFF || !API || typeof API.aiAccess !== 'function') { syncEngineUi(); return Promise.resolve(false); }
+      return activeOrg().then(function (oid) { return API.aiAccess(oid || undefined); }).then(function (r) {
+        AI.enabled = !!(r && !r.error && r.data && r.data.can_use === true);
+        AI.remaining = AI.enabled && r.data.daily_remaining != null ? Number(r.data.daily_remaining) : null;
+        syncEngineUi();
+        return AI.enabled;
+      }, function () { syncEngineUi(); return false; });
+    }
+
     function runQueue() {
       if (running) return;
       var todo = jobs.filter(function (j) { return j.status === 'queued' || j.status === 'cancelled'; });
@@ -703,12 +819,13 @@
         j.status = 'running'; j.error = ''; j.qr = null; j.qrOther = false; j.processedThumb = false;
         j.saved = null;     // a re-read is a new extraction (new machine output)
         j.docType = $('ocr-doc-type').value; j.langs = $('ocr-langs').value;
+        j.mode = engineMode(); j.ai = null;
         renderQueue();
         setProgress(j, 0, 'تحضير الملف…', true);
         sha256(j.file).then(function (h) { j.sha256 = h; })
-          .then(function () { return gated(isPdf(j.file) ? processPdfJob(j) : processImageJob(j)); })
+          .then(function () { return gated(j.mode === 'ai' ? processAiJob(j) : (isPdf(j.file) ? processPdfJob(j) : processImageJob(j))); })
           .then(function (pages) {
-            finishJob(j, pages);
+            if (j.mode === 'ai') finishAiJob(j, pages); else finishJob(j, pages);
             if (!firstDone) firstDone = j;
             announce('تمت قراءة ' + j.name + (j.confidence != null ? ' بدقة ' + Math.round(j.confidence) + '%' : '') + '.');
           }, function (e) {
@@ -766,10 +883,14 @@
       box.textContent = '';
       var typeName = (DOC_TYPES.filter(function (t) { return t[0] === j.docType; })[0] || DOC_TYPES[6])[1];
       box.appendChild(badge('badge-navy', typeName));
-      if (j.confidence != null) box.appendChild(badge(j.confidence < LOW_CONF ? 'badge-warning' : 'badge-success', 'متوسط دقة القراءة: ' + Math.round(j.confidence) + '%'));
+      if (j.engine === ENGINE_AI) {
+        box.appendChild(badge('badge-teal', T('ai_badge')));
+        if (j.confidence != null) box.appendChild(badge(j.confidence < LOW_CONF ? 'badge-warning' : 'badge-success', T('ai_conf', { n: Math.round(j.confidence) })));
+        if (j.ai && j.ai.costUsd != null) box.appendChild(badge('badge-blue', T('ai_cost', { usd: j.ai.costUsd.toFixed(4) })));
+      } else if (j.confidence != null) box.appendChild(badge(j.confidence < LOW_CONF ? 'badge-warning' : 'badge-success', 'متوسط دقة القراءة: ' + Math.round(j.confidence) + '%'));
       else box.appendChild(badge('badge-success', 'نص PDF أصلي (دون تعرّف ضوئي)'));
       if (j.pages) box.appendChild(badge('badge-blue', 'الصفحات: ' + j.pages + (j.truncated ? ' (أول ' + MAX_PAGES + ' من ' + j.pageCount + ')' : '')));
-      if (j.langs) box.appendChild(badge('badge-blue', 'اللغة: ' + (LANG_LABEL[j.langs] || j.langs)));
+      if (j.langs && j.engine !== ENGINE_AI) box.appendChild(badge('badge-blue', 'اللغة: ' + (LANG_LABEL[j.langs] || j.langs)));
       if (j.qr) box.appendChild(badge('badge-teal', 'رمز QR للفاتورة الإلكترونية ✓'));
       else if (j.qrOther) box.appendChild(badge('badge-warning', 'رمز QR غير مطابق لصيغة الفاتورة الإلكترونية'));
       if (j.saved) box.appendChild(badge('badge-success', j.saved.where === 'server' ? 'محفوظ على الخادم' : 'محفوظ على هذا الجهاز'));
@@ -830,6 +951,7 @@
     function srcInfo(f) {
       if (!f || !f.value) return null;
       if (f.source === 'qr') return { cls: 'is-qr', text: 'من رمز QR' };
+      if (f.source === 'ai') return { cls: 'is-' + (f.confidence || 'medium'), text: T('ai_src', { n: Math.round((Number(f.score) || 0) * 100) }) };
       if (f.source === 'manual' || f.confidence === 'manual') return { cls: 'is-manual', text: CONF_LABEL.manual };
       return { cls: 'is-' + f.confidence, text: CONF_LABEL[f.confidence] || '' };
     }
@@ -838,6 +960,7 @@
       box.textContent = '';
       FIELD_DEFS.forEach(function (def) {
         var f = j.fields[def.key];
+        if (def.ai && !f && j.engine !== ENGINE_AI) return;           // AI-only keys: only on an AI reading
         var g = el('div', 'form-group ocr-field');
         g.setAttribute('data-key', def.key);
         var head = el('div', 'ocr-field-head');
@@ -914,6 +1037,21 @@
         a.appendChild(el('span', null, m[1]));
         box.appendChild(a);
       });
+      // AI reading: the model's notes and the server checks (ISO 6346, VAT, totals) — untrusted text, textContent only
+      var aw = j.ai && j.ai.warnings ? j.ai.warnings : [];
+      if (aw.length) {
+        var w = el('div', 'alert alert-warning');
+        var inner = el('div');
+        inner.appendChild(el('strong', null, T('ai_warn_title')));
+        var ul = el('ul');
+        aw.forEach(function (x) {
+          var label = x && x.field ? (FIELD_LABEL[x.field] || x.field) + ': ' : '';
+          ul.appendChild(el('li', null, label + String((x && x.text) || '')));
+        });
+        inner.appendChild(ul);
+        w.appendChild(inner);
+        box.appendChild(w);
+      }
     }
 
     /* line items */
@@ -1000,6 +1138,7 @@
     typeSel.addEventListener('change', function () { var j = current(); if (j) { j.docType = this.value; renderMeta(j); } });
     $('ocr-reextract').addEventListener('click', function () {
       var j = current();
+      if (j && j.engine === ENGINE_AI) { toast(T('ai_reextract_off'), 'info'); return; }
       if (!j) return;
       var edited = Object.keys(j.fields).some(function (k) { return j.fields[k].source === 'manual'; });
       if (!edited) { reextract(j); return; }
@@ -1140,14 +1279,14 @@
       try { var o = Shell.orgId(); return typeof o === 'string' && o ? o : null; } catch (e) { return null; }
     }
     function buildRow(j) {
-      return {
+      return Object.assign({
         doc_type: j.docType || 'other', source_name: String(j.name || 'document').slice(0, 255), source_sha256: j.sha256 || '',
         source_mime: j.mime ? String(j.mime).slice(0, 120) : null, source_size: j.size > 0 ? j.size : null,
         source_pages: j.pages ? Math.min(Math.max(j.pages, 1), 200) : null, engine: String(j.engine || ENGINE_OCR).slice(0, 80),
         languages: String(j.langs || 'ara+eng').slice(0, 40), mean_confidence: j.confidence == null ? null : Math.min(100, Math.max(0, j.confidence)),
         raw_text: String(j.text || '').slice(0, MAX_TEXT), extracted_fields: j.extracted || {}, qr_payload: j.qr || null,
         line_items: (j.machineItems || []).map(function (x) { return Object.assign({}, x); })
-      };
+      }, j.engine === ENGINE_AI && j.ai && j.ai.usageId ? { ai_usage_id: j.ai.usageId, languages: 'auto', qr_payload: null } : {});
     }
     // order-independent: jsonb returns keys sorted by length, not in insertion order
     var ITEM_KEYS = ['description', 'hs_code', 'quantity', 'unit_price', 'amount'];
@@ -1372,13 +1511,15 @@
           text: row.raw_text || '', confidence: row.mean_confidence == null ? null : Number(row.mean_confidence), engine: row.engine,
           pages: row.source_pages, pageCount: row.source_pages, qr: row.qr_payload || null, sha256: row.source_sha256,
           extracted: row.extracted_fields || {}, machineItems: [], saved: { id: row.id, where: where, row: row } };
-        var res = P.extractFields(j.text, j.docType);
-        if (j.qr) res = P.mergeQr(res, j.qr);
+        var isAi = row.engine === ENGINE_AI;
+        var res = isAi ? { fields: {} } : P.extractFields(j.text, j.docType);
+        if (j.qr && !isAi) res = P.mergeQr(res, j.qr);
         var stored = row.reviewed_fields || row.extracted_fields || {};
         var fields = {};
         Object.keys(stored).forEach(function (k) {
           var auto = res.fields[k];
-          fields[k] = auto && auto.value === stored[k] ? auto : { value: String(stored[k]), confidence: row.reviewed_fields ? 'manual' : 'medium', source: row.reviewed_fields ? 'manual' : 'text' };
+          fields[k] = auto && auto.value === stored[k] ? auto : { value: String(stored[k]), confidence: row.reviewed_fields ? 'manual' : 'medium',
+            source: row.reviewed_fields ? 'manual' : (isAi ? 'ai' : 'text'), score: isAi && row.mean_confidence != null ? Number(row.mean_confidence) / 100 : undefined };
         });
         j.fields = fields;
         j.items = (row.line_items || []).map(function (x) { return Object.assign({}, x); });
@@ -1410,6 +1551,7 @@
       historySub();
       var c = current(); if (c) renderSaveState(c);
       loadHistory();
+      initAi();
     });
     // org switcher (app shell): staff role, server history and the transaction picker follow the active org.
     // A result already saved keeps its row (it belongs to the org it was saved in).
@@ -1421,10 +1563,11 @@
         resetTxPicker();
         var c = current(); if (c && !c.saved) renderSaveState(c);
         loadHistory();
+        initAi();
       });
     });
     if (ONLINE && API && API.onAuth) {
-      API.onAuth(function () { initRole().then(function (s) { if (s !== STAFF) { STAFF = s; var c = current(); if (c && !c.saved) renderSaveState(c); loadHistory(); } }); });
+      API.onAuth(function () { initRole().then(function (s) { if (s !== STAFF) { STAFF = s; var c = current(); if (c && !c.saved) renderSaveState(c); loadHistory(); initAi(); } }); });
     }
     window.addEventListener('beforeunload', function () { killWorker(); });
   });

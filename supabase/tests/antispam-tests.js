@@ -162,8 +162,12 @@ async function secFile() {
     return (lim.length === 2 && lim.every(f => f === "app.fail('MRS_RATE_LIMITED', 'try_later')")
       && fails.length === 3 && fails.includes("app.fail('MRS_INVALID', 'action')")) || J(fails);
   });
-  await check('this is the latest migration file', () => migFiles().pop() === MIG || 'latest: ' + migFiles().pop());
-  await check('all_migrations.sql holds this file verbatim (appended like the earlier phases, last) + a header line', () => {
+  // later phases may follow this file (20261114000100 ai_documents); none may sort before it unnoticed
+  await check('this file is present; only the listed later phases follow it', () => {
+    const later = migFiles().filter(f => f > MIG);
+    return (migFiles().includes(MIG) && later.every(f => ['20261114000100_ai_documents.sql'].includes(f))) || 'unexpected later files: ' + later.join(', ');
+  });
+  await check('all_migrations.sql holds this file verbatim (appended like the earlier phases; later phases follow it) + a header line', () => {
     const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
     const marker = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(marker);

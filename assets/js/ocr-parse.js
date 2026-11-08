@@ -33,7 +33,9 @@
 
   var FIELD_KEYS = ['invoice_number', 'invoice_date', 'supplier_name', 'supplier_vat', 'buyer_name', 'buyer_vat',
     'currency', 'subtotal', 'vat_amount', 'total', 'bl_number', 'container_numbers', 'declaration_number',
-    'hs_codes', 'country_of_origin', 'iban'];
+    'hs_codes', 'country_of_origin', 'iban',
+    // AI reading (Claude, 20261114000100): bill-of-lading voyage / parties — never produced by the text parser below
+    'vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'shipper', 'consignee'];
 
   /* ---------------------------------------------------------------
      Digits, amounts, dates

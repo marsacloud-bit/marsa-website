@@ -16,12 +16,14 @@
     - normalizeAddress — mirror of app.msg_norm_address;
     - redact / scrubText — mirror of app.msg_redact / app.msg_scrub_text (= the G5 app.bill_redact rules);
     - sha256Hex — lowercase hex SHA-256 of a UTF-8 string (globalThis.crypto.subtle);
-    - estimateAiCost / AI_PRICES — the AI cost-estimate hook (rule_mock = 0; llm_pending = null = unknown → refused);
+    - estimateAiCost / AI_PRICES — the AI cost-estimate hook (rule_mock = 0; llm_pending = null = unknown → refused;
+      claude = claude-opus-5-5 per-direction prices, real token usage when the provider reports it);
     - createLiveEmailAdapter — G6c: the REAL IMAP / SMTP adapter only when the config carries connect + imap + smtp AND
       an explicit factory (config.impl = email-live.js createImapSmtpEmail, passed by index.ts; review H1), else the
       documented stub; createLiveWhatsAppAdapter — documented stub. Stubs throw AdapterError('not_configured'), never
       read a key and never call fetch;
-    - createLlmProvider — the AI provider interface whose every method throws not_configured (no LLM call in G6b);
+    - createLlmProvider — the AI provider interface: the model-backed provider (llm-provider.js) when given an injected
+      callModel + factory, else the stub whose every method throws not_configured;
     - LIVE_ENDPOINTS_TO_VERIFY — data only. Nothing here is ever called.
 */
 (function () {
@@ -261,15 +263,57 @@
   }
 
   /* ---------------------------------------------------------------- AI cost estimate hook (§24) */
-  const AI_PRICES = Object.freeze({ rule_mock: 0, llm_pending: null });   // USD per 1k tokens; null = unknown → refused
+  // USD per 1k tokens. A number = one price for input + output (rule_mock 0; null = unknown → refused). A Claude model =
+  // per-direction prices from the published list (claude-api skill, shared/models.md): Claude Opus 5.5 $4 in / $20 out per
+  // MTok, cache reads $0.20, cache writes 1.25 × input; Claude Opus 5 / Opus 4.8 (possible refusal-fallback targets)
+  // $5 / $25, cache reads 0.1 ×. settings.ai_provider 'claude' = model claude-opus-5-5.
+  const claudePrice = (inp, out, read) => Object.freeze({ input_per_1k: inp, output_per_1k: out, cache_read_per_1k: read, cache_write_per_1k: inp * 1.25 });
+  const AI_PRICES = Object.freeze({
+    rule_mock: 0, llm_pending: null,
+    'claude-opus-5-5': claudePrice(0.004, 0.02, 0.0002),
+    'claude-opus-5': claudePrice(0.005, 0.025, 0.0005),
+    'claude-opus-4-8': claudePrice(0.005, 0.025, 0.0005)
+  });
+  const AI_PROVIDER_MODELS = Object.freeze({ claude: 'claude-opus-5-5' });
+  // an unknown claude-* model (e.g. a future refusal-fallback target) is priced at the most expensive known Claude price
+  function claudeMaxPrice() {
+    let best = null;
+    for (const k of Object.keys(AI_PRICES)) {
+      const p = AI_PRICES[k];
+      if (p && typeof p === 'object' && (!best || p.output_per_1k > best.output_per_1k)) best = p;
+    }
+    return best;
+  }
+  function priceOf(o) {
+    const key = o.model || AI_PROVIDER_MODELS[o.provider] || o.provider;
+    if (Object.prototype.hasOwnProperty.call(AI_PRICES, key)) return AI_PRICES[key];
+    if (typeof key === 'string' && /^claude-/.test(key)) return claudeMaxPrice();
+    return null;
+  }
+  const tok = v => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.floor(Number(v)) : 0);
+  const ceil4 = x => Math.ceil(Math.round(x * 1e8) / 1e4) / 10000;
+  // estimateAiCost({provider | model, input_chars, output_chars, usage?, exact?}) → {est_input_tokens, est_output_tokens, est_cost_usd}
+  //   without usage: tokens = ceil(chars / 4) (the G6b estimate); with usage (the model's real counts): those tokens, and
+  //   usage.cost_usd when the provider already priced each attempt. Claude costs round UP to 4 decimals (numeric(10,4));
+  //   exact: true returns the unrounded cost (to sum attempts before rounding once).
   function estimateAiCost(x) {
     const o = x || {};
+    const u = o.usage && typeof o.usage === 'object' ? o.usage : null;
     const inC = Math.max(0, Number(o.input_chars) || 0);
     const outC = Math.max(0, Number(o.output_chars) || 0);
-    const est_input_tokens = Math.ceil(inC / 4);
-    const est_output_tokens = Math.ceil(outC / 4);
-    const price = Object.prototype.hasOwnProperty.call(AI_PRICES, o.provider) ? AI_PRICES[o.provider] : null;
-    const est_cost_usd = price === null ? null : Math.round(((est_input_tokens + est_output_tokens) / 1000) * price * 10000) / 10000;
+    const cr = u ? tok(u.cache_read_input_tokens) : 0, cw = u ? tok(u.cache_creation_input_tokens) : 0;
+    const inT = u ? tok(u.input_tokens) : Math.ceil(inC / 4);
+    const est_input_tokens = inT + cr + cw;
+    const est_output_tokens = u ? tok(u.output_tokens) : Math.ceil(outC / 4);
+    const price = priceOf(o);
+    let est_cost_usd;
+    if (price === null || price === undefined) est_cost_usd = null;
+    else if (typeof price === 'number') est_cost_usd = Math.round(((est_input_tokens + est_output_tokens) / 1000) * price * 10000) / 10000;
+    else {
+      const c = u && Number.isFinite(u.cost_usd) && u.cost_usd >= 0 ? u.cost_usd
+        : (inT * price.input_per_1k + cr * price.cache_read_per_1k + cw * price.cache_write_per_1k + est_output_tokens * price.output_per_1k) / 1000;
+      est_cost_usd = o.exact ? c : ceil4(c);
+    }
     return { est_input_tokens, est_output_tokens, est_cost_usd };
   }
 
@@ -310,8 +354,17 @@
     return impl(cfg);
   }
   function createLiveWhatsAppAdapter(config) { void config; return stub('whatsapp'); }
+  // createLlmProvider(config): with config.callModel AND an explicit factory (config.impl = llm-provider.js
+  // createModelProvider, passed by index.ts / the tests; same rule as createLiveEmailAdapter, review H1) → the model-backed
+  // provider; otherwise the documented stub whose every method throws not_configured (settings.ai_provider 'llm_pending',
+  // or 'claude' without a key / consent). Never reads a key, never calls fetch: callModel is injected.
   function createLlmProvider(config) {
-    void config;
+    const c = config || {};
+    if (typeof c.callModel === 'function' && typeof c.impl === 'function') {
+      const cfg = Object.assign({}, c);
+      delete cfg.impl;
+      return c.impl(cfg);
+    }
     const p = { name: 'llm_pending', version: 'stub' };
     for (const m of AI_METHODS) p[m] = function () { throw notConfigured('LLM provider'); };
     return Object.freeze(p);
@@ -322,7 +375,7 @@
     AdapterError, isAdapterError,
     normalizeInbound, normalizeAddress, htmlToText, foldDigitsStr,
     redact, scrubText, sha256Hex, stableStringify, cpLen,
-    estimateAiCost, AI_PRICES,
+    estimateAiCost, AI_PRICES, AI_PROVIDER_MODELS,
     createLiveEmailAdapter, createLiveWhatsAppAdapter, createLlmProvider, LIVE_ENDPOINTS_TO_VERIFY
   };
   (typeof module === 'object' && module.exports) ? (module.exports = API) : (globalThis.MarsaInbox = Object.assign(globalThis.MarsaInbox || {}, API));

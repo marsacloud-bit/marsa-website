@@ -188,6 +188,16 @@
                   <span class="form-hint" id="ocr-langs-hint">اختيار لغة واحدة أسرع وأدق إن كان المستند بلغة واحدة.</span>
                 </div>
               </div>
+              <!-- AI reading (Claude): shown by ocr.js only online, to signed-in staff, when the org admin enabled it -->
+              <fieldset class="fieldset ocr-engine" id="ocr-engine-group" hidden>
+                <legend class="form-label" data-i18n="ocr.engine_label">طريقة القراءة</legend>
+                <label class="check"><input type="radio" name="ocr-engine" id="ocr-engine-tesseract" value="tesseract" checked> <span data-i18n="ocr.engine_tesseract">القراءة داخل المتصفح (Tesseract) — لا يُرسل الملف إلى أي جهة</span></label>
+                <label class="check"><input type="radio" name="ocr-engine" id="ocr-engine-ai" value="ai" aria-describedby="ocr-ai-note"> <span data-i18n="ocr.engine_ai">القراءة بالذكاء الاصطناعي (Claude) — أدق للمستندات الممسوحة والجداول</span></label>
+                <div class="alert alert-warning mt-2" id="ocr-ai-note" role="note" hidden>
+                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18h.01"/></svg>
+                  <span><span data-i18n="ocr.ai_note">عند اختيار القراءة بالذكاء الاصطناعي يُرسل الملف إلى خادم مرسى ثم إلى شركة Anthropic (مزوّد نموذج Claude) لمعالجته وإرجاع البيانات. لا تستخدمها لمستند لا يجوز مشاركته مع مزوّد خارجي. الحد: 10 ميغابايت للملف، وصيغ JPG وPNG وWEBP وGIF وPDF.</span> <span id="ocr-ai-remaining"></span></span>
+                </div>
+              </fieldset>
               <fieldset class="fieldset ocr-options">
                 <legend class="form-label">تحسين الصورة قبل القراءة</legend>
                 <label class="check"><input type="checkbox" id="ocr-enhance" checked> تحويل إلى تدرّج رمادي مع رفع التباين</label>
@@ -222,7 +232,7 @@
             </div>
             <p class="demo-note mt-2">
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
-              <span>الملفات تُعالج داخل متصفحك ولا تُرسل لأي خادم أثناء القراءة؛ يتم تنزيل ملفات اللغة فقط (من jsDelivr وcdnjs عند أول استخدام). <span data-show-mode="online" hidden>لا يُرفع شيء إلى خادم مرسى إلا عند ضغطك «حفظ» بحساب موظف.</span></span>
+              <span>الملفات تُعالج داخل متصفحك ولا تُرسل لأي خادم أثناء القراءة (إلا إذا اخترت «القراءة بالذكاء الاصطناعي»)؛ يتم تنزيل ملفات اللغة فقط (من jsDelivr وcdnjs عند أول استخدام). <span data-show-mode="online" hidden>لا يُرفع شيء إلى خادم مرسى إلا عند ضغطك «حفظ» بحساب موظف.</span></span>
             </p>
 
             <ul class="file-list ocr-queue" id="ocr-queue" aria-label="المستندات المضافة"></ul>

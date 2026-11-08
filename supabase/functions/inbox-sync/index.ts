@@ -17,8 +17,19 @@
 //   `not_configured` (no network). G6c: `live` + e-mail → the IMAP 993 / SMTP 465 adapter (email-live.js over
 //   denoConnect = Deno.connectTls) ONLY for the one channel id in MARSA_EMAIL_LIVE_CHANNEL whose address_norm equals
 //   MARSA_EMAIL_FROM_ADDRESS, with both logins present and ports exactly 993 / 465; any other `live` channel gets the stub.
-// - AI: the deterministic rule provider (ai-mock.js). No LLM is called; settings.ai_provider='llm_pending' makes the
-//   worker use createLlmProvider(), which throws not_configured.
+// - AI: the deterministic rule provider (ai-mock.js) by default. settings.ai_provider='claude' (an org admin's choice)
+//   makes the worker build ONE model-backed provider per job (llm-provider.js) whose only way out is callModel below:
+//   npm:@anthropic-ai/sdk@1.5.0, client.beta.messages.create with model claude-opus-5-5, structured output (JSON schema),
+//   explicit effort, refusal fallbacks `fallbacks: "default"` (beta server-side-fallback-2026-07-01). Each such job first
+//   reserves its maximum spend with public.ai_reserve(org, NULL, 'inbox', est) — the SAME switch, consent and monthly
+//   budget as document reading (app.ai_settings: off until the org admin enables it with the consent that covers
+//   message text) — and settles it with public.ai_settle whatever happened (aiLedger below). Timing: maxRetries 0, each
+//   call's timeout ≤ the job deadline, and the job deadline ends 15 s before the 150 s wall clock. The key is
+//   ANTHROPIC_API_KEY (Edge Function secret, shared with ai-extract), read here only: never logged, never returned, never
+//   passed to the worker, the provider or SQL. Without it 'claude' behaves like 'llm_pending' (every AI job fails
+//   not_configured). NOTE: SQL (msg_settings CHECK / msg_claim_jobs / msg_apply_*) still accepts only rule_mock and
+//   llm_pending, so no Claude inbox job runs until a later migration allows 'claude'.
+//   settings.ai_provider='llm_pending' still makes the worker use the createLlmProvider() stub (not_configured).
 // - G6c live e-mail secrets (owner-entered Edge Function secrets, read here only, never logged, never returned, never
 //   passed to the worker or SQL): MARSA_EMAIL_IMAP_USER / _PASSWORD, MARSA_EMAIL_SMTP_USER / _PASSWORD. Other env:
 //   MARSA_EMAIL_LIVE_CHANNEL, MARSA_EMAIL_FROM_ADDRESS (the channel alias = From), MARSA_EMAIL_FROM_NAME,
@@ -30,10 +41,13 @@
 //   or clients.
 
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
+// the official SDK, pinned (same version as ai-extract: its types carry fallbacks: 'default')
+import Anthropic from 'npm:@anthropic-ai/sdk@1.5.0';
 import './adapters.js';
 import './mock-email.js';
 import './mock-whatsapp.js';
 import './ai-mock.js';
+import './llm-provider.js';
 import './pipeline.js';
 import './worker.js';
 import './email-mime.js';
@@ -162,6 +176,47 @@ function liveEmailFor(channel: any): { adapter?: any; refused?: string } {
   return { adapter };
 }
 
+/* ---------------------------------------------------------------- AI model (Claude) */
+const AI_JOB_DEADLINE_MS = 60000;           // all model calls of one AI job (one job per /run loop step, under RUN_BUDGET_MS)
+const AI_CALL_TIMEOUT_MS = 30000;           // one attempt (maxRetries 0), and never past the job deadline (timeout_ms)
+const AI_WALL_END_MS = 150000 - 15000;      // the last model call ends here: ai_settle + msg_complete_job still fit
+let anthropic: Anthropic | null = null;
+// callModel for llm-provider.js: the ONLY network path of the AI provider. Request shape and response parsing live in
+// llm-provider.js (buildClaudeRequest / parseClaudeResponse, unit-tested); SDK errors are thrown as-is and mapped there
+// (mapModelError) to fixed AdapterError messages.
+// deno-lint-ignore no-explicit-any
+async function callModel(req: any): Promise<any> {
+  const key = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
+  if (!key) throw new M.AdapterError('not_configured', 'AI provider not configured', { applied: 'no', code: 'ai_key' });
+  if (!anthropic) anthropic = new Anthropic({ apiKey: key, maxRetries: 0, timeout: AI_CALL_TIMEOUT_MS });
+  const params = M.buildClaudeRequest(req);
+  const timeout = Math.max(1000, Math.min(AI_CALL_TIMEOUT_MS, Number(req?.timeout_ms) || AI_CALL_TIMEOUT_MS));
+  const resp = await anthropic.beta.messages.create(params, { timeout });
+  return M.parseClaudeResponse(resp);
+}
+// one provider per job (usage + per-message state, capped at the job's reservation); only when the key exists —
+// otherwise the worker uses the stub. The job deadline never passes AI_WALL_END_MS of this request (t0).
+// deno-lint-ignore no-explicit-any
+const llmFactoryFor = (clock: () => string, t0: number) => (Deno.env.get('ANTHROPIC_API_KEY') ? (ctx: any, extra: any) => M.createLlmProvider({
+  impl: M.createModelProvider, callModel, deps: M, clock, settings: ctx?.settings ?? {}, holdUsd: extra?.holdUsd,
+  deadlineMs: Math.max(1, Math.min(AI_JOB_DEADLINE_MS, AI_WALL_END_MS - (Date.now() - t0))),
+}) : undefined);
+// the shared AI ledger (app.ai_usage, purpose 'inbox', no user): reserve before a Claude job, settle after it in every case
+// deno-lint-ignore no-explicit-any
+const aiLedgerFor = (sb: any) => (Deno.env.get('ANTHROPIC_API_KEY') ? {
+  // deno-lint-ignore no-explicit-any
+  reserve: async (ctx: any, est: number) => {
+    const { data, error } = await sb.rpc('ai_reserve', { p_org: ctx?.job?.org_id ?? null, p_user: null, p_purpose: 'inbox', p_est_usd: est });
+    if (error || typeof data !== 'string') throw M.mapLedgerError(M, error?.message);
+    return data;
+  },
+  // deno-lint-ignore no-explicit-any
+  settle: async (id: string, status: string, usage: any) => {
+    const { error } = await sb.rpc('ai_settle', M.ledgerSettleArgs(id, status, usage));
+    if (error) console.error('inbox-sync: ai_settle failed');
+  },
+} : undefined);
+
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
   const url = Deno.env.get('SUPABASE_URL') ?? '';
@@ -202,6 +257,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (route !== '/run') return json({ error: 'not_found' }, 404);
 
   /* ---------------------------------------------------------------- worker run */
+  const t0 = Date.now();
   const clock = () => new Date().toISOString();
   // deno-lint-ignore no-explicit-any
   const mocks = new Map<string, { adapter: any; version: number }>();
@@ -254,11 +310,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
   };
 
-  const worker = M.createWorker({ rpc, adapterFor, beforeComplete, provider: M.createRuleProvider({ clock }), deps: M, clock,
+  const worker = M.createWorker({ rpc, adapterFor, beforeComplete, provider: M.createRuleProvider({ clock }), llmFactory: llmFactoryFor(clock, t0),
+    aiLedger: aiLedgerFor(sb), deps: M, clock,
     callTimeoutMs: CALL_TIMEOUT_MS, workerId: `edge:${crypto.randomUUID().slice(0, 8)}` });
 
   try {
-    const t0 = Date.now();
     const scheduled = await rpc('msg_schedule', { p_limit: 50 });
     // one job per claim, so a job is never claimed (lease running) while it cannot start before the budget ends
     const counts: Record<string, number> = { claimed: 0, ok: 0, retry: 0, failed: 0, unknown: 0, conflict: 0, errors: 0 };

@@ -5,7 +5,7 @@
   processMessage(ctx, provider, deps) → the `process` job effects:
     {message_id, extractions, classification, summary, risk_flags, suggested_template, ai_run}
     runs extract on the subject, the body and each attachment's extracted text; classify; summarize; detectInjection;
-    cost estimate. Injection flags are SIDE OUTPUT: the classification / extraction / matching inputs exclude nothing
+    cost estimate (a model-backed provider's real token usage when it reports one). Injection flags are SIDE OUTPUT: the classification / extraction / matching inputs exclude nothing
     because of a flag and include nothing from it.
   buildDraft(ctx, provider, deps) → the `draft` job effects:
     {reply_id, lang, subject, body_text, clarification, missing, used_facts, template_key, template_version, ai_run}
@@ -28,12 +28,24 @@
   }
   function validation(A, code, msg) { return new A.AdapterError('validation', msg || code, { applied: 'no', code }); }
 
-  async function aiRun(A, provider, settings, inputObj, outputObj) {
+  // a model-backed provider reports its real usage (usage(): tokens + cost per attempt); the job's share is the delta since
+  // the job started (u0). The rule provider has none: the G6b char estimate applies.
+  const usageNow = provider => (provider && typeof provider.usage === 'function' ? provider.usage() : null);
+  function usageDelta(u0, u1) {
+    if (!u1) return null;
+    const z = u0 || {};
+    const d = k => Math.max(0, (Number(u1[k]) || 0) - (Number(z[k]) || 0));
+    return { input_tokens: d('input_tokens'), output_tokens: d('output_tokens'), cache_read_input_tokens: d('cache_read_input_tokens'),
+      cache_creation_input_tokens: d('cache_creation_input_tokens'), cost_usd: d('cost_usd') };
+  }
+
+  async function aiRun(A, provider, settings, inputObj, outputObj, u0) {
     const input = A.stableStringify(inputObj);
     const output = A.stableStringify(outputObj);
     const input_chars = A.cpLen(input);
     const output_chars = A.cpLen(output);
-    const est = A.estimateAiCost({ provider: provider.name, input_chars, output_chars });
+    const usage = usageDelta(u0, usageNow(provider));
+    const est = A.estimateAiCost(usage ? { provider: provider.name, input_chars, output_chars, usage } : { provider: provider.name, input_chars, output_chars });
     if (est.est_cost_usd === null) throw new A.AdapterError('not_configured', 'AI provider price unknown', { applied: 'no', code: 'not_configured' });
     const s = settings || {};
     const budget = Number(s.ai_monthly_budget_usd || 0);
@@ -55,13 +67,15 @@
     const subject = typeof m.subject === 'string' ? m.subject : '';
     const body = typeof m.body_text === 'string' ? m.body_text : '';
     const atts = Array.isArray(m.attachments) ? m.attachments : [];
+    const u0 = usageNow(provider);
 
     // extraction: subject, body, each attachment's extracted text (never the file name)
     const all = [];
-    all.push(...provider.extract(subject, { source: 'subject' }));
-    all.push(...provider.extract(body, { source: 'body' }));
+    // (awaited: the rule provider answers synchronously, a model-backed provider asynchronously)
+    all.push(...await provider.extract(subject, { source: 'subject' }));
+    all.push(...await provider.extract(body, { source: 'body' }));
     for (const a of atts) {
-      if (a && a.id && typeof a.extracted_text === 'string' && a.extracted_text) all.push(...provider.extract(a.extracted_text, { source: 'attachment', attachment_id: a.id }));
+      if (a && a.id && typeof a.extracted_text === 'string' && a.extracted_text) all.push(...await provider.extract(a.extracted_text, { source: 'attachment', attachment_id: a.id }));
     }
     const seen = new Set();
     const extractions = [];
@@ -74,7 +88,7 @@
     }
 
     const classifyBody = [body].concat(atts.map(a => (a && typeof a.extracted_text === 'string') ? a.extracted_text : '')).join('\n');
-    const classification = provider.classify({ subject, body: classifyBody, extractions });
+    const classification = await provider.classify({ subject, body: classifyBody, extractions });
 
     // injection / foreign-address detection over everything the message carries (flags only)
     const scanText = [subject, body].concat(atts.map(a => String((a && a.file_name) || '') + '\n' + String((a && a.extracted_text) || ''))).join('\n');
@@ -90,7 +104,7 @@
 
     const sender = m.sender || { display_name: m.sender_display_name || null, status: m.sender_status || null };
     const lang = (ctx.settings && ctx.settings.default_lang) === 'en' ? 'en' : 'ar';
-    const summary = provider.summarize({ category: classification.category, extractions, sender, flags: risk_flags, lang, sent_at: m.sent_at || null,
+    const summary = await provider.summarize({ category: classification.category, extractions, sender, flags: risk_flags, lang, sent_at: m.sent_at || null,
       topic_rules: (ctx.instructions && ctx.instructions.topic_rules) || [] });
 
     const out = {
@@ -103,7 +117,7 @@
     };
     out.ai_run = await aiRun(A, provider, ctx.settings,
       { v: PIPELINE_VERSION, subject, body, attachments: atts.map(a => ({ id: a.id, file_name: a.file_name || null, extracted_text: a.extracted_text || null })) },
-      { extractions, classification, summary, risk_flags });
+      { extractions, classification, summary, risk_flags }, u0);
     return out;
   }
 
@@ -119,7 +133,8 @@
     const d = ctx && ctx.draft;
     if (!d || !d.thread_id) throw validation(A, 'draft', 'draft: no draft context');
     if (!provider || typeof provider.draftReply !== 'function') throw validation(A, 'provider', 'draft: no AI provider');
-    const r = provider.draftReply({
+    const u0 = usageNow(provider);
+    const r = await provider.draftReply({
       lang: d.lang, template_key: d.template_key, template: d.template, params: d.params || {}, recipient: d.recipient || {},
       facts: d.facts || {}, category: d.category || null, org_name: d.org_name || null
     });
@@ -138,7 +153,7 @@
     };
     out.ai_run = await aiRun(A, provider, ctx.settings,
       { v: PIPELINE_VERSION, draft: { lang: d.lang, template_key: d.template_key, template: d.template || null, params: d.params || {}, recipient: d.recipient || {}, facts: d.facts || {}, category: d.category || null } },
-      { subject: out.subject, body_text: out.body_text, missing: out.missing, used_facts });
+      { subject: out.subject, body_text: out.body_text, missing: out.missing, used_facts }, u0);
     return out;
   }
 

@@ -63,6 +63,16 @@
       MRS_EXTRACTION_DUPLICATE: 'هذا الملف محفوظ من قبل في المستندات المقروءة (للمعاملة نفسها). افتحه من «السجل» بدلًا من حفظه مرة أخرى.',
       MRS_EXTRACTION_VOIDED: 'هذا السجل مُلغى ولا يمكن تعديله.',
       MRS_EXTRACTION_ATTACHED: 'ربط السجل بمعاملة أو بمستند لا يمكن تغييره بعد تعيينه.',
+      // AI document reading (20261114000100 + Edge Function ai-extract)
+      MRS_AI_DISABLED: 'القراءة بالذكاء الاصطناعي غير مفعّلة لهذه المؤسسة. يفعّلها مدير المؤسسة من «المؤسسة» في لوحة الموظفين.',
+      MRS_AI_DAILY_CAP: 'وصلت المؤسسة إلى الحد اليومي للقراءة بالذكاء الاصطناعي. حاول غدًا أو اطلب من مدير المؤسسة رفع الحد.',
+      MRS_AI_BUDGET: 'بلغت تكلفة القراءة بالذكاء الاصطناعي ميزانية هذا الشهر. اطلب من مدير المؤسسة رفع الميزانية.',
+      MRS_AI_REFUSED: 'رفض نموذج الذكاء الاصطناعي قراءة هذا المستند. استخدم القراءة داخل المتصفح (Tesseract) بدلًا منه.',
+      MRS_AI_TRUNCATED: 'المستند أطول من أن يُقرأ كاملًا في طلب واحد. قسّم ملف PDF أو ارفع الصفحات المهمة فقط.',
+      MRS_AI_TOO_LARGE: 'الملف أكبر من حد القراءة بالذكاء الاصطناعي: 5 ميغابايت للصورة و10 ميغابايت لملف PDF.',
+      MRS_AI_UNSUPPORTED: 'صيغة الملف غير مدعومة للقراءة بالذكاء الاصطناعي. استخدم JPG أو PNG أو WEBP أو GIF أو PDF.',
+      MRS_AI_UNAVAILABLE: 'خدمة القراءة بالذكاء الاصطناعي غير متاحة الآن. حاول لاحقًا أو استخدم القراءة داخل المتصفح.',
+      MRS_AI_FAILED: 'تعذّرت القراءة بالذكاء الاصطناعي. حاول مرة أخرى أو استخدم القراءة داخل المتصفح.',
       MRS_EXPIRED: 'انتهت صلاحية هذا الرابط أو الدعوة. اطلب دعوة جديدة.',
       MRS_EMAIL_MISMATCH: 'هذه الدعوة موجّهة إلى بريد إلكتروني آخر. سجّل الدخول بالبريد المدعو نفسه.',
       MRS_EMAIL_UNCONFIRMED: 'يلزم تأكيد بريدك الإلكتروني أولًا من الرسالة المرسلة إليك، ثم أعد المحاولة.',
@@ -316,6 +326,16 @@
         // G7 subscriptions & plan limits
         MRS_PLAN_LIMIT: 'Your organization reached its plan limit ({f}). Nothing was saved. Contact the platform team to upgrade.',
         MRS_PLAN_INACTIVE: 'The organization\'s subscription is not active ({f}). You can view data but cannot create new records.',
+        // AI document reading (20261114000100)
+        MRS_AI_DISABLED: 'AI reading is not enabled for this organization. An organization admin enables it under “Organization” in the staff dashboard.',
+        MRS_AI_DAILY_CAP: 'The organization reached today\'s AI reading limit. Try tomorrow or ask an organization admin to raise it.',
+        MRS_AI_BUDGET: 'AI reading reached this month\'s budget. Ask an organization admin to raise it.',
+        MRS_AI_REFUSED: 'The AI model declined to read this document. Use in-browser reading (Tesseract) instead.',
+        MRS_AI_TRUNCATED: 'The document is too long to read in one request. Split the PDF or upload the important pages only.',
+        MRS_AI_TOO_LARGE: 'The file is over the AI reading limit: 5 MB for an image, 10 MB for a PDF.',
+        MRS_AI_UNSUPPORTED: 'This file type is not supported for AI reading. Use JPG, PNG, WEBP, GIF or PDF.',
+        MRS_AI_UNAVAILABLE: 'The AI reading service is not available right now. Try later or use in-browser reading.',
+        MRS_AI_FAILED: 'AI reading failed. Try again or use in-browser reading.',
         plan_metric_users: 'users', plan_metric_branches: 'branches', plan_metric_transactions_month: 'transactions per month',
         plan_metric_storage_mb: 'storage', plan_metric_storage_bytes: 'storage', plan_metric_messages_month: 'messages per month',
         plan_metric_ai_runs_month: 'automated-processing runs per month',
@@ -1606,7 +1626,8 @@
     'created_by,created_at,voided_at,void_reason';
   var EXT_COLS = EXT_LIST_COLS + ',raw_text,line_items';
   var EXT_INSERT = ['org_id', 'transaction_id', 'document_id', 'doc_type', 'source_name', 'source_sha256', 'source_mime', 'source_size',
-    'source_pages', 'engine', 'languages', 'mean_confidence', 'raw_text', 'extracted_fields', 'qr_payload', 'line_items'];
+    'source_pages', 'engine', 'languages', 'mean_confidence', 'raw_text', 'extracted_fields', 'qr_payload', 'line_items',
+    'ai_usage_id'];   // AI reading (20261114000100): sent only when set (pickKeys skips undefined)
   var EXT_REVIEW = ['reviewed_fields', 'line_items', 'review_status', 'review_note', 'doc_type', 'transaction_id', 'document_id'];
   var EXT_LOCAL_KEY = 'marsa_extractions';
   var EXT_LOCAL_MAX = 50;
@@ -1708,6 +1729,77 @@
       return Promise.resolve(extLocalWrite(list) ? ok(true) : fail('MRS_LOCAL_SAVE'));
     }
   };
+
+  /* ------------------------------------------------------------------
+     AI document reading (Claude) — migration 20261114000100 + Edge Function ai-extract.
+     Off per organization until an org admin enables it with an explicit consent (document contents are sent to
+     Anthropic). The file goes to OUR Edge Function with the user's own access token (functions.invoke); the
+     Anthropic key exists only there. Staff only; aiExtract returns the reading, saving stays saveExtraction()
+     (engine 'claude-opus-5-5' + ai_usage_id = the reading's usage_id).
+     ------------------------------------------------------------------ */
+  var AI_EDGE_ERRORS = {
+    ai_disabled: 'MRS_AI_DISABLED', daily_cap: 'MRS_AI_DAILY_CAP', budget: 'MRS_AI_BUDGET', refused: 'MRS_AI_REFUSED',
+    truncated: 'MRS_AI_TRUNCATED', too_large: 'MRS_AI_TOO_LARGE', unsupported_media: 'MRS_AI_UNSUPPORTED',
+    forbidden: 'MRS_FORBIDDEN', mfa_required: 'MRS_MFA_REQUIRED', unauthorized: 'MRS_AUTH_REQUIRED',
+    transaction_not_found: 'MRS_NOT_FOUND', not_configured: 'MRS_AI_UNAVAILABLE', upstream_busy: 'MRS_AI_UNAVAILABLE',
+    upstream_error: 'MRS_AI_FAILED', bad_output: 'MRS_AI_FAILED', bad_request: 'MRS_AI_FAILED', internal: 'MRS_AI_FAILED'
+  };
+  var AI_MEDIA = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'];
+  var AI_DOC_TYPES = ['bill_of_lading', 'commercial_invoice', 'customs_declaration', 'supplier_invoice', 'auto'];
+  var AI_MAX_BYTES = 10 * 1024 * 1024;          // PDF
+  var AI_MAX_IMAGE_BYTES = 5 * 1024 * 1024;     // image (the API's per-image limit)
+  function aiOrg(orgIdArg) { return orgIdArg ? Promise.resolve(ok(orgIdArg)) : orgId(); }
+  // {enabled, can_use, model, daily_request_cap, today_requests, daily_remaining} — staff of the org
+  function aiAccess(orgIdArg) {
+    if (!configured) return demoOnly();
+    return aiOrg(orgIdArg).then(function (r) { return r.error ? r : rpc('ai_access', { p_org: r.data }); });
+  }
+  // org admin (aal2): settings + usage summary
+  function aiGetSettings(orgIdArg) {
+    if (!configured) return demoOnly();
+    return aiOrg(orgIdArg).then(function (r) { return r.error ? r : rpc('ai_get_settings', { p_org: r.data }); });
+  }
+  // payload = {enabled?, consent_ack?, daily_request_cap?, monthly_budget_usd?}
+  function aiSaveSettings(orgIdArg, payload) {
+    if (!configured) return demoOnly();
+    return aiOrg(orgIdArg).then(function (r) { return r.error ? r : rpc('ai_save_settings', { p_org: r.data, p_payload: payload || {} }); });
+  }
+  // the Edge Function's fixed error code → MRS_*; never shows a server message
+  function aiEdgeError(err) {
+    var ctx = err && err.context;
+    var body = ctx && typeof ctx.json === 'function' ? Promise.resolve().then(function () { return ctx.json(); }).catch(function () { return null; }) : Promise.resolve(null);
+    return body.then(function (b) {
+      var code = b && typeof b.error === 'string' && Object.prototype.hasOwnProperty.call(AI_EDGE_ERRORS, b.error) ? AI_EDGE_ERRORS[b.error] : null;
+      if (code) return fail(code);
+      if (err && (err.name === 'FunctionsFetchError' || err.name === 'FunctionsRelayError')) return fail('MRS_NETWORK');
+      return fail('MRS_AI_FAILED');
+    });
+  }
+  // o = { orgId?, docType: bill_of_lading|commercial_invoice|customs_declaration|supplier_invoice|auto,
+  //       file: { media_type, data_b64 }, transactionId?, lang? }
+  // → { usage_id, engine, model, doc_type, kind, fields [{name, value, confidence 0..1, page, valid}], extracted_fields,
+  //     line_items, warnings [{source, code, text, field}], mean_confidence (0..100), raw_text, usage }
+  function aiExtract(o) {
+    o = o || {};
+    if (!configured) return demoOnly();
+    var f = o.file || {};
+    if (AI_MEDIA.indexOf(f.media_type) === -1) return Promise.resolve(fail('MRS_AI_UNSUPPORTED'));
+    if (typeof f.data_b64 !== 'string' || !f.data_b64) return Promise.resolve(fail('MRS_REQUIRED', 'file'));
+    if (Math.floor(f.data_b64.length / 4) * 3 > (f.media_type === 'application/pdf' ? AI_MAX_BYTES : AI_MAX_IMAGE_BYTES)) return Promise.resolve(fail('MRS_AI_TOO_LARGE'));
+    var docType = AI_DOC_TYPES.indexOf(o.docType) !== -1 ? o.docType : 'auto';
+    return aiOrg(o.orgId).then(function (r) {
+      if (r.error) return r;
+      var body = { org_id: r.data, doc_type: docType, file: { media_type: f.media_type, data_b64: f.data_b64 },
+        lang: o.lang === 'en' ? 'en' : 'ar' };
+      if (o.transactionId) body.transaction_id = o.transactionId;
+      return ready().then(function (c) {
+        return c.functions.invoke('ai-extract', { body: body }).then(function (res) {
+          if (res && !res.error && res.data && typeof res.data === 'object' && res.data.usage_id) return ok(res.data);
+          return aiEdgeError(res && res.error);
+        }, function (e) { return { data: null, error: normalizeError(e) }; });
+      }, function (e) { return { data: null, error: normalizeError(e) }; });
+    });
+  }
 
   // row = { org_id?, transaction_id?, document_id?, doc_type, source_name, source_sha256, source_mime, source_size,
   //         source_pages, engine, languages, mean_confidence, raw_text, extracted_fields, qr_payload, line_items }
@@ -3115,6 +3207,8 @@
     saveExtraction: saveExtraction, listExtractions: listExtractions, getExtraction: getExtraction,
     reviewExtraction: reviewExtraction, voidExtraction: voidExtraction, attachExtractionDocument: attachExtractionDocument,
     localExtractions: localExtractions,
+    // AI document reading (Claude, Edge Function ai-extract; 20261114000100)
+    aiAccess: aiAccess, aiExtract: aiExtract, aiGetSettings: aiGetSettings, aiSaveSettings: aiSaveSettings,
     // inbox / audit
     listContactMessages: listContactMessages, setContactStatus: setContactStatus, listAudit: listAudit,
     // G3 operations (docs/online/G3_SPEC.md)
