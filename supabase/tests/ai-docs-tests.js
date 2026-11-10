@@ -196,7 +196,8 @@ async function secFile() {
   await check('no key, no Anthropic endpoint, no document content in the SQL file', () =>
     (!/sk-ant|ANTHROPIC_API_KEY\s*=|api\.anthropic\.com|x-api-key/i.test(src)) || 'secret-like text found');
   // later phases may follow this file (20261115000100 convert_in_place, 20261116000100 doc_match); none may sort before it unnoticed
-  const LATER_PHASES = ['20261115000100_convert_in_place.sql', '20261116000100_doc_match.sql', '20261117000100_legacy_core.sql'];
+  const LATER_PHASES = ['20261115000100_convert_in_place.sql', '20261116000100_doc_match.sql', '20261117000100_legacy_core.sql',
+    '20261118000100_legacy_tx.sql'];
   await check('this file is present; only the listed later phases follow it', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');

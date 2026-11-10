@@ -146,6 +146,8 @@
 .adm-dialog-body { padding: 18px 22px; overflow-y: auto; display: grid; gap: 14px; }
 .adm-dialog-body .alert { margin: 0; }
 .adm-dialog-error { margin: 0 22px; }
+/* .form-error is display:none until .has-error (style.css): the dialog's own error line shows whenever it is not hidden */
+.adm-dialog-error:not([hidden]) { display: block; }
 .adm-dialog-error[hidden] { display: none; }
 .adm-dialog-foot { display: flex; flex-wrap: wrap; gap: 10px; padding: 16px 22px; border-top: 1px solid var(--border); background: #FAFCFE; border-radius: 0 0 var(--r-lg) var(--r-lg); }
 .adm-dialog-foot .btn[hidden] { display: none; }
@@ -170,6 +172,7 @@
 .adm-org-switch[hidden] { display: none; }
 .adm-org-select { min-height: 36px; padding-block: 4px; padding-inline: 10px 30px; font-size: var(--fs-sm); max-width: 240px; }
 .adm-org-form { display: grid; gap: 14px; }
+.adm-org-form > .form-error:not([hidden]) { display: block; }   /* the form-level save error (org / AI settings) */
 .adm-org-form .form-error[hidden] { display: none; }
 .adm-org-form .btn-group { justify-content: flex-start; }
 .adm-swatch { flex: 0 0 auto; width: 44px; border-radius: var(--r-sm); border: 1px solid var(--border); background: transparent; }

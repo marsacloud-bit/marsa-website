@@ -58,6 +58,10 @@
         dec_hint: 'آخر بيان نشط ينعكس على بيانات المعاملة تلقائيًا، وكل تغيير يُسجَّل في سجل الأحداث.',
         dec_added: 'أُضيف البيان.', dec_status_saved: 'تغيّرت حالة البيان.', dec_cancel_done: 'أُلغي البيان.', dec_replace_done: 'أُلغي البيان وسُجّل البديل.',
         dec_correct_done: 'صُحّح البيان.', dec_bad_no: 'رقم البيان: أرقام وحروف فقط (حتى 30 خانة).',
+        dec_hijri: 'تاريخ البيان (هجري)', dec_hijri_hint: 'تقويم أم القرى: yyyy/mm/dd أو d/m/yyyy، وتُقبل الأرقام العربية.',
+        dec_hijri_ok: 'يوافق {d} م', dec_hijri_filled: 'يوافق {d} م — عُبّئ التاريخ الميلادي تلقائيًا.', dec_hijri_bad: 'تاريخ هجري غير صالح (السنة 1300–1700، الشهر 1–12، اليوم 1–30).',
+        dec_hijri_unsupported: 'المتصفح لا يدعم تقويم أم القرى؛ أدخل التاريخ الميلادي يدويًا.', dec_greg_hijri: 'يوافق {d} هـ',
+        dec_hijri_mismatch: 'التاريخ الميلادي لا يوافق التاريخ الهجري المدخل ({d} م). صحّح أحدهما.',
         // B/Ls
         bl_title: 'بوالص الشحن', bl_link: 'ربط بوليصة موجودة', bl_new: 'بوليصة جديدة', bl_no: 'رقم البوليصة', bl_type: 'النوع',
         bl_primary: 'رئيسية', bl_make_primary: 'جعلها الرئيسية', bl_unlink: 'فك الربط', bl_vessel: 'السفينة / الرحلة', bl_route: 'من ← إلى',
@@ -111,6 +115,8 @@
         // labels
         lbl_declaration_status_draft: 'مسودة', lbl_declaration_status_submitted: 'مقدَّم', lbl_declaration_status_under_inspection: 'تحت المعاينة',
         lbl_declaration_status_released: 'مُفرج عنه', lbl_declaration_status_cancelled: 'ملغى', lbl_declaration_status_replaced: 'مستبدَل',
+        lbl_declaration_status_accepted: 'قبول البيان — مرحلة تفتيش ومعاينة البضاعة', lbl_declaration_status_cco_review_done: 'انتهاء مراجعة مركز العمليات الجمركية',
+        lbl_declaration_status_awaiting_duty_payment: 'مرحلة انتظار تحصيل الرسوم الجمركية', lbl_declaration_status_release_ready: 'جاهز لطباعة إشعار الفسح الإلكتروني',
         lbl_declaration_source_manual: 'إدخال يدوي', lbl_declaration_source_ocr: 'قراءة مستند (OCR)', lbl_declaration_source_import: 'رفع جماعي', lbl_declaration_source_fasah: 'منصة فسح',
         lbl_bl_type_master: 'رئيسية (Master)', lbl_bl_type_house: 'فرعية (House)', lbl_bl_type_sea_waybill: 'سند شحن بحري (Sea Waybill)',
         lbl_bl_type_awb: 'بوليصة جوية (AWB)', lbl_bl_type_other: 'أخرى',
@@ -152,6 +158,10 @@
         dec_hint: 'The latest active declaration is mirrored onto the transaction; every change is recorded in the event log.',
         dec_added: 'Declaration added.', dec_status_saved: 'Declaration status changed.', dec_cancel_done: 'Declaration cancelled.', dec_replace_done: 'Declaration cancelled and replacement recorded.',
         dec_correct_done: 'Declaration corrected.', dec_bad_no: 'Declaration no.: letters and digits only (up to 30).',
+        dec_hijri: 'Declaration date (Hijri)', dec_hijri_hint: 'Umm al-Qura: yyyy/mm/dd or d/m/yyyy; Arabic digits are accepted.',
+        dec_hijri_ok: 'Equals {d} (Gregorian)', dec_hijri_filled: 'Equals {d} (Gregorian) — the Gregorian date was filled in.', dec_hijri_bad: 'Invalid Hijri date (year 1300–1700, month 1–12, day 1–30).',
+        dec_hijri_unsupported: 'This browser has no Umm al-Qura calendar; enter the Gregorian date by hand.', dec_greg_hijri: 'Equals {d} AH',
+        dec_hijri_mismatch: 'The Gregorian date does not match the Hijri date entered ({d}). Correct one of them.',
         bl_title: 'Bills of lading', bl_link: 'Link existing B/L', bl_new: 'New B/L', bl_no: 'B/L number', bl_type: 'Type',
         bl_primary: 'Primary', bl_make_primary: 'Make primary', bl_unlink: 'Unlink', bl_vessel: 'Vessel / voyage', bl_route: 'From → to',
         bl_packages: 'Packages', bl_weight: 'Gross weight (kg)', bl_agent: 'Shipping agent', bl_carrier: 'Carrier / line',
@@ -199,6 +209,8 @@
         exc_hint: 'Every exception has a source, date and reason. Exceptions are internal (never shown to the client); cancelling a declaration creates one automatically.',
         lbl_declaration_status_draft: 'Draft', lbl_declaration_status_submitted: 'Submitted', lbl_declaration_status_under_inspection: 'Under inspection',
         lbl_declaration_status_released: 'Released', lbl_declaration_status_cancelled: 'Cancelled', lbl_declaration_status_replaced: 'Replaced',
+        lbl_declaration_status_accepted: 'Accepted — inspection stage', lbl_declaration_status_cco_review_done: 'Customs operations centre review done',
+        lbl_declaration_status_awaiting_duty_payment: 'Awaiting customs duty payment', lbl_declaration_status_release_ready: 'Ready to print the release notice',
         lbl_declaration_source_manual: 'Manual', lbl_declaration_source_ocr: 'Document reading (OCR)', lbl_declaration_source_import: 'Bulk import', lbl_declaration_source_fasah: 'FASAH',
         lbl_bl_type_master: 'Master', lbl_bl_type_house: 'House', lbl_bl_type_sea_waybill: 'Sea waybill', lbl_bl_type_awb: 'Air waybill (AWB)', lbl_bl_type_other: 'Other',
         lbl_container_state_expected: 'Expected', lbl_container_state_at_port: 'At port', lbl_container_state_released: 'Released',
@@ -223,8 +235,9 @@
      Codes (mirror the CHECK constraints of the G3 migrations)
      ------------------------------------------------------------------ */
   var STAGES = ['new', 'in_progress', 'customs_declaration', 'appointment', 'transport', 'empty_return', 'operationally_complete', 'under_billing', 'billed', 'closed'];
-  var DEC_STATUS = ['draft', 'submitted', 'under_inspection', 'released', 'cancelled', 'replaced'];
-  var DEC_SETTABLE = ['draft', 'submitted', 'under_inspection', 'released'];
+  // + the Fasah stages (20261117000100): accepted, cco_review_done, awaiting_duty_payment, release_ready
+  var DEC_STATUS = ['draft', 'submitted', 'accepted', 'under_inspection', 'cco_review_done', 'awaiting_duty_payment', 'release_ready', 'released', 'cancelled', 'replaced'];
+  var DEC_SETTABLE = ['draft', 'submitted', 'accepted', 'under_inspection', 'cco_review_done', 'awaiting_duty_payment', 'release_ready', 'released'];
   var DEC_SOURCE = ['manual', 'ocr', 'import', 'fasah'];
   var BL_TYPES = ['master', 'house', 'sea_waybill', 'awb', 'other'];
   var CTR_STATES = ['expected', 'at_port', 'released', 'gated_out', 'delivered', 'empty_returned'];
@@ -238,7 +251,8 @@
   var TRIP_FINANCE_ROLES = ['accountant', 'accounts_manager', 'operations_manager', 'branch_manager', 'supervisor', 'admin'];
   var CURRENCIES = ['SAR', 'USD', 'EUR', 'AED'];
   var TONES = {
-    declaration_status: { draft: 'neutral', submitted: 'info', under_inspection: 'warning', released: 'success', cancelled: 'danger', replaced: 'neutral' },
+    declaration_status: { draft: 'neutral', submitted: 'info', accepted: 'info', under_inspection: 'warning', cco_review_done: 'info', awaiting_duty_payment: 'warning',
+      release_ready: 'brand', released: 'success', cancelled: 'danger', replaced: 'neutral' },
     container_state: { expected: 'neutral', at_port: 'info', released: 'brand', gated_out: 'brand', delivered: 'success', empty_returned: 'success' },
     appt_status: { requested: 'info', confirmed: 'brand', completed: 'success', missed: 'danger', cancelled: 'neutral', rescheduled: 'neutral' },
     trip_status: { planned: 'info', dispatched: 'brand', loaded: 'brand', delivered: 'success', cancelled: 'neutral' },
@@ -531,11 +545,62 @@
      20 — customs declarations (add · status · correct · cancel + replace)
      ================================================================== */
   var DECL_NO_RE = /^[A-Za-z0-9\/-]{1,30}$/;
+  /* Hijri declaration date (legacy convertHijriField): Umm al-Qura through MarsaNorm (assets/js/legacy-norm.js).
+     Typing the Hijri date shows the Gregorian day live and fills the Gregorian field while that field is empty
+     (or was filled by this helper); a Gregorian date typed by hand shows its Hijri day. Listeners are delegated on
+     the form so the 'r_' copy of the cancel / replace dialog works too. */
+  function hijriState(v) {
+    var N = window.MarsaNorm, s = String(v == null ? '' : v).trim();
+    if (!s) return { state: 'empty' };
+    if (!N || typeof N.normalizeHijri !== 'function') return { state: 'unsupported', hijri: s };
+    var h = N.normalizeHijri(s);
+    if (!h) return { state: 'bad' };
+    if (typeof N.hijriSupported === 'function' && !N.hijriSupported()) return { state: 'unsupported', hijri: h };
+    var iso = N.hijriToGregorian(h);
+    return iso ? { state: 'ok', hijri: h, iso: iso } : { state: 'bad' };
+  }
+  function hijriField(k, d) {
+    var g = k.field({ name: 'declaration_date_hijri', label: k.t('dec_hijri'), value: d.declaration_date_hijri, ltr: true, max: 20, hint: k.t('dec_hijri_hint') });
+    var inp = g.querySelector('input');
+    inp.setAttribute('inputmode', 'numeric'); inp.setAttribute('placeholder', '1447/06/15');
+    var out = k.el('span', { class: 'form-hint ops-hijri-out', 'aria-live': 'polite', 'data-hijri-out': '1' });
+    g.appendChild(out);
+    function partner(n) { var f = inp.form; return f ? f.elements[n.replace(/declaration_date_hijri$/, 'declaration_date')] : null; }
+    function paint() {
+      var st = hijriState(inp.value), greg = partner(inp.name);
+      out.textContent = '';
+      out.classList.remove('is-error');
+      if (st.state === 'bad') { out.textContent = k.t('dec_hijri_bad'); out.classList.add('is-error'); return; }
+      if (st.state === 'unsupported') { out.textContent = k.t('dec_hijri_unsupported'); return; }
+      if (st.state !== 'ok') return;
+      if (greg && (!greg.value || greg.getAttribute('data-hijri-auto') === '1')) {
+        greg.value = st.iso; greg.setAttribute('data-hijri-auto', '1');
+        out.textContent = k.t('dec_hijri_filled', { d: st.iso });
+      } else {
+        out.textContent = greg && greg.value && greg.value !== st.iso ? k.t('dec_hijri_mismatch', { d: st.iso }) : k.t('dec_hijri_ok', { d: st.iso });
+      }
+    }
+    inp.addEventListener('input', paint);
+    inp.addEventListener('change', paint);
+    // a Gregorian date typed by hand: no longer auto-filled, shows its Hijri day
+    setTimeout(function () {
+      var greg = partner(inp.name);
+      if (!greg) return;
+      greg.addEventListener('input', function () {
+        greg.removeAttribute('data-hijri-auto');
+        var N = window.MarsaNorm, h = N && typeof N.gregorianToHijri === 'function' && greg.value ? N.gregorianToHijri(greg.value) : '';
+        if (!String(inp.value || '').trim()) { out.classList.remove('is-error'); out.textContent = h ? k.t('dec_greg_hijri', { d: h }) : ''; } else paint();
+      });
+      if (inp.value) paint();
+    }, 0);
+    return g;
+  }
   function declFields(k, docs, d) {
     d = d || {};
     return [
       k.field({ name: 'declaration_no', label: k.t('dec_no'), value: d.declaration_no, req: true, ltr: true, max: 30 }),
       k.field({ name: 'declaration_type', label: k.t('dec_type'), value: d.declaration_type, max: 40 }),
+      hijriField(k, d),
       k.field({ name: 'declaration_date', label: k.t('dec_date'), type: 'date', value: d.declaration_date }),
       k.field({ name: 'source', label: k.t('dec_source'), type: 'select', value: d.source || 'manual', options: k.codeOpts('declaration_source', DEC_SOURCE) }),
       k.field({ name: 'source_document_id', label: k.t('dec_source_doc'), type: 'select', value: d.source_document_id, options: docOpts(docs, k.t('optional_none')), full: true })
@@ -543,8 +608,17 @@
   }
   function declPayload(k, form, prefix) {
     var p = function (n) { return k.val(form, (prefix || '') + n); };
-    return { declaration_no: p('declaration_no') ? p('declaration_no').toUpperCase() : null, declaration_type: p('declaration_type'),
+    var out = { declaration_no: p('declaration_no') ? p('declaration_no').toUpperCase() : null, declaration_type: p('declaration_type'),
       declaration_date: p('declaration_date'), source: p('source') || 'manual', source_document_id: p('source_document_id') };
+    // the Hijri text as normalised by MarsaNorm (the server normalises it again: app.norm_hijri_date); '' clears it
+    var h = hijriState(p('declaration_date_hijri'));
+    out.declaration_date_hijri = h.state === 'empty' ? null : (h.hijri || p('declaration_date_hijri'));
+    if (h.state === 'bad') out.__hijri_bad = true;
+    return out;
+  }
+  function declCheck(k, p) {
+    if (p.__hijri_bad) { delete p.__hijri_bad; return k.t('dec_hijri_bad'); }
+    return null;
   }
   function renderDeclarations(root, tx, api) {
     var k = kit(api), el = k.el;
@@ -564,6 +638,7 @@
             p.status = k.val(form, 'status') || 'submitted'; p.notes = k.val(form, 'notes');
             if (!p.declaration_no) return k.t('required');
             if (!DECL_NO_RE.test(p.declaration_no)) return k.t('dec_bad_no');
+            if (declCheck(k, p)) return k.t('dec_hijri_bad');
             return M(api, 'addDeclaration')(tx.id, p, { idemKey: key(p) }).then(function (r) { return k.settle(r, k.t('dec_added')); });
           }
         });
@@ -597,6 +672,9 @@
             if (!p.declaration_no) return k.t('required');
             if (!DECL_NO_RE.test(p.declaration_no)) return k.t('dec_bad_no');
             if (!why) return k.t('reason_required');
+            if (declCheck(k, p)) return k.t('dec_hijri_bad');
+            // never clear what this screen could not read (an older list without the column)
+            if (d.declaration_date_hijri === undefined && p.declaration_date_hijri == null) delete p.declaration_date_hijri;
             return M(api, 'correctDeclaration')(d.id, p, why).then(function (r) { return k.settle(r, k.t('dec_correct_done')); });
           }
         });
@@ -622,6 +700,7 @@
               replacement = declPayload(k, form, 'r_');
               if (!replacement.declaration_no) return k.t('required');
               if (!DECL_NO_RE.test(replacement.declaration_no)) return k.t('dec_bad_no');
+              if (declCheck(k, replacement)) return k.t('dec_hijri_bad');
             }
             return M(api, 'cancelDeclaration')(d.id, why, replacement).then(function (r) { return k.settle(r, k.t(replacement ? 'dec_replace_done' : 'dec_cancel_done')); });
           }
@@ -637,7 +716,8 @@
         var ol = el('ol', { class: 'timeline adm-timeline ops-dec-list' }, list.map(function (d, i) {
           var active = ['cancelled', 'replaced'].indexOf(d.status) === -1;
           var prev = list.filter(function (x) { return x.replaced_by_id === d.id; })[0];
-          var meta = [d.declaration_type, d.declaration_date ? k.when(d.declaration_date) : null, k.L('declaration_source', d.source)].filter(Boolean).join(' · ');
+          var meta = [d.declaration_type, d.declaration_date ? k.when(d.declaration_date) : null,
+            d.declaration_date_hijri ? d.declaration_date_hijri + (api.isEn && api.isEn() ? ' AH' : ' هـ') : null, k.L('declaration_source', d.source)].filter(Boolean).join(' · ');
           var notes = [];
           if (prev) notes.push(k.t('dec_replaces', { n: prev.declaration_no }));
           if (d.corrected_at) notes.push(k.t('dec_corrected', { d: k.when(d.corrected_at, true) }));
@@ -802,6 +882,7 @@
      40 — containers (state, seal, B/L, visit history) + empty-return panel
      ================================================================== */
   function renderContainers(root, tx, api) {
+    if (tx && tx.cargo_unit_type === 'roro') return null;   // legacy Ro-Ro: a vehicle, no containers and no empty return
     var k = kit(api), el = k.el;
     var canTr = api.can('transportWriter', tx.branch_id);
     var list = (tx.containers || []).slice().sort(function (a, b) { return String(a.container_no) < String(b.container_no) ? -1 : 1; });

@@ -859,6 +859,8 @@ async function secCompleteness() {
       && Array.isArray(r.ready_for) && !JSON.stringify(r).includes('cleared')) || JSON.stringify(r);
   });
   await check('ready_for stops at the first stage with something missing', async () => {
+    // legacy tx (20261118000100): the appointment / trip RPCs of earlier sections moved TX3 forward automatically; back to 'new' (owner SQL)
+    await q(`UPDATE public.transactions SET operational_status = 'new' WHERE id = $1`, [TX3]);
     const r = await comp('staffA', TX3);
     return JSON.stringify(r.ready_for) === '["in_progress"]' || JSON.stringify(r.ready_for);
   });
@@ -894,13 +896,15 @@ async function secCompleteness() {
     await ownerDoc(A, TX_LAND, 'packing_list', 'packing_list', 'confirmed');
     S.dLand = (await rpc('clrJ', `SELECT public.add_declaration($1, '{"declaration_no":"LAND-DEC-1","status":"draft"}') r`, [TX_LAND])).id;
     const r = await comp('clrJ', TX_LAND);
-    return (JSON.stringify(r.ready_for) === '["in_progress","customs_declaration"]' && r.ready_limit === 'declaration_release'
+    // legacy tx (20261118000100): adding the declaration moved the transaction to customs_declaration automatically
+    return (r.stage === 'customs_declaration' && JSON.stringify(r.ready_for) === '[]' && r.ready_limit === 'declaration_release'
       && !r.ready_for.includes('operationally_complete')) || JSON.stringify(r);
   });
   await check('released declaration: the later stages may be listed', async () => {
     await rpc('clrJ', `SELECT public.set_declaration_status($1, 'released') r`, [S.dLand]);
     const r = await comp('clrJ', TX_LAND);
-    return (r.ready_for.includes('appointment') && r.ready_for.includes('operationally_complete') && r.ready_limit === null) || JSON.stringify(r);
+    // legacy tx (20261118000100): the release moved the transaction to appointment automatically
+    return (r.stage === 'appointment' && r.ready_for.includes('transport') && r.ready_for.includes('operationally_complete') && r.ready_limit === null) || JSON.stringify(r);
   });
   await expectErr('other branch → MRS_NOT_FOUND', () => comp('trD', TX4), /MRS_NOT_FOUND/);
   await expectErr('org B → MRS_NOT_FOUND', () => comp('staffB', TX4), /MRS_NOT_FOUND/);

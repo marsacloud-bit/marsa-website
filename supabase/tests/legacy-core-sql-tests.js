@@ -248,19 +248,21 @@ async function secFile() {
   });
   await check('no personal data / legacy organization name copied from the legacy code (no e-mail, phone number, real org name)', () =>
     (!/@[a-z0-9-]+\.[a-z]/i.test(src.replace(/--.*$/gm, '')) && !/\b05[0-9]{8}\b/.test(src) && !/رأس الحكمة/.test(src)) || 'personal data');
-  const LATER_PHASES = [];
+  // later phases may follow this file (20261118000100 legacy_tx: re-creates public_track)
+  const LATER_PHASES = ['20261118000100_legacy_tx.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
   });
-  await check('all_migrations.sql holds this file verbatim (appended last, in order) + a header line', () => {
+  await check('all_migrations.sql holds this file verbatim (followed only by the listed later phases, in order) + a header line', () => {
     const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
     const marker = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(marker);
     const next = all.indexOf('\n-- ===== migrations/', i + marker.length);
     const body = all.slice(i + marker.length, next < 0 ? undefined : next);
     const order = (all.match(/^-- ===== migrations\/(\S+) =====$/gm) || []).map(l => l.split('/')[1].split(' ')[0]);
-    return (i > 0 && next < 0 && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
+    const after = next < 0 ? [] : (all.slice(next).match(/^-- ===== migrations\/(\S+) =====$/gm) || []).map(l => l.split('/')[1].split(' ')[0]);
+    return (i > 0 && after.every(f => LATER_PHASES.includes(f)) && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
       && all.slice(0, 8000).includes(MIG) && J(order) === J(migFiles())) || 'not appended verbatim / no header line / order';
   });
   await check('docs/online/LEGACY_CORE_AR.md exists and names the migration, cancel_transaction and the 7 ports', () => {

@@ -229,7 +229,7 @@
     // server-side filters of the list views (re-query); offset = first row of the fetched window
     filters: {
       requests: { status: 'new', search: '', offset: 0 },
-      transactions: { status: '', branchId: '', search: '', offset: 0 },
+      transactions: { status: '', branchId: '', search: '', cancelled: '', ttype: '', unit: '', offset: 0 },
       clients: { search: '', inactive: false, offset: 0 },
       messages: { status: 'new', offset: 0 },
       imports: { status: '', search: '', offset: 0 }
@@ -693,7 +693,9 @@
     try { return Promise.resolve(localStorage.getItem('marsa_active_org')); } catch (e) { return Promise.resolve(null); }
   }
   function loadLabels() {
-    var domains = ['operational_status', 'financial_status', 'request_status', 'container_return_status', 'document_kind', 'classification_status', 'contact_status', 'import_row_status', 'role'];
+    var domains = ['operational_status', 'financial_status', 'request_status', 'container_return_status', 'document_kind', 'classification_status', 'contact_status', 'import_row_status', 'role',
+      // legacy step 1 / 2 (20261117000100, 20261118000100)
+      'transaction_type', 'cargo_unit_type', 'transport_mode', 'transaction_state', 'movement_status'];
     return Promise.all(domains.map(function (d) { return api.statusLabels(d); })).then(function (res) {
       res.forEach(function (r, i) {
         if (r.error || !r.data || !r.data.length) return;
@@ -822,6 +824,18 @@
     } catch (e) { root.appendChild(dAlert('danger', errText(e))); }
     return root;
   }
+  // a cancelled transaction (legacy step 2) is read-only: the sections get can() = false for the named write sets
+  // (read sets and explicit role lists unchanged); the server refuses every write anyway (MRS_BAD_TRANSITION cancelled)
+  var READ_SETS = ['staff', 'finRead', 'msgRead', 'mgmt', 'tripFin'];
+  function txOpsApi(tx) {
+    var a = opsApi();
+    if (tx && tx.cancelled_at) {
+      var can0 = a.can;
+      a.can = function (set, branchId) { return typeof set === 'string' && READ_SETS.indexOf(set) === -1 ? false : can0(set, branchId); };
+      a.cancelled = true;
+    }
+    return a;
+  }
   // transaction detail sections, sorted by order; each fails on its own
   function renderTxSections(host, tx) {
     var list = (Array.isArray(OPS.txSections) ? OPS.txSections : []).filter(function (s) { return s && typeof s.render === 'function'; })
@@ -833,7 +847,7 @@
       var box = el('div', { class: 'ops-tx-section', 'data-section': s.id || null });
       host.appendChild(box);
       try {
-        var p = s.render(box, tx, opsApi());
+        var p = s.render(box, tx, txOpsApi(tx));
         if (p && typeof p.then === 'function') p.then(null, function (e) { box.appendChild(dAlert('danger', errText(e))); });
       } catch (e) { box.appendChild(dAlert('danger', errText(e))); }
     });
@@ -1720,7 +1734,7 @@
   function txNew() {
     var branches = branchesFor(R.opsWriter);
     if (!branches.length) return toast(t('txnew_no_branch'), 'error');
-    var mp = null, clientSel = null;
+    var mp = null, clientSel = null, LX = legacyTx(), lxf = null, dupAck = null;
     openDialog({
       title: t('txnew_title'), submit: t('txnew_submit'), wide: true, body: '',
       onOpen: function (b) {
@@ -1732,6 +1746,14 @@
         var grpVat = dField({ name: 'client_vat', label: t('col_vat'), ltr: true, max: 15 });
         var grpCr = dField({ name: 'client_cr', label: t('col_cr'), ltr: true, max: 10 });
         nameIn = grpName.querySelector('input'); vatIn = grpVat.querySelector('input'); crIn = grpCr.querySelector('input');
+        var grpCtr = dField({ name: 'containers', label: t('col_containers'), type: 'textarea', rows: 3, full: true, ltr: true, hint: t('txnew_containers_hint') });
+        grpCtr.setAttribute('data-lx-hide-roro', '');   // Ro-Ro carries no containers (tx-legacy.js toggles it)
+        lxf = LX ? LX.txFields(opsApi(), null) : null;
+        var dup = LX ? LX.dupPanel(opsApi(), function () {
+          var u = b.querySelector('[name=cargo_unit_type]'), roro = !!(u && u.value === 'roro'), ch = b.querySelector('[name=chassis_no]');
+          return { blNumber: nn(b.querySelector('[name=bl_number]').value), cargoUnitType: roro ? 'roro' : 'container',
+            chassisNo: roro && ch ? LX.pure.normChassis(ch.value) : null, containers: roro ? [] : parseContainers(b.querySelector('[name=containers]').value).good };
+        }) : null;
         append(b, [
           dAlert('info', t('txnew_intro')),
           dGrid([
@@ -1757,9 +1779,27 @@
             dField({ name: 'country', label: t('txnew_country'), max: 80 }),
             dField({ name: 'eta', label: t('txnew_eta'), type: 'date' }),
             dField({ name: 'goods_description', label: t('txnew_goods'), type: 'textarea', max: 1000, full: true }),
-            dField({ name: 'containers', label: t('col_containers'), type: 'textarea', rows: 3, full: true, ltr: true, hint: t('txnew_containers_hint') })
-          ])
+            grpCtr
+          ].concat(lxf ? lxf.nodes : [], dup ? [el('h4', { class: 'adm-full adm-form-sep', text: LX.t('dup_title') }), dup.node] : []))
         ]);
+        if (lxf) lxf.bind(b);
+        if (dup) ['bl_number', 'containers', 'chassis_no', 'cargo_unit_type'].forEach(function (n) {
+          var x = b.querySelector('[name=' + n + ']');
+          if (x) { x.addEventListener('change', dup.soon); if (n === 'containers' || n === 'bl_number') x.addEventListener('blur', dup.soon); }
+        });
+        // client typeahead (legacy): match_client runs while typing a name (3+ letters), a full VAT (15) or CR (10)
+        var typing = null;
+        function typeahead() {
+          if (typing) clearTimeout(typing);
+          typing = setTimeout(function () {
+            var digits = function (x) { return String(x || '').replace(/[٠-٩]/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'.indexOf(d); }).replace(/\D/g, ''); };
+            if (String(nameIn.value || '').trim().length >= 3 || digits(vatIn.value).length === 15 || digits(crIn.value).length === 10) {
+              mp.run({ name: nameIn.value, vat_number: vatIn.value, cr_number: crIn.value });
+            }
+          }, 450);
+        }
+        [nameIn, vatIn, crIn].forEach(function (x) { x.addEventListener('input', typeahead); });
+        if (LX) grpName.appendChild(el('span', { class: 'form-hint', text: LX.t('client_typing') }));
         // B/L type follows the mode (air → AWB) until the user picks a type by hand
         var modeSel = b.querySelector('[name=mode]'), typeSel = b.querySelector('[name=bl_type]'), typeTouched = false;
         if (modeSel && typeSel) {
@@ -1784,10 +1824,33 @@
         if (!clientId && !(fval(form, 'new_client') && name)) return t('txnew_need_client');
         if (vat && !/^[0-9]{15}$/.test(vat)) return t('txnew_bad_vat');
         if (cr && !/^[0-9]{10}$/.test(cr)) return t('txnew_bad_cr');
-        var ctr = parseContainers(fval(form, 'containers'));
+        var lx = lxf ? lxf.collect(form) : { patch: {}, error: null };
+        if (lx.error) return lx.error;
+        var roro = lx.patch.cargo_unit_type === 'roro';
+        var ctr = roro ? { good: [], bad: [] } : parseContainers(fval(form, 'containers'));
         if (ctr.bad.length) return t('txnew_bad_containers', { list: ctr.bad.slice(0, 5).join(', ') });
         var bl = v('bl_number') ? v('bl_number').toUpperCase() : null;
+        // legacy validateTransaction_: B/L, port from the approved list, ≥ 1 container (or the Ro-Ro chassis, checked above).
+        // Sea and air only: a land shipment may travel without a B/L / AWB, a port of the list or containers.
+        var mode = fval(form, 'mode');
+        if (LX && (mode === 'sea' || mode === 'air')) {
+          if (!bl) return LX.t('req_bl');
+          if (!lx.patch.port_code) return LX.t('req_port');
+          if (mode === 'sea' && !roro && !ctr.good.length) return LX.t('req_containers');
+        }
         var warn = [];
+        // duplicate guard (check_tx_duplicates): same B/L + container / chassis blocks; the container under another B/L warns once.
+        // The check must answer: when it fails nothing is saved (the server guard refuses only the later B/L / container
+        // writes, after the transaction row exists)
+        var gateP = LX && bl ? LX.dupCheck(opsApi(), { blNumber: bl, cargoUnitType: roro ? 'roro' : 'container', chassisNo: lx.patch.chassis_no, containers: ctr.good })
+          : Promise.resolve({ block: [], warn: [] });
+        return gateP.then(function (g) {
+        if (g.error) return LX.t('dup_failed_block', { e: apiErr(g.error) });
+        if (g.block && g.block.length) return g.block.join(' ');
+        if (g.warn && g.warn.length) {
+          var sig = JSON.stringify([bl, ctr.good]);
+          if (dupAck !== sig) { dupAck = sig; return g.warn.join(' ') + ' ' + LX.t('dup_warn_confirm'); }
+        }
         var clientP = clientId ? Promise.resolve({ data: { id: clientId } })
           : api.createClient({ org_id: S.orgId, client_type: 'business', name_ar: name, vat_number: vat, cr_number: cr });
         return clientP.then(function (cr0) {
@@ -1796,10 +1859,12 @@
           var row = { org_id: S.orgId, branch_id: branchId, client_id: cid, operation: fval(form, 'operation'), mode: fval(form, 'mode'),
             port_of_loading: v('port_of_loading'), port_of_discharge: v('port_of_discharge'), country: v('country'),
             goods_description: v('goods_description'), shipping_line: v('shipping_line'), eta: v('eta'), container_count: ctr.good.length };
+          Object.keys(lx.patch).forEach(function (k) { if (lx.patch[k] != null) row[k] = lx.patch[k]; });
           return api.createTransaction(row).then(function (tr) {
             if (tr.error) return apiErr(tr.error);
             var tx = tr.data;
-            var chain = Promise.resolve(null);
+            var chain = Promise.resolve(null), dupHit = null;
+            var isDup = function (e) { return !!(e && (e.code === 'MRS_DUPLICATE_TX' || (e.raw && e.raw.code === 'MRS_DUPLICATE_TX'))); };
             if (bl) {
               // save_bl registers (or finds) the B/L and links it as primary in one server transaction
               chain = call('saveBL', { bl_number: bl, bl_type: fval(form, 'bl_type') || 'master', carrier_name: v('shipping_line'), vessel: v('vessel'),
@@ -1808,6 +1873,8 @@
                 .then(function (br) {
                   var blId = br.data && (br.data.id || br.data.bl_id);
                   // not linked (e.g. bl_other_branch): the plain number is kept on the record; the server logs a 'conflict' B/L event
+                  // the server duplicate guard refused the B/L (a twin saved since the pre-check): no plain-number fallback
+                  if (isDup(br.error)) { dupHit = br.error; return null; }
                   if (br.error || !blId) { warn.push(br.error && errField(br.error) === 'bl_other_branch' ? t('txnew_warn_bl_branch') : t('txnew_warn_bl', { e: br.error ? apiErr(br.error) : '—' })); return api.updateTransaction(tx.id, { bl_number: bl }).then(function () { return null; }); }
                   if (br.data.shared_with_other_client) warn.push(t('txnew_warn_bl_shared'));
                   if (br.data.linked) return blId;
@@ -1816,12 +1883,30 @@
             }
             return chain.then(function (blId) {
               // sequential: a repeated number inside one transaction is refused by the server (it may repeat across transactions)
+              if (dupHit) return null;
               return ctr.good.reduce(function (p, no) {
                 return p.then(function () {
-                  return api.addContainer(tx.id, blId ? { container_no: no, bl_id: blId } : { container_no: no }).then(function (r) { if (r.error) warn.push(no + ': ' + apiErr(r.error)); });
+                  if (dupHit) return null;
+                  return api.addContainer(tx.id, blId ? { container_no: no, bl_id: blId } : { container_no: no }).then(function (r) {
+                    if (isDup(r.error)) dupHit = r.error; else if (r.error) warn.push(no + ': ' + apiErr(r.error));
+                  });
                 });
               }, Promise.resolve());
             }).then(function () {
+              if (!dupHit) return null;
+              // a duplicate refused after the row was written (race with another save): void the new transaction at once
+              // (cancel_transaction, append-only) and keep the form open
+              return call('cancelTransaction', tx.id, LX ? LX.t('dup_race_reason') : 'duplicate').then(function (cx) {
+                var msg = apiErr(dupHit);
+                if (cx && cx.error) {
+                  toast(LX ? LX.t('dup_race_not_cancelled', { ref: tx.ref || '', e: msg }) : msg, 'error');
+                  go('#tx/' + tx.id);
+                  return true;
+                }
+                return { stop: (LX ? LX.t('dup_race_cancelled', { ref: tx.ref || '', e: msg }) : msg) };
+              });
+            }).then(function (r) {
+              if (r === true || (r && r.stop)) return r;
               if (!clientId || !name || !fval(form, 'save_alias')) return null;
               return call('addClientAlias', clientId, name, bl ? 'bl' : 'manual').then(function (ar) {
                 if (!ar.error || !isAliasTaken(ar.error)) { if (ar.error) warn.push(t('txnew_warn_alias', { e: apiErr(ar.error) })); return null; }
@@ -1831,12 +1916,15 @@
                   if (!mine) warn.push(t('txnew_warn_alias', { e: t('alias_duplicate') }));
                 });
               });
-            }).then(function () {
+            }).then(function (r) {
+              if (r === true) return true;
+              if (r && r.stop) return r.stop;
               toast(t('txnew_done', { ref: tx.ref || '' }) + (warn.length ? ' ' + t('txnew_with_warnings', { list: warn.join(' · ') }) : ''), warn.length ? 'warning' : 'success');
               go('#tx/' + tx.id);
               return true;
             });
           });
+        });
         });
       }
     });
@@ -1850,25 +1938,42 @@
       return '<option value="' + esc(b.id) + '"' + (b.id === selected ? ' selected' : '') + '>' + esc(b.name_ar) + '</option>';
     }).join('');
   }
+  // legacy step 2 (assets/js/ops/tx-legacy.js): null when the module did not load
+  function legacyTx() { var X = OPS.legacyTx; return X && typeof X.txFields === 'function' ? X : null; }
+  function cancelledText() { var s = opsLabel('transaction_state', 'cancelled'); return s && s !== 'cancelled' ? s : (legacyTx() ? legacyTx().t('cancelled') : 'ملغاة'); }
+  // a cancelled transaction (cancelled_at) shows «ملغاة» instead of its operational stage ('closed')
+  function txStateNode(x) { return x && x.cancelled_at ? pillNode('danger', cancelledText()) : badgeNode('operational_status', x.operational_status); }
   function renderTransactions() {
     var f = S.filters.transactions;
-    return api.listTransactions({ orgId: S.orgId, status: f.status || null, branchId: f.branchId || null, search: f.search, limit: WINDOW, offset: f.offset }).then(function (r) {
+    var LX = legacyTx();
+    return api.listTransactions({ orgId: S.orgId, status: f.status || null, branchId: f.branchId || null, search: f.search, limit: WINDOW, offset: f.offset,
+      cancelled: f.cancelled || null, transactionType: f.ttype || null, cargoUnitType: f.unit || null }).then(function (r) {
       var canNew = branchesFor(R.opsWriter).length > 0;
       var out = frag(dHead(viewLabel('transactions'), t('transactions_sub'),
         canNew ? [dBtn([svgIcon('plus'), t('txnew_btn')], 'btn-primary', function () { txNew(); })] : null));
       var multi = S.branches.length > 1;
       var tools = [filterSelect('transactions', 'status', t('col_op_status'), statusOptions('operational_status'))];
       if (multi) tools.push(filterSelect('transactions', 'branchId', t('col_branch'), [['', t('all_branches')]].concat(S.branches.map(function (b) { return [b.id, (isEn() && b.name_en) || b.name_ar]; }))));
+      if (LX) {
+        // legacy step 2: cancelled (cancelled_at) / transaction type / cargo unit
+        tools.push(filterSelect('transactions', 'cancelled', LX.t('f_cancelled_label'), [['', LX.t('f_cancelled_all')], ['exclude', LX.t('f_cancelled_exclude')], ['only', LX.t('f_cancelled_only')]]));
+        tools.push(filterSelect('transactions', 'ttype', LX.t('k_type'), [['', LX.t('f_type_all')], ['normal', opsLabel('transaction_type', 'normal')], ['re_export', opsLabel('transaction_type', 're_export')]]));
+        tools.push(filterSelect('transactions', 'unit', LX.t('k_unit'), [['', LX.t('f_unit_all')], ['container', opsLabel('cargo_unit_type', 'container')], ['roro', opsLabel('cargo_unit_type', 'roro')]]));
+      }
       var cols = [
-        { id: 'ref', label: t('col_ref'), value: function (x) { return x.ref; }, cell: function (x) { return refCell(x.ref, '#tx/' + x.id); } },
+        { id: 'ref', label: t('col_ref'), value: function (x) { return x.ref; }, cell: function (x) {
+          return [refCell(x.ref, '#tx/' + x.id),
+            x.transaction_type === 're_export' ? [' ', pillNode('warning', opsLabel('transaction_type', 're_export'))] : null,
+            x.cargo_unit_type === 'roro' ? [' ', pillNode('info', 'Ro-Ro')] : null];
+        } },
         { id: 'client', label: t('col_client'), value: function (x) { return x.clients && x.clients.name_ar; }, cell: function (x) { return x.clients && x.clients.name_ar; } }
       ];
       if (multi) cols.push({ id: 'branch', label: t('col_branch'), value: function (x) { return x.branches && x.branches.name_ar; }, cell: function (x) { return x.branches && x.branches.name_ar; } });
       cols.push(
         { id: 'op', label: t('col_operation'), value: function (x) { return lbl('direction', x.operation) + lbl('mode', x.mode); }, cell: function (x) { return lbl('direction', x.operation) + ' · ' + lbl('mode', x.mode); } },
-        { id: 'bl', label: t('col_bl'), value: function (x) { return x.bl_number; }, cell: function (x) { return dLtr(x.bl_number); } },
+        { id: 'bl', label: t('col_bl'), value: function (x) { return x.bl_number; }, cell: function (x) { return x.cargo_unit_type === 'roro' && x.chassis_no ? twoLine(x.bl_number, x.chassis_no, true) : dLtr(x.bl_number); } },
         { id: 'ctr', label: t('col_containers'), num: true, value: function (x) { return x.container_count; }, cell: function (x) { return el('span', { class: 'num', text: fmtCount(x.container_count) }); } },
-        { id: 'ops', label: t('col_op_status'), value: function (x) { return ORDER.operational_status.indexOf(x.operational_status); }, cell: function (x) { return badgeNode('operational_status', x.operational_status); } },
+        { id: 'ops', label: t('col_op_status'), value: function (x) { return x.cancelled_at ? 99 : ORDER.operational_status.indexOf(x.operational_status); }, cell: function (x) { return txStateNode(x); } },
         { id: 'fin', label: t('col_fin_status'), value: function (x) { return (ORDER.financial_status || Object.keys(LABELS.financial_status)).indexOf(x.financial_status); }, cell: function (x) { return badgeNode('financial_status', x.financial_status); } },
         { id: 'changed', label: t('col_changed_at'), desc: true, value: function (x) { return ts(x.status_changed_at); }, cell: function (x) { return fmtWhen(x.status_changed_at); } }
       );
@@ -1876,7 +1981,7 @@
         key: 'transactions', rows: r.data || [], total: r.count, error: r.error, serverSearch: true,
         placeholder: t('ph_transactions'), empty: t('empty_transactions'), tools: tools, columns: cols,
         href: function (x) { return '#tx/' + x.id; },
-        text: function (x) { return [x.ref, x.bl_number, x.declaration_no, x.clients && x.clients.name_ar, x.branches && x.branches.name_ar, x.port_of_discharge, lbl('operational_status', x.operational_status)].join(' '); }
+        text: function (x) { return [x.ref, x.bl_number, x.declaration_no, x.chassis_no, x.clients && x.clients.name_ar, x.branches && x.branches.name_ar, x.port_of_discharge, lbl('operational_status', x.operational_status), x.cancelled_at ? cancelledText() : ''].join(' '); }
       }));
       return out;
     });
@@ -1898,21 +2003,25 @@
       var reqP = t.request_id ? L.requestRef(t.request_id) : Promise.resolve({ data: null });
       return Promise.all([L.profiles(actorIds), reqP]).then(function (more) {
         var req = more[1].data;
-        var canOps = canAt(t.branch_id, R.opsWriter), canTr = canAt(t.branch_id, R.transportWriter);
+        var LX = legacyTx(), cancelled = !!t.cancelled_at, roro = t.cargo_unit_type === 'roro';
+        // a cancelled transaction is read-only (every write RPC answers MRS_BAD_TRANSITION cancelled)
+        var canOps = canAt(t.branch_id, R.opsWriter) && !cancelled, canTr = canAt(t.branch_id, R.transportWriter) && !cancelled;
         var actions = '';
         if (canOps) {
           actions += '<button class="btn btn-sm btn-ghost" type="button" data-act="tx-edit" data-id="' + esc(t.id) + '">تعديل البيانات</button>';
           actions += '<button class="btn btn-sm btn-ghost" type="button" data-act="tx-token" data-id="' + esc(t.id) + '">إصدار رمز تتبع</button>';
         }
-        var html = head('معاملة ' + ltr(t.ref),
+        var html = head('معاملة ' + ltr(t.ref) + (cancelled ? ' ' + pillHtml('danger', cancelledText()) : '') +
+            (t.transaction_type === 're_export' ? ' ' + pillHtml('warning', opsLabel('transaction_type', 're_export')) : ''),
           esc(t.clients ? t.clients.name_ar : '') + (t.branches ? ' · ' + esc(t.branches.name_ar) : '') + ' · أُنشئت ' + fmtDate(t.created_at),
           actions, '#transactions');
 
-        // stages + status
+        // stages + status (legacy step 2: the tx_lifecycle stepper with the automatic moves + cancel, filled below)
         var order = ORDER.operational_status, cur = order.indexOf(t.operational_status);
-        html += '<ol class="adm-stages" aria-label="المراحل التشغيلية">' + order.map(function (s, i) {
+        var stagesHtml = '<ol class="adm-stages" aria-label="المراحل التشغيلية">' + order.map(function (s, i) {
           return '<li class="' + (i < cur ? 'is-done' : i === cur ? 'is-current' : '') + '"' + (i === cur ? ' aria-current="step"' : '') + '><span>' + esc(lbl('operational_status', s)) + '</span></li>';
         }).join('') + '</ol>';
+        html += LX ? '<div class="lx-stepper-host" data-lx-stepper></div>' : stagesHtml;
 
         var info = kv([
           ['العميل', t.clients ? '<a href="#client/' + esc(t.clients.id) + '">' + esc(t.clients.name_ar) + '</a>' : T.common.none, true],
@@ -1926,11 +2035,13 @@
           ['تاريخ الوصول المتوقع', fmtDate(t.eta), true], ['المسؤول', t.responsible_user_id ? who(t.responsible_user_id) : T.common.none],
           ['ملاحظات', t.notes]
         ]);
-        var status = '<div class="adm-status-now"><div><span class="text-xs text-muted">الحالة التشغيلية</span>' + badge('operational_status', t.operational_status) +
+        var status = '<div class="adm-status-now"><div><span class="text-xs text-muted">الحالة التشغيلية</span>' + (cancelled ? pillHtml('danger', cancelledText()) : badge('operational_status', t.operational_status)) +
           '</div><div><span class="text-xs text-muted">الحالة المالية (مرجعية فقط حتى إطلاق الفوترة)</span>' + badge('financial_status', t.financial_status) + '</div></div>' +
           '<p class="text-xs text-muted">آخر تغيير: ' + fmtDateTime(t.status_changed_at) + '</p>';
-        var choices = statusChoices(t);
-        if (choices.length) {
+        var choices = cancelled ? [] : statusChoices(t);
+        if (cancelled) {
+          status += '<p class="text-sm text-muted">' + esc(LX ? LX.t('cancelled_frozen') : T.common.notAllowed) + '</p>';
+        } else if (choices.length) {
           status += '<form class="adm-status-form" data-form="tx-status" data-id="' + esc(t.id) + '">' +
             field({ name: 'status', label: 'الحالة الجديدة', type: 'select', req: true, options: '<option value="">اختر الحالة</option>' + choices.map(function (c) {
               return '<option value="' + esc(c.code) + '" data-back="' + (c.back ? '1' : '') + '">' + esc(lbl('operational_status', c.code)) + (c.back ? ' — تصحيح للخلف (يلزم سبب)' : '') + '</option>';
@@ -1943,9 +2054,13 @@
         } else {
           status += '<p class="text-sm text-muted">' + T.common.notAllowed + '</p>';
         }
-        html += '<div class="adm-cols adm-cols-wide">' + card('بيانات المعاملة', info) + card('الحالة', status) + '</div>';
+        html += '<div class="adm-cols adm-cols-wide">' + card('بيانات المعاملة', info + (LX ? '<div data-lx-details></div>' : '')) + card('الحالة', status) + '</div>';
 
-        // containers
+        // containers (a Ro-Ro transaction carries a vehicle instead: no containers, no empty return)
+        if (roro && LX) {
+          html += card(esc(LX.t('roro_card')), kv([[LX.t('k_chassis'), ltr(t.chassis_no), true], [LX.t('k_plate'), ltr(t.vehicle_plate_no), true]]) +
+            '<p class="form-hint">' + esc(LX.t('roro_card_hint')) + '</p>');
+        } else {
         var cRows = (t.containers || []).slice().sort(function (a, b) { return a.container_no < b.container_no ? -1 : 1; }).map(function (c) {
           var ev = docs.filter(function (d) { return d.id === c.evidence_document_id; })[0];
           var open = ['pending', 'evidence_submitted', 'disputed'].indexOf(c.return_status) !== -1;
@@ -1959,6 +2074,7 @@
         html += card('الحاويات وإرجاع الفارغ', table(['رقم الحاوية', 'النوع', 'آخر موعد للإرجاع', 'مكان الإرجاع', 'حالة الإرجاع', 'دليل الإرجاع', ''], cRows) +
           '<p class="form-hint">الإثبات الوحيد المقبول لإرجاع الحاوية هو «' + esc(lbl('document_kind', 'empty_return_receipt')) + '» بعد تأكيد تصنيفه من الموظف. إيصال التسليم (EIR) وتعليمات الإرجاع ليست إثباتًا.</p>',
           canTr ? '<button class="btn btn-sm btn-primary" type="button" data-act="ctr-add" data-tx="' + esc(t.id) + '">' + icon('plus') + 'إضافة حاوية</button>' : '');
+        }
 
         // documents
         var upload = '';
@@ -1987,6 +2103,11 @@
         var tpl = document.createElement('template');
         tpl.innerHTML = html;
         var out = tpl.content;
+        if (LX) {
+          var stepHost = out.querySelector('[data-lx-stepper]'), detHost = out.querySelector('[data-lx-details]');
+          if (stepHost) LX.stepper(stepHost, t, opsApi(), function () { var x = document.createElement('template'); x.innerHTML = stagesHtml; return x.content; });
+          if (detHost) detHost.appendChild(dKv(LX.detailRows(t, opsApi())));
+        }
         var sections = el('div', { class: 'ops-tx-sections' });
         out.appendChild(sections);
         renderTxSections(sections, t);
@@ -2035,8 +2156,11 @@
       var title = esc(lbl('event_type', e.event_type)), detail = '';
       var p = e.payload || {};
       if (e.event_type === 'operational_status') {
-        title += ': ' + esc(lbl('operational_status', e.from_status)) + ' ← ' + esc(lbl('operational_status', e.to_status));
+        // legacy: cancel_transaction writes op 'cancelled' (→ closed); the automatic moves carry {auto: true, cause}
+        title += ': ' + esc(lbl('operational_status', e.from_status)) + ' ← ' + esc(p.op === 'cancelled' ? cancelledText() : lbl('operational_status', e.to_status));
         if (p.direction === 'backward') detail += pillHtml('warning', t('backward')) + ' ';
+        if (p.op === 'cancelled') detail += pillHtml('danger', cancelledText()) + ' ';
+        if (p.auto && legacyTx()) detail += pillHtml('info', legacyTx().t('lc_auto') + (p.cause ? ' — ' + legacyTx().t('cause_' + p.cause) : '')) + ' ';
       } else if (e.event_type === 'financial_status') {
         title += ': ' + esc(lbl('financial_status', e.from_status)) + ' ← ' + esc(lbl('financial_status', e.to_status));
       } else if (e.event_type === 'container_return') {
@@ -2064,9 +2188,18 @@
 
   function txEdit(id) {
     var c = TX_CACHE[id]; if (!c) return;
-    var t = c.tx;
+    var t = c.tx, LX = legacyTx(), lxf = null;
+    if (t.cancelled_at) return toast(LX ? LX.t('cancelled_frozen') : T.common.notAllowed, 'warning');
     openDialog({
       title: 'تعديل بيانات المعاملة ' + t.ref, wide: true,
+      // legacy step 2: port / terminal / cargo unit / transport mode / declaration notes (assets/js/ops/tx-legacy.js)
+      onOpen: function (b) {
+        if (!LX) return;
+        lxf = LX.txFields(opsApi(), t);
+        var g = b.querySelector('.adm-form-grid'), cc = b.querySelector('[name=container_count]');
+        if (cc && cc.closest('.form-group')) cc.closest('.form-group').setAttribute('data-lx-hide-roro', '');
+        if (g) { append(g, lxf.nodes); lxf.bind(b); }
+      },
       body: alertBox('info', 'المرجع والحالات لا تُعدّل من هنا. كل تعديل يُحفظ في سجل التدقيق.') +
         alertBox('info', 'البيان الجمركي (إضافة / تصحيح / إلغاء واستبدال) يُدار من قسم «البيانات الجمركية»، والبوالص الإضافية من قسم «بوالص الشحن» في صفحة المعاملة. لا يُرسَل هنا إلا ما غيّرته.') + grid(
         field({ name: 'service', label: 'الخدمة', type: 'select', options: opts('service', t.service, 'غير محدد') }) +
@@ -2094,6 +2227,11 @@
         patch.container_count = cc == null ? 0 : parseInt(cc, 10);
         patch.package_count = pc == null ? null : parseInt(pc, 10);
         if (isNaN(patch.container_count) || patch.container_count < 0 || (patch.package_count != null && (isNaN(patch.package_count) || patch.package_count < 0))) return 'الأعداد يجب أن تكون أرقامًا صحيحة موجبة.';
+        if (lxf) {
+          var lx = lxf.collect(form);
+          if (lx.error) return lx.error;
+          Object.keys(lx.patch).forEach(function (k) { patch[k] = lx.patch[k]; });   // a Ro-Ro row also gets container_count 0
+        }
         // only the keys the user changed against the values the form opened with: a form opened before
         // another change (e.g. a new primary B/L) never writes the older value back
         Object.keys(patch).forEach(function (k) {
@@ -2103,9 +2241,18 @@
           if (was === now) delete patch[k];
         });
         if (!Object.keys(patch).length) { toast(T.common.saved, 'success'); return true; }
-        return api.updateTransaction(id, patch).then(function (r) {
-          if (r.error) return errText(r.error);
-          toast(T.common.saved, 'success'); rerender(); return true;
+        var pick = function (k) { return patch[k] !== undefined ? patch[k] : t[k]; };
+        // a new B/L / chassis / unit is checked against the org's live transactions first (the server refuses it anyway)
+        var gateP = LX && (patch.bl_number !== undefined || patch.chassis_no !== undefined || patch.cargo_unit_type !== undefined)
+          ? LX.dupCheck(opsApi(), { tx: t, blNumber: pick('bl_number'), cargoUnitType: pick('cargo_unit_type'), chassisNo: pick('chassis_no'),
+              containers: (t.containers || []).map(function (x) { return x.container_no; }) })
+          : Promise.resolve({ block: [] });
+        return gateP.then(function (g) {
+          if (g.block && g.block.length) return g.block.join(' ');
+          return api.updateTransaction(id, patch).then(function (r) {
+            if (r.error) return errText(r.error);
+            toast(T.common.saved, 'success'); rerender(); return true;
+          });
         });
       }
     });
@@ -2349,7 +2496,7 @@
       var tr = res[1];
       html += card('معاملات العميل', tr.error ? alertBox('danger', errText(tr.error)) : table(['المرجع', 'الفرع', 'العملية', 'الحالة التشغيلية', 'التاريخ', ''], (tr.data || []).map(function (t) {
         return '<tr><td>' + ltr(t.ref) + '</td><td>' + esc(t.branches && t.branches.name_ar) + '</td><td>' + esc(lbl('direction', t.operation)) + ' · ' + esc(lbl('mode', t.mode)) + '</td><td>' +
-          badge('operational_status', t.operational_status) + '</td><td>' + fmtDate(t.created_at) + '</td><td><a class="btn btn-sm btn-ghost" href="#tx/' + esc(t.id) + '">' + T.common.view + '</a></td></tr>';
+          (t.cancelled_at ? pillHtml('danger', cancelledText()) : badge('operational_status', t.operational_status)) + '</td><td>' + fmtDate(t.created_at) + '</td><td><a class="btn btn-sm btn-ghost" href="#tx/' + esc(t.id) + '">' + T.common.view + '</a></td></tr>';
       })) + '<p class="form-hint">تظهر فقط معاملات الفروع المسموح لك بها.</p>');
       var tpl = document.createElement('template');
       tpl.innerHTML = html;

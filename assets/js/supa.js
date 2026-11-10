@@ -85,6 +85,9 @@
       MRS_UNKNOWN_RESULT: 'لم نتمكن من تأكيد نتيجة العملية بسبب انقطاع الاتصال. إعادة المحاولة آمنة ولن تُنشئ نسخة مكرّرة.',
       MRS_TIMEOUT: 'استغرق الخادم وقتًا أطول من المعتاد. حاول مرة أخرى.',
       MRS_DOCS_MISSING: 'لا يمكن الانتقال إلى هذه المرحلة قبل استكمال المستندات المطلوبة لها ({f}). ارفعها وصنّفها، أو تجاوز القاعدة بصلاحية مدير مع ذكر السبب.',
+      // legacy step 2 (20261118000100): duplicate transaction / appointment guards
+      MRS_DUPLICATE_TX: 'توجد معاملة مسجلة مسبقًا بنفس رقم البوليصة ونفس الوحدة (حاوية أو شاسيه). افتح المعاملة الموجودة بدلًا من تكرارها.',
+      MRS_DUPLICATE_APPOINTMENT: 'يوجد موعد مطابق مسجل مسبقًا لنفس الحاوية ورقم الموعد وتاريخ/وقت الموعد.',
       // G4 (docs/online/G4_SPEC.md)
       MRS_OVER_ALLOCATED: 'مجموع التوزيع يتجاوز صافي البند؛ التوزيع لا يضاعف الفاتورة (المتبقي القابل للتوزيع: {f}).',
       MRS_OVERPAID: 'المبلغ يتجاوز المتبقي من الإجمالي (المتبقي: {f}).',
@@ -141,6 +144,10 @@
       declaration_no_taken: 'رقم البيان (مسجّل لمعاملة أخرى في المؤسسة)', declaration_no_cancelled: 'رقم البيان (ملغى؛ يُستخدم فقط كبديل صريح)',
       bl_number: 'رقم البوليصة', bl_number_taken: 'رقم البوليصة (مسجّل من قبل بالنوع نفسه)', bl_type: 'نوع البوليصة', bl: 'البوليصة',
       alias: 'الاسم البديل', alias_taken: 'الاسم البديل (مستخدم لعميل آخر)', carrier_id: 'الناقل', shipping_agent_id: 'الوكيل الملاحي',
+      driver_name: 'اسم السائق', driver_phone: 'رقم جوال السائق', truck_plate: 'رقم الشاحنة', movement_status: 'حالة الموعد والنقل',
+      destination: 'وجهة التسليم', cost_amount: 'قيمة النقل', sell_amount: 'عائد المؤسسة', delivered_at: 'وقت التسليم',
+      appointment_id: 'الموعد', appointment: 'الموعد', trip: 'حركة النقل', appointment_status: 'حالة الموعد', cargo_unit_type: 'نوع وحدة الشحن',
+      chassis_no: 'رقم الشاسيه', port_code: 'المنفذ الجمركي',
       terminal_party_id: 'المحطة', return_yard_party_id: 'ساحة الإرجاع', return_instruction_document_id: 'تعليمات الإرجاع', driver_id: 'السائق',
       truck_id: 'الشاحنة', container_id: 'الحاوية', container_no: 'رقم الحاوية', appointment_at: 'وقت الموعد', window_minutes: 'مدة نافذة الموعد',
       appointment_no: 'رقم الموعد', occurred_at: 'تاريخ الحدوث', at: 'وقت الحالة', leg_no: 'رقم المرحلة',
@@ -312,7 +319,14 @@
       'MRS_NOT_FOUND:declaration_extraction_id': 'قراءة البيان الجمركي غير موجودة أو لا تملك صلاحية عرضها.',
       'MRS_INVALID:overall': 'النتيجة العامة لا تتفق مع نتائج الحقول (اختلاف في حقل أساسي يعني «يوجد اختلاف»). أعد المطابقة ثم احفظ.',
       'MRS_INVALID:transaction_id': 'المستندات المقروءة مرتبطة بمعاملة أخرى. اختر المعاملة نفسها أو احفظ بدون معاملة.',
-      'MRS_REQUIRED:reviewed_rows': 'علّم حقلًا واحدًا على الأقل بأنه «تمت مراجعته» قبل اعتماد المراجعة.'
+      'MRS_REQUIRED:reviewed_rows': 'علّم حقلًا واحدًا على الأقل بأنه «تمت مراجعته» قبل اعتماد المراجعة.',
+      // legacy step 2 (20261118000100)
+      'MRS_DUPLICATE_TX:container': 'توجد معاملة مسجلة مسبقًا بنفس رقم البوليصة وإحدى الحاويات.',
+      'MRS_DUPLICATE_TX:chassis': 'توجد معاملة Ro-Ro مسجلة مسبقًا بنفس رقم البوليصة ورقم الشاسيه.',
+      'MRS_BAD_TRANSITION:cancelled': 'هذا السجل ملغى ولا يقبل التعديل.',
+      'MRS_BAD_TRANSITION:delivered': 'تم النقل لهذه الحركة؛ لا تُعدَّل بياناتها التشغيلية ولا تُلغى.',
+      'MRS_FORBIDDEN:cost': 'قيمة النقل وعائد المؤسسة متاحان لصلاحيات المالية ومدير العمليات فقط.',
+      'MRS_BAD_TRANSITION:same_status': 'المعاملة في هذه المرحلة بالفعل (ربما تقدّمت تلقائيًا). حدّث الصفحة.'
     },
     banner: {
       staging: 'بيئة تجريبية (Staging) — البيانات للاختبار فقط'
@@ -1437,7 +1451,10 @@
      ------------------------------------------------------------------ */
   var TX_COLS = 'id,org_id,branch_id,client_id,request_id,ref,operation,mode,service,port_of_loading,port_of_discharge,country,' +
     'goods_description,hs_code,shipping_line,bl_number,declaration_no,declaration_date,declaration_type,container_count,' +
-    'package_count,eta,responsible_user_id,operational_status,status_changed_at,created_at,updated_at';   // notes, financial_status: withInternal() (G5 column grant)
+    'package_count,eta,responsible_user_id,operational_status,status_changed_at,created_at,updated_at,' +
+    // legacy step 1 (20261117000100) columns (declaration_notes, cancel_reason, cancelled_by: withInternal(), staff only)
+    'port_code,terminal_party_id,cargo_unit_type,chassis_no,vehicle_plate_no,transaction_type,transport_mode,transport_party_id,' +
+    'transport_order_no,transport_order_date,cancelled_at';   // notes, financial_status: withInternal() (G5 column grant)
   function listTransactions(o) {
     o = o || {};
     return online(function (c) {
@@ -1447,7 +1464,14 @@
       if (o.status) q = q.eq('operational_status', o.status);
       if (o.branchId) q = q.eq('branch_id', o.branchId);
       if (o.clientId) q = q.eq('client_id', o.clientId);
-      if (o.search) { var s = likeSafe(o.search); if (s) q = q.or('ref.ilike.%' + s + '%,bl_number.ilike.%' + s + '%,declaration_no.ilike.%' + s + '%'); }
+      // legacy tx (20261118000100): o.cancelled = 'only' (ملغاة) | 'exclude' (live only) | absent (all);
+      // o.transactionType (normal | re_export), o.cargoUnitType (container | roro), o.portCode
+      if (o.cancelled === 'only') q = q.not('cancelled_at', 'is', null);
+      else if (o.cancelled === 'exclude') q = q.is('cancelled_at', null);
+      if (o.transactionType) q = q.eq('transaction_type', o.transactionType);
+      if (o.cargoUnitType) q = q.eq('cargo_unit_type', o.cargoUnitType);
+      if (o.portCode) q = q.eq('port_code', o.portCode);
+      if (o.search) { var s = likeSafe(o.search); if (s) q = q.or('ref.ilike.%' + s + '%,bl_number.ilike.%' + s + '%,declaration_no.ilike.%' + s + '%,chassis_no.ilike.%' + s + '%'); }
       return range(q, o);
     }).then(function (r) { return withInternal('transactions', r); }).then(function (r) {
       // financial_status is not API-selectable since G5 (clients must not read it): filtered on the merged staff field
@@ -1482,6 +1506,74 @@
     return idemRpc('set_financial_status', idemKey, function (k) {
       return { p_transaction_id: id, p_status: status, p_note: note || null, p_idem_key: k };
     });
+  }
+  /* legacy step 2 (20261118000100, docs/online/LEGACY_TX_AR.md) */
+  // void-only cancel (20261117000100) with the reason (≤ 500) → {transaction_id, ref, from, to:'closed', cancelled_at, event_id, declarations_cancelled}
+  function cancelTransaction(id, reason) { return rpc('cancel_transaction', { p_tx: id, p_reason: reason == null ? null : String(reason) }); }
+  // form pre-check. o = { orgId?, transactionId?, blNumber, cargoUnitType? ('container' | 'roro'), chassisNo?, containers?: [text] }
+  // → { duplicates: [{kind:'container'|'chassis', unit, transaction_id|null, ref|null, branch_id|null, other_branch}],
+  //     container_elsewhere: [{container_no, transaction_id, ref, operational_status}] }   (duplicates block, the rest warns)
+  function checkTxDuplicates(o) {
+    o = o || {};
+    var p = { bl_number: o.blNumber || null, cargo_unit_type: o.cargoUnitType || 'container', chassis_no: o.chassisNo || null,
+      containers: Array.isArray(o.containers) ? o.containers : [] };
+    if (o.transactionId) p.transaction_id = o.transactionId;
+    return inActiveOrg(o.orgId, function (oid) { return rpc('check_tx_duplicates', { p_org: oid, p_payload: p }); });
+  }
+  // the stepper → {transaction_id, ref, operational_status, cancelled, cancelled_at, cargo_unit_type, …, stages:[{code, sort,
+  //   label_ar, label_en, state:'done'|'current'|'todo', reached_at, auto, cause}], next:{code, manual, containers_not_returned,
+  //   docs_missing:[kind]}|null, pending_containers:[container_no], follow_up_required}
+  function txLifecycle(id) { return rpc('tx_lifecycle', { p_tx: id }); }
+  // combined movement (appointment + trip + return plan; legacy saveMovement). p = { transaction_id, appointment_id?|trip_id?,
+  //   container_id, appointment_at, appointment_no, terminal_party_id, window_minutes, appointment_status, driver_id | driver_name +
+  //   driver_phone, truck_id | truck_plate, carrier_id, origin, destination, notes, cost_amount, sell_amount (finance roles),
+  //   movement_status 'registered'|'delivered'|'cancelled', delivered_at, return_deadline, return_location, return_yard_party_id,
+  //   reason, idempotent } → { movement, is_new, already_exists, transaction, lifecycle_status, pending_containers,
+  //   follow_up_required, driver_id, driver_created, truck_id, truck_created }
+  function saveMovement(p, opts) {
+    opts = opts || {};
+    return idemRpc('save_movement', opts.idemKey, function (k) { return { p_payload: withKey(p, null), p_idem_key: k }; });
+  }
+  function listMovements(txId) { return rpc('list_movements', { p_tx: txId }); }
+  // typeahead: q ≥ 2 chars (name or phone digits); '' = recent → [{driver_id, full_name, phone, carrier_id, last_truck_id, last_truck_plate}]
+  function driverDirectory(q, o) {
+    o = o || {};
+    return inActiveOrg(o.orgId, function (oid) { return rpc('driver_directory', { p_org: oid, p_q: q == null ? null : String(q) }); });
+  }
+  // terminal operators for a port (mapped first; operators mapped to no port are included) → [{party_id, name_ar, name_en, mapped}]
+  function portOperators(portCode, o) {
+    o = o || {};
+    return inActiveOrg(o.orgId, function (oid) { return rpc('port_operators', { p_org: oid, p_port: portCode || null }); });
+  }
+  // the 7 approved ports (platform table, read-only) → [{code, unlocode, kind, name_ar, name_en, daftra_value, sort, is_active}]
+  function listCustomsPorts() {
+    return online(function (c) {
+      return c.from('customs_ports').select('code,unlocode,kind,name_ar,name_en,daftra_value,sort,is_active').order('sort');
+    });
+  }
+  // operator ↔ port mapping (transport writers add / (de)activate; never deleted). o = { orgId?, partyId?, portCode?, activeOnly? }
+  function listPartyPorts(o) {
+    o = o || {};
+    return inActiveOrg(o.orgId, function (oid) {
+      return online(function (c) {
+        var q = c.from('party_ports').select('id,org_id,party_id,port_code,is_active,created_at,updated_at').eq('org_id', oid).order('port_code');
+        if (o.partyId) q = q.eq('party_id', o.partyId);
+        if (o.portCode) q = q.eq('port_code', o.portCode);
+        if (o.activeOnly) q = q.eq('is_active', true);
+        return q;
+      });
+    });
+  }
+  function addPartyPort(partyId, portCode, o) {
+    o = o || {};
+    return inActiveOrg(o.orgId, function (oid) {
+      return online(function (c) {
+        return c.from('party_ports').insert({ org_id: oid, party_id: partyId, port_code: portCode }).select('id,org_id,party_id,port_code,is_active').single();
+      });
+    });
+  }
+  function setPartyPortActive(id, active) {
+    return online(function (c) { return c.from('party_ports').update({ is_active: !!active }).eq('id', id).select('id,party_id,port_code,is_active').single(); });
   }
   // the token is shown once; on a replay the server returns tracking_token null + token_shown true
   function issueTrackingToken(id, idemKey) {
@@ -2173,7 +2265,7 @@
 
   /* customs declarations (G3.5) — any status; the newest first */
   // notes / cancel_reason are not API-selectable (column grants): staff get them through staff_internal_fields()
-  var DECL_COLS = 'id,org_id,transaction_id,declaration_no,declaration_type,declaration_date,status,source,source_document_id,' +
+  var DECL_COLS = 'id,org_id,transaction_id,declaration_no,declaration_type,declaration_date,declaration_date_hijri,status,source,source_document_id,' +
     'corrected_at,cancelled_at,replaced_by_id,created_by,created_at,updated_at';
   var DECL_CLIENT_COLS = 'id,transaction_id,declaration_no,declaration_type,declaration_date,status,replaced_by_id,created_at';
   // o = { minimal } (portal: number / type / date / status only)
@@ -3343,6 +3435,10 @@
     listTransactions: listTransactions, getTransaction: getTransaction, createTransaction: createTransaction,
     updateTransaction: updateTransaction, setTransactionStatus: setTransactionStatus, setFinancialStatus: setFinancialStatus,
     issueTrackingToken: issueTrackingToken, listEvents: listEvents, addNote: addNote,
+    // legacy step 2 (20261118000100)
+    cancelTransaction: cancelTransaction, checkTxDuplicates: checkTxDuplicates, txLifecycle: txLifecycle, saveMovement: saveMovement,
+    listMovements: listMovements, driverDirectory: driverDirectory, portOperators: portOperators, listCustomsPorts: listCustomsPorts,
+    listPartyPorts: listPartyPorts, addPartyPort: addPartyPort, setPartyPortActive: setPartyPortActive,
     listContainers: listContainers, addContainer: addContainer, updateContainer: updateContainer,
     // documents
     listDocuments: listDocuments, uploadDocument: uploadDocument, documentUrl: documentUrl,

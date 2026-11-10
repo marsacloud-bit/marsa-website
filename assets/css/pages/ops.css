@@ -134,3 +134,30 @@ button.ops-kpi { font: inherit; color: inherit; width: 100%; cursor: pointer; }
 @media print {
   .ops-row-actions, .ops-item-actions, .ops-toolbar, .app-page-actions { display: none !important; }
 }
+
+/* ---- legacy step 2 (assets/js/ops/tx-legacy.js): stepper, cancel, movements, Hijri preview ---- */
+.lx-stepper-host { display: grid; gap: 10px; margin-block-end: 16px; min-width: 0; }
+.lx-lifecycle { display: grid; gap: 8px; min-width: 0; }
+.lx-stepper { max-width: 100%; }
+.lx-stepper li span { flex-wrap: nowrap; }
+.lx-stepper .lx-auto { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: var(--r-pill); background: var(--info-bg, #e8f1fb); color: var(--info, #1f5fa8); }
+.lx-stepper li.is-current .lx-auto { background: rgba(255, 255, 255, .2); color: #fff; }
+.lx-stepper li.is-skipped span { opacity: .6; border-style: dashed; }
+.lx-stepper .lx-na { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: var(--r-pill); background: var(--surface-2, #eef1f5); color: var(--text-muted, #5b6675); }
+.lx-stepper.is-cancelled li span { opacity: .55; text-decoration: line-through; }
+.lx-next { margin: 0; padding-inline-start: 18px; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.lx-cancel { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.lx-cancel .form-hint { margin: 0; }
+.lx-cancelled { margin: 0; overflow-wrap: anywhere; }
+.lx-dup { min-width: 0; overflow-wrap: anywhere; }
+.lx-dup .alert { margin-block: 0 8px; }
+.lx-suggest { margin-block-start: 6px; display: grid; gap: 4px; min-width: 0; }
+.lx-suggest .adm-mini { margin: 0; }
+.lx-tas { overflow-wrap: anywhere; }
+.ops-hijri-out { overflow-wrap: anywhere; }
+.ops-hijri-out.is-error { color: var(--danger); }
+.lx-movements .adm-row-actions { flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .lx-cancel { flex-direction: column; align-items: stretch; }
+  .lx-cancel .btn { width: 100%; }
+}

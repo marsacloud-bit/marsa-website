@@ -565,6 +565,9 @@
     var mode = (tx && tx.mode) || (rq && rq.mode) || '';
     var modeIcon = mode === 'air' ? IC.plane : (mode === 'land' ? IC.truck : IC.ship);
     var label = tx ? (tx.status_label_ar || tx.operational_status) : (rq ? (rq.status_label_ar || rq.status) : '');
+    // legacy step 2: a cancelled transaction (status_label_ar = «ملغاة» from public_track) gets a red badge and no progress bar
+    var cancelled = !!(tx && tx.cancelled);
+    if (cancelled && !tx.status_label_ar) label = 'ملغاة';
     var rows = '';
     if (rq) {
       rows += kvLi(OSTR.received, dt(rq.created_at));
@@ -575,6 +578,7 @@
       if (rq && rq.ref && tx.ref && rq.ref !== tx.ref) rows += kvLi('رقم المعاملة', tx.ref, true);
       if (!rq) rows += kvLi(OSTR.operation, DIR_LABEL[tx.operation] || '');
       rows += kvLi(OSTR.changed, dt(tx.status_changed_at));
+      if (cancelled && tx.cancelled_at) rows += kvLi('تاريخ الإلغاء', dt(tx.cancelled_at));
       if (tx.containers && tx.containers.total > 0) {
         rows += kvLi(OSTR.containers, OSTR.containersVal.replace('{r}', String(tx.containers.returned || 0)).replace('{t}', String(tx.containers.total)));
       }
@@ -582,7 +586,7 @@
     rows += kvLi(OSTR.mode, MODE_LABEL[mode] || '');
 
     var progress = '';
-    if (tx && tx.stage_index != null && tx.stage_total) {
+    if (tx && !cancelled && tx.stage_index != null && tx.stage_total) {
       var pct = Math.max(0, Math.min(100, Math.round((Number(tx.stage_index) / Number(tx.stage_total)) * 100)));
       progress = '<div class="ts-progress">' +
         '<div class="progress-meta"><span>' + esc(OSTR.progress) + '</span><span class="num">' + pct + '%</span></div>' +
@@ -596,7 +600,7 @@
           '<span class="icon-box icon-box-sm">' + svg(modeIcon) + '</span>' +
           '<div><span class="ts-sub">' + esc(tx ? OSTR.kindTx : OSTR.kindRequest) + ' — رقم المرجع</span><h2 id="ts-title" class="num" tabindex="-1" dir="ltr">' + esc(ref) + '</h2></div>' +
         '</div>' +
-        '<div class="ts-actions"><span class="badge badge-teal"><span class="dot"></span>' + esc(label) + '</span>' +
+        '<div class="ts-actions"><span class="badge ' + (cancelled ? 'badge-danger' : 'badge-teal') + '"' + (cancelled ? ' data-cancelled="1"' : '') + '><span class="dot"></span>' + esc(label) + '</span>' +
           '<button class="btn btn-ghost btn-sm" type="button" data-act="copy" data-ref="' + esc(ref) + '">' + svg(IC.copy) + 'نسخ الرقم</button>' +
         '</div>' +
       '</div>' +

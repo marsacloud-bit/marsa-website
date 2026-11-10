@@ -669,9 +669,11 @@ async function main() {
       // document matching (20261116000100): save / review / void a match (staff)
       'save_document_match', 'review_document_match', 'void_document_match',
       // legacy core (20261117000100): void-only cancel of a transaction (ops writers of its branch)
-      'cancel_transaction'];
+      'cancel_transaction',
+      // legacy tx (20261118000100): duplicate pre-check, stepper, combined movement, movements list, driver directory, operators by port
+      'check_tx_duplicates', 'tx_lifecycle', 'save_movement', 'list_movements', 'driver_directory', 'port_operators'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 195) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 201) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');
@@ -1013,7 +1015,9 @@ async function main() {
   section('public_track: token required, no personal data');
   const ALLOWED_KEYS = new Set(['ref', 'environment', 'kind', 'request', 'status', 'status_label_ar', 'status_label_en', 'direction', 'mode',
     'created_at', 'reviewed_at', 'transaction', 'operation', 'operational_status', 'stage_index', 'stage_total', 'status_changed_at',
-    'containers', 'total', 'returned', 'timeline', 'label_ar', 'label_en', 'at']);
+    'containers', 'total', 'returned', 'timeline', 'label_ar', 'label_en', 'at',
+    // legacy tx (20261118000100): a cancelled transaction shows «ملغاة» (no personal data)
+    'cancelled', 'cancelled_at']);
   const keysOf = (o, acc = []) => { if (Array.isArray(o)) o.forEach(x => keysOf(x, acc)); else if (o && typeof o === 'object') for (const k of Object.keys(o)) { acc.push(k); keysOf(o[k], acc); } return acc; };
   const personal = [basePayload.fullName, basePayload.company, basePayload.email, basePayload.goods, basePayload.blNumber, 'TSTU0000021', basePayload.crNumber, basePayload.notes, 'invoice.pdf'];
   let trk;
@@ -1268,6 +1272,9 @@ async function main() {
   await expectErr('clearance staff cannot set financial status', () => as('staffA', `SELECT public.set_financial_status($1, 'estimate_only', NULL)`, [TX1]), /MRS_FORBIDDEN/);
   await expectErr('operationally_complete blocked while containers not returned', () => as('staffA', `SELECT public.set_transaction_status($1, 'operationally_complete', NULL)`, [TX1]), /MRS_CONTAINERS_NOT_RETURNED/);
   await expectErr('request status: clientA cannot change', () => as('clientA', `SELECT public.set_request_status($1, 'rejected', 'x')`, [REQ_SEED]), /MRS_NOT_FOUND/);
+  // legacy tx (20261118000100): the appointment / trip RPCs of earlier sections now move TX3 forward automatically;
+  // the stage-order checks below start again from 'new' (owner SQL, no event)
+  await q(`UPDATE public.transactions SET operational_status = 'new' WHERE id = $1`, [TX3]);
   await expectErr('stage order enforced (clearance staff cannot jump new → operationally_complete)', () => as('staffA',
     `SELECT public.set_transaction_status($1, 'operationally_complete', NULL)`, [TX3]), /MRS_BAD_TRANSITION/, 'set_transaction_status stage_skip');
   await expectErr('stage skip by admin needs a reason', () => as('adminA',

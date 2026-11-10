@@ -75,7 +75,9 @@
     request_status: ['new', 'under_review', 'converted', 'rejected'],
     container_return_status: ['pending', 'evidence_submitted', 'returned_verified', 'disputed', 'waived'],
     document_kind: ['bill_of_lading', 'commercial_invoice', 'packing_list', 'certificate_of_origin', 'saber_certificate', 'government_doc', 'other'],
-    portal_payment_status: ['unknown', 'unpaid', 'partial', 'paid']
+    portal_payment_status: ['unknown', 'unpaid', 'partial', 'paid'],
+    // legacy step 2 (20261118000100): «ملغاة» for a cancelled transaction (client-visible label)
+    transaction_state: ['cancelled']
   };
   // kinds a client may declare when uploading (staff verify/classify afterwards)
   var CLIENT_KINDS = ['bill_of_lading', 'commercial_invoice', 'packing_list', 'certificate_of_origin', 'saber_certificate', 'government_doc', 'other'];
@@ -313,6 +315,11 @@
     var cls = (BADGE[domain] && BADGE[domain][code]) || 'badge-blue';
     return h('span', { class: 'badge ' + cls, text: label(domain, code) });
   }
+  // a cancelled transaction (cancelled_at; the stage stays 'closed') shows «ملغاة»
+  function txBadge(tx) {
+    return tx && tx.cancelled_at ? h('span', { class: 'badge badge-danger', 'data-cancelled': '1', text: label('transaction_state', 'cancelled') })
+      : statusBadge('operational_status', tx.operational_status);
+  }
   function opText(op, mode) {
     return [op ? codeText('dir', op) : '', mode ? codeText('mode', mode) : ''].filter(Boolean).join(' · ') || '—';
   }
@@ -380,7 +387,7 @@
           h('td', null, [num(tx.ref)]),
           h('td', { text: opText(tx.operation, tx.mode) }),
           h('td', null, [tx.bl_number ? num(tx.bl_number) : '—']),
-          h('td', null, [statusBadge('operational_status', tx.operational_status)]),
+          h('td', null, [txBadge(tx)]),
           h('td', { text: fmtDate(tx.status_changed_at || tx.updated_at) }),
           h('td', null, [h('button', { class: 'btn btn-sm btn-secondary', type: 'button', text: msg('details'),
             'aria-label': msg('details') + ' ' + (tx.ref || ''), onclick: function () { go('tx/' + tx.id); } })])
@@ -454,7 +461,7 @@
     var blNos = bls.map(function (b) { return b.bl_number; }).filter(Boolean);
     txDetail.appendChild(h('div', { class: 'portal-detail-head' }, [
       h('div', null, [h('p', { class: 'eyebrow mb-1', text: msg('eyebrowTx') }), h('h3', { class: 'mb-0' }, [num(tx.ref)])]),
-      statusBadge('operational_status', tx.operational_status)
+      txBadge(tx)
     ]));
 
     var grid = h('div', { class: 'portal-detail-grid' });
@@ -493,6 +500,12 @@
 
   function renderStages(tx) {
     var cur = sortOf('operational_status', tx.operational_status);
+    if (tx.cancelled_at) {
+      return panel('tx-stage-h', msg('stagesTitle'), [
+        h('div', { class: 'alert alert-danger', role: 'status' }, [h('div', null, [
+          h('strong', { text: label('transaction_state', 'cancelled') }),
+          h('p', { class: 'mb-0 text-sm', text: msg('cancelledNote', { d: fmtDate(tx.cancelled_at, true) }) })])])]);
+    }
     var ol = h('ol', { class: 'timeline' });
     (state.labels.operational_status || []).forEach(function (s) {
       var cls = s.sort < cur ? 'is-done' : (s.sort === cur ? 'is-current' : '');
@@ -517,7 +530,8 @@
       var title = codeText('ev', e.event_type);
       var detail = '';
       if (e.event_type === 'operational_status' || e.event_type === 'created' || e.event_type === 'request_converted') {
-        if (e.to_status) detail = (e.from_status ? label('operational_status', e.from_status) + arrow : '') + label('operational_status', e.to_status);
+        var cx = e.payload && e.payload.op === 'cancelled';   // cancel_transaction: → closed, shown as «ملغاة»
+        if (e.to_status) detail = (e.from_status ? label('operational_status', e.from_status) + arrow : '') + (cx ? label('transaction_state', 'cancelled') : label('operational_status', e.to_status));
       } else if (e.event_type === 'container_return') {
         detail = ((e.payload && e.payload.container_no) ? e.payload.container_no + ': ' : '') + label('container_return_status', e.to_status);
       } else if (e.event_type === 'document' && e.payload) {
