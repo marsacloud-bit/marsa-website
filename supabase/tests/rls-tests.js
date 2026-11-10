@@ -249,6 +249,8 @@ async function g3Fixtures() {
       [org, carrier, 'سائق ' + tag]))[0].id;
     await as(who, `INSERT INTO public.trucks (org_id, carrier_id, plate_no) VALUES ($1, $2, $3)`, [org, carrier, 'RLS ' + tag + '100']);
     await as(who, `INSERT INTO public.client_aliases (org_id, client_id, alias, source) VALUES ($1, $2, $3, 'manual')`, [org, cl, 'اسم بديل ' + tag]);
+    // legacy core (20261117000100): the operator ↔ port mapping, written by the org's own transport writer
+    await as(who, `INSERT INTO public.party_ports (org_id, party_id, port_code) VALUES ($1, $2, 'SAJED')`, [org, carrier]);
     if (tag === 'B') await rpcAs(who, `SELECT public.add_declaration($1, $2) r`, [tx, { declaration_no: 'RLS-B-DEC-1' }]);
     await rpcAs(who, `SELECT public.create_appointment($1) r`, [{ transaction_id: tx, terminal_party_id: carrier, appointment_at: '2026-12-01T08:00:00Z' }]);
     await rpcAs(who, `SELECT public.create_trip($1) r`, [{ transaction_id: tx, carrier_id: carrier, driver_id: driver, origin: 'ميناء', destination: 'مستودع' }]);
@@ -498,6 +500,9 @@ const TENANT_TABLES = [
   ['drivers',            `SELECT id::text id FROM public.drivers WHERE org_id = $1 LIMIT 1`,            'id::text',  'full_name = full_name'],
   ['trucks',             `SELECT id::text id FROM public.trucks WHERE org_id = $1 LIMIT 1`,             'id::text',  'plate_type = plate_type'],
   ['client_aliases',     `SELECT id::text id FROM public.client_aliases WHERE org_id = $1 LIMIT 1`,     'id::text',  'source = source'],
+  // legacy core (20261117000100): operator ↔ port mapping (transport writers), per-org service catalog (seeded for every org)
+  ['party_ports',        `SELECT id::text id FROM public.party_ports WHERE org_id = $1 LIMIT 1`,        'id::text',  'is_active = is_active'],
+  ['org_service_items',  `SELECT id::text id FROM public.org_service_items WHERE org_id = $1 LIMIT 1`,  'id::text',  'name_ar = name_ar'],
   ['customs_declarations', `SELECT id::text id FROM public.customs_declarations WHERE org_id = $1 LIMIT 1`, 'id::text', 'status = status'],
   ['bills_of_lading',    `SELECT id::text id FROM public.bills_of_lading WHERE org_id = $1 LIMIT 1`,    'id::text',  'vessel = vessel'],
   ['transaction_bls',    `SELECT bl_id::text id FROM public.transaction_bls WHERE org_id = $1 LIMIT 1`, 'bl_id::text', 'is_primary = is_primary'],
@@ -526,7 +531,9 @@ const NO_API_TABLES = ['idempotency_keys', 'platform_admins', 'schema_versions',
   'msg_mock_mailboxes',
   // G7: subscription plans / per-org subscriptions / events / usage cache — read through platform RPCs only
   'plans', 'org_subscriptions', 'subscription_events', 'org_usage_counters'];
-const ALL_PUBLIC_TABLES = TENANT_TABLES.map(t => t[0]).concat(['status_labels'], NO_API_TABLES);
+// platform reference tables without org: read-only for authenticated, nothing for anon (legacy core 20261117000100)
+const PLATFORM_TABLES = ['customs_ports'];
+const ALL_PUBLIC_TABLES = TENANT_TABLES.map(t => t[0]).concat(['status_labels'], NO_API_TABLES, PLATFORM_TABLES);
 
 async function isolationSweep(who, targetOrg, memberUser, label) {
   for (const [t, sampleSql, idExpr, setClause] of TENANT_TABLES) {
@@ -583,6 +590,11 @@ async function main() {
     const r = await q(`SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r'`);
     const missing = r.map(x => x.relname).filter(t => !ALL_PUBLIC_TABLES.includes(t));
     return missing.length === 0 || 'new tables not in TENANT_TABLES: ' + missing.join(', ');
+  });
+  await check('platform reference tables (customs_ports): authenticated SELECT only, no write, nothing for anon', async () => {
+    const r = await q(`SELECT grantee, table_name, privilege_type FROM information_schema.role_table_grants
+                        WHERE grantee IN ('anon','authenticated') AND table_schema = 'public' AND table_name = ANY($1)`, [PLATFORM_TABLES]);
+    return (r.length === PLATFORM_TABLES.length && r.every(x => x.grantee === 'authenticated' && x.privilege_type === 'SELECT')) || JSON.stringify(r);
   });
   await check('anon has no table privilege except SELECT on status_labels', async () => {
     const r = await q(`SELECT table_name, privilege_type FROM information_schema.role_table_grants
@@ -655,9 +667,11 @@ async function main() {
       // AI document reading (20261114000100): staff ai_access + org-admin settings; ai_reserve / ai_settle are service_role only
       'ai_access', 'ai_get_settings', 'ai_save_settings',
       // document matching (20261116000100): save / review / void a match (staff)
-      'save_document_match', 'review_document_match', 'void_document_match'];
+      'save_document_match', 'review_document_match', 'void_document_match',
+      // legacy core (20261117000100): void-only cancel of a transaction (ops writers of its branch)
+      'cancel_transaction'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 194) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 195) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');

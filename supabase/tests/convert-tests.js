@@ -178,7 +178,7 @@ async function secFile() {
   });
   // later phases may follow this file (20261116000100 doc_match: re-creates convert_delete_tables / convert_delete_guards
   // with public.document_matches); none may sort before it unnoticed
-  const LATER_PHASES = ['20261116000100_doc_match.sql'];
+  const LATER_PHASES = ['20261116000100_doc_match.sql', '20261117000100_legacy_core.sql'];
   await check('this file is present; only the listed later phases follow it', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');

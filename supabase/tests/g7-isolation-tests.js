@@ -613,7 +613,8 @@ async function directApiSweep(tables) {
           catch (e) { if (!/permission denied|row-level security|MRS_/.test(errText(e))) bad.push(who + ' ' + sql.slice(0, 6) + ': ' + errText(e).slice(0, 70)); }
         }
       } else if (dup) skipped += 2;
-      if (!col && !cov.tables.has(t) && t !== 'status_labels') {
+      // platform reference tables readable by every signed-in user by design: status_labels, customs_ports (20261117000100)
+      if (!col && !cov.tables.has(t) && t !== 'status_labels' && t !== 'customs_ports') {
         ran++;
         try { const r = await as(who, `SELECT 1 FROM public.${t} LIMIT 1`); if (r.length && !['status_labels'].includes(t)) bad.push(who + ' SELECT no-API table ' + r.length); }
         catch (e) { if (!/permission denied/.test(errText(e))) bad.push(who + ' SELECT: ' + errText(e).slice(0, 60)); }

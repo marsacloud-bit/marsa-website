@@ -818,7 +818,9 @@ async function secProcess() {
     return (res[0] === 0 && e.span_start === cpIndex(astral, astral.indexOf(C1B)) && e.raw === C1B && e.span_start !== astral.indexOf(C1B)) || JSON.stringify({ res, e });
   });
   // invalid check digit + ambiguous date + deadline rules
-  const rb = await ingest(S.chE.id, [email({ pid: 'em-bad-cd', from: UNK, subject: 'appointment', body: `Appointment for ${BADC} before 2026-11-09, also 03/04/2026.`, headers: { message_id: '<bd@x>' } })]);
+  // the valid deadline is kept in the future (a fixed 2026-11-09 became a past date and was dropped once that day passed)
+  const BAD_DUE = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
+  const rb = await ingest(S.chE.id, [email({ pid: 'em-bad-cd', from: UNK, subject: 'appointment', body: `Appointment for ${BADC} before ${BAD_DUE}, also 03/04/2026.`, headers: { message_id: '<bd@x>' } })]);
   S.mBad = rb.items[0].message_id; S.tBad = rb.items[0].thread_id;
   await check('deadline index pointing at a container → MRS_INVALID deadline (nothing applied)', async () => {
     await work(c => c.job.kind === 'process' && c.message.id === S.mBad ? { outcome: 'ok', effects: procEffects(c, { deadline: { extraction_index: 0 } }) } : null, 1);
@@ -843,7 +845,7 @@ async function secProcess() {
     const e = await one(`SELECT valid FROM public.msg_extractions WHERE message_id = $1 AND kind = 'container_no'`, [S.mBad]);
     const t = await thr(S.tBad);
     const s = await one(`SELECT deadline_date::text d, deadline_extraction_id x, risks FROM public.msg_summaries WHERE message_id = $1`, [S.mBad]);
-    return (e.valid === false && t.risk_flags.includes('invalid_check_digit') && t.risk_flags.includes('ambiguous_date') && s.d === '2026-11-09' && s.x
+    return (e.valid === false && t.risk_flags.includes('invalid_check_digit') && t.risk_flags.includes('ambiguous_date') && s.d === BAD_DUE && s.x
             && s.risks.includes('invalid_check_digit') && t.match_status === 'unmatched') || JSON.stringify({ e, t: t.risk_flags, s, m: t.match_status });
   });
   await check('an invalid container is never a matching signal (same digits as a T1 container)', async () =>

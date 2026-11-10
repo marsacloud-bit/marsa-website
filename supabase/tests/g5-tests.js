@@ -701,11 +701,12 @@ async function secClients() {
 
 async function secItems() {
   section('4. item catalog: every key, defaults, unique mapping both ways');
-  await check('list_daftra_items: 45 keys (3 kinds × 15), all unmapped, canonical names and tax defaults', async () => {
+  // 3 kinds × (16 fin_service codes + none): 20261117000100 legacy_core adds gate_in_appointment / gate_out_appointment
+  await check('list_daftra_items: 51 keys (3 kinds × 17), all unmapped, canonical names and tax defaults', async () => {
     const r = await R.items('accA');
     const by = k => r.items.find(x => x.item_key === k);
     const cc = by('service:customs_clearance'), rp = by('reimbursable:port_charges'), none = by('service:none'), int = by('internal_service:transport');
-    return (r.items.length === 45 && r.counts.unmapped === 45 && cc.product_code === 'MRS-service-customs_clearance' && cc.name_ar === 'تخليص جمركي'
+    return (r.items.length === 51 && r.counts.unmapped === 51 && cc.product_code === 'MRS-service-customs_clearance' && cc.name_ar === 'تخليص جمركي'
             && N(cc.default_vat_rate) === 15 && cc.tax_code === 'standard' && rp.name_ar === 'رسوم ميناء — مبلغ مسترد' && N(rp.default_vat_rate) === 0
             && rp.tax_code === 'out_of_scope' && none.name_ar === 'خدمات أخرى' && none.name_en === 'Other services'
             && int.name_ar === 'نقل — خدمة داخلية' && cc.mapped === false) || JSON.stringify({ n: r.items.length, cc, rp, none, int });

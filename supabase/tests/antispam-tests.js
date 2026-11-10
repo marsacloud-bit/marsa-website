@@ -162,10 +162,11 @@ async function secFile() {
     return (lim.length === 2 && lim.every(f => f === "app.fail('MRS_RATE_LIMITED', 'try_later')")
       && fails.length === 3 && fails.includes("app.fail('MRS_INVALID', 'action')")) || J(fails);
   });
-  // later phases may follow this file (20261114000100 ai_documents, 20261115000100 convert_in_place, 20261116000100 doc_match); none may sort before it unnoticed
+  // later phases may follow this file (20261114000100 ai_documents, 20261115000100 convert_in_place, 20261116000100 doc_match, 20261117000100 legacy_core); none may sort before it unnoticed
   await check('this file is present; only the listed later phases follow it', () => {
     const later = migFiles().filter(f => f > MIG);
-    return (migFiles().includes(MIG) && later.every(f => ['20261114000100_ai_documents.sql', '20261115000100_convert_in_place.sql', '20261116000100_doc_match.sql'].includes(f))) || 'unexpected later files: ' + later.join(', ');
+    return (migFiles().includes(MIG) && later.every(f => ['20261114000100_ai_documents.sql', '20261115000100_convert_in_place.sql', '20261116000100_doc_match.sql',
+      '20261117000100_legacy_core.sql'].includes(f))) || 'unexpected later files: ' + later.join(', ');
   });
   await check('all_migrations.sql holds this file verbatim (appended like the earlier phases; later phases follow it) + a header line', () => {
     const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');

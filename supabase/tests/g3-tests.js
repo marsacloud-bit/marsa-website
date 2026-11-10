@@ -239,7 +239,8 @@ async function secCatalog() {
                         WHERE domain IN ('declaration_status','bl_type','container_state','party_kind','alias_source','client_match')
                         GROUP BY 1 ORDER BY 1`);
     const m = Object.fromEntries(r.map(x => [x.domain, x.n]));
-    return (m.declaration_status === 6 && m.bl_type === 5 && m.container_state === 6 && m.party_kind === 7
+    // 20261117000100 legacy_core adds the 4 Fasah stages (accepted, cco_review_done, awaiting_duty_payment, release_ready)
+    return (m.declaration_status === 10 && m.bl_type === 5 && m.container_state === 6 && m.party_kind === 7
       && m.alias_source === 4 && m.client_match === 3) || JSON.stringify(m);
   });
   await expectErr('anon cannot call match_client', () => as('anon', `SELECT public.match_client($1, '{"name":"x"}')`, [A]), /permission denied/);

@@ -399,6 +399,8 @@ async function secSearch() {
     const want = ['id', 'ref', 'branch_id', 'branch_name', 'client_id', 'client_name', 'client_name_en', 'operation', 'mode', 'operational_status',
       'bl_number', 'declaration_no', 'port_of_loading', 'port_of_discharge', 'shipping_line', 'eta', 'created_at', 'status_changed_at',
       'container_count', 'financial_status', 'matched'].sort();
+    // legacy step 1 (20261117000100) adds cancelled_at to the row when that migration is present
+    if (fs.readdirSync(path.join(ROOT, 'supabase', 'migrations')).some(f => f.startsWith('20261117000100'))) { want.push('cancelled_at'); want.sort(); }
     return JSON.stringify(Object.keys(all.items[0]).sort()) === JSON.stringify(want) || JSON.stringify(Object.keys(all.items[0]));
   });
   await check('container_count = real number of containers (TX4: 2, TX1: 2, TX3: 0)', async () => {

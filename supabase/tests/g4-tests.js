@@ -243,17 +243,19 @@ async function secCatalog() {
     return ['finance', 'docs_override', 'appointment', 'trip', 'exception', 'declaration', 'bl', 'container', 'tracking_token']
       .every(x => r.d.includes(`'${x}'`)) || r.d;
   });
-  await check('dictionaries: 20 fin_* domains, all internal, ar + en', async () => {
+  // + fin_funding_source (20261117000100 legacy_core)
+  await check('dictionaries: 21 fin_* domains, all internal, ar + en', async () => {
     const r = await one(`SELECT count(DISTINCT domain)::int d, count(*) FILTER (WHERE client_visible)::int v,
                                 count(*) FILTER (WHERE label_ar = '' OR label_en = '')::int e
                            FROM public.status_labels WHERE domain LIKE 'fin\\_%'`);
-    return (r.d === 20 && r.v === 0 && r.e === 0) || JSON.stringify(r);
+    return (r.d === 21 && r.v === 0 && r.e === 0) || JSON.stringify(r);
   });
-  await check('fin_service catalog has the 14 codes; app.fin_check_service refuses an unknown code', async () => {
+  // 14 G4 codes + gate_in_appointment / gate_out_appointment (20261117000100 legacy_core)
+  await check('fin_service catalog has the 16 codes; app.fin_check_service refuses an unknown code', async () => {
     const n = await count(`SELECT count(*)::int n FROM public.status_labels WHERE domain = 'fin_service'`);
     let err = '';
     try { await q(`SELECT app.fin_check_service('teleport')`); } catch (e) { err = errText(e); }
-    return (n === 14 && /MRS_INVALID service_code/.test(err)) || JSON.stringify({ n, err });
+    return (n === 16 && /MRS_INVALID service_code/.test(err)) || JSON.stringify({ n, err });
   });
   await check('storage bucket "finance" is private (25 MB), with read / insert policies and no update / delete policy', async () => {
     const b = await one(`SELECT public, file_size_limit FROM storage.buckets WHERE id = 'finance'`);
