@@ -285,6 +285,23 @@ async function apptFixtures() {
   }
 }
 
+// legacy pay (20261122000100): per org, a payment register entry with an invoice line (record_payment_bundle: the G4 invoice
+// and payment it books), a typed attachment, and a custody deposit + deduction (save_custody_entry), by a finance role of the
+// org (org A: adminA on TX1; org B: finB on B_TX)
+async function payFixtures() {
+  const rpcAs = async (who, sql, params) => (await as(who, sql, params))[0].r;
+  for (const [who, org, br, tx, cl, tag] of [['adminA', A, JED, TX1, CL101, 'A'], ['finB', B, B_BR, B_TX, B_CL, 'B']]) {
+    const party = (await q(`SELECT id FROM public.parties WHERE org_id = $1 AND name_ar = $2`, [org, 'ناقل اختبار ' + tag]))[0].id;
+    const doc = await rpcAs(who, `SELECT public.register_finance_document($1) r`, [{ branch_id: br, kind: 'payment_evidence',
+      original_name: 'proof-' + tag + '.pdf', mime_type: 'application/pdf', size_bytes: 1000, sha256: hex(tag === 'A' ? 'b' : 'c') }]);
+    const pay = await rpcAs(who, `SELECT public.record_payment_bundle($1) r`, [{ movement_type: 'org_paid', service_code: 'port_charges', transaction_id: tx,
+      claim_no: 'RLS-PAY-' + tag, paid_amount: 50, paid_at: '2026-11-01', funding_source: 'client_custody', method: 'sadad', paying_account: 'Bank ' + tag,
+      sadad_number: tag === 'A' ? '111' : '222', beneficiary_party_id: party, documents: [{ finance_document_id: doc.id, role: 'payment_proof' }] }]);
+    await rpcAs(who, `SELECT public.save_custody_entry($1) r`, [{ client_id: cl, kind: 'deposit', amount: 100, entry_date: '2026-11-01', transaction_id: tx }]);
+    await rpcAs(who, `SELECT public.save_custody_entry($1) r`, [{ client_id: cl, kind: 'deduction', amount: 50, entry_date: '2026-11-01', transaction_id: tx, disbursement_id: pay.id }]);
+  }
+}
+
 // G3 (20261103000100 / 0200): one row per org in every new tenant table, written through the real
 // RLS-guarded inserts / RPCs by each org's own staff. Org A uses TX3 (air, no containers) so the
 // G1/G2 status tests below are unaffected; document requirements are export-only so nothing is gated.
@@ -556,6 +573,11 @@ const TENANT_TABLES = [
   ['appointment_drafts', `SELECT id::text id FROM public.appointment_drafts WHERE org_id = $1 LIMIT 1`, 'id::text',  'org_id = org_id'],
   ['appointment_draft_cards', `SELECT id::text id FROM public.appointment_draft_cards WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
   ['empty_return_proofs', `SELECT id::text id FROM public.empty_return_proofs WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
+  // legacy pay (20261122000100): finance read roles only (branch-scoped), written only by the payment / custody RPCs
+  ['client_disbursements', `SELECT id::text id FROM public.client_disbursements WHERE org_id = $1 LIMIT 1`, 'id::text', 'notes = notes'],
+  ['disbursement_allocations', `SELECT id::text id FROM public.disbursement_allocations WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
+  ['payment_documents', `SELECT id::text id FROM public.payment_documents WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
+  ['client_custody_entries', `SELECT id::text id FROM public.client_custody_entries WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
   ['invitations',        `SELECT id::text id FROM public.invitations WHERE org_id = $1 LIMIT 1`,        'id::text',  'email = email'],
   // G3 registry (20261103000100)
   ['parties',            `SELECT id::text id FROM public.parties WHERE org_id = $1 LIMIT 1`,            'id::text',  'name_ar = name_ar'],
@@ -646,6 +668,8 @@ async function main() {
   catch (e) { fail('legacy decl fixtures', errText(e)); return finish(); }
   try { await apptFixtures(); pass('legacy appt fixtures: an open appointment draft with a card and a pending empty-return proof per org'); }
   catch (e) { fail('legacy appt fixtures', errText(e)); return finish(); }
+  try { await payFixtures(); pass('legacy pay fixtures: a payment entry with an attachment and a custody deposit + deduction per org'); }
+  catch (e) { fail('legacy pay fixtures', errText(e)); return finish(); }
 
   /* ---------------------------------------------------------------- catalog */
   section('catalog: RLS, grants, function privileges');
@@ -749,9 +773,14 @@ async function main() {
       // legacy appt (20261121000100): appointment card drafts, empty-return proofs, the TASTO carrier order, the readiness banner
       'appointment_card_state', 'save_appointment_draft', 'get_appointment_draft', 'cancel_appointment_draft', 'move_appointment_draft',
       'approve_appointment_draft', 'create_empty_return_proof', 'verify_empty_return_proof', 'void_empty_return_proof',
-      'save_empty_return_deadline', 'list_empty_return_proofs', 'save_transport_carrier_order', 'tx_readiness'];
+      'save_empty_return_deadline', 'list_empty_return_proofs', 'save_transport_carrier_order', 'tx_readiness',
+      // legacy pay (20261122000100): the payment register (four-eyes review, correct / void, attachments, the transaction panel,
+      // the duplicate / transaction checks) and the client custody
+      'record_payment_bundle', 'correct_payment', 'void_payment', 'review_payment', 'add_payment_documents', 'remove_payment_document',
+      'get_payment', 'list_payments', 'tx_disbursements', 'check_payment_duplicates', 'match_payment_transaction', 'save_custody_entry',
+      'void_custody_entry', 'list_custody_entries', 'custody_balances', 'client_custody_balance'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 234) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 250) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');

@@ -175,6 +175,9 @@
     { id: 'finance', key: 'fin.nav_group', items: [
       { id: 'costs', key: 'fin.nav_costs', href: 'admin.html#costs', icon: 'receipt', allow: R.finRead },
       { id: 'payables', key: 'fin.nav_payables', href: 'admin.html#payables', icon: 'wallet', allow: R.finRead },
+      // legacy step 6 (assets/js/fin/payments.js, custody.js)
+      { id: 'payments', key: 'pay.nav_payments', href: 'admin.html#payments', icon: 'receipt', allow: R.finRead },
+      { id: 'custody', key: 'pay.nav_custody', href: 'admin.html#custody', icon: 'shield', allow: R.finRead },
       { id: 'margins', key: 'fin.nav_margins', href: 'admin.html#margins', icon: 'chart', allow: R.finRead },
       { id: 'demurrage', key: 'fin.nav_demurrage', href: 'admin.html#demurrage', icon: 'clock', allow: R.finRead },
       // G5 billing & Daftra (assets/js/bill/*.js views, allow 'finRead')
@@ -212,6 +215,7 @@
       'ops.nav_parties': 'الجهات والناقلون', 'ops.nav_requirements': 'قواعد المستندات', 'ops.nav_alerts_badge': 'التنبيهات المفتوحة: {n}',
       'fin.nav_group': 'المالية التشغيلية', 'fin.nav_costs': 'فواتير الموردين', 'fin.nav_payables': 'المستحقات والمدفوعات',
       'fin.nav_margins': 'الهامش والتكاليف', 'fin.nav_demurrage': 'الأرضيات والغرامات',
+      'pay.nav_payments': 'السدادات والمصروفات', 'pay.nav_custody': 'عهدة العملاء',
       'bill.nav_billing': 'الفوترة ودفترة', 'bill.nav_daftra': 'إعداد دفترة',
       'rpt.nav_group': 'التقارير والبحث', 'rpt.nav_search': 'البحث المتقدم', 'rpt.nav_reports': 'التقارير',
       'rpt.cmdk_advanced': 'بحث متقدم عن «{q}»…',
@@ -222,6 +226,7 @@
       'ops.nav_parties': 'Parties & carriers', 'ops.nav_requirements': 'Document rules', 'ops.nav_alerts_badge': 'Open alerts: {n}',
       'fin.nav_group': 'Operating finance', 'fin.nav_costs': 'Supplier invoices', 'fin.nav_payables': 'Payables & payments',
       'fin.nav_margins': 'Margins & costs', 'fin.nav_demurrage': 'Storage & demurrage',
+      'pay.nav_payments': 'Payments & disbursements', 'pay.nav_custody': 'Client custody',
       'bill.nav_billing': 'Billing & Daftra', 'bill.nav_daftra': 'Daftra settings',
       'rpt.nav_group': 'Reports & search', 'rpt.nav_search': 'Advanced search', 'rpt.nav_reports': 'Reports',
       'rpt.cmdk_advanced': 'Advanced search for "{q}"…',

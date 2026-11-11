@@ -2,8 +2,9 @@
 /*
   A very small DOM for UI flow tests (no dependency): elements with children, attributes, className / classList,
   textContent, value (input / select / textarea), events, getElementById, and querySelector(All) for simple selectors:
-  tag, #id, .class, [attr], [attr="v"], :last-child, joined by descendant spaces. Enough for assets/js/doc-batch.js and
-  assets/js/ops/tx-docs.js; not a general DOM.
+  tag, #id, .class, [attr], [attr="v"], :last-child, joined by descendant spaces; insertBefore / contains / closest /
+  createElementNS (legacy step 6: the MarsaOps.ui kit). Enough for assets/js/doc-batch.js, assets/js/ops/tx-docs.js and
+  assets/js/fin/payments.js; not a general DOM.
 */
 function makeDom() {
   let byIdCache = null;
@@ -49,6 +50,14 @@ function makeDom() {
     }
     removeChild(n) { this.children = this.children.filter(c => c !== n); n.parentNode = null; byIdCache = null; return n; }
     remove() { if (this.parentNode) this.parentNode.removeChild(this); }
+    insertBefore(n, ref) {
+      if (!ref) return this.appendChild(n);
+      if (n.parentNode) n.parentNode.removeChild(n);
+      const i = this.children.indexOf(ref);
+      n.parentNode = this; this.children.splice(i < 0 ? this.children.length : i, 0, n); byIdCache = null; return n;
+    }
+    contains(n) { let p = n; while (p) { if (p === this) return true; p = p.parentNode; } return false; }
+    closest(sel) { let p = this; while (p && p.tagName !== '#FRAGMENT') { if (p.tagName !== 'BODY' && matchCompound(p, sel)) return p; p = p.parentNode; } return null; }
     setAttribute(k, v) { if (k === 'id') this.id = v; else if (k === 'class') this.className = String(v); else this.attrs[k] = String(v); }
     getAttribute(k) { if (k === 'class') return this.className; return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null; }
     removeAttribute(k) { delete this.attrs[k]; }
@@ -98,6 +107,7 @@ function makeDom() {
     readyState: 'complete',
     body: new Node('body'),
     createElement(t) { return new Node(t); },
+    createElementNS(ns, t) { return new Node(t); },
     createTextNode(t) { const n = new Node('#text'); n._text = String(t); return n; },
     createDocumentFragment() { return new Node('#fragment'); },
     getElementById(id) {

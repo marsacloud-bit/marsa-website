@@ -197,7 +197,8 @@ async function secFile() {
     (!/sk-ant|ANTHROPIC_API_KEY\s*=|api\.anthropic\.com|x-api-key/i.test(src)) || 'secret-like text found');
   // later phases may follow this file (20261115000100 convert_in_place, 20261116000100 doc_match); none may sort before it unnoticed
   const LATER_PHASES = ['20261115000100_convert_in_place.sql', '20261116000100_doc_match.sql', '20261117000100_legacy_core.sql',
-    '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql'];
+    '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql',
+    '20261122000100_legacy_pay.sql'];
   await check('this file is present; only the listed later phases follow it', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -1364,6 +1365,7 @@ async function secV3() {
 
   await secDeclV3(v3Deps, body3, stored);
   await secOpsV3(v3Deps, body3, stored);
+  await secPayV3(v3Deps, body3, stored);
 }
 
 /* ai-doc-v3 customs declaration reading (20261120000100 legacy_decl): legacy DocumentAI analyzeDeclarationDocument /
@@ -1650,6 +1652,159 @@ async function secOpsV3(v3Deps, body3, stored) {
     const b2 = JSON.parse((await H.handleRequest(hReq(bodyC()), d2)).body);
     return (d.calls.includes('claude') && b.reused === false && b2.reused === true && !d2.calls.includes('claude') && !d2.calls.includes('ai_reserve')
       && b2.appointment && b2.appointment.container_no === OC1 && b2.kind === 'appointment') || J({ b: b.reused, b2: b2.reused, c: d2.calls });
+  });
+}
+
+/* payment documents (20261122000100 legacy_pay): the entity invoice (Fasah TAS appointment invoice) and the payment proof,
+   plus the client merge / fill-empty helper assets/js/fin/pay-ai.js */
+const PAYAI = require(path.join(ROOT, 'assets', 'js', 'fin', 'pay-ai.js'));
+const PC1 = 'CSQU3054383';
+const invOut = o => Object.assign({ doc_type: 'appointment_invoice', document_title: 'TAS Appointments invoice', is_fasah_appointment: true,
+  component_amounts: [{ page: 1, amount_after_vat: 34.5 }, { page: 2, amount_after_vat: 19.55 }],
+  fields: [{ name: 'issuer_name', value: 'Tabadul Test Issuer', confidence: 0.9, page: 1 }, { name: 'invoice_number', value: 'FP00123456', confidence: 0.8, page: 1 },
+    { name: 'reference_no', value: '260809154618646', confidence: 0.95, page: 1 }, { name: 'internal_invoice_no', value: 'FP00123456', confidence: 0.9, page: 1 },
+    { name: 'appointment_no', value: '\u200f20260811122969874TAS', confidence: 0.9, page: 1 }, { name: 'payment_date', value: '11/08/2026', confidence: 0.9, page: 1 },
+    { name: 'invoice_date', value: '2026-08-10', confidence: 0.9, page: 1 }, { name: 'total', value: '34.50', confidence: 0.7, page: 1 },
+    { name: 'container_numbers', value: 'csqu 305438-3', confidence: 0.9, page: 1 }, { name: 'bl_number', value: '--', confidence: 0.5, page: 1 }],
+  warnings: [] }, o || {});
+const proofOut = o => Object.assign({ doc_type: 'payment_proof', document_title: 'Payment receipt',
+  fields: [{ name: 'beneficiary_name', value: 'SADAD', confidence: 0.8, page: null }, { name: 'payment_method', value: 'سداد', confidence: 0.9, page: null },
+    { name: 'sadad_number', value: '٧٧١ 234', confidence: 0.9, page: null }, { name: 'bank_reference', value: 'SA0380000000608010167519', confidence: 0.6, page: null },
+    { name: 'iban', value: 'SA03 8000 0000 6080 1016 7519', confidence: 0.9, page: null }, { name: 'amount', value: '54.05 SAR', confidence: 0.9, page: null },
+    { name: 'payment_date', value: '2026/08/11', confidence: 0.9, page: null }, { name: 'payer_name', value: 'Test Payer', confidence: 0.9, page: null }],
+  warnings: [] }, o || {});
+async function secPayV3(v3Deps, body3, stored) {
+  section('7h. ai-doc-v3 payment documents: entity / appointment invoice + payment proof (schemas, Fasah rules, channels, wrong document, merge / fill-empty; mocked Claude)');
+  await check('exports: PAY_TYPES are v3 doc types only; ALL_KEYS_V3 / KEYS_FOR_V3 unchanged (the readings are not saved as extractions); 4 MB, 6 docs, 12 MB', () =>
+    (J(X.PAY_TYPES) === J(['appointment_invoice', 'payment_proof']) && X.PAY_TYPES.every(t => X.DOC_TYPES_V3.includes(t) && !X.DOC_TYPES.includes(t))
+      && X.ALL_KEYS_V3.length === 66 && !X.KEYS_FOR_V3.payment_proof && X.MAX_PAY_BYTES === 4 * 1024 * 1024 && X.PAY_MAX_DOCS === 6
+      && X.PAY_MAX_TOTAL_BYTES === 12 * 1024 * 1024 && J(X.PAY_METHODS) === J(['sadad', 'mada', 'fasah_wallet', 'dry_port_wallet', 'bank_transfer', 'cash', 'cheque', 'other'])
+      && PAYAI.MAX_DOCS === 6 && PAYAI.MAX_BYTES === X.MAX_PAY_BYTES && PAYAI.MAX_TOTAL_BYTES === X.PAY_MAX_TOTAL_BYTES) || 'exports');
+  await check('validateRequest: payment types only with ai-doc-v3; above 4 MB → too_large; no transaction needed', () => {
+    const t = b => { try { const v = X.validateRequest(b); return v.prompt_version + ':' + v.doc_type; } catch (e) { return e.code; } };
+    const big = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(4.2 * 1024 * 1024, 32)]).toString('base64');
+    const r = [t(goodBody({ doc_type: 'payment_proof' })), t(goodBody({ doc_type: 'payment_proof', prompt_version: 'ai-doc-v3' })),
+      t(goodBody({ doc_type: 'appointment_invoice', prompt_version: 'ai-doc-v3' })),
+      t(goodBody({ doc_type: 'appointment_invoice', prompt_version: 'ai-doc-v3', file: { media_type: 'application/pdf', data_b64: big } })),
+      t(goodBody({ doc_type: 'packing_list', prompt_version: 'ai-doc-v3', file: { media_type: 'application/pdf', data_b64: big } }))];
+    return J(r) === J(['bad_request', 'ai-doc-v3:payment_proof', 'ai-doc-v3:appointment_invoice', 'too_large', 'ai-doc-v3:packing_list']) || J(r);
+  });
+  await check('buildRequest invoice: the same SDK call shape (claude-opus-5-5, effort medium, 16000, server-side fallback beta + fallbacks default, json_schema, no thinking); SYSTEM_PAY; strict schema with is_fasah_appointment / component_amounts; the Reference No / FP / Date of Payment / page-sum rules', () => {
+    const p = X.buildRequest(X.validateRequest(goodBody({ doc_type: 'appointment_invoice', prompt_version: 'ai-doc-v3' })));
+    const sc = p.output_config.format.schema, t = p.messages[0].content[1].text;
+    return (p.model === 'claude-opus-5-5' && p.max_tokens === 16000 && p.output_config.effort === 'medium' && p.fallbacks === 'default'
+      && J(p.betas) === J(['server-side-fallback-2026-07-01']) && p.output_config.format.type === 'json_schema' && !('thinking' in p) && p.system === X.SYSTEM_PAY
+      && p.system.startsWith(X.SYSTEM) && J(sc.required) === J(['doc_type', 'document_title', 'fields', 'warnings', 'is_fasah_appointment', 'component_amounts'])
+      && sc.additionalProperties === false && J(sc.properties.fields.items.properties.name.enum) === J(X.PAY_INVOICE_KEYS) && J(sc.properties.doc_type.enum) === J(X.PAY_DETECTED)
+      && /never used as invoice_number or appointment_no/.test(t) && /Date of Payment/.test(t) && /list EVERY page value in component_amounts/.test(t)
+      && /reversed right-to-left/.test(t) && p.messages[0].content[0].type === 'image') || t;
+  });
+  await check('buildRequest proof: strict schema {doc_type, document_title, fields, warnings}; the channel / bank / IBAN rules', () => {
+    const p = X.buildRequest(X.validateRequest(goodBody({ doc_type: 'payment_proof', prompt_version: 'ai-doc-v3' })));
+    const sc = p.output_config.format.schema, t = p.messages[0].content[1].text;
+    return (J(sc.required) === J(['doc_type', 'document_title', 'fields', 'warnings']) && J(sc.properties.fields.items.properties.name.enum) === J(X.PAY_PROOF_KEYS)
+      && /Fasah \/ فسح \/ Fasah Pay, Tabadul \/ تبادل, SADAD/.test(t) && /urpay are payment platforms or channels/.test(t) && /never the bank reference/.test(t)
+      && p.system === X.SYSTEM_PAY) || t;
+  });
+  let I;
+  await check('postProcess invoice (Fasah TAS appointment invoice): number = Reference No (never FP…), internal FP kept apart, TAS normalised (bidi + reversed), date = Date of Payment, the page amounts summed (34.50 + 19.55 = 54.05), gate_in from the container only → gate_in_appointment; containers ISO 6346', () => {
+    I = X.postProcess(invOut(), 'appointment_invoice', 'ai-doc-v3');
+    const p = I.payment, c = I.warnings.map(w => w.code);
+    return (I.rejected === null && I.doc_type === 'appointment_invoice' && p.kind === 'invoice' && p.invoice_no === '260809154618646' && p.internal_invoice_no === 'FP00123456'
+      && p.appointment_no === 'TAS20260811122969874' && p.invoice_date === '2026-08-11' && p.total === 54.05 && J(p.components.map(x => x.amount)) === J([34.5, 19.55])
+      && p.appointment_type === 'gate_in' && p.service_code === 'gate_in_appointment' && J(p.container_numbers) === J([PC1]) && p.bl_number === null
+      && p.is_fasah_appointment === true && p.issuer_name === 'Tabadul Test Issuer' && I.ai_detail === null && c.includes('fp_not_invoice_no')
+      && c.includes('components_summed') && c.includes('components_total_mismatch') && I.extracted_fields.invoice_number === '260809154618646' && /\npayment invoice:\n/.test(I.raw_text)) || J({ p, c });
+  });
+  await check('postProcess invoice: container + B/L + declaration → gate_out (gate_out_appointment); no TAS → tas_missing (no FP used instead); no Reference No → reference_missing; a plain supplier invoice keeps its number and total', () => {
+    const a = X.postProcess(invOut({ fields: invOut().fields.filter(f => f.name !== 'bl_number').concat([{ name: 'bl_number', value: 'MEDU123456', confidence: 0.9, page: 1 },
+      { name: 'declaration_number', value: '3012345', confidence: 0.9, page: 1 }]) }), 'appointment_invoice', 'ai-doc-v3');
+    const b = X.postProcess(invOut({ fields: invOut().fields.filter(f => !['appointment_no', 'reference_no'].includes(f.name)) }), 'appointment_invoice', 'ai-doc-v3');
+    const c = X.postProcess({ doc_type: 'supplier_invoice', document_title: 'Tax invoice', is_fasah_appointment: false, component_amounts: [],
+      fields: [{ name: 'issuer_name', value: 'Test Port Co', confidence: 0.9, page: 1 }, { name: 'invoice_number', value: 'INV-0012', confidence: 0.9, page: 1 },
+        { name: 'total', value: '1,150.00', confidence: 0.9, page: 1 }, { name: 'vat_amount', value: '150', confidence: 0.9, page: 1 }, { name: 'invoice_date', value: '2026-11-02', confidence: 0.9, page: 1 }],
+      warnings: [] }, 'appointment_invoice', 'ai-doc-v3');
+    const bw = b.warnings.map(w => w.code);
+    return (a.payment.appointment_type === 'gate_out' && a.payment.service_code === 'gate_out_appointment' && b.payment.appointment_no === null && bw.includes('tas_missing')
+      && bw.includes('reference_missing') && b.payment.invoice_no === null && c.payment.invoice_no === 'INV-0012' && c.payment.total === 1150 && c.payment.vat_amount === 150
+      && c.payment.is_fasah_appointment === false && c.payment.service_code === null && c.payment.invoice_date === '2026-11-02' && c.rejected === null) || J({ a: a.payment, b: b.payment, bw, c: c.payment });
+  });
+  let Q;
+  await check('postProcess proof: a channel (SADAD) is never the beneficiary (moved to payment_channel, warning); method → sadad; SADAD no digits only (Arabic digits); the IBAN is never the bank reference; amount 54.05', () => {
+    Q = X.postProcess(proofOut(), 'payment_proof', 'ai-doc-v3');
+    const p = Q.payment, c = Q.warnings.map(w => w.code);
+    return (Q.rejected === null && p.kind === 'proof' && p.beneficiary_name === null && p.beneficiary_raw === 'SADAD' && p.payment_channel === 'SADAD' && p.method === 'sadad'
+      && p.sadad_number === '771234' && p.bank_reference === null && p.amount === 54.05 && p.paid_at === '2026-08-11' && p.payer_name === 'Test Payer'
+      && c.includes('beneficiary_is_channel') && c.includes('beneficiary_missing') && c.includes('bank_ref_is_iban') && !('beneficiary_name' in Q.extracted_fields)) || J({ p, c });
+  });
+  await check('payment channels (Fasah, فسح, Tabadul, تبادل, SADAD, سداد, mada, مدى, Visa, Mastercard, Apple Pay, STC Pay, urpay) are recognised; a real company is not; methods map to the register codes', () => {
+    const ch = ['Fasah', 'فسح', 'Fasah Pay', 'Tabadul', 'تبادل', 'SADAD', 'سداد', 'mada', 'مدى', 'Visa', 'Mastercard', 'Apple Pay', 'STC Pay', 'urpay'];
+    const m = ['SADAD', 'mada card', 'محفظة فسح', 'Dry port wallet', 'Bank transfer', 'نقدي', 'شيك', 'Visa', 'something'].map(X.payMethod);
+    return (ch.every(x => X.isPaymentChannel(x) && PAYAI.isChannel(x)) && !X.isPaymentChannel('Test Port Co') && !PAYAI.isChannel('شركة الميناء')
+      && J(m) === J(['sadad', 'mada', 'fasah_wallet', 'dry_port_wallet', 'bank_transfer', 'cash', 'cheque', 'mada', 'other'])) || J(m);
+  });
+  await check('wrong document: a proof read in the invoice slot → not_entity_invoice; an invoice read in the proof slot → not_payment_proof; "other" only warns', () => {
+    const a = X.postProcess(invOut({ doc_type: 'payment_proof' }), 'appointment_invoice', 'ai-doc-v3');
+    const b = X.postProcess(proofOut({ doc_type: 'supplier_invoice' }), 'payment_proof', 'ai-doc-v3');
+    const c = X.postProcess(proofOut({ doc_type: 'other' }), 'payment_proof', 'ai-doc-v3');
+    return (J(a.rejected) === J({ code: 'wrong_document_type', reason: 'not_entity_invoice' }) && J(b.rejected) === J({ code: 'wrong_document_type', reason: 'not_payment_proof' })
+      && c.rejected === null) || J({ a: a.rejected, b: b.rejected, c: c.rejected });
+  });
+  await check('parseMessage (payment doc types): the payment shape is checked (bad doc type / component / is_fasah → bad_output)', () => {
+    const ok1 = X.parseMessage(msgOf(invOut()), 'ai-doc-v3', 'appointment_invoice').ok, ok2 = X.parseMessage(msgOf(proofOut()), 'ai-doc-v3', 'payment_proof').ok;
+    const bad = [X.parseMessage(msgOf(invOut({ doc_type: 'receipt' })), 'ai-doc-v3', 'appointment_invoice').code,
+      X.parseMessage(msgOf(invOut({ component_amounts: [{ page: 1, amount_after_vat: '3' }] })), 'ai-doc-v3', 'appointment_invoice').code,
+      X.parseMessage(msgOf(invOut({ is_fasah_appointment: 'yes' })), 'ai-doc-v3', 'appointment_invoice').code];
+    return (ok1 && ok2 && bad.every(c => c === 'bad_output')) || J({ ok1, ok2, bad });
+  });
+  const bodyP = o => body3(Object.assign({ doc_type: 'payment_proof' }, o || {}));
+  await check('handler proof (mocked Claude, real ai_reserve / ai_bind_source / ai_settle): 200 with payment, no stored-reading lookup (never reused), one reserve, settled ok', async () => {
+    const d = v3Deps([stored({ doc_type: 'other' })], { msg: msgOf(proofOut()) });
+    const r = await H.handleRequest(hReq(bodyP()), d);
+    const b = JSON.parse(r.body);
+    const order = d.calls.filter(c => !/^log:/.test(c));
+    const u = await usageRow(b.usage_id);
+    return (r.status === 200 && J(order) === J(['user:ai_access', 'ai_reserve', 'ai_bind_source', 'claude', 'ai_settle']) && d.lookups.length === 0
+      && b.payment && b.payment.method === 'sadad' && b.reused === false && b.ai_detail === null && b.appointment === null && u.status === 'ok'
+      && d.params.system === X.SYSTEM_PAY && d.params.model === 'claude-opus-5-5') || J({ s: r.status, order, keys: Object.keys(b) });
+  });
+  await check('handler invoice: an invoice read in the proof slot → 422 wrong_document_type (not_payment_proof), still settled; an invoice in its slot → 200 with payment.invoice_no', async () => {
+    const d = v3Deps([], { msg: msgOf(invOut({ doc_type: 'appointment_invoice' })) });
+    const r = await H.handleRequest(hReq(bodyP()), d);
+    const b = JSON.parse(r.body);
+    const d2 = v3Deps([], { msg: msgOf(invOut()) });
+    const r2 = await H.handleRequest(hReq(body3({ doc_type: 'appointment_invoice' })), d2);
+    const b2 = JSON.parse(r2.body);
+    return (r.status === 422 && b.error === 'wrong_document_type' && b.reason === 'not_payment_proof' && d.calls.includes('ai_settle') && r2.status === 200
+      && b2.payment.invoice_no === '260809154618646' && b2.kind === 'operator_invoice') || J({ s: r.status, b, s2: r2.status });
+  });
+  await check('pay-ai.js merge: issuer → beneficiary (never the channel), Σ invoice totals vs the proof amount, the proof\'s method + its reference only, the TAS / service code, hints for match_payment_transaction', () => {
+    const m = PAYAI.merge([{ payment: I.payment }, { payment: Q.payment }]);
+    const s = m.suggestion;
+    return (m.invoices.length === 1 && m.proofs.length === 1 && s.beneficiary_name === 'Tabadul Test Issuer' && s.claim_no === '260809154618646'
+      && s.internal_invoice_no === 'FP00123456' && s.appointment_no === 'TAS20260811122969874' && s.service_code === 'gate_in_appointment' && s.expected_amount === 54.05
+      && s.paid_amount === 54.05 && s.method === 'sadad' && s.sadad_number === '771234' && !('receipt_no' in s) && s.paid_at === '2026-08-11'
+      && J(m.hints.container_numbers) === J([PC1]) && m.hints.appointment_no === 'TAS20260811122969874' && !m.warnings.some(w => w.code === 'amount_mismatch')
+      && m.warnings.some(w => w.code === 'beneficiary_from_issuer')) || J(m);
+  });
+  await check('pay-ai.js merge warnings: different issuers, beneficiary ≠ issuer, amount mismatch; ≥ 2 invoices → suggested allocations (no top-level claim); > 6 documents refused', () => {
+    const i2 = Object.assign({}, I.payment, { issuer_name: 'Another Test Entity', invoice_no: 'X-1', total: 10 });
+    const q2 = Object.assign({}, Q.payment, { beneficiary_name: 'Unrelated Test Merchant', amount: 70 });
+    const m = PAYAI.merge([{ payment: I.payment }, { payment: i2 }, { payment: q2 }]);
+    const many = PAYAI.merge(new Array(7).fill({ payment: Q.payment }));
+    const codes = m.warnings.map(w => w.code);
+    return (codes.includes('issuers_differ') && codes.includes('beneficiary_issuer_mismatch') && codes.includes('amount_mismatch') && !('claim_no' in m.suggestion)
+      && m.allocations_suggested.length === 2 && m.allocations_suggested[1].claim_no === 'X-1' && m.warnings.every(w => w.text_ar && w.text_en)
+      && many.error && many.error.field === 'count' && many.proofs.length === 6) || J({ codes, a: m.allocations_suggested });
+  });
+  await check('pay-ai.js fillEmpty: only EMPTY form fields are filled (a typed value is never overwritten); review / movement / pattern never filled; checkFiles 6 / 4 MB / 12 MB / PDF-image', () => {
+    const m = PAYAI.merge([{ payment: I.payment }, { payment: Q.payment }]);
+    const r = PAYAI.fillEmpty({ claim_no: 'TYPED-1', paid_amount: '', method: null, review_status: '', movement_type: 'org_paid' }, Object.assign({ review_status: 'approved', movement_type: 'x' }, m.suggestion));
+    const f = [PAYAI.checkFiles(new Array(7).fill({ size: 1, type: 'application/pdf' })), PAYAI.checkFiles([{ size: 4 * 1024 * 1024 + 1, type: 'image/png' }]),
+      PAYAI.checkFiles([1, 2, 3, 4].map(() => ({ size: 3.5 * 1024 * 1024, type: 'image/jpeg' }))), PAYAI.checkFiles([{ size: 10, type: 'text/plain' }]),
+      PAYAI.checkFiles([{ size: 10, type: 'application/pdf' }])];
+    return (r.form.claim_no === 'TYPED-1' && r.form.paid_amount === 54.05 && r.form.method === 'sadad' && r.form.review_status === '' && r.form.movement_type === 'org_paid'
+      && !r.filled.includes('claim_no') && r.filled.includes('paid_amount') && J(f.map(x => x.ok ? 'ok' : x.field)) === J(['count', 'size', 'total', 'type', 'ok'])) || J({ r, f });
   });
 }
 

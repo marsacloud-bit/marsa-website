@@ -729,6 +729,8 @@
                                 titleKey, render(root, opsApi, param) }   → route #<id> / #<id>/<param>
        MarsaOps.txSections  = [{ id, order, placement?, render(root, tx, opsApi) }] → inside #tx/<id>, after admin.js' own cards
                               (placement 'top': above them, under the stages)
+       MarsaOps.clientSections = [{ id, order, render(root, client, opsApi) }] → inside #client/<id>, after its own cards
+                              (legacy step 6: the client custody balance, assets/js/fin/custody.js)
      The hook is read on every route, so a module that registers late still shows up.
      ------------------------------------------------------------------ */
   var OPS = window.MarsaOps = window.MarsaOps || { views: {}, txSections: [] };
@@ -748,11 +750,17 @@
       .map(function (id) { return { id: id, allow: opsRoleSet(OPS.views[id].allow), ops: OPS.views[id] }; });
   }
   function allowedViews() { return VIEWS.concat(opsViewList()).filter(function (v) { return canAny(v.allow); }); }
+  function activeOrgName() {
+    var o = (S.orgs || []).filter(function (x) { return x && x.org_id === S.orgId; })[0];
+    return o ? ((isEn() && o.name_en) || o.name_ar || o.name_en || null) : null;
+  }
   // what the modules get (one object per render; S may change on an org switch)
   function opsApi() {
     var I = window.MarsaI18n;
     return {
       orgId: S.orgId, roles: S.roles.slice(), branches: S.branches.slice(), userId: S.ctx ? S.ctx.user_id : null,
+      // legacy step 6: the active org's display name (the payment form shows it as the default payer; the server uses the org settings)
+      orgName: activeOrgName(),
       // can('opsWriter') · can('transportWriter', tx.branch_id) · can(['admin', 'supervisor'], branchId)
       can: function (set, branchId) {
         var roles = Array.isArray(set) ? set : R[set];
@@ -855,6 +863,23 @@
     });
   }
 
+  // client detail sections (legacy step 6: custody balance), sorted by order; each fails on its own
+  function renderClientSections(host, client) {
+    var list = (Array.isArray(OPS.clientSections) ? OPS.clientSections : []).filter(function (s) { return s && typeof s.render === 'function'; })
+      .slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+    var seen = {};
+    list.forEach(function (s) {
+      if (s.id && seen[s.id]) return;
+      if (s.id) seen[s.id] = true;
+      var box = el('div', { class: 'ops-client-section', 'data-section': s.id || null });
+      host.appendChild(box);
+      try {
+        var p = s.render(box, client, opsApi());
+        if (p && typeof p.then === 'function') p.then(null, function (e) { box.appendChild(dAlert('danger', errText(e))); });
+      } catch (e) { box.appendChild(dAlert('danger', errText(e))); }
+    });
+  }
+
   function startApp() {
     gate.hidden = true; app.hidden = false;
     fillMe();
@@ -881,7 +906,7 @@
   var NAV_ORDER = ['dashboard', 'requests', 'transactions', 'clients', 'messages', 'imports', 'alerts', 'schedule', 'exceptions', 'parties',
     'search', 'reports',
     'inbox', 'contacts', 'templates', 'channels',
-    'costs', 'payables', 'margins', 'demurrage', 'billing', 'daftra',
+    'costs', 'payables', 'payments', 'custody', 'margins', 'demurrage', 'billing', 'daftra',
     'org', 'branches', 'members', 'requirements', 'audit', 'errors'];
   function buildNav() {
     if (!nav) return;
@@ -2510,6 +2535,10 @@
       tpl.innerHTML = html;
       var out = tpl.content;
       out.appendChild(aliasesCard(c, res[2]));
+      var clientSections = el('div', { class: 'ops-client-sections' });
+      out.appendChild(clientSections);
+      renderClientSections(clientSections, c);
+      if (!clientSections.children.length) clientSections.parentNode.removeChild(clientSections);
       return out;
     });
   }

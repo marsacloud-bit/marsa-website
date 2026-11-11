@@ -68,6 +68,22 @@
   return (a gate-out of a full container, another document) → rejected. Neither reading is ever applied: the card becomes
   a draft card (save_appointment_draft) and the EIR a pending proof (create_empty_return_proof) until a staff member
   approves / verifies it. The response (and ai_detail) carries appointment {…} or empty_return {…}.
+  Payment documents (ai-doc-v3, migration 20261122000100_legacy_pay.sql — legacy PaymentDocumentAI.js analyzePaymentDocumentsV2,
+  Payments.js analyzePaymentDocuments / paymentAiClassifyAppointmentInvoice_, R12TransportPurchases.js analyzePaymentDocumentsR12):
+  doc_type appointment_invoice (the entity / issuer invoice of a payment: a Fasah «TAS Appointments» invoice or any other
+  claim) and payment_proof (the proof of the payment), v3 only, ≤ 4 MB each, ONE document per call (the payment form reads up
+  to 6 and merges / compares them on the client: assets/js/fin/pay-ai.js), each with its own strict schema in the same SDK
+  call shape (one call = one ai_reserve). Invoice: issuer, number = the Fasah «Reference No» for an appointment invoice (an
+  «Internal Invoice No» FP… is never the number: it goes to internal_invoice_no), the TAS appointment no (normalised: bidi
+  marks, the RTL-reversed …TAS form), gate_in / gate_out (from the model or the legacy rule: container + B/L + declaration →
+  gate_out, container only → gate_in) → the fin_service code gate_in_appointment / gate_out_appointment, the per-page
+  «Amount after VAT» values summed into the total, the date = «Date of Payment» (never the payment deadline), B/L,
+  declaration, containers (ISO 6346). Proof: beneficiary (a payment channel — Fasah, Tabadul, SADAD, mada, Visa,
+  Mastercard, Apple Pay, STC Pay, urpay — is NEVER the beneficiary: it moves to payment_channel), channel, payer, method
+  (mapped to the register codes), date, amount, SADAD no (digits), bank ref (never the IBAN), receipt. The wrong document
+  (a proof read as an invoice or the reverse) → rejected {code 'wrong_document_type', reason not_entity_invoice |
+  not_payment_proof} (422 after settling). These readings are never saved as document_extractions (no ai_detail, no dedupe
+  reuse): the form only fills its EMPTY fields with them, and a staff member saves the payment.
   Every value is a DRAFT: nothing here is saved or approved (approve_doc_batch / approve_declaration_extraction, staff only).
   The document is untrusted data: the system prompt tells the model to ignore instructions inside it.
 */
@@ -94,11 +110,12 @@
   const KIND_OF = Object.freeze({
     bill_of_lading: 'bill_of_lading', commercial_invoice: 'commercial_invoice', customs_declaration: 'customs_declaration',
     supplier_invoice: 'operator_invoice', packing_list: 'packing_list', other: 'other',
-    appointment_ticket: 'appointment', empty_return_receipt: 'empty_return_receipt'
+    appointment_ticket: 'appointment', empty_return_receipt: 'empty_return_receipt',
+    appointment_invoice: 'operator_invoice', payment_proof: 'other'
   });
   // v3: + packing_list (requested and detected); 20261121000100: + appointment_ticket, empty_return_receipt
   const DOC_TYPES_V3 = Object.freeze(['bill_of_lading', 'commercial_invoice', 'packing_list', 'customs_declaration', 'supplier_invoice', 'auto',
-    'appointment_ticket', 'empty_return_receipt']);
+    'appointment_ticket', 'empty_return_receipt', 'appointment_invoice', 'payment_proof']);
   const DETECTED_TYPES_V3 = Object.freeze(['bill_of_lading', 'commercial_invoice', 'packing_list', 'customs_declaration', 'supplier_invoice', 'other']);
   // 20261121000100: the operational readings (v3 only): an appointment card and an empty-return receipt (EIR)
   const OPS_TYPES = Object.freeze(['appointment_ticket', 'empty_return_receipt']);
@@ -106,6 +123,20 @@
     'packing_list', 'customs_declaration', 'supplier_invoice', 'other']);
   const MAX_EIR_BYTES = 8 * 1024 * 1024;                 // legacy: an empty-return proof ≤ 8 MB
   function isOps(docType) { return OPS_TYPES.indexOf(docType) !== -1; }
+  // 20261122000100: the payment documents (v3 only): the entity invoice and the payment proof of the payment register
+  const PAY_TYPES = Object.freeze(['appointment_invoice', 'payment_proof']);
+  const PAY_DETECTED = Object.freeze(['appointment_invoice', 'supplier_invoice', 'payment_proof', 'commercial_invoice', 'appointment_ticket',
+    'bill_of_lading', 'customs_declaration', 'other']);
+  const PAY_INVOICE_DETECTED = Object.freeze(['appointment_invoice', 'supplier_invoice', 'commercial_invoice']);
+  const MAX_PAY_BYTES = 4 * 1024 * 1024;                 // legacy PAYMENT_MODULE.maxAttachmentBytes
+  const PAY_MAX_DOCS = 6, PAY_MAX_TOTAL_BYTES = 12 * 1024 * 1024;   // per payment form (client side: one document per call)
+  const PAY_INVOICE_KEYS = Object.freeze(['issuer_name', 'invoice_number', 'reference_no', 'internal_invoice_no', 'appointment_no',
+    'appointment_type', 'invoice_date', 'payment_date', 'total', 'vat_amount', 'currency', 'customer_name', 'bl_number',
+    'declaration_number', 'container_numbers']);
+  const PAY_PROOF_KEYS = Object.freeze(['beneficiary_name', 'payment_channel', 'payer_name', 'payment_method', 'payment_date', 'amount',
+    'currency', 'sadad_number', 'bank_reference', 'receipt_no', 'iban']);
+  const PAY_METHODS = Object.freeze(['sadad', 'mada', 'fasah_wallet', 'dry_port_wallet', 'bank_transfer', 'cash', 'cheque', 'other']);
+  function isPay(docType) { return PAY_TYPES.indexOf(docType) !== -1; }
 
   // the field keys of app.extraction_field_keys() (20261114000100 + the 6 match keys of 20261116000100)
   const ALL_KEYS = Object.freeze(['invoice_number', 'invoice_date', 'supplier_name', 'supplier_vat', 'buyer_name', 'buyer_vat',
@@ -228,6 +259,34 @@
     return_delivered_at: 'the actual delivery / gate-in date AND time of the empty container, local time, YYYY-MM-DDTHH:mm; the date alone (YYYY-MM-DD) when no time is printed',
     return_depot: 'the depot / yard / terminal that received the empty container, as printed'
   });
+  // 20261122000100: the payment documents (legacy paymentDocAiV2Prompt_ / analyzePaymentDocumentsR12)
+  const PAY_HINTS = Object.freeze({
+    issuer_name: 'the name of the entity that ISSUED the invoice / claim (the seller), as printed',
+    invoice_number: 'the invoice / claim number as printed; on a Fasah TAS appointments invoice the «Reference No» (never the Internal Invoice No / any number starting with FP)',
+    reference_no: 'Fasah appointment invoices only: the number printed next to «Reference No» / الرقم المرجعي, exactly as printed',
+    internal_invoice_no: 'the «Internal Invoice No» (often FP followed by digits) when printed; never use it as the invoice number',
+    appointment_no: 'the appointment / booking number TAS followed by digits (e.g. TAS20260811122969874), when printed',
+    appointment_type: 'Fasah appointment invoices only: gate_out for an exit appointment, gate_in for an entry appointment, empty otherwise',
+    invoice_date: 'the invoice / issue date, YYYY-MM-DD',
+    payment_date: 'Fasah appointment invoices: the «Date of Payment» / تاريخ سداد الفاتورة, YYYY-MM-DD (never the payment deadline)',
+    total: 'the final total due including VAT, plain decimal; on a multi-page Fasah appointment invoice the SUM of every page\'s «Amount after VAT»',
+    vat_amount: 'the VAT amount, plain decimal, when printed',
+    currency: 'ISO 4217 code, e.g. SAR',
+    customer_name: 'the customer / importer named on the invoice, when printed',
+    bl_number: 'the bill of lading number, when printed (-- or empty means none)',
+    declaration_number: 'the customs declaration number, when printed (-- or empty means none)',
+    container_numbers: 'ONE container number per entry, ISO 6346 (4 letters + 7 digits, no spaces)',
+    beneficiary_name: 'the commercial beneficiary that actually received the money (the invoice owner / merchant), NOT the payment platform or channel and NOT the bank; leave it out when only a platform is shown',
+    payment_channel: 'the platform / channel that executed the payment, e.g. Fasah, Tabadul, SADAD, mada, Visa, Mastercard, Apple Pay, STC Pay, urpay',
+    payer_name: 'the name of the payer / sender',
+    payment_method: 'the payment method as printed (SADAD, mada, bank transfer, cash, cheque, Fasah wallet, dry port wallet, card …)',
+    payment_date: 'the date of the payment operation, YYYY-MM-DD',
+    amount: 'the amount actually paid, plain decimal',
+    sadad_number: 'the SADAD payment number (digits) when the payment was made with a SADAD number; never the invoice number',
+    bank_reference: 'the bank transfer reference of the operation; never the account number or the IBAN',
+    receipt_no: 'the receipt / voucher / operation number when printed',
+    iban: 'an IBAN printed on the proof (kept apart so it is never taken as a reference)'
+  });
   // per-document overrides of FIELD_HINTS: on a customs declaration the "total" the match compares with the invoice is
   // the DECLARED (customs / invoice) value of the goods — not the duties + VAT payable printed on the same form
   const HINTS_FOR = Object.freeze({
@@ -322,6 +381,34 @@
     'Do not infer values that are not clearly printed.'
   ].join('\n');
   function isDeclType(docType) { return docType === 'customs_declaration' || docType === 'auto'; }
+  // 20261122000100: the payment documents
+  const SYSTEM_PAY = [SYSTEM,
+    'This request reads ONE financial document of a customs-clearance payment in Saudi Arabia: the invoice / claim of the entity',
+    'that was paid, or the proof of the payment. Classify the document by its content only, never by the file name or by the slot',
+    'the user uploaded it into. Never invent a value; leave a field out when it is not clearly printed.'
+  ].join('\n');
+  const PAY_INVOICE_RULES = [
+    'Set doc_type to appointment_invoice for a Fasah «TAS Appointments» invoice (an appointment fee invoice with Reference No,',
+    'Appointment No and Amount after VAT) and is_fasah_appointment true; supplier_invoice for any other invoice or claim of an entity',
+    '(port, shipping agent, terminal, supplier); payment_proof when the document is only the proof of a payment.',
+    'On a Fasah appointment invoice: invoice_number = reference_no = the Reference No; appointment_no = the TAS number (it may',
+    'appear reversed right-to-left as digits followed by TAS: give TAS followed by the digits); internal_invoice_no = the Internal',
+    'Invoice No (FP…), never used as invoice_number or appointment_no; the date is the Date of Payment (payment_date), not the',
+    'payment deadline. A multi-page appointment invoice carries one Amount after VAT per page for the same Reference No /',
+    'Appointment No: list EVERY page value in component_amounts (page + amount) and make total their sum; a one-page invoice has',
+    'one component. Other invoices have no components (empty list) and total is the final total due.',
+    'appointment_type: gate_out when the invoice is for an exit appointment (declaration + B/L + container shown), gate_in for',
+    'an entry appointment (a container while the declaration and B/L are empty / --), empty otherwise.'
+  ].join('\n');
+  const PAY_PROOF_RULES = [
+    'Set doc_type to payment_proof for a payment receipt / transfer confirmation / SADAD or mada slip / wallet payment screen;',
+    'an invoice or a claim is its own type (appointment_invoice or supplier_invoice).',
+    'beneficiary_name is the commercial beneficiary that received the money. Fasah / فسح / Fasah Pay, Tabadul / تبادل, SADAD /',
+    'سداد, mada / مدى, Visa, Mastercard, Apple Pay, STC Pay and urpay are payment platforms or channels: put them in',
+    'payment_channel, never in beneficiary_name; a bank is not the beneficiary because the money went through it. When only a',
+    'platform is shown, leave beneficiary_name out. An invoice number is not a SADAD number; an account number or an IBAN is',
+    'never the bank reference (give a printed IBAN in iban).'
+  ].join('\n');
 
   /* ------------------------------------------------------------------ schema */
   function nullable(t) { return { anyOf: [{ type: t }, { type: 'null' }] }; }
@@ -408,8 +495,40 @@
     };
   }
 
+  // 20261122000100: the payment document schemas (strict, every property required)
+  function outputSchemaPay(docType) {
+    const inv = docType === 'appointment_invoice';
+    const keys = (inv ? PAY_INVOICE_KEYS : PAY_PROOF_KEYS).slice();
+    const fields = {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false, required: ['name', 'value', 'confidence', 'page'],
+        properties: { name: { type: 'string', enum: keys }, value: { type: 'string' }, confidence: { type: 'number' }, page: nullable('integer') }
+      }
+    };
+    const sc = {
+      type: 'object', additionalProperties: false,
+      required: ['doc_type', 'document_title', 'fields', 'warnings'],
+      properties: {
+        doc_type: { type: 'string', enum: PAY_DETECTED.slice() }, document_title: nullable('string'), fields,
+        warnings: { type: 'array', items: { type: 'string' } }
+      }
+    };
+    if (inv) {
+      sc.properties.is_fasah_appointment = { type: 'boolean' };
+      sc.properties.component_amounts = {
+        type: 'array',
+        items: { type: 'object', additionalProperties: false, required: ['page', 'amount_after_vat'],
+          properties: { page: nullable('integer'), amount_after_vat: { type: 'number' } } }
+      };
+      sc.required.push('is_fasah_appointment', 'component_amounts');
+    }
+    return sc;
+  }
+
   function outputSchemaV3(docType) {
     if (isOps(docType)) return outputSchemaOps(docType);
+    if (isPay(docType)) return outputSchemaPay(docType);
     const keys = (KEYS_FOR_V3[docType] || ALL_KEYS_V3).slice();
     const itemProps = { description: { type: 'string' } };
     ITEM_KEYS_V3.slice(1).forEach(k => { itemProps[k] = nullable(ITEM_NUM_V3.indexOf(k) !== -1 ? 'number' : 'string'); });
@@ -536,6 +655,8 @@
     // 20261121000100: an appointment card is read for a saved transaction; an empty-return proof is ≤ 8 MB
     if (docType === 'appointment_ticket' && !tx) throw new AiError('transaction_required', 400);
     if (docType === 'empty_return_receipt' && bytes > MAX_EIR_BYTES) throw new AiError('too_large', 413);
+    // 20261122000100: a payment document is ≤ 4 MB (legacy maxAttachmentBytes)
+    if (isPay(docType) && bytes > MAX_PAY_BYTES) throw new AiError('too_large', 413);
     const pages = f.media_type === 'application/pdf' ? pdfPageCount(f.data_b64) : 1;
     return { org_id: body.org_id.toLowerCase(), doc_type: docType, media_type: f.media_type, data_b64: f.data_b64, bytes, pages,
       transaction_id: tx, lang, prompt_version: version };
@@ -557,6 +678,8 @@
       ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: v.data_b64 } }
       : { type: 'image', source: { type: 'base64', media_type: v.media_type, data: v.data_b64 } };
     const v3 = isV3(v.prompt_version);
+    const pay = v3 && isPay(v.doc_type);
+    if (pay) return buildRequestPay(v, fileBlock);
     const keys = keysFor(v.doc_type, v.prompt_version);
     const ops = isOps(v.doc_type);
     const typeLine = ops
@@ -581,6 +704,28 @@
       fallbacks: FALLBACKS,
       output_config: { effort: EFFORT, format: { type: 'json_schema', schema: outputSchema(v.doc_type, v.prompt_version) } },
       system: ops ? SYSTEM_OPS : (v3 ? SYSTEM_V3 : SYSTEM),
+      messages: [{ role: 'user', content: [fileBlock, { type: 'text', text }] }]
+    };
+  }
+
+  // 20261122000100: the payment documents — the same SDK call shape (model, effort, max_tokens, betas, fallbacks, json_schema)
+  function buildRequestPay(v, fileBlock) {
+    const inv = v.doc_type === 'appointment_invoice';
+    const keys = inv ? PAY_INVOICE_KEYS : PAY_PROOF_KEYS;
+    const text = [
+      'Document type (as chosen by the user): ' + (inv ? 'the entity invoice of a payment' : 'the payment proof') + ' (' + v.doc_type + '). Set doc_type to what the document actually is.',
+      'Fields to extract when present:',
+      keys.map(k => '- ' + k + ': ' + PAY_HINTS[k]).join('\n'),
+      inv ? PAY_INVOICE_RULES : PAY_PROOF_RULES,
+      'Write warnings in ' + (v.lang === 'en' ? 'English' : 'Arabic') + '.'
+    ].join('\n');
+    return {
+      model: MODEL,
+      max_tokens: MAX_TOKENS,
+      betas: BETAS.slice(),
+      fallbacks: FALLBACKS,
+      output_config: { effort: EFFORT, format: { type: 'json_schema', schema: outputSchemaPay(v.doc_type) } },
+      system: SYSTEM_PAY,
       messages: [{ role: 'user', content: [fileBlock, { type: 'text', text }] }]
     };
   }
@@ -635,8 +780,24 @@
     const text = content.slice(start).filter(b => b && b.type === 'text' && typeof b.text === 'string').map(b => b.text).join('');
     let data;
     try { data = JSON.parse(text); } catch (e) { return { ok: false, code: 'bad_output', usage, model }; }
-    if (!(isV3(version) && isOps(docType) ? shapeOkOps(data, docType) : shapeOk(data, version))) return { ok: false, code: 'bad_output', usage, model };
+    const okShape = isV3(version) && isOps(docType) ? shapeOkOps(data, docType)
+      : (isV3(version) && isPay(docType) ? shapeOkPay(data, docType) : shapeOk(data, version));
+    if (!okShape) return { ok: false, code: 'bad_output', usage, model };
     return { ok: true, data, usage, model };
+  }
+  // 20261122000100: the payment document output
+  function shapeOkPay(d, docType) {
+    if (!d || typeof d !== 'object' || Array.isArray(d)) return false;
+    if (PAY_DETECTED.indexOf(d.doc_type) === -1) return false;
+    if (!Array.isArray(d.fields) || !Array.isArray(d.warnings) || !d.warnings.every(w => typeof w === 'string')) return false;
+    if (!d.fields.every(f => f && typeof f === 'object' && typeof f.name === 'string' && typeof f.value === 'string')) return false;
+    if (d.document_title != null && typeof d.document_title !== 'string') return false;
+    if (docType === 'appointment_invoice') {
+      if (d.is_fasah_appointment != null && typeof d.is_fasah_appointment !== 'boolean') return false;
+      if (d.component_amounts != null && !(Array.isArray(d.component_amounts)
+          && d.component_amounts.every(c => c && typeof c === 'object' && !Array.isArray(c) && (c.amount_after_vat == null || typeof c.amount_after_vat === 'number')))) return false;
+    }
+    return true;
   }
   // 20261121000100: the appointment card / EIR output
   function shapeOkOps(d, docType) {
@@ -1118,11 +1279,210 @@
     return result;
   }
 
+  /* --------------------------------------------- payment documents (20261122000100) */
+  // TAS + ≥ 8 digits only (= SQL app.norm_tas / MarsaNorm.normTas), else ''
+  function tasStrict(v) { const t = normTas(v); return /^TAS\d{8,}$/.test(t) ? t : ''; }
+  // legacy paymentDocAiV2PartyKey_
+  function partyKey(v) {
+    return String(v == null ? '' : v).trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي')
+      .replace(/[^a-z0-9\u0600-\u06ff]+/g, '');
+  }
+  // legacy paymentDocAiV2RoughPartyMatch_ (an empty side matches)
+  function roughPartyMatch(a, b) {
+    const l = partyKey(a), r = partyKey(b);
+    if (!l || !r) return true;
+    return l === r || l.indexOf(r) !== -1 || r.indexOf(l) !== -1;
+  }
+  // legacy paymentDocAiV2IsPaymentChannel_: Fasah, Tabadul, SADAD, mada, Visa, Mastercard, Apple Pay, STC Pay, urpay
+  const CHANNEL_KEYS = ['fasah', 'فسح', 'fasahpay', 'فسحباي', 'tabadul', 'تبادل', 'sadad', 'سداد', 'سدادللمدفوعات', 'mada', 'مدي', 'مدى',
+    'visa', 'فيزا', 'mastercard', 'ماستركارد', 'applepay', 'stcpay', 'urpay'].map(partyKey);
+  function isPaymentChannel(v) {
+    const k = partyKey(v);
+    if (!k) return false;
+    return CHANNEL_KEYS.indexOf(k) !== -1 || /^(fasah|tabadul|sadad|mada|visa|mastercard|applepay|stcpay|urpay)/.test(k)
+      || /^(فسح|تبادل|سداد|مدى|مدي|فيزا|ماستركارد)/.test(k);
+  }
+  // legacy paymentAiNormalizePaymentMethod_ → the register method codes ('' when nothing printed)
+  function payMethod(v) {
+    const t = String(v == null ? '' : v).trim().toLowerCase();
+    if (!t) return '';
+    if (PAY_METHODS.indexOf(t) !== -1) return t;
+    if (/محفظة\s*فسح|fasah\s*wallet/.test(t)) return 'fasah_wallet';
+    if (/محفظة.*ميناء.*جاف|dry\s*port.*wallet/.test(t)) return 'dry_port_wallet';
+    if (/سداد|sadad/.test(t)) return 'sadad';
+    if (/مدى|mada/.test(t)) return 'mada';
+    if (/تحويل|transfer|bank/.test(t)) return 'bank_transfer';
+    if (/نقد|cash/.test(t)) return 'cash';
+    if (/بطاق|card|visa|master|apple\s*pay/.test(t)) return 'mada';
+    if (/شيك|cheque|check/.test(t)) return 'cheque';
+    return 'other';
+  }
+  // legacy paymentAiNormalizeDate_: YYYY-MM-DD (or YYYY/M/D, D/M/YYYY) → 'YYYY-MM-DD' | ''
+  function payDate(v) {
+    const t = western(clean(v, 40));
+    let m = /^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/.exec(t);
+    let d = m ? m[1] + '-' + pad(+m[2], 2) + '-' + pad(+m[3], 2) : '';
+    if (!d) { m = /^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})$/.exec(t); d = m ? m[3] + '-' + pad(+m[2], 2) + '-' + pad(+m[1], 2) : ''; }
+    return d && isIsoDate(d) ? d : '';
+  }
+  // legacy paymentAiNormalizeNumber_: Arabic digits, separators, currency text dropped; ≥ 0, 2 decimals | null
+  function payAmount(v) {
+    if (v == null || v === '') return null;
+    const t = western(String(v)).replace(/[,،\s]/g, '').replace(/[^\d.\-]/g, '');
+    if (!/^\d+(\.\d+)?$/.test(t)) return null;
+    return Math.round((Number(t) + Number.EPSILON) * 100) / 100;
+  }
+  function round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
+
+  function postProcessPay(data, requestedType) {
+    const inv = requestedType === 'appointment_invoice';
+    const warnings = [];
+    const W = (source, code, text, field) => warnings.push({ source, code, text: clean(text, 300), field: field || null });
+    (data.warnings || []).slice(0, 30).forEach(w => { const t = clean(w, 300); if (t) W('model', 'model_note', t); });
+    const allowed = inv ? PAY_INVOICE_KEYS : PAY_PROOF_KEYS;
+    const by = {};
+    (data.fields || []).slice(0, 100).forEach(f => {
+      if (!f || allowed.indexOf(f.name) === -1) return;
+      const value = clean(f.value, 2000);
+      if (!value || /^-+$/.test(value)) return;
+      (by[f.name] = by[f.name] || []).push({ value, confidence: conf(f.confidence), page: page(f.page) });
+    });
+    const best = k => {
+      const list = by[k];
+      if (!list || !list.length) return null;
+      const b = list.slice().sort((a, c) => c.confidence - a.confidence)[0];
+      if (k !== 'container_numbers' && list.some(x => x.value !== b.value)) W('server', 'conflicting_values', 'Several different values were read for this field.', k);
+      return b;
+    };
+    const fields = [], extracted = {};
+    const put = (k, value, b, valid) => {
+      if (value == null || value === '') return;
+      fields.push({ name: k, value: String(value), confidence: b ? b.confidence : 1, page: b ? b.page : null, valid: valid !== false });
+      extracted[k] = String(value);
+    };
+    const detected = PAY_DETECTED.indexOf(data.doc_type) !== -1 ? data.doc_type : 'other';
+    const title = clean(data.document_title, 300) || null;
+    let rejected = null, payment;
+    if (inv) {
+      if (detected === 'payment_proof') rejected = 'not_entity_invoice';
+      else if (detected !== 'other' && PAY_INVOICE_DETECTED.indexOf(detected) === -1) W('server', 'doc_type_mismatch', 'The document looks like a ' + detected + ', not an invoice.', null);
+      const g = k => { const b = best(k); return b ? b : null; };
+      const bIssuer = g('issuer_name'), bNo = g('invoice_number'), bRef = g('reference_no'), bInt = g('internal_invoice_no'), bAppt = g('appointment_no');
+      const bType = g('appointment_type'), bDate = g('invoice_date'), bPay = g('payment_date'), bTot = g('total'), bVat = g('vat_amount');
+      const bCur = g('currency'), bCust = g('customer_name'), bBl = g('bl_number'), bDec = g('declaration_number');
+      const rawNo = bNo ? normRef(bNo.value, 60) : '', rawRef = bRef ? normRef(bRef.value, 60) : '';
+      const internal = bInt ? normRef(bInt.value, 60) : (/^FP\d{6,}$/i.test(rawNo) ? rawNo : '');
+      const tas = tasStrict((bAppt && bAppt.value) || '') || tasStrict(rawNo);
+      const rawType = bType ? String(bType.value).trim().toLowerCase().replace(/[\s-]+/g, '_') : '';
+      let apptType = ['gate_out', 'gateout', 'out', 'خروج'].indexOf(rawType) !== -1 ? 'gate_out' : (['gate_in', 'gatein', 'in', 'دخول'].indexOf(rawType) !== -1 ? 'gate_in' : '');
+      // components: every page's Amount after VAT, summed (legacy componentAmounts)
+      const comps = (Array.isArray(data.component_amounts) ? data.component_amounts : []).slice(0, 50)
+        .map(c => ({ page: page(c && c.page), amount: Number.isFinite(c && c.amount_after_vat) && c.amount_after_vat > 0 ? round2(c.amount_after_vat) : null }))
+        .filter(c => c.amount !== null);
+      const fasah = data.is_fasah_appointment === true || detected === 'appointment_invoice' || !!tas || !!rawRef || /^FP\d{6,}$/i.test(rawNo);
+      const safeRef = /^FP/i.test(rawRef) ? '' : rawRef;
+      const plainNo = /^FP/i.test(rawNo) ? '' : rawNo;
+      // the invoice number: the Reference No on a Fasah appointment invoice, never an FP… number
+      const number = fasah ? (safeRef || (!tas ? plainNo : '')) : plainNo;
+      if (/^FP/i.test(rawNo) || /^FP/i.test(rawRef)) W('server', 'fp_not_invoice_no', 'The Internal Invoice No (FP…) is not the invoice number; it is kept as the internal number only.', 'invoice_number');
+      if (fasah && !tas) W('server', 'tas_missing', 'An appointment invoice was recognised but no TAS appointment number is clearly printed; no FP or other reference was used instead.', 'appointment_no');
+      if (fasah && !number) W('server', 'reference_missing', 'An appointment invoice was recognised but the Reference No is not clearly printed; enter it as printed before saving.', 'invoice_number');
+      if (bAppt && !tasStrict(bAppt.value)) W('server', 'tas_format', 'The appointment number is not TAS followed by at least 8 digits.', 'appointment_no');
+      // containers (ISO 6346)
+      const ctrs = [];
+      (by.container_numbers || []).forEach(x => String(x.value).split(/[,;\n]+/).forEach(v => {
+        const c = normContainer(v);
+        if (!c) return;
+        if (!isValidContainer(c)) W('server', 'container_check_digit', 'Container number fails the ISO 6346 check digit: ' + c, 'container_numbers');
+        else if (ctrs.indexOf(c) === -1 && ctrs.length < 50) ctrs.push(c);
+      }));
+      const bl = bBl ? normRef(bBl.value, 80) : '', decl = bDec ? normRef(bDec.value, 60) : '';
+      // legacy paymentAiClassifyAppointmentInvoice_: container + B/L + declaration → gate_out, container alone → gate_in
+      if (!apptType && fasah && ctrs.length) apptType = bl && decl ? 'gate_out' : (!bl && !decl ? 'gate_in' : '');
+      const modelTotal = bTot ? payAmount(bTot.value) : null;
+      if (bTot && modelTotal === null) W('server', 'amount_format', 'Amount is not a plain number.', 'total');
+      const sum = comps.length ? round2(comps.reduce((a, c) => a + c.amount, 0)) : null;
+      const total = sum !== null ? sum : modelTotal;
+      if (sum !== null && comps.length > 1) W('server', 'components_summed', 'The appointment invoice pages were summed: ' + comps.map(c => c.amount.toFixed(2)).join(' + ') + ' = ' + sum.toFixed(2) + '.', 'total');
+      if (sum !== null && modelTotal !== null && Math.abs(sum - modelTotal) >= 0.005) W('server', 'components_total_mismatch', 'The printed total differs from the sum of the page amounts; the sum is used.', 'total');
+      const invDate = bDate ? payDate(bDate.value) : '', payD = bPay ? payDate(bPay.value) : '';
+      if (bDate && !invDate) W('server', 'date_format', 'Date is not a valid YYYY-MM-DD date.', 'invoice_date');
+      if (bPay && !payD) W('server', 'date_format', 'Date is not a valid YYYY-MM-DD date.', 'payment_date');
+      const date = fasah ? (payD || invDate) : (invDate || payD);
+      const vat = bVat ? payAmount(bVat.value) : null;
+      const cur = bCur ? clean(bCur.value, 10).toUpperCase() : '';
+      const issuer = bIssuer ? cleanLine(bIssuer.value).slice(0, 160) : '';
+      put('issuer_name', issuer, bIssuer); put('invoice_number', number, bNo || bRef); put('reference_no', safeRef, bRef); put('internal_invoice_no', internal, bInt || bNo);
+      put('appointment_no', tas, bAppt || bNo); put('appointment_type', apptType, bType); put('invoice_date', date, bPay || bDate);
+      put('total', total === null ? '' : total.toFixed(2), bTot); put('vat_amount', vat === null ? '' : vat.toFixed(2), bVat);
+      put('currency', /^[A-Z]{3}$/.test(cur) ? cur : '', bCur); put('customer_name', bCust ? cleanLine(bCust.value).slice(0, 160) : '', bCust);
+      put('bl_number', bl, bBl); put('declaration_number', decl, bDec); put('container_numbers', ctrs.join(','), by.container_numbers ? by.container_numbers[0] : null);
+      payment = {
+        kind: 'invoice', document_title: title, is_fasah_appointment: fasah, issuer_name: issuer || null, invoice_no: number || null,
+        reference_no: safeRef || null, internal_invoice_no: internal || null, appointment_no: tas || null, appointment_type: apptType || null,
+        service_code: apptType === 'gate_in' ? 'gate_in_appointment' : (apptType === 'gate_out' ? 'gate_out_appointment' : null),
+        invoice_date: date || null, total, components: comps, vat_amount: vat, currency: /^[A-Z]{3}$/.test(cur) ? cur : null,
+        customer_name: bCust ? cleanLine(bCust.value).slice(0, 160) : null, bl_number: bl || null, declaration_number: decl || null,
+        container_numbers: ctrs
+      };
+    } else {
+      if (PAY_INVOICE_DETECTED.indexOf(detected) !== -1) rejected = 'not_payment_proof';
+      else if (detected !== 'payment_proof' && detected !== 'other') W('server', 'doc_type_mismatch', 'The document looks like a ' + detected + ', not a payment proof.', null);
+      const g = k => best(k);
+      const bBen = g('beneficiary_name'), bCh = g('payment_channel'), bPayer = g('payer_name'), bM = g('payment_method'), bD = g('payment_date');
+      const bA = g('amount'), bCur = g('currency'), bS = g('sadad_number'), bB = g('bank_reference'), bR = g('receipt_no'), bI = g('iban');
+      let beneficiary = bBen ? cleanLine(bBen.value).slice(0, 160) : '';
+      let channel = bCh ? cleanLine(bCh.value).slice(0, 60) : '';
+      const benRaw = beneficiary || null;
+      // a payment channel is NEVER the beneficiary (legacy paymentDocAiV2NormalizeProofParties_)
+      if (beneficiary && isPaymentChannel(beneficiary)) {
+        if (!channel) channel = beneficiary.slice(0, 60);
+        W('server', 'beneficiary_is_channel', '«' + beneficiary + '» is a payment channel / platform, not the beneficiary; it is not used as the beneficiary.', 'beneficiary_name');
+        beneficiary = '';
+      }
+      if (!beneficiary && channel) W('server', 'beneficiary_missing', 'Only the payment channel «' + channel + '» is shown; choose the beneficiary (the invoice issuer) before saving.', 'beneficiary_name');
+      const method = bM ? payMethod(bM.value) : '';
+      const sadad = bS ? western(clean(bS.value, 60)).replace(/\D/g, '').slice(0, 30) : '';
+      let bank = bB ? western(clean(bB.value, 80)).toUpperCase().replace(/[^A-Z0-9-]+/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 60) : '';
+      const iban = bI ? western(clean(bI.value, 60)).toUpperCase().replace(/\s+/g, '') : '';
+      // the IBAN / an account number is never the bank reference
+      if (bank && (/^SA\d{22}$/.test(bank.replace(/-/g, '')) || (iban && bank.replace(/-/g, '') === iban))) {
+        W('server', 'bank_ref_is_iban', 'The bank reference read is the IBAN / account number; it was dropped.', 'bank_reference');
+        bank = '';
+      }
+      const receipt = bR ? western(clean(bR.value, 100)) : '';
+      const amt = bA ? payAmount(bA.value) : null;
+      if (bA && amt === null) W('server', 'amount_format', 'Amount is not a plain number.', 'amount');
+      const date = bD ? payDate(bD.value) : '';
+      if (bD && !date) W('server', 'date_format', 'Date is not a valid YYYY-MM-DD date.', 'payment_date');
+      const cur = bCur ? clean(bCur.value, 10).toUpperCase() : '';
+      put('beneficiary_name', beneficiary, bBen); put('payment_channel', channel, bCh || bBen); put('payer_name', bPayer ? cleanLine(bPayer.value).slice(0, 160) : '', bPayer);
+      put('payment_method', method, bM); put('payment_date', date, bD); put('amount', amt === null ? '' : amt.toFixed(2), bA);
+      put('currency', /^[A-Z]{3}$/.test(cur) ? cur : '', bCur); put('sadad_number', sadad, bS); put('bank_reference', bank, bB); put('receipt_no', receipt, bR);
+      payment = {
+        kind: 'proof', document_title: title, beneficiary_name: beneficiary || null, beneficiary_raw: benRaw, payment_channel: channel || null,
+        payer_name: bPayer ? cleanLine(bPayer.value).slice(0, 160) : null, method: method || null, method_raw: bM ? clean(bM.value, 80) : null,
+        paid_at: date || null, amount: amt, currency: /^[A-Z]{3}$/.test(cur) ? cur : null, sadad_number: sadad || null,
+        bank_reference: bank || null, receipt_no: receipt || null
+      };
+    }
+    if (rejected) W('server', 'wrong_document_type', 'The document is not a ' + requestedType + ' (' + rejected + ').', null);
+    const mean = fields.length ? Math.round(fields.reduce((a, f) => a + f.confidence, 0) / fields.length * 1000) / 10 : null;
+    const result = {
+      doc_type: requestedType, detected_type: detected, kind: KIND_OF[requestedType], fields, extracted_fields: extracted, line_items: [],
+      warnings: warnings.slice(0, 60), mean_confidence: mean, prompt_version: PROMPT_VERSION_V3, containers: [], detected_documents: [detected],
+      rejected: rejected ? { code: 'wrong_document_type', reason: rejected } : null, payment, ai_detail: null
+    };
+    result.raw_text = renderText(result);
+    return result;
+  }
+
   // model output → the response of ai-extract (and the extraction row): validated, normalized, warnings added.
   // version 'ai-doc-v3' → the v3 keys, packing_list, the wider line items and containers (+ result.containers).
   function postProcess(data, requestedType, version) {
     const v3 = isV3(version);
     if (v3 && isOps(requestedType)) return postProcessOps(data, requestedType);
+    if (v3 && isPay(requestedType)) return postProcessPay(data, requestedType);
     const allowed = keysFor(requestedType, version);
     const KEYS = v3 ? ALL_KEYS_V3 : ALL_KEYS;
     const warnings = [];
@@ -1396,6 +1756,12 @@
       lines.push('', 'appointment:', 'movement: ' + (a.movement_type || '-') + ', container: ' + (a.container_no || '-') + ', time: ' + (a.appointment_local || '-'),
         'entry: ' + sec(a.entry), 'exit: ' + sec(a.exit), 'structure: ' + (a.structural.ok ? 'ok' : a.structural.reason));
     }
+    if (v3 && r.payment) {
+      const p = r.payment;
+      lines.push('', 'payment ' + p.kind + ':', p.kind === 'invoice'
+        ? 'issuer: ' + (p.issuer_name || '-') + ', no: ' + (p.invoice_no || '-') + ', TAS: ' + (p.appointment_no || '-') + ', total: ' + (p.total == null ? '-' : p.total)
+        : 'beneficiary: ' + (p.beneficiary_name || '-') + ', channel: ' + (p.payment_channel || '-') + ', amount: ' + (p.amount == null ? '-' : p.amount));
+    }
     if (v3 && r.empty_return) {
       const e = r.empty_return;
       lines.push('', 'empty return:', 'container: ' + (e.container_no || '-') + ', delivered: ' + (e.delivered_at || (e.delivery_date ? e.delivery_date + ' (no time)' : '-')) +
@@ -1453,7 +1819,10 @@
     DECL_KEYS, normDeclarationStatus, normDeclarationType, normalizeHijri, hijriToGregorian, hijriSupported,
     // appointment card / EIR readings (20261121000100)
     OPS_TYPES, OPS_DETECTED, APPT_KEYS, EIR_KEYS, SHIP_KEYS_V3, APPT_SECTION_KEYS, SYSTEM_OPS, MAX_EIR_BYTES, isOps, normTas,
-    normSaMobile, normPlate, localDateTime
+    normSaMobile, normPlate, localDateTime,
+    // payment documents (20261122000100)
+    PAY_TYPES, PAY_DETECTED, PAY_INVOICE_KEYS, PAY_PROOF_KEYS, PAY_METHODS, SYSTEM_PAY, MAX_PAY_BYTES, PAY_MAX_DOCS, PAY_MAX_TOTAL_BYTES,
+    isPay, isPaymentChannel, roughPartyMatch, payMethod, tasStrict
   };
   (typeof module === 'object' && module.exports) ? (module.exports = API) : (globalThis.MarsaAiExtract = Object.assign(globalThis.MarsaAiExtract || {}, API));
 })();

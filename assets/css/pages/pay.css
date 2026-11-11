@@ -1,0 +1,113 @@
+/* =====================================================================
+   مرسى | MARSA — legacy step 6: payments register / form / detail (#payments), client custody (#custody), the payments
+   section of the transaction (fin-tx-payments) and the client-page custody card. Loaded after fin.css.
+   Built on the original style.css / app.css / ops.css classes (.card, .form-control, .table-wrap, .toolbar, .badge-*,
+   .alert-*); this file only adds the form grid, the scroll box of the register table, the allocation totals, the typed
+   attachment rows and the reason panel — style.css tokens only, logical properties, no page overflow at 375 px.
+   Prefixes: pay-, cu-, fin-pay-stats.
+   ===================================================================== */
+
+/* ---- frame ---- */
+.pay-view { display: grid; gap: 14px; min-width: 0; }
+.pay-view > * { min-width: 0; }
+.pay-bar, .pay-body { min-width: 0; }
+.pay-tiles { grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr)); }
+.pay-tiles .stat-value { font-size: var(--fs-lg, 1.25rem); overflow-wrap: anywhere; }
+.pay-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.pay-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pay-panel:empty { display: none; }
+.pay-static { margin: 0; padding-block: 8px; font-weight: 700; color: var(--navy-dark); overflow-wrap: anywhere; }
+/* style.css hides .form-error unless its group has .has-error: here an error is shown whenever it is not [hidden] */
+.pay-view .form-error:not([hidden]) { display: block; }
+.pay-view .form-error[hidden] { display: none; }
+
+/* ---- the register table: its own scroll box (both directions), sticky header ---- */
+.table-wrap.pay-scroll { max-height: min(70vh, 640px); overflow: auto; -webkit-overflow-scrolling: touch; }
+.table-wrap.pay-scroll thead th { position: sticky; top: 0; z-index: 1; background: #fff; box-shadow: inset 0 -1px 0 var(--border); }
+.pay-scroll .adm-table { min-width: 980px; }
+.cu-view .pay-scroll .adm-table { min-width: 760px; }
+.pay-tx-chip { display: block; }
+.pay-diff .fin-money { font-weight: 700; }
+.pay-tx-filter { display: flex; align-items: center; gap: 6px; flex: 1 1 220px; min-width: 0; }
+.pay-tx-filter .fin-finder { flex: 1 1 auto; min-width: 0; }
+
+/* ---- the form ---- */
+.pay-form { display: grid; gap: 14px; min-width: 0; }
+.pay-sec { display: grid; gap: 10px; padding: 14px 16px; background: #fff; border: 1px solid var(--border); border-radius: var(--r); min-width: 0; }
+.pay-sec-title { margin: 0; font-size: var(--fs-md, 1.0625rem); color: var(--navy-dark); }
+.pay-sec > .form-hint, .pay-sec > p { margin: 0; }
+.pay-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 12px 16px; min-width: 0; }
+.pay-field { min-width: 0; margin: 0; }
+.pay-field.is-full { grid-column: 1 / -1; }
+.pay-field .form-control { width: 100%; min-width: 0; }
+.pay-field.has-error .form-control, .pay-field .form-control[aria-invalid="true"] { border-color: var(--danger); }
+.pay-tx { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.pay-tx .fin-finder { flex: 1 1 100%; min-width: 0; }
+.pay-diff-out { display: block; }
+.pay-dup { display: grid; gap: 8px; }
+.pay-dup:empty, .pay-form-error:empty, .pay-ai-result:empty { display: none; }
+.pay-form-error { display: grid; gap: 8px; }
+.pay-form-actions { position: sticky; bottom: 0; z-index: 2; padding: 10px 0; background: linear-gradient(to top, #fff 70%, rgba(255, 255, 255, 0)); }
+.pay-restored { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* ---- shared allocations ---- */
+.pay-allocs { display: grid; gap: 10px; }
+.pay-alloc { margin: 0; padding: 10px 12px 12px; border: 1px solid var(--border); border-radius: var(--r); background: #FAFCFE; min-width: 0; }
+.pay-alloc-legend { display: inline-flex; align-items: center; gap: 6px; padding-inline: 6px; font-weight: 800; color: var(--navy-dark); font-size: var(--fs-sm); }
+.pay-totals { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 10px 12px; border-radius: var(--r); border: 1px dashed var(--border); font-size: var(--fs-sm); }
+.pay-totals .fin-money { font-weight: 800; }
+.pay-totals.is-ok { background: var(--success-bg); border-color: rgba(31, 138, 91, .35); }
+.pay-totals.is-short { background: var(--warning-bg); border-color: rgba(201, 138, 11, .35); }
+.pay-totals.is-over { background: var(--danger-bg); border-color: rgba(200, 50, 60, .35); }
+.pay-totals.is-over .pay-unalloc .fin-money { color: var(--danger); }
+
+/* ---- typed attachments + Claude reading ---- */
+.pay-files-box { display: grid; gap: 8px; min-width: 0; }
+.pay-files, .pay-docs { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.pay-file, .pay-doc { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r); background: #fff; min-width: 0; }
+.pay-file .form-control { width: auto; flex: 1 1 150px; min-width: 0; }
+.pay-file.is-bad { border-color: rgba(200, 50, 60, .45); background: var(--danger-bg); }
+.pay-file-name, .pay-doc-name { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; font-weight: 700; }
+.pay-doc.is-removed { opacity: .65; }
+.pay-doc.is-removed .pay-doc-name { text-decoration: line-through; }
+.pay-docs-add { display: grid; gap: 8px; margin-block-start: 10px; }
+.pay-sec-ai { border-color: rgba(22, 115, 184, .35); background: #FAFCFE; }
+.pay-ai-result { display: grid; gap: 8px; }
+.pay-ai-result .pay-actions .btn { max-width: 100%; }
+
+/* ---- reason panel (reject / void / remove) ---- */
+.pay-reason { display: grid; gap: 8px; padding: 12px 14px; margin: 0; }
+.pay-reason-title { color: var(--navy-dark); }
+.pay-reason .form-hint, .pay-reason .form-error { margin: 0; }
+.pay-detail-actions { margin-block-start: -4px; }
+
+/* ---- transaction section: share-only figures ---- */
+.fin-pay-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: 8px; margin: 0 0 10px; }
+.fin-pay-stats > div { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r); background: #FAFCFE; min-width: 0; }
+.fin-pay-stats dt { font-size: var(--fs-xs, .8125rem); color: var(--muted); font-weight: 700; }
+.fin-pay-stats dd { margin: 2px 0 0; font-weight: 800; color: var(--navy-dark); overflow-wrap: anywhere; }
+.fin-pay-stats > div.is-warn { background: var(--warning-bg); }
+.fin-pay-stats > div.is-danger { background: var(--danger-bg); }
+.fin-pay-mv { margin: 0 0 8px; }
+
+/* ---- custody ---- */
+.cu-tiles { grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); }
+.cu-form-host:empty { display: none; }
+.cu-form .app-card-body { display: grid; gap: 10px; }
+.cu-balance:empty, .cu-max:empty { display: none; }
+.cu-balance { font-weight: 700; }
+.cu-balance .fin-money { font-weight: 800; color: var(--teal, #0E8C8C); }
+.cu-max { margin: 0; font-weight: 700; }
+.cu-void-error { display: grid; gap: 6px; }
+.cu-void-error:empty { display: none; }
+
+@media (max-width: 575.98px) {
+  .pay-sec { padding: 12px; }
+  .pay-tx-filter { flex-basis: 100%; }
+  .pay-file .form-control { flex-basis: 100%; }
+  .pay-form-actions .btn { flex: 1 1 auto; }
+}
+@media print {
+  .pay-form-actions, .pay-sec-ai, .pay-actions { display: none !important; }
+  .table-wrap.pay-scroll { max-height: none; overflow: visible; }
+}

@@ -116,6 +116,18 @@
       MRS_TASTO_TAKEN: 'رقم أمر النقل مسجل مسبقًا في معاملة أخرى ({f}).',
       MRS_TASTO_STAGE: 'لا يمكن تسجيل أمر نقل لشركة قبل انتهاء المعاملة جمركيًا (المرحلة الحالية: {f}).',
       MRS_AI_WRONG_DOCUMENT: 'المستند المرفوع ليس من النوع المطلوب ({f}). إن كان فاتورة موعد فارفع بطاقة الموعد نفسها، وإن كان غير إيصال إعادة الفارغ فارفع الإيصال.',
+      // legacy step 6 (20261122000100): the payment register and the client custody
+      MRS_PAY_REF_TAKEN: 'المرجع ({f}) مسجل سابقًا في سداد آخر ({x}). راجع السداد السابق قبل المتابعة.',
+      MRS_PAY_REF_METHOD: 'الحقل ({f}) لا يخص طريقة السداد المختارة. امسحه أو غيّر طريقة السداد.',
+      MRS_PAY_REFERENCE: 'صيغة ({f}) غير صحيحة: رقم السداد أرقام فقط، والمرجع البنكي حروف إنجليزية وأرقام وشرطة بين الأجزاء، ورقم الإيصال حتى 100 حرف.',
+      MRS_PAY_FUNDING: 'مصدر التمويل لا يتوافق مع طريقة السداد ({f}).',
+      MRS_PAY_ALLOCATION: 'توزيع السداد غير صحيح ({f}).',
+      MRS_PAY_DOCUMENT: 'مرفقات السداد غير مقبولة ({f}).',
+      MRS_PAY_INVOICE_TAKEN: 'الفاتورة نفسها من الجهة نفسها مسجلة في سداد آخر ({x}). لا يمكن حفظ الفاتورة مرتين.',
+      MRS_CONFIRM_INVOICE_REUSE: 'رقم الفاتورة مستخدم سابقًا لجهة أخرى ({x}). إن كانت هذه الفاتورة صادرة فعلًا من جهة مختلفة فأكّد المتابعة.',
+      MRS_PAY_LOCKED: 'لا يمكن إلغاء هذا السداد أو تعديله ({f}).',
+      MRS_CUSTODY_NEGATIVE: 'لا يمكن أن يصبح رصيد عهدة العميل سالبًا. الرصيد الحالي {x} ريال.',
+      MRS_CUSTODY_LINK: 'ربط حركة العهدة غير صحيح ({f}).',
       // G4 (docs/online/G4_SPEC.md)
       MRS_OVER_ALLOCATED: 'مجموع التوزيع يتجاوز صافي البند؛ التوزيع لا يضاعف الفاتورة (المتبقي القابل للتوزيع: {f}).',
       MRS_OVERPAID: 'المبلغ يتجاوز المتبقي من الإجمالي (المتبقي: {f}).',
@@ -140,6 +152,15 @@
       UNKNOWN: 'حدث خطأ غير متوقع. حاول مرة أخرى.'
     },
     fields: {
+      // legacy step 6 (20261122000100): the payment register and the custody
+      sadad_number: 'رقم السداد', bank_reference: 'الرقم المرجعي البنكي', receipt_no: 'رقم الإيصال / السند / العملية',
+      paying_account: 'البنك / الحساب المسدد منه', payer_name: 'الجهة الدافعة', beneficiary_party_id: 'الجهة المستفيدة (مصدرة الفاتورة)',
+      funding_source: 'مصدر التمويل', service_item: 'بند الخدمة', paid_amount: 'مبلغ السداد', claim_no: 'رقم الفاتورة أو المطالبة',
+      internal_invoice_no: 'الرقم الداخلي للفاتورة', payment_proof: 'إثبات السداد', payment_reference: 'مرجع السداد أو ملف إثباته',
+      movement_type: 'نوع الحركة المالية', pattern: 'نمط السداد', allocations: 'التوزيعات', entry_date: 'تاريخ الحركة',
+      disbursement_id: 'السداد المرتبط', charge_client: 'تحميل المبلغ على العميل', invoice_vat_amount: 'ضريبة الفاتورة',
+      invoice_total: 'إجمالي الفاتورة', expected_amount: 'المبلغ المطلوب', payment: 'السداد', custody_entry: 'حركة العهدة',
+      payment_document: 'مرفق السداد', invoice_number_dup: 'رقم الفاتورة',
       // document matching (20261116000100)
       invoice_extraction_id: 'الفاتورة التجارية', bl_extraction_id: 'بوليصة الشحن', declaration_extraction_id: 'البيان الجمركي',
       reviewed_rows: 'الحقول المراجَعة', engine_version: 'إصدار المطابقة', overall: 'النتيجة العامة', counts: 'عدد النتائج',
@@ -314,6 +335,51 @@
     },
     // G6b: messages for a detail word under one code only ('CODE:detail'); checked before details / the code text
     codeDetails: {
+      // legacy step 6 (20261122000100): the funding source × method matrix (app.fin_funding_check rules)
+      'MRS_PAY_FUNDING:fasah_wallet_source': 'طريقة السداد «محفظة فسح» تتطلب أن يكون مصدر التمويل «محفظة فسح».',
+      'MRS_PAY_FUNDING:fasah_wallet_method': 'عند اختيار «محفظة فسح» مصدرًا للتمويل يجب أن تكون طريقة السداد «محفظة فسح».',
+      'MRS_PAY_FUNDING:cash_box_method': 'عند اختيار «الصندوق / النقدية» مصدرًا للتمويل يجب أن تكون طريقة السداد «نقدي».',
+      'MRS_PAY_FUNDING:dry_port_wallet_source': 'طريقة السداد «محفظة الميناء الجاف» تتطلب مصدر تمويل خاصًا بمحفظة الميناء الجاف.',
+      'MRS_PAY_FUNDING:dry_port_wallet_method': 'مصدر تمويل محفظة الميناء الجاف يجب أن يستخدم طريقة السداد «محفظة الميناء الجاف».',
+      'MRS_PAY_FUNDING:payer_name': 'أدخل اسم الشخص الذي سدد من حسابه الشخصي.',
+      'MRS_PAY_FUNDING:paying_account': 'أدخل البنك / الحساب المسدد منه لهذه العملية (سداد، مدى، تحويل بنكي).',
+      'MRS_PAY_FUNDING:wallet_no_account': 'لا تسجل بنكًا على السداد من المحفظة؛ البنك يُسجل في حركة تغذية المحفظة المنفصلة.',
+      'MRS_PAY_FUNDING:funding_source': 'حدد مصدر تمويل السداد الفعلي.',
+      'MRS_PAY_FUNDING:payment_method': 'اختر طريقة سداد صحيحة.',
+      'MRS_PAY_ALLOCATION:count': 'السداد المشترك يحتاج توزيعين على الأقل، والفردي توزيعًا واحدًا.',
+      'MRS_PAY_ALLOCATION:sum': 'مجموع التوزيعات يجب أن يساوي إجمالي السداد (الفرق: {x} ريال).',
+      'MRS_PAY_ALLOCATION:amount': 'المبلغ المخصص في كل توزيع يجب أن يكون أكبر من صفر.',
+      'MRS_PAY_ALLOCATION:duplicate': 'لا يمكن تكرار المعاملة ورقم الفاتورة نفسيهما داخل السداد المشترك.',
+      'MRS_PAY_ALLOCATION:branch': 'معاملات السداد الواحد يجب أن تكون من الفرع نفسه.',
+      'MRS_PAY_ALLOCATION:client': 'هذا النوع من السداد يخص عميلًا واحدًا: اختر معاملات العميل نفسه.',
+      'MRS_PAY_ALLOCATION:not_allowed': 'السداد الفردي لا يقبل توزيعات، والمشترك تُحدَّد معاملاته وفواتيره في التوزيعات فقط.',
+      'MRS_PAY_DOCUMENT:count': 'يمكن إضافة 8 مرفقات كحد أقصى في عملية حفظ واحدة.',
+      'MRS_PAY_DOCUMENT:size': 'حجم المرفق «{x}» يتجاوز 4 ميغابايت.',
+      'MRS_PAY_DOCUMENT:total': 'إجمالي المرفقات الجديدة يتجاوز 12 ميغابايت. قسّم الرفع على عمليتي حفظ.',
+      'MRS_PAY_DOCUMENT:type': 'المرفق «{x}» يجب أن يكون PDF أو صورة.',
+      'MRS_PAY_DOCUMENT:branch': 'المرفق مسجل لفرع آخر غير فرع السداد.',
+      'MRS_PAY_DOCUMENT:in_use': 'المرفق «{x}» مرتبط بسداد آخر.',
+      'MRS_PAY_DOCUMENT:allocation': 'اربط كل فاتورة في السداد المشترك بالتوزيع الخاص بها، ولا تربط مرفقًا بتوزيع في السداد الفردي.',
+      'MRS_PAY_DOCUMENT:role': 'نوع المرفق غير صحيح (فاتورة الجهة، إثبات السداد، مرفق إضافي).',
+      'MRS_PAY_LOCKED:daftra': 'هذا السداد مرتبط بدفترة، فلا يُلغى ولا يُعدَّل من مرسى.',
+      'MRS_PAY_LOCKED:invoiced': 'المبلغ المسترد من هذا السداد مفوتر على العميل، فلا يُلغى السداد ولا يُعدَّل.',
+      'MRS_PAY_LOCKED:custody': 'هذا السداد مخصوم من عهدة العميل. ألغِ حركة الخصم أولًا.',
+      'MRS_CUSTODY_LINK:transaction_required': 'خصم العهدة يجب أن يكون مرتبطًا بمعاملة.',
+      'MRS_CUSTODY_LINK:payment_required': 'خصم العهدة يجب أن يكون مرتبطًا بسداد محفوظ.',
+      'MRS_CUSTODY_LINK:client_mismatch': 'المعاملة المختارة لا تخص العميل المحدد في العهدة.',
+      'MRS_CUSTODY_LINK:payment_not_in_transaction': 'السداد المختار غير مرتبط بالمعاملة المحددة.',
+      'MRS_CUSTODY_LINK:exceeds_payment': 'مبلغ الخصم أكبر من مبلغ السداد المرتبط بهذه المعاملة. الحد الأعلى {x} ريال.',
+      'MRS_CUSTODY_LINK:duplicate_deduction': 'هذا السداد خُصم مسبقًا من عهدة العميل لهذه المعاملة.',
+      'MRS_CUSTODY_LINK:payment_void': 'السداد المختار ملغى.',
+      'MRS_CUSTODY_NEGATIVE:void_deposit': 'لا يمكن إلغاء هذا الإيداع لأن رصيد العهدة سيصبح سالبًا (الرصيد الحالي {x} ريال). ألغِ حركات الخصم أو الإرجاع التي استخدمته أولًا.',
+      'MRS_CUSTODY_NEGATIVE:deduction': 'رصيد عهدة العميل لا يكفي لهذا الخصم (الرصيد الحالي {x} ريال). الرصيد لا يصبح سالبًا أبدًا.',
+      'MRS_CUSTODY_NEGATIVE:refund': 'رصيد عهدة العميل لا يكفي لهذا الإرجاع (الرصيد الحالي {x} ريال). الرصيد لا يصبح سالبًا أبدًا.',
+      'MRS_PAY_INVOICE_TAKEN:internal_invoice_no': 'الرقم الداخلي للفاتورة ({x}) مستخدم في فاتورة أو سداد آخر.',
+      'MRS_INVALID:claim_no_fp': 'رسوم المواعيد: رقم المطالبة هو الرقم المرجعي (Reference No) في فاتورة فسح، وليس الرقم الداخلي FP…. ضع رقم FP في حقل الرقم الداخلي.',
+      'MRS_INVALID:internal_invoice_mismatch': 'هذه الفاتورة مسجلة سابقًا برقم داخلي آخر ({x}). صحّح الرقم الداخلي أو اتركه فارغًا.',
+      'MRS_BAD_TRANSITION:approved_documents': 'هذا السداد معتمد، فلا تُضاف مرفقاته ولا تُحذف. لتغيير المستندات صحّح السداد ليعود إلى المراجعة.',
+      'MRS_AI_WRONG_DOCUMENT:not_payment_proof': 'المستند ليس إثبات سداد (يبدو فاتورة أو مستندًا آخر). ارفعه في خانة فاتورة الجهة أو اختر إثبات السداد.',
+      'MRS_AI_WRONG_DOCUMENT:not_entity_invoice': 'المستند ليس فاتورة جهة (يبدو إثبات سداد أو مستندًا آخر). ارفعه في خانة إثبات السداد أو اختر الفاتورة.',
       // public anti-spam (20261113000100): one generic refusal for the per-IP limits and the form signals
       'MRS_RATE_LIMITED:try_later': 'عدد كبير من الطلبات، حاول بعد قليل.',
       // G7 subscriptions (platform RPCs)
@@ -1799,6 +1865,106 @@
   // the readiness banner → { policy {empty_return_blocks_billing, switchable}, pending_containers [...], pending_count,
   //   declared_missing, billing_gate_open, blocking, proofs {...}, movements, carrier_order | null, … }
   function txReadiness(txId) { return rpc('tx_readiness', { p_tx: txId }); }
+
+  /* ------------------------------------------------------------------
+     Legacy step 6 (20261122000100): the payment register (client_disbursements + allocations + typed attachments,
+     booking G4 supplier invoices / payments), four-eyes review, correct = void + re-record, and the client custody.
+     Finance roles only; every write is an RPC. Contract: docs/online/LEGACY_PAY_AR.md.
+     ------------------------------------------------------------------ */
+  // payload = { movement_type org_paid|received_from_client|client_direct, pattern? single|shared, service_item_id | service_code,
+  //   transaction_id (single), claim_no?, internal_invoice_no?, invoice_date?, invoice_vat_amount?, invoice_total?, supplier_invoice_id?,
+  //   appointment_no?, expected_amount?, paid_amount, paid_at 'YYYY-MM-DD', funding_source?, method, paying_account?, payer_name?,
+  //   beneficiary_party_id?, payment_channel?, sadad_number? | bank_reference? | receipt_no?, notes?, review_status? draft|pending,
+  //   confirm_invoice_reuse?, charge_client?, allocations? [{transaction_id, amount, claim_no?, internal_invoice_no?, invoice_date?,
+  //   invoice_vat_amount?, invoice_total?, supplier_invoice_id?, notes?, key?}], documents? [{finance_document_id, role
+  //   entity_invoice|payment_proof|extra, allocation? (1-based index or key)}] }, o = { idemKey? } → the full payment (getPayment)
+  function recordPaymentBundle(payload, o) {
+    o = o || {};
+    if (!payload || typeof payload !== 'object') return Promise.resolve(fail('MRS_REQUIRED', 'payment'));
+    var p = Object.assign({}, payload);
+    delete p.idempotencyKey;
+    return idemRpc('record_payment_bundle', o.idemKey, function (k) { return { p_payload: p, p_idem_key: k }; });
+  }
+  // the whole corrected form (as recordPaymentBundle + keep_documents? default true, remove_document_ids? [link ids]) + a reason
+  //   → { voided: the old payment, payment: the new one, changed: [field names] }
+  function correctPayment(paymentId, payload, reason, o) {
+    o = o || {};
+    if (!isUuid(paymentId)) return Promise.resolve(fail('MRS_REQUIRED', 'payment'));
+    var p = Object.assign({}, payload || {});
+    delete p.idempotencyKey;
+    return idemRpc('correct_payment', o.idemKey, function (k) {
+      return { p_id: paymentId, p_payload: p, p_reason: reason == null ? null : String(reason), p_idem_key: k };
+    });
+  }
+  // → the payment (void); finance approvers; MRS_PAY_LOCKED daftra|invoiced|custody
+  function voidPayment(paymentId, reason) { return rpc('void_payment', { p_id: paymentId, p_reason: reason == null ? null : String(reason) }); }
+  // decision 'submit' (draft → pending) | 'approve' | 'reject' (note required); approver ≠ creator → the payment
+  function reviewPayment(paymentId, decision, note) {
+    return rpc('review_payment', { p_id: paymentId, p_decision: decision, p_note: note == null ? null : String(note) });
+  }
+  // docs = [{ finance_document_id, role, allocation? (seq or allocation id) }] → the payment
+  function addPaymentDocuments(paymentId, docs, o) {
+    o = o || {};
+    if (!isUuid(paymentId)) return Promise.resolve(fail('MRS_REQUIRED', 'payment'));
+    return idemRpc('add_payment_documents', o.idemKey, function (k) { return { p_id: paymentId, p_documents: docs || [], p_idem_key: k }; });
+  }
+  // soft removal of one attachment link (payment_documents.id) → the payment
+  function removePaymentDocument(linkId, reason) { return rpc('remove_payment_document', { p_link: linkId, p_reason: reason == null ? null : String(reason) }); }
+  function getPayment(paymentId) { return rpc('get_payment', { p_id: paymentId }); }
+  // filters = { q?, movement_type?, pattern?, method?, funding_source?, review_status?, status? recorded|void|all, date_from?,
+  //   date_to?, transaction_id?, client_id?, beneficiary_party_id?, service_code?, branch_id?, limit?, offset? } → { total, rows, totals }
+  function listPayments(orgIdArg, filters) {
+    if (!configured) return demoOnly();
+    return aiOrg(orgIdArg).then(function (r) { return r.error ? r : rpc('list_payments', { p_org: r.data, p_filters: filters || {} }); });
+  }
+  // the payments panel of a transaction (only its share) → { count, total_share, pending_review, rejected, last_paid_at,
+  //   by_movement, custody_balance, items [...] }
+  function txDisbursements(txId) { return rpc('tx_disbursements', { p_tx: txId }); }
+  // the form's live check → { references [...], invoices [...] } (nothing saved)
+  function checkPaymentDuplicates(orgIdArg, payload) {
+    if (!configured) return demoOnly();
+    return aiOrg(orgIdArg).then(function (r) { return r.error ? r : rpc('check_payment_duplicates', { p_org: r.data, p_payload: payload || {} }); });
+  }
+  // hints = { bl_number?, declaration_number?, container_numbers? [], appointment_no?, client_id? } → { candidates, unique_transaction_id }
+  function matchPaymentTransaction(orgIdArg, hints) {
+    if (!configured) return demoOnly();
+    return aiOrg(orgIdArg).then(function (r) { return r.error ? r : rpc('match_payment_transaction', { p_org: r.data, p_hints: hints || {} }); });
+  }
+  // payload = { client_id, kind deposit|deduction|refund, amount, entry_date, transaction_id?, disbursement_id?, branch_id?,
+  //   reference?, notes? } → the entry + { balance }
+  function saveCustodyEntry(payload, o) {
+    o = o || {};
+    if (!payload || typeof payload !== 'object') return Promise.resolve(fail('MRS_REQUIRED', 'custody_entry'));
+    var p = Object.assign({}, payload);
+    delete p.idempotencyKey;
+    return idemRpc('save_custody_entry', o.idemKey, function (k) { return { p_payload: p, p_idem_key: k }; });
+  }
+  // reason ≥ 3 characters → the entry (void) + { balance }; MRS_CUSTODY_NEGATIVE when voiding a deposit would go negative
+  function voidCustodyEntry(entryId, reason) { return rpc('void_custody_entry', { p_id: entryId, p_reason: reason == null ? null : String(reason) }); }
+  // filters = { client_id?, kind?, status? active|void|all, transaction_id?, date_from?, date_to?, q?, limit?, offset? }
+  function listCustodyEntries(orgIdArg, filters) {
+    if (!configured) return demoOnly();
+    return aiOrg(orgIdArg).then(function (r) { return r.error ? r : rpc('list_custody_entries', { p_org: r.data, p_filters: filters || {} }); });
+  }
+  // filters = { q?, nonzero? } → { rows [{client_id, client_name, balance, total_deposits, total_deductions, total_refunds, …}], total_balance }
+  function custodyBalances(orgIdArg, filters) {
+    if (!configured) return demoOnly();
+    return aiOrg(orgIdArg).then(function (r) { return r.error ? r : rpc('custody_balances', { p_org: r.data, p_filters: filters || {} }); });
+  }
+  // the client page → { client_id, client_name, balance, total_deposits, total_deductions, total_refunds, entry_count, last_entry_date }
+  function clientCustodyBalance(clientId) { return rpc('client_custody_balance', { p_client: clientId }); }
+  // the org service / fee catalog (org_service_items, step 1; staff read) for the payment form's service item
+  // f = { orgId?, active? (default true) } → [{ id, code, name_ar, name_en, fin_service, sort, is_active }]
+  function listServiceItems(f) {
+    f = f || {};
+    return inActiveOrg(f.orgId, function (oid) {
+      return online(function (c) {
+        var q = c.from('org_service_items').select('id,code,name_ar,name_en,fin_service,sort,is_active').eq('org_id', oid).order('sort').order('name_ar');
+        if (f.active !== false) q = q.eq('is_active', true);
+        return q.limit(500);
+      });
+    });
+  }
   // o = { orgId?, name (consignee block or name), vatNumber?, crNumber?, limit? } → { source_name, latin_key, candidates
   //   [{client_id, name_ar, name_en, confidence 0..100, method, review, reasons}], best {client_id, confidence, method} | null,
   //   suggested, conflict, confirmed:false, thresholds {suggest:90, review:70} }   (never links: confirm with confirmClientMatch)
@@ -2161,9 +2327,12 @@
   var AI_DOC_TYPES = ['bill_of_lading', 'commercial_invoice', 'customs_declaration', 'supplier_invoice', 'auto'];
   // prompt ai-doc-v3 (20261119000100): + packing_list; o.promptVersion 'ai-doc-v3' opts in (v2 callers unchanged)
   // 20261121000100: + appointment_ticket (needs transactionId) / empty_return_receipt (≤ 8 MB)
+  // 20261122000100: + payment_proof / appointment_invoice (the payment form: ≤ 4 MB each, ≤ 6 documents, one per call)
   var AI_DOC_TYPES_V3 = ['bill_of_lading', 'commercial_invoice', 'packing_list', 'customs_declaration', 'supplier_invoice', 'auto',
-    'appointment_ticket', 'empty_return_receipt'];
+    'appointment_ticket', 'empty_return_receipt', 'payment_proof', 'appointment_invoice'];
   var AI_MAX_EIR_BYTES = 8 * 1024 * 1024;
+  var AI_PAY_TYPES = ['payment_proof', 'appointment_invoice'];
+  var AI_MAX_PAY_BYTES = 4 * 1024 * 1024;
   var AI_PROMPT_V3 = 'ai-doc-v3';
   var AI_MAX_BYTES = 10 * 1024 * 1024;          // PDF
   var AI_MAX_IMAGE_BYTES = 5 * 1024 * 1024;     // image (the API's per-image limit)
@@ -2217,6 +2386,7 @@
     var v3 = o.promptVersion === AI_PROMPT_V3;
     var docType = (v3 ? AI_DOC_TYPES_V3 : AI_DOC_TYPES).indexOf(o.docType) !== -1 ? o.docType : 'auto';
     if (docType === 'empty_return_receipt' && Math.floor(f.data_b64.length / 4) * 3 > AI_MAX_EIR_BYTES) return Promise.resolve(fail('MRS_AI_TOO_LARGE'));
+    if (AI_PAY_TYPES.indexOf(docType) !== -1 && Math.floor(f.data_b64.length / 4) * 3 > AI_MAX_PAY_BYTES) return Promise.resolve(fail('MRS_PAY_DOCUMENT', 'size'));
     if (docType === 'appointment_ticket' && !o.transactionId) return Promise.resolve(fail('MRS_REQUIRED', 'transaction_id'));
     return aiOrg(o.orgId).then(function (r) {
       if (r.error) return r;
@@ -3764,6 +3934,13 @@
     createEmptyReturnProof: createEmptyReturnProof, verifyEmptyReturnProof: verifyEmptyReturnProof, voidEmptyReturnProof: voidEmptyReturnProof,
     saveEmptyReturnDeadline: saveEmptyReturnDeadline, listEmptyReturnProofs: listEmptyReturnProofs,
     saveTransportCarrierOrder: saveTransportCarrierOrder, txReadiness: txReadiness,
+    // legacy step 6 (20261122000100)
+    recordPaymentBundle: recordPaymentBundle, correctPayment: correctPayment, voidPayment: voidPayment, reviewPayment: reviewPayment,
+    addPaymentDocuments: addPaymentDocuments, removePaymentDocument: removePaymentDocument, getPayment: getPayment,
+    listPayments: listPayments, txDisbursements: txDisbursements, checkPaymentDuplicates: checkPaymentDuplicates,
+    matchPaymentTransaction: matchPaymentTransaction, saveCustodyEntry: saveCustodyEntry, voidCustodyEntry: voidCustodyEntry,
+    listCustodyEntries: listCustodyEntries, custodyBalances: custodyBalances, clientCustodyBalance: clientCustodyBalance,
+    listServiceItems: listServiceItems,
     listContainers: listContainers, addContainer: addContainer, updateContainer: updateContainer,
     // documents
     listDocuments: listDocuments, uploadDocument: uploadDocument, documentUrl: documentUrl,

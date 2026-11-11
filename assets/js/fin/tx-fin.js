@@ -82,6 +82,12 @@
         ch_link_trip: 'سعر بيع رحلة {n}{c}: {a}', ch_link_cost: 'تكلفة: {d} — {a}', ch_price_from_link: 'السعر يُحسب من التكلفة المرتبطة عند الحفظ ويُخزَّن، ولا يُعاد حسابه لاحقًا.',
         ch_price_required: 'أدخل سعر الوحدة.', ch_link_required: 'اختر التكلفة المرتبطة أو سعر الرحلة.', ch_markup_required: 'أدخل نسبة الإضافة.',
         ch_suggest_failed: 'تعذّر تحميل الاقتراحات ({e}). يمكنك إدخال سعر يدوي.',
+        // payments (legacy step 6: tx_disbursements — this transaction's share only)
+        pay_title: 'السدادات والمصروفات', pay_hint: 'يظهر هنا نصيب هذه المعاملة فقط من كل سداد؛ السداد المشترك يُعرض بحصة المعاملة لا بإجماليه.',
+        pay_count: 'عدد السدادات', pay_total: 'إجمالي حصة المعاملة', pay_pending: 'بانتظار المراجعة', pay_rejected: 'مرفوضة', pay_last: 'آخر سداد',
+        pay_custody: 'رصيد عهدة العميل', pay_add: 'إضافة سداد', pay_all: 'كل سدادات المعاملة', pay_empty: 'لا توجد سدادات مسجلة لهذه المعاملة.',
+        pay_ref: 'السداد', pay_date: 'التاريخ', pay_service: 'البند', pay_share: 'حصة المعاملة', pay_method: 'الطريقة والتمويل', pay_review: 'المراجعة',
+        pay_beneficiary: 'المستفيد', pay_shared: 'سداد مشترك', pay_docs: 'مرفقات: {n}', pay_by_movement: 'حسب نوع الحركة',
         // collections
         col_title: 'تسجيل تحصيل من العميل', col_amount: 'المبلغ', col_date: 'تاريخ التحصيل', col_method: 'الطريقة', col_ref: 'المرجع',
         col_file: 'ملف الإثبات (اختياري)', col_need: 'أدخل مرجعًا أو أرفق ملف الإثبات.', col_saved: 'سُجّل التحصيل (إثبات فقط، ليس سند قبض).',
@@ -170,6 +176,11 @@
         ch_link_trip: 'Trip leg {n} sell price{c}: {a}', ch_link_cost: 'Cost: {d} — {a}', ch_price_from_link: 'The price is computed from the linked cost when saved and stored; it is never recomputed later.',
         ch_price_required: 'Enter the unit price.', ch_link_required: 'Choose the linked cost or trip price.', ch_markup_required: 'Enter the markup %.',
         ch_suggest_failed: 'Suggestions could not be loaded ({e}). You can still enter a manual price.',
+        pay_title: 'Payments & disbursements', pay_hint: 'Only this transaction\'s share of each payment is shown; a shared payment shows the transaction\'s share, not its total.',
+        pay_count: 'Payments', pay_total: 'Total share of this transaction', pay_pending: 'Awaiting review', pay_rejected: 'Rejected', pay_last: 'Last payment',
+        pay_custody: 'Client custody balance', pay_add: 'Add payment', pay_all: 'All payments of this transaction', pay_empty: 'No payments recorded for this transaction.',
+        pay_ref: 'Payment', pay_date: 'Date', pay_service: 'Item', pay_share: 'Transaction share', pay_method: 'Method & funding', pay_review: 'Review',
+        pay_beneficiary: 'Beneficiary', pay_shared: 'Shared payment', pay_docs: 'Attachments: {n}', pay_by_movement: 'By movement type',
         col_title: 'Record client collection', col_amount: 'Amount', col_date: 'Collection date', col_method: 'Method', col_ref: 'Reference',
         col_file: 'Evidence file (optional)', col_need: 'Enter a reference or attach the evidence file.', col_saved: 'Collection recorded (evidence only, not a receipt).',
         col_void: 'Void collection', col_voided: 'Collection voided.', col_list: 'Collections', col_void_title: 'Void collection {a}',
@@ -914,7 +925,59 @@
     }, 'fin-tx-margin');
   }
 
+  /* ==================================================================
+     78 — payments & disbursements (legacy step 6, tx_disbursements): the transaction's SHARE of each payment only
+     ================================================================== */
+  function payLabel(api, domain, code) {
+    if (code == null || code === '') return api.t('fintx.none');
+    var k = 'pay.' + domain + '_' + code, s = api.t(k);
+    return s && s !== k ? s : String(code);
+  }
+  function payDay(v) {
+    var P = OPS.finPay && OPS.finPay.pure;
+    return P ? P.fmtDay(v) : String(v || '').slice(0, 10);
+  }
+  var PAY_TONE = { draft: 'neutral', pending: 'warning', approved: 'success', rejected: 'danger' };
+  function renderPayments(root, tx, api) {
+    if (!api.can('finRead', tx.branch_id)) return null;
+    var k = kit(api), el = k.el;
+    var acts = [el('a', { class: 'btn btn-sm btn-ghost', href: '#payments?tx=' + tx.id, 'data-act': 'pay-all' }, k.t('pay_all'))];
+    if (api.can('finWrite', tx.branch_id)) acts.unshift(el('a', { class: 'btn btn-sm btn-primary', href: '#payments/new?tx=' + tx.id, 'data-act': 'pay-add' }, k.t('pay_add')));
+    return section(root, k, k.t('pay_title'), acts, function () {
+      return M(api, 'txDisbursements')(tx.id).then(function (r) {
+        if (r.error) return loadErr(k, api, r.error);
+        var d = r.data || {}, items = k.rows(d);
+        var bm = d.by_movement && typeof d.by_movement === 'object' ? d.by_movement : {};
+        var stats = el('dl', { class: 'fin-pay-stats' }, [
+          el('div', null, [el('dt', { text: k.t('pay_count') }), el('dd', { text: String(d.count || 0) })]),
+          el('div', null, [el('dt', { text: k.t('pay_total') }), el('dd', null, el('bdi', { dir: 'ltr', class: 'num fin-money', text: k.money(d.total_share || 0, 'SAR') }))]),
+          el('div', { class: +d.pending_review ? 'is-warn' : null }, [el('dt', { text: k.t('pay_pending') }), el('dd', { text: String(d.pending_review || 0) })]),
+          +d.rejected ? el('div', { class: 'is-danger' }, [el('dt', { text: k.t('pay_rejected') }), el('dd', { text: String(d.rejected) })]) : null,
+          el('div', null, [el('dt', { text: k.t('pay_last') }), el('dd', { text: d.last_paid_at ? payDay(d.last_paid_at) : k.t('none') })]),
+          d.custody_balance != null ? el('div', null, [el('dt', { text: k.t('pay_custody') }), el('dd', null, el('bdi', { dir: 'ltr', class: 'num fin-money', text: k.money(d.custody_balance, 'SAR') }))]) : null
+        ]);
+        var mv = Object.keys(bm).length ? el('p', { class: 'text-sm text-muted fin-pay-mv', text: k.t('pay_by_movement') + ': ' + Object.keys(bm).map(function (m) { return payLabel(api, 'mt', m) + ' ' + k.money(bm[m], 'SAR'); }).join(' · ') }) : null;
+        var table = k.table([k.t('pay_ref'), k.t('pay_date'), k.t('pay_service'), k.t('pay_beneficiary'), { label: k.t('pay_share'), num: true }, k.t('pay_method'), k.t('pay_review')],
+          items.map(function (p) {
+            return el('tr', { 'data-pay': p.id }, [
+              el('td', null, [el('a', { class: 'ops-ref', href: '#payments/' + p.id }, el('bdi', { dir: 'ltr', text: p.ref || String(p.id).slice(0, 8) })),
+                p.pattern === 'shared' ? k.sub(k.t('pay_shared')) : null, +p.document_count ? k.sub(k.t('pay_docs', { n: p.document_count })) : null]),
+              el('td', { text: payDay(p.paid_at) }),
+              el('td', null, [el('span', { text: p.service_name_ar || p.service_code || k.t('none') }), p.claim_no ? el('span', { class: 'adm-sub' }, el('bdi', { dir: 'ltr', text: p.claim_no })) : null,
+                p.appointment_no ? el('span', { class: 'adm-sub' }, el('bdi', { dir: 'ltr', text: p.appointment_no })) : null]),
+              el('td', null, [el('span', { text: p.beneficiary_name || k.t('none') }), k.sub(payLabel(api, 'mt', p.movement_type))]),
+              k.moneyCell(p.share, 'SAR'),
+              el('td', null, [el('span', { text: payLabel(api, 'method', p.method) }), k.sub(payLabel(api, 'source', p.funding_source))]),
+              el('td', null, k.pill(PAY_TONE[p.review_status] || 'info', payLabel(api, 'review', p.review_status)))
+            ]);
+          }), k.t('pay_empty'));
+        return [el('p', { class: 'form-hint', text: k.t('pay_hint') }), stats, mv, table];
+      });
+    }, 'fin-tx-payments');
+  }
+
   var MINE = [
+    { id: 'fin-payments', order: 78, render: renderPayments },
     { id: 'fin-costs', order: 80, render: renderCosts },
     { id: 'fin-margin', order: 85, render: renderMargin }
   ];

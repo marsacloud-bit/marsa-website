@@ -23,7 +23,10 @@
   the same file (OCR / v2) in the scope a save would collide with (document_extractions_dedupe_uidx: same transaction,
   or unlinked) → returned as itself (its own engine, reused: true), since a new reading could not be saved there] →
   [v3 only: ai_bind_source — the SHA-256 of the bytes sent to Claude bound to the reservation; a v3 reading can only be
-  saved under it] → Claude → ai_settle (always, once). Operational readings (20261121000100: doc_type appointment_ticket /
+  saved under it] → Claude → ai_settle (always, once). Payment documents (20261122000100: doc_type appointment_invoice /
+  payment_proof, v3, ≤ 4 MB): never answered from a stored reading (they are not saved as readings); the body carries
+  payment {…}; a proof read as an invoice or the reverse → 422 wrong_document_type (reason not_entity_invoice /
+  not_payment_proof) after settling. Operational readings (20261121000100: doc_type appointment_ticket /
   empty_return_receipt, v3): a reading the server rejects (an appointment INVOICE, another document, a card without the
   ticket structure, an EIR that is not an empty return) is settled as usual (Claude ran) and answered 422
   {error: 'wrong_document_type', reason, detected_type}; a reused stored reading must be of the same document kind. Settle status: ok / refused / error with the reported tokens per attempt, or
@@ -206,7 +209,8 @@
     let sha = null;
     if (v3) {
       try { sha = await sha256Hex(v.data_b64); } catch (e) { return fail('bad_request', 400, origin); }
-      const prior = await findReading(userDb, v, sha, X);
+      // 20261122000100: a payment document reading is never stored, so never answered from a stored reading
+      const prior = X.isPay && X.isPay(v.doc_type) ? null : await findReading(userDb, v, sha, X);
       if (prior) {
         v.data_b64 = '';
         log('ai-extract: reading reused (no charge)');
@@ -306,6 +310,7 @@
       body.declaration = out.declaration || null;     // v3 customs declaration (20261120000100), else null
       body.appointment = out.appointment || null;     // v3 appointment card (20261121000100), else null
       body.empty_return = out.empty_return || null;   // v3 EIR (20261121000100), else null
+      body.payment = out.payment || null;             // v3 payment document (20261122000100), else null
       body.reused = false; body.extraction_id = null;
     }
     return json(body, 200, origin);

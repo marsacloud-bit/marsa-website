@@ -674,7 +674,12 @@ const NOT_EXERCISED = ['accept_invitation', 'ack_alert', 'import_commit', 'porta
   // legacy appt (20261121000100): they take an appointment draft / proof id (the builder sends a transaction id; the minimal payload
   // has no key the RPC needs); isolation of the drafts, cards and proofs (org, branch, client, anon) is asserted by legacy-appt-sql-tests.js
   'approve_appointment_draft[min]', 'cancel_appointment_draft', 'get_appointment_draft', 'move_appointment_draft',
-  'verify_empty_return_proof[min]', 'void_empty_return_proof'];
+  'verify_empty_return_proof[min]', 'void_empty_return_proof',
+  // legacy pay (20261122000100): they take a payment / attachment link / custody entry id (the builder sends another id; the minimal
+  // payload has no key the RPC needs); isolation of the register, allocations, attachments and custody (org, branch, finance roles,
+  // client, anon) is asserted by legacy-pay-sql-tests.js and rls-tests.js
+  'add_payment_documents', 'add_payment_documents[min]', 'correct_payment', 'correct_payment[min]', 'get_payment', 'remove_payment_document',
+  'review_payment', 'void_custody_entry', 'void_payment'];
 async function positiveControl() {
   section('8. positive control: the §1 argument builder with B\'s own staff');
   const fns = (await listRpcs()).filter(f => !PUBLIC_BY_DESIGN[f.proname] && !/^platform_/.test(f.proname));
