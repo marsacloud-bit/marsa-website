@@ -161,3 +161,13 @@ button.ops-kpi { font: inherit; color: inherit; width: 100%; cursor: pointer; }
   .lx-cancel { flex-direction: column; align-items: stretch; }
   .lx-cancel .btn { width: 100%; }
 }
+
+/* legacy step 3: approved shipment data on #tx/<id> (ops/tx-docs.js) */
+.docb-tx-h { font-size: var(--fs-sm); margin: 14px 0 6px; color: var(--navy-dark); }
+.docb-tx-dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 16px; margin: 0; font-size: var(--fs-sm); }
+.docb-tx-dl > div { min-width: 0; }
+.docb-tx-dl dt { font-size: var(--fs-xs); color: var(--muted); font-weight: 700; }
+.docb-tx-dl dd { margin: 0; overflow-wrap: anywhere; }
+.docb-tx-batches { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: var(--fs-sm); }
+.docb-tx-batches .adm-sub { display: inline; }
+@media (max-width: 640px) { .docb-tx-dl { grid-template-columns: 1fr; } }

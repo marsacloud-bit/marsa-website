@@ -207,7 +207,7 @@ async function secFile() {
       && !/sk-ant|api\.anthropic\.com/i.test(src)) || 'body';
   });
   // later phases may follow this file (20261117000100 legacy_core: re-creates convert_delete_tables with party_ports)
-  const LATER_PHASES = ['20261117000100_legacy_core.sql', '20261118000100_legacy_tx.sql'];
+  const LATER_PHASES = ['20261117000100_legacy_core.sql', '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql'];
   await check('this file is present; only the listed later phases follow it', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');

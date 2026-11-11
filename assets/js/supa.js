@@ -88,6 +88,12 @@
       // legacy step 2 (20261118000100): duplicate transaction / appointment guards
       MRS_DUPLICATE_TX: 'توجد معاملة مسجلة مسبقًا بنفس رقم البوليصة ونفس الوحدة (حاوية أو شاسيه). افتح المعاملة الموجودة بدلًا من تكرارها.',
       MRS_DUPLICATE_APPOINTMENT: 'يوجد موعد مطابق مسجل مسبقًا لنفس الحاوية ورقم الموعد وتاريخ/وقت الموعد.',
+      // legacy step 3 (20261119000100): shipment document batches
+      MRS_DOC_WRONG_SLOT: 'المستند مرفوع في الخانة الخطأ: محتواه لا يطابق نوع الخانة ({f}). اختر الخانة الصحيحة ثم أعد القراءة.',
+      MRS_DOC_IN_OTHER_BATCH: 'هذا المستند المقروء مضاف إلى حزمة مستندات أخرى مفتوحة أو معتمدة. افتح تلك الحزمة أو أزله منها أولًا.',
+      MRS_DOC_BATCH_STATE: 'حالة حزمة المستندات لا تسمح بهذا الإجراء ({f}). المعتمدة لا تُعدَّل ولا تُحذف، والمتجاهلة أو المؤرشفة لا تُعتمد.',
+      MRS_DOC_BATCH_STALE: 'عدّل شخص آخر هذه المسودة بعد فتحك لها. أعد تحميلها ثم راجع التغييرات قبل الحفظ أو الاعتماد.',
+      MRS_CLIENT_ALIAS_CONFLICT: 'هذا الاسم معتمد مسبقًا كاسم بديل لعميل آخر. اختر ذلك العميل، أو راجع الأسماء البديلة في دليل العملاء.',
       // G4 (docs/online/G4_SPEC.md)
       MRS_OVER_ALLOCATED: 'مجموع التوزيع يتجاوز صافي البند؛ التوزيع لا يضاعف الفاتورة (المتبقي القابل للتوزيع: {f}).',
       MRS_OVERPAID: 'المبلغ يتجاوز المتبقي من الإجمالي (المتبقي: {f}).',
@@ -326,7 +332,17 @@
       'MRS_BAD_TRANSITION:cancelled': 'هذا السجل ملغى ولا يقبل التعديل.',
       'MRS_BAD_TRANSITION:delivered': 'تم النقل لهذه الحركة؛ لا تُعدَّل بياناتها التشغيلية ولا تُلغى.',
       'MRS_FORBIDDEN:cost': 'قيمة النقل وعائد المؤسسة متاحان لصلاحيات المالية ومدير العمليات فقط.',
-      'MRS_BAD_TRANSITION:same_status': 'المعاملة في هذه المرحلة بالفعل (ربما تقدّمت تلقائيًا). حدّث الصفحة.'
+      'MRS_BAD_TRANSITION:same_status': 'المعاملة في هذه المرحلة بالفعل (ربما تقدّمت تلقائيًا). حدّث الصفحة.',
+      // legacy step 3 (20261119000100)
+      'MRS_NOT_FOUND:doc_batch': 'حزمة المستندات غير موجودة أو لا تملك صلاحية عرضها (المسودات مفصولة حسب الفرع).',
+      'MRS_NOT_FOUND:extraction': 'المستند المقروء غير موجود أو لا تملك صلاحية عرضه.',
+      'MRS_INVALID:slot_full': 'الخانة ممتلئة: بوليصة واحدة وبيان جمركي واحد، وحتى 10 فواتير و10 بيانات تعبئة.',
+      'MRS_INVALID:duplicate_file': 'الملف نفسه مضاف إلى هذه الحزمة من قبل.',
+      'MRS_INVALID:containers_roro': 'معاملة Ro-Ro لا تقبل حاويات. احذف الحاويات من المسودة أو اختر معاملة حاويات.',
+      'MRS_REQUIRED:documents': 'أضف مستندًا مقروءًا واحدًا على الأقل إلى الحزمة قبل الاعتماد.',
+      'MRS_REQUIRED:draft': 'احفظ المسودة بعد مراجعتها قبل الاعتماد.',
+      'MRS_REQUIRED:client_id': 'اختر العميل (المستورد) قبل إنشاء معاملة جديدة من المسودة.',
+      'MRS_REQUIRED:branch_id': 'اختر الفرع الذي تتبع له حزمة المستندات.'
     },
     banner: {
       staging: 'بيئة تجريبية (Staging) — البيانات للاختبار فقط'
@@ -1545,6 +1561,112 @@
     o = o || {};
     return inActiveOrg(o.orgId, function (oid) { return rpc('port_operators', { p_org: oid, p_port: portCode || null }); });
   }
+  /* legacy step 3 (20261119000100, docs/online/LEGACY_DOCS_AR.md): shipment document batches. Every AI / OCR value stays a
+     DRAFT until a staff member approves the batch (approveDocBatch); nothing is approved automatically. */
+  // o = { orgId?, transactionId?, branchId?, note?, idempotencyKey? } → batch (full: + draft, comparison, client_match, documents)
+  function createDocBatch(o) {
+    o = o || {};
+    var p = {};
+    if (o.transactionId) p.transaction_id = o.transactionId;
+    if (o.branchId) p.branch_id = o.branchId;
+    if (o.note) p.note = String(o.note);
+    return inActiveOrg(o.orgId, function (oid) {
+      return idemRpc('create_doc_batch', o.idempotencyKey, function (k) { return { p_org: oid, p_payload: withKey(p, k) }; });
+    });
+  }
+  // slot: bill_of_lading | commercial_invoice | packing_list | customs_declaration → { document {id, slot, seq, extraction_id,
+  //   detected_type, created_at}, already_attached, batch (summary) }   (wrong slot: MRS_DOC_WRONG_SLOT '<slot>:<detected>')
+  function attachDocBatchDocument(batchId, extractionId, slot) {
+    if (!isUuid(batchId)) return Promise.resolve(fail('MRS_REQUIRED', 'doc_batch'));
+    if (!isUuid(extractionId)) return Promise.resolve(fail('MRS_REQUIRED', 'extraction_id'));
+    return rpc('attach_doc_batch_document', { p_batch: batchId, p_payload: { extraction_id: extractionId, slot: slot } });
+  }
+  // → { id, detached_at, batch (summary) }
+  function detachDocBatchDocument(documentId, reason) {
+    return rpc('detach_doc_batch_document', { p_document: documentId, p_reason: reason == null ? null : String(reason) });
+  }
+  // read-only server merge of the attached readings → { draft, merge_conflicts [{section, field, values [{slot, seq, value}]}],
+  //   comparison {engine, matches, conflicts, missing_fields}, version }
+  function mergeDocBatch(batchId) { return rpc('merge_doc_batch', { p_batch: batchId }); }
+  // o = { version (required: the batch.version read), draft?, clientMatch?, clientId?, note? } → batch (full; version + 1)
+  function saveDocBatchDraft(batchId, o) {
+    o = o || {};
+    if (typeof o.version !== 'number') return Promise.resolve(fail('MRS_REQUIRED', 'version'));
+    var p = { version: o.version };
+    if (o.draft !== undefined) p.draft = o.draft;
+    if (o.clientMatch !== undefined) p.client_match = o.clientMatch;
+    if (o.clientId !== undefined) p.client_id = o.clientId || null;
+    if (o.note !== undefined) p.note = o.note == null ? null : String(o.note);
+    return rpc('save_doc_batch_draft', { p_batch: batchId, p_payload: p });
+  }
+  function getDocBatch(batchId) { return rpc('get_doc_batch', { p_batch: batchId }); }
+  // o = { orgId?, status?: 'draft' (default) | 'approved' | 'discarded' | 'archived' | 'open', transactionId?, limit? (≤ 200) }
+  // → [batch summary]
+  function listPendingDocBatches(o) {
+    o = o || {};
+    var f = {};
+    if (o.status) f.status = o.status;
+    if (o.transactionId) f.transaction_id = o.transactionId;
+    if (o.limit != null) f.limit = o.limit;
+    return inActiveOrg(o.orgId, function (oid) { return rpc('list_pending_doc_batches', { p_org: oid, p_filter: f }); });
+  }
+  function discardDocBatch(batchId, reason) { return rpc('discard_doc_batch', { p_batch: batchId, p_reason: reason == null ? null : String(reason) }); }
+  function archiveDocBatch(batchId, reason) { return rpc('archive_doc_batch', { p_batch: batchId, p_reason: reason == null ? null : String(reason) }); }
+  // o = { version (required), transactionId? | newTransaction? {clientId, operation?, mode?}, shippingAgentId?, confirmClient?,
+  //       idemKey? } → { batch_id, status:'approved', transaction_id, ref, created_transaction, client_id, bl {id, bl_number,
+  //       created, existing, is_primary} | null, containers {added, updated, unchanged}, invoice_items, packing_items,
+  //       extractions_linked, tx_filled, tx_kept, port_code, client_alias {alias_id, status, occurrences, created} | null,
+  //       conflicts, missing_fields }
+  function approveDocBatch(batchId, o) {
+    o = o || {};
+    if (typeof o.version !== 'number') return Promise.resolve(fail('MRS_REQUIRED', 'version'));
+    var p = { version: o.version };
+    if (o.transactionId) p.transaction_id = o.transactionId;
+    if (o.newTransaction) {
+      p.new_transaction = {};
+      if (o.newTransaction.clientId) p.new_transaction.client_id = o.newTransaction.clientId;
+      if (o.newTransaction.operation) p.new_transaction.operation = o.newTransaction.operation;
+      if (o.newTransaction.mode) p.new_transaction.mode = o.newTransaction.mode;
+    }
+    if (o.shippingAgentId) p.shipping_agent_id = o.shippingAgentId;
+    if (o.confirmClient) p.confirm_client = true;
+    return idemRpc('approve_doc_batch', o.idemKey, function (k) { return { p_batch: batchId, p_payload: withKey(p, k) }; });
+  }
+  // → { transaction_id, shipment_data | null, invoice_items [..], packing_items [..], batches [batch summary] }
+  function getTransactionShipment(txId) { return rpc('get_transaction_shipment', { p_tx: txId }); }
+  // o = { orgId?, name (consignee block or name), vatNumber?, crNumber?, limit? } → { source_name, latin_key, candidates
+  //   [{client_id, name_ar, name_en, confidence 0..100, method, review, reasons}], best {client_id, confidence, method} | null,
+  //   suggested, conflict, confirmed:false, thresholds {suggest:90, review:70} }   (never links: confirm with confirmClientMatch)
+  function matchClientV2(o) {
+    o = o || {};
+    var p = {};
+    if (o.name) p.name = String(o.name);
+    if (o.vatNumber) p.vat_number = String(o.vatNumber);
+    if (o.crNumber) p.cr_number = String(o.crNumber);
+    if (o.limit != null) p.limit = o.limit;
+    return inActiveOrg(o.orgId, function (oid) { return rpc('match_client_v2', { p_org: oid, p_payload: p }); });
+  }
+  // o = { orgId?, clientId, sourceName, source?: 'bl' | 'invoice', sourceRef?, confidence? } → { client_id, alias_id, status,
+  //   occurrences, created, match_count }
+  function confirmClientMatch(o) {
+    o = o || {};
+    var p = { client_id: o.clientId, source_name: o.sourceName == null ? null : String(o.sourceName) };
+    if (o.source) p.source = o.source;
+    if (o.sourceRef) p.source_ref = String(o.sourceRef);
+    if (o.confidence != null) p.confidence = o.confidence;
+    return inActiveOrg(o.orgId, function (oid) { return rpc('confirm_client_match', { p_org: oid, p_payload: p }); });
+  }
+  function rejectClientAlias(aliasId, reason) { return rpc('reject_client_alias', { p_alias: aliasId, p_reason: reason == null ? null : String(reason) }); }
+  // org admin: the 15 legacy shipping agents (idempotent, never a duplicate) → { added, updated, skipped }
+  function seedShippingAgents(o) {
+    o = o || {};
+    return inActiveOrg(o.orgId, function (oid) { return rpc('seed_shipping_agents', { p_org: oid }); });
+  }
+  // → [{ party_id, name_ar, name_en, match: 'name' | 'alias' | 'contains' }]
+  function matchShippingAgent(name, o) {
+    o = o || {};
+    return inActiveOrg(o.orgId, function (oid) { return rpc('match_shipping_agent', { p_org: oid, p_name: name == null ? null : String(name) }); });
+  }
   // the 7 approved ports (platform table, read-only) → [{code, unlocode, kind, name_ar, name_en, daftra_value, sort, is_active}]
   function listCustomsPorts() {
     return online(function (c) {
@@ -1750,7 +1872,8 @@
   var EXT_COLS = EXT_LIST_COLS + ',raw_text,line_items';
   var EXT_INSERT = ['org_id', 'transaction_id', 'document_id', 'doc_type', 'source_name', 'source_sha256', 'source_mime', 'source_size',
     'source_pages', 'engine', 'languages', 'mean_confidence', 'raw_text', 'extracted_fields', 'qr_payload', 'line_items',
-    'ai_usage_id'];   // AI reading (20261114000100): sent only when set (pickKeys skips undefined)
+    'ai_usage_id',    // AI reading (20261114000100): sent only when set (pickKeys skips undefined)
+    'ai_detail'];     // ai-doc-v3 reading (20261119000100): the response's ai_detail, sent only when set
   var EXT_REVIEW = ['reviewed_fields', 'line_items', 'review_status', 'review_note', 'doc_type', 'transaction_id', 'document_id'];
   var EXT_LOCAL_KEY = 'marsa_extractions';
   var EXT_LOCAL_MAX = 50;
@@ -1869,6 +1992,9 @@
   };
   var AI_MEDIA = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'];
   var AI_DOC_TYPES = ['bill_of_lading', 'commercial_invoice', 'customs_declaration', 'supplier_invoice', 'auto'];
+  // prompt ai-doc-v3 (20261119000100): + packing_list; o.promptVersion 'ai-doc-v3' opts in (v2 callers unchanged)
+  var AI_DOC_TYPES_V3 = ['bill_of_lading', 'commercial_invoice', 'packing_list', 'customs_declaration', 'supplier_invoice', 'auto'];
+  var AI_PROMPT_V3 = 'ai-doc-v3';
   var AI_MAX_BYTES = 10 * 1024 * 1024;          // PDF
   var AI_MAX_IMAGE_BYTES = 5 * 1024 * 1024;     // image (the API's per-image limit)
   function aiOrg(orgIdArg) { return orgIdArg ? Promise.resolve(ok(orgIdArg)) : orgId(); }
@@ -1898,10 +2024,13 @@
       return fail('MRS_AI_FAILED');
     });
   }
-  // o = { orgId?, docType: bill_of_lading|commercial_invoice|customs_declaration|supplier_invoice|auto,
-  //       file: { media_type, data_b64 }, transactionId?, lang? }
-  // → { usage_id, engine, model, doc_type, kind, fields [{name, value, confidence 0..1, page, valid}], extracted_fields,
-  //     line_items, warnings [{source, code, text, field}], mean_confidence (0..100), raw_text, usage }
+  // o = { orgId?, docType: bill_of_lading|commercial_invoice|customs_declaration|supplier_invoice|auto (+ packing_list with v3),
+  //       file: { media_type, data_b64 }, transactionId?, lang?, promptVersion?: 'ai-doc-v3' }
+  // → { usage_id, engine, model, prompt_version, doc_type, detected_type, kind, fields [{name, value, confidence 0..1, page, valid}],
+  //     extracted_fields, line_items, warnings [{source, code, text, field}], mean_confidence (0..100), raw_text, usage }
+  //   v3 adds: containers [{container_number, seal_number, size_type, packages_count, net_weight, gross_weight}], ai_detail
+  //   (save it with the reading), source_sha256, reused, extraction_id. reused:true = the same file was already read and
+  //   saved (no AI call, no charge): use extraction_id, do NOT save the reading again.
   function aiExtract(o) {
     o = o || {};
     if (!configured) return demoOnly();
@@ -1909,11 +2038,13 @@
     if (AI_MEDIA.indexOf(f.media_type) === -1) return Promise.resolve(fail('MRS_AI_UNSUPPORTED'));
     if (typeof f.data_b64 !== 'string' || !f.data_b64) return Promise.resolve(fail('MRS_REQUIRED', 'file'));
     if (Math.floor(f.data_b64.length / 4) * 3 > (f.media_type === 'application/pdf' ? AI_MAX_BYTES : AI_MAX_IMAGE_BYTES)) return Promise.resolve(fail('MRS_AI_TOO_LARGE'));
-    var docType = AI_DOC_TYPES.indexOf(o.docType) !== -1 ? o.docType : 'auto';
+    var v3 = o.promptVersion === AI_PROMPT_V3;
+    var docType = (v3 ? AI_DOC_TYPES_V3 : AI_DOC_TYPES).indexOf(o.docType) !== -1 ? o.docType : 'auto';
     return aiOrg(o.orgId).then(function (r) {
       if (r.error) return r;
       var body = { org_id: r.data, doc_type: docType, file: { media_type: f.media_type, data_b64: f.data_b64 },
         lang: o.lang === 'en' ? 'en' : 'ar' };
+      if (v3) body.prompt_version = AI_PROMPT_V3;
       if (o.transactionId) body.transaction_id = o.transactionId;
       return ready().then(function (c) {
         return c.functions.invoke('ai-extract', { body: body }).then(function (res) {
@@ -3439,6 +3570,13 @@
     cancelTransaction: cancelTransaction, checkTxDuplicates: checkTxDuplicates, txLifecycle: txLifecycle, saveMovement: saveMovement,
     listMovements: listMovements, driverDirectory: driverDirectory, portOperators: portOperators, listCustomsPorts: listCustomsPorts,
     listPartyPorts: listPartyPorts, addPartyPort: addPartyPort, setPartyPortActive: setPartyPortActive,
+    // legacy step 3 (20261119000100)
+    createDocBatch: createDocBatch, attachDocBatchDocument: attachDocBatchDocument, detachDocBatchDocument: detachDocBatchDocument,
+    mergeDocBatch: mergeDocBatch, saveDocBatchDraft: saveDocBatchDraft, getDocBatch: getDocBatch,
+    listPendingDocBatches: listPendingDocBatches, discardDocBatch: discardDocBatch, archiveDocBatch: archiveDocBatch,
+    approveDocBatch: approveDocBatch, getTransactionShipment: getTransactionShipment, matchClientV2: matchClientV2,
+    confirmClientMatch: confirmClientMatch, rejectClientAlias: rejectClientAlias, seedShippingAgents: seedShippingAgents,
+    matchShippingAgent: matchShippingAgent,
     listContainers: listContainers, addContainer: addContainer, updateContainer: updateContainer,
     // documents
     listDocuments: listDocuments, uploadDocument: uploadDocument, documentUrl: documentUrl,

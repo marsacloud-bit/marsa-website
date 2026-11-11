@@ -588,6 +588,27 @@
       </div>
     </section>
 
+    <!-- ===== Shipment document batch + pending drafts (legacy step 3): built by doc-batch.js, shown only online to signed-in staff ===== -->
+    <section class="section section-sm docb-section" id="docb-section" aria-labelledby="docb-title" hidden>
+      <div class="container">
+        <div class="card shadow-lg ocr-card docb-card">
+          <div class="ocr-block-head">
+            <span class="icon-box icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18v13H3z"/><path d="M8 7V4h8v3M3 12h18"/></svg></span>
+            <div>
+              <h2 id="docb-title" tabindex="-1" data-i18n="docb.h_title">حزمة مستندات الشحنة</h2>
+              <p data-i18n="docb.h_lead">ارفع مستندات الشحنة الواحدة في خاناتها: البوليصة، والفواتير، وبيانات التعبئة، والبيان الجمركي إن وُجد. يقرؤها Claude بالتوازي، ثم تُدمج في مسودة واحدة تراجعها وتصححها، وتختار العميل والمعاملة، ثم تعتمدها بنفسك.</p>
+            </div>
+          </div>
+          <p class="sr-only" id="docb-live" role="status" aria-live="polite" aria-atomic="true"></p>
+          <div class="docb-root" id="docb-root"></div>
+          <div class="ocr-block docb-pending-block">
+            <h3 class="ocr-save-title" id="docb-pending-title" data-i18n="docb.pending_title">المسودات بانتظار المراجعة</h3>
+            <div class="docb-pending" id="docb-pending" role="region" aria-labelledby="docb-pending-title"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="section section-sm" aria-labelledby="tips-title">
       <div class="container">
         <div class="section-head text-center">
@@ -684,6 +705,7 @@
   <script src="assets/js/config.js" defer></script>
   <script src="assets/js/i18n.js" defer></script>
   <script src="assets/i18n/ocr.js" defer></script>
+  <script src="assets/i18n/docb.js" defer></script>
   <script src="assets/i18n/app.js" defer></script>
   <script src="assets/js/main.js" defer></script>
   <script src="assets/js/supa.js" defer></script>
@@ -694,5 +716,6 @@
   <script src="assets/js/ocr.js" defer></script>
   <script src="assets/js/doc-match.js" defer></script>
   <script src="assets/js/ocr-match.js" defer></script>
+  <script src="assets/js/doc-batch.js" defer></script>
 </body>
 </html>

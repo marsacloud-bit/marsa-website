@@ -197,7 +197,7 @@ async function secFile() {
     (!/sk-ant|ANTHROPIC_API_KEY\s*=|api\.anthropic\.com|x-api-key/i.test(src)) || 'secret-like text found');
   // later phases may follow this file (20261115000100 convert_in_place, 20261116000100 doc_match); none may sort before it unnoticed
   const LATER_PHASES = ['20261115000100_convert_in_place.sql', '20261116000100_doc_match.sql', '20261117000100_legacy_core.sql',
-    '20261118000100_legacy_tx.sql'];
+    '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql'];
   await check('this file is present; only the listed later phases follow it', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -300,12 +300,12 @@ async function secGrants() {
                          FROM pg_class c WHERE c.oid = ANY (ARRAY['app.ai_prices'::regclass, 'app.ai_settings'::regclass, 'app.ai_usage'::regclass])`);
     return (r.length === 3 && r.every(x => x.rls && !x.a && !x.u && !x.s)) || J(r);
   });
-  await check('app.ai_* helpers: no API role, except ai_model / ai_usage_claimable for authenticated (the extraction trigger)', async () => {
+  await check('app.ai_* helpers: no API role, except ai_model / ai_usage_claimable (+ ai_usage_source_ok of 20261119000100) for authenticated (the extraction trigger)', async () => {
     const r = await q(`SELECT p.proname, has_function_privilege('anon', p.oid, 'EXECUTE') a, has_function_privilege('authenticated', p.oid, 'EXECUTE') u,
                               has_function_privilege('service_role', p.oid, 'EXECUTE') s
                          FROM pg_proc p WHERE p.pronamespace = 'app'::regnamespace AND (p.proname LIKE 'ai\\_%' OR p.proname = 'tg_ai_usage_guard')`);
-    const bad = r.filter(x => x.a || x.s || (x.u && !['ai_model', 'ai_usage_claimable'].includes(x.proname)));
-    return (r.length === 9 && bad.length === 0) || J(r);
+    const bad = r.filter(x => x.a || x.s || (x.u && !['ai_model', 'ai_usage_claimable', 'ai_usage_source_ok'].includes(x.proname)));
+    return (r.length === 10 && bad.length === 0) || J(r);
   });
   await check('ai_access / ai_get_settings / ai_save_settings: authenticated only (not anon, not service_role), SECURITY DEFINER', async () => {
     const r = await q(`SELECT p.proname, p.prosecdef d, has_function_privilege('anon', p.oid, 'EXECUTE') a,
@@ -545,9 +545,10 @@ async function secReserve() {
     return (a === 'MRS_APPEND_ONLY ai_usage' && b === 'MRS_IMMUTABLE user_id' && c === 'MRS_IMMUTABLE reserved_usd'
       && d === 'MRS_APPEND_ONLY ai_usage' && e === 'MRS_APPEND_ONLY ai_usage') || J({ a, b, c, d, e });
   });
-  await check('the ledger holds counts and money only (no text column beyond model / purpose / status)', async () => {
+  await check('the ledger holds counts and money only (no text column beyond model / purpose / status; 20261119000100 adds source_sha256, a 64-hex file hash, no content)', async () => {
     const r = await q(`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'app' AND table_name = 'ai_usage' AND data_type = 'text' ORDER BY 1`);
-    return J(r.map(x => x.column_name)) === J(['model', 'purpose', 'status']) || J(r);
+    const k = await one(`SELECT pg_get_constraintdef(oid) d FROM pg_constraint WHERE conname = 'ai_usage_source_sha256_chk'`);
+    return (J(r.map(x => x.column_name)) === J(['model', 'purpose', 'source_sha256', 'status']) && /\^\[0-9a-f\]\{64\}\$/.test(k.d)) || J({ r, k });
   });
 }
 
@@ -1030,7 +1031,7 @@ function hDeps(o) {
       rpc: (name, args) => { calls.push('user:' + name); return sqlRpc('staff', name, args); },
       from: () => { const q2 = { select: () => q2, eq: () => q2, maybeSingle: async () => ({ data: x.tx ? { id: 'tx' } : null, error: null }) }; return q2; }
     }),
-    serviceClient: () => ({ rpc: (name, args) => { calls.push(name); d.last = d.last || {}; d.last[name] = args; return x.settleFails && name === 'ai_settle' ? Promise.resolve({ data: null, error: { message: 'down' } }) : sqlRpc('service', name, args); } }),
+    serviceClient: () => ({ rpc: (name, args) => { calls.push(name); d.last = d.last || {}; d.last[name] = args; return (x.settleFails && name === 'ai_settle') || (x.bindFails && name === 'ai_bind_source') ? Promise.resolve({ data: null, error: { message: 'down' } }) : sqlRpc('service', name, args); } }),
     claudeClient: () => ({ beta: { messages: { create: async (params, opts) => { calls.push('claude'); d.params = params; d.opts = opts; if (x.throws) throw x.throws; return x.msg || msgOf(modelOut()); } } } })
   };
   return d;
@@ -1140,6 +1141,226 @@ async function secHandler() {
     const r = await H.handleRequest(hReq(goodBody()), d);
     return (r.status === 200 && d.calls.includes('log:ai-extract: settle failed') && JSON.parse(r.body).usage.cost_usd === null) || J({ r: r.status, c: d.calls });
   });
+}
+
+/* prompt ai-doc-v3 (20261119000100 legacy_docs): packing_list, extended keys, containers, dedupe-before-call */
+const v3Out = o => Object.assign({ doc_type: 'packing_list', fields: [
+  { name: 'packing_list_number', value: 'PL-77', confidence: 0.95, page: 1 }, { name: 'packing_list_date', value: '2026-10-02', confidence: 0.9, page: 1 },
+  { name: 'packages_count', value: '40', confidence: 0.9, page: 1 }, { name: 'net_weight', value: '1,000 KGS', confidence: 0.9, page: 1 },
+  { name: 'gross_weight', value: '1200', confidence: 0.9, page: 1 }, { name: 'measurement_cbm', value: '28.5 CBM', confidence: 0.8, page: 1 },
+  { name: 'consignee', value: 'CONSIGNEE: TEST TRADING CO. ONE\nP.O. BOX 1 JEDDAH\nVAT 300000000000003', confidence: 0.9, page: 1 },
+  { name: 'seal_numbers', value: 'SL1001; sl 1002', confidence: 0.85, page: 1 }, { name: 'iban', value: 'SA03', confidence: 0.9, page: 1 }],
+  line_items: [{ description: 'Brake pads', hs_code: '870830', quantity: 400, unit_price: null, amount: null, unit: 'PCS', scientific_name: null,
+    origin_country: 'China', net_weight: 600, gross_weight: 700, packages: 30, container_number: 'csqu3054383', seal_number: 'SL1001', notes: null },
+    { description: 'Clutch discs', hs_code: null, quantity: 100, unit_price: null, amount: null, unit: 'PCS', scientific_name: null, origin_country: null,
+      net_weight: 400, gross_weight: 500, packages: 10, container_number: null, seal_number: null, notes: 'fragile' }],
+  containers: [{ container_number: 'CSQU 305438-3', seal_number: 'SL1001', size_type: '40hc', packages_count: 40, net_weight: 1000, gross_weight: 1200 },
+    { container_number: 'CSQU3054384', seal_number: null, size_type: null, packages_count: null, net_weight: null, gross_weight: null }],
+  warnings: [] }, o || {});
+async function secV3() {
+  section('7e. prompt ai-doc-v3: packing_list, extended keys, containers, compatibility, dedupe-before-call (mocked Claude)');
+  await check('v3 exports; the default stays ai-doc-v2 (v2 callers unchanged): DOC_TYPES / ALL_KEYS / SYSTEM untouched', () =>
+    (X.PROMPT_VERSION === 'ai-doc-v2' && X.PROMPT_VERSION_V3 === 'ai-doc-v3' && J(X.PROMPT_VERSIONS) === J(['ai-doc-v2', 'ai-doc-v3'])
+      && !X.DOC_TYPES.includes('packing_list') && X.DOC_TYPES_V3.includes('packing_list') && X.ALL_KEYS.length === 28 && X.ALL_KEYS_V3.length === 42
+      && J(X.ALL_KEYS_V3.slice(0, 28)) === J(X.ALL_KEYS) && X.KIND_OF.packing_list === 'packing_list' && X.SYSTEM_V3.startsWith(X.SYSTEM)) || 'exports');
+  await check('validateRequest: packing_list only with prompt_version ai-doc-v3; an unknown version → bad_request; no version → ai-doc-v2', () => {
+    const t = b => { try { return X.validateRequest(b).prompt_version + ':' + X.validateRequest(b).doc_type; } catch (e) { return e.code; } };
+    const r = [t(goodBody({ doc_type: 'packing_list' })), t(goodBody({ doc_type: 'packing_list', prompt_version: 'ai-doc-v3' })),
+      t(goodBody({ prompt_version: 'ai-doc-v9' })), t(goodBody()), t(goodBody({ prompt_version: 'ai-doc-v2' }))];
+    return J(r) === J(['bad_request', 'ai-doc-v3:packing_list', 'bad_request', 'ai-doc-v2:bill_of_lading', 'ai-doc-v2:bill_of_lading']) || J(r);
+  });
+  await check('buildRequest v2 is unchanged by v3 (same system prompt, no containers in the schema, same keys)', () => {
+    const p = X.buildRequest(X.validateRequest(goodBody()));
+    const sc = p.output_config.format.schema;
+    return (p.system === X.SYSTEM && !('containers' in sc.properties) && J(sc.required) === J(['doc_type', 'fields', 'line_items', 'warnings'])
+      && J(sc.properties.fields.items.properties.name.enum) === J(X.KEYS_FOR.bill_of_lading) && !/containers \(one row/.test(p.messages[0].content[1].text)) || J(sc.required);
+  });
+  await check('buildRequest v3: the same SDK call shape (model, effort, betas, fallbacks, json_schema), SYSTEM_V3 (content-based classification), containers required', () => {
+    const p = X.buildRequest(X.validateRequest(goodBody({ doc_type: 'packing_list', prompt_version: 'ai-doc-v3' })));
+    const sc = p.output_config.format.schema;
+    const en = sc.properties.fields.items.properties.name.enum;
+    return (p.model === 'claude-opus-5-5' && p.max_tokens === 16000 && p.output_config.effort === 'medium' && p.fallbacks === 'default'
+      && J(p.betas) === J(['server-side-fallback-2026-07-01']) && p.output_config.format.type === 'json_schema' && !('thinking' in p) && p.system === X.SYSTEM_V3
+      && /content only, never by the file name/.test(p.system) && /reference only/.test(p.system) && J(sc.required) === J(['doc_type', 'detected_documents', 'fields', 'line_items', 'containers', 'warnings'])
+      && sc.properties.doc_type.enum.includes('packing_list') && J(sc.properties.detected_documents.items.enum) === J(X.DETECTED_TYPES_V3)
+      && /several documents/.test(p.system) && ['packing_list_number', 'seal_numbers', 'consignee_name', 'measurement_cbm'].every(k => en.includes(k))
+      && J(Object.keys(sc.properties.line_items.items.properties)) === J(X.ITEM_KEYS_V3) && /- seal_numbers: ONE container seal/.test(p.messages[0].content[1].text)) || J(sc.required);
+  });
+  await check('v3 schema: every object additionalProperties:false and requires all its properties; no numeric / length constraints (all v3 doc types)', () => {
+    const problems = [];
+    for (const t of X.DOC_TYPES_V3) {
+      walk(X.outputSchema(t, 'ai-doc-v3'), (n, at) => {
+        if (n.type === 'object') {
+          if (n.additionalProperties !== false) problems.push(t + at + ' additionalProperties');
+          if (J(Object.keys(n.properties || {}).sort()) !== J((n.required || []).slice().sort())) problems.push(t + at + ' required');
+        }
+        for (const k of ['minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'pattern']) if (k in n) problems.push(t + at + ' ' + k);
+      });
+    }
+    return problems.length === 0 || J(problems.slice(0, 5));
+  });
+  await check('v3 keys per doc type: B/L + seals / notify / booking / places / freight / CBM / temperature / shipping line; invoice + export country / payment terms; every key known', () => {
+    const K = X.KEYS_FOR_V3;
+    return (['seal_numbers', 'notify_party', 'booking_number', 'place_of_receipt', 'place_of_delivery', 'freight_terms', 'measurement_cbm', 'temperature_c', 'shipping_line', 'consignee_name'].every(k => K.bill_of_lading.includes(k))
+      && ['export_country', 'payment_terms', 'seal_numbers', 'consignee_name'].every(k => K.commercial_invoice.includes(k)) && K.packing_list.includes('packing_list_date')
+      && J(K.supplier_invoice) === J(X.KEYS_FOR.supplier_invoice) && Object.values(K).every(l => l.every(k => X.ALL_KEYS_V3.includes(k)))) || J(K);
+  });
+  let P;
+  await check('v3 postProcess (packing list): containers normalised + ISO 6346 checked (bad one dropped with a warning), seals unioned, identity name derived from the consignee block', () => {
+    P = X.postProcess(v3Out(), 'packing_list', 'ai-doc-v3');
+    const e = P.extracted_fields;
+    return (P.kind === 'packing_list' && P.doc_type === 'packing_list' && P.prompt_version === 'ai-doc-v3' && P.containers.length === 1
+      && P.containers[0].container_number === 'CSQU3054383' && P.containers[0].size_type === '40HC' && P.containers[0].seal_number === 'SL1001'
+      && P.warnings.some(w => w.code === 'container_check_digit' && /CSQU3054384/.test(w.text)) && e.container_numbers === 'CSQU3054383'
+      && e.seal_numbers === 'SL1001, SL1002' && e.consignee_name === 'TEST TRADING CO. ONE' && e.measurement_cbm === '28.5' && e.net_weight === '1000'
+      && e.packing_list_date === '2026-10-02' && !('iban' in e)) || J({ e, c: P.containers, w: P.warnings });
+  });
+  await check('v3 postProcess: the wider items (unit, weights, packages, container normalised, seal, notes) and the totals check', () => {
+    const it = P.line_items;
+    const bad = X.postProcess(v3Out({ fields: [{ name: 'packages_count', value: '50', confidence: 0.9, page: 1 }] }), 'packing_list', 'ai-doc-v3');
+    const tb = X.postProcess(v3Out({ doc_type: 'bill_of_lading', line_items: [], fields: [{ name: 'temperature_c', value: '+120 °C', confidence: 0.9, page: 1 },
+      { name: 'temperature_c', value: '-18', confidence: 0.5, page: 1 }] }), 'bill_of_lading', 'ai-doc-v3');
+    return (it.length === 2 && it[0].unit === 'PCS' && it[0].packages === 30 && it[0].container_number === 'CSQU3054383' && it[0].seal_number === 'SL1001'
+      && it[1].notes === 'fragile' && !P.warnings.some(w => w.code === 'items_total_mismatch')
+      && bad.warnings.some(w => w.code === 'items_total_mismatch' && w.field === 'packages_count') && tb.warnings.some(w => w.code === 'temperature_range')
+      && tb.extracted_fields.temperature_c === '120' && tb.warnings.some(w => w.code === 'conflicting_values')) || J({ it, w: bad.warnings, t: tb.warnings });
+  });
+  await check('v3 ai_detail: {prompt_version, detected_type, doc_type, containers, fields (no values), warnings}; raw_text header ai-doc-v3 with the containers', () => {
+    const d = P.ai_detail;
+    return (J(Object.keys(d)) === J(['prompt_version', 'detected_type', 'doc_type', 'detected_documents', 'containers', 'fields', 'warnings']) && d.detected_type === 'packing_list'
+      && J(d.detected_documents) === J(['packing_list'])
+      && d.fields.every(f => !('value' in f)) && d.containers.length === 1 && /^\[claude-opus-5-5 · ai-doc-v3\] packing_list/.test(P.raw_text) && /containers:/.test(P.raw_text)) || J(d);
+  });
+  await check('v3 detected type: a B/L read in the packing-list slot keeps the requested type, reports doc_type_mismatch and detected_type bill_of_lading (the wrong-slot guard input)', () => {
+    const r = X.postProcess(v3Out({ doc_type: 'bill_of_lading' }), 'packing_list', 'ai-doc-v3');
+    return (r.doc_type === 'packing_list' && r.detected_type === 'bill_of_lading' && r.ai_detail.detected_type === 'bill_of_lading'
+      && r.warnings.some(w => w.code === 'doc_type_mismatch')) || J({ d: r.doc_type, t: r.detected_type });
+  });
+  await check('parseMessage: v3 accepts doc_type packing_list + containers; v2 refuses packing_list (bad_output); a non-array containers → bad_output', () => {
+    const a = X.parseMessage(msgOf(v3Out()), 'ai-doc-v3');
+    const b = X.parseMessage(msgOf(v3Out()));
+    const c = X.parseMessage(msgOf(v3Out({ containers: 'x' })), 'ai-doc-v3');
+    return (a.ok && b.code === 'bad_output' && c.code === 'bad_output') || J({ a: a.code, b: b.code, c: c.code });
+  });
+  await check('identityName (legacy extractCustomerIdentityName_): labels / address / CR / VAT / NOTIFY dropped, ≤ 16 words', () =>
+    (X.identityName('BUYER: AL NOOR EST.\nP.O. BOX 12 RIYADH') === 'AL NOOR EST.' && X.identityName('BUYER: AL NOOR EST.\nKING ROAD 12') === 'AL NOOR EST. KING' && X.identityName('SOLD TO - X CO\nNOTIFY: Y') === 'X CO'
+      && X.identityName('ABC LLC CR NO 7000000001') === 'ABC LLC' && X.identityName('') === '' && X.identityName(Array(30).fill('W').join(' ')).split(' ').length === 16) || 'identity');
+  await check('a v3 reading is saved with its ai_detail through the API (real ai_reserve / ai_bind_source / ai_settle usage), only under the bound hash', async () => {
+    const id = await reserve(A, U.staff);
+    const h = sha();
+    await as('service', `SELECT public.ai_bind_source($1, $2)`, [id, h]);
+    await settle(id, 100, 100, 'ok');
+    const ins = x => tryErr(() => as('staff', `INSERT INTO public.document_extractions (org_id, doc_type, source_name, source_sha256, engine, languages, raw_text,
+        extracted_fields, line_items, created_by, ai_usage_id, ai_detail) VALUES ($1, 'packing_list', 'pl.pdf', $2, 'claude-opus-5-5', 'auto', $3, $4, $5, $6, $7, $8)`,
+      [A, x, P.raw_text, J(P.extracted_fields), J(P.line_items), U.staff, id, J(P.ai_detail)]));
+    const other = await ins(sha());
+    const r = await ins(h);
+    return (/MRS_INVALID/.test(other) && r === 'ok') || J({ other, r });
+  });
+
+  // handler: v3 response + dedupe-before-call (the stored reading of the same bytes is returned, nothing reserved / charged)
+  const PDF3 = Buffer.from('%PDF-1.7\n%v3 dedupe test\n').toString('base64');
+  const SHA3 = require('crypto').createHash('sha256').update(Buffer.from(PDF3, 'base64')).digest('hex');
+  const body3 = o => goodBody(Object.assign({ doc_type: 'packing_list', prompt_version: 'ai-doc-v3', file: { media_type: 'application/pdf', data_b64: PDF3 } }, o || {}));
+  const stored = o => Object.assign({ id: 'e-1', org_id: A, transaction_id: null, doc_type: 'packing_list', engine: 'claude-opus-5-5', ai_usage_id: 'u-1',
+    ai_detail: Object.assign({}, P.ai_detail), extracted_fields: P.extracted_fields, line_items: P.line_items, raw_text: P.raw_text, mean_confidence: 88.5,
+    review_status: 'reviewed', source_sha256: SHA3, created_at: '2026-11-10T10:00:00Z' }, o || {});
+  // deps whose user client answers the dedupe lookup with `rows` (or an error) and records the filters
+  const v3Deps = (rows, o) => {
+    const d = hDeps(Object.assign({ msg: msgOf(v3Out()) }, o || {}));
+    const base = d.userClient;
+    d.lookups = [];
+    d.userClient = t => {
+      const u = base(t);
+      const orig = u.from;
+      u.from = table => {
+        if (table !== 'document_extractions') return orig(table);
+        const f = { table, eq: {}, is: {}, order: null, limit: null };
+        d.lookups.push(f);
+        const qb = { select: c => { f.cols = c; return qb; }, eq: (k, v) => { f.eq[k] = v; return qb; }, is: (k, v) => { f.is[k] = v; return qb; },
+          order: (k, opt) => { f.order = [k, opt]; return qb; }, limit: n => { f.limit = n; return Promise.resolve(rows instanceof Error ? { data: null, error: { message: 'x' } } : { data: rows, error: null }); } };
+        return qb;
+      };
+      return u;
+    };
+    return d;
+  };
+  await check('handler v3, no earlier reading: lookup by org + sha256 + not voided BEFORE ai_reserve; the hash bound to the reservation (ai_bind_source) before Claude; the response adds containers, ai_detail, source_sha256, reused:false', async () => {
+    const d = v3Deps([]);
+    const r = await H.handleRequest(hReq(body3()), d);
+    const b = JSON.parse(r.body);
+    const order = d.calls.filter(c => !/^log:/.test(c));
+    const f = d.lookups[0] || {};
+    const u = await one(`SELECT source_sha256 FROM app.ai_usage WHERE id = $1`, [b.usage_id]);
+    return (r.status === 200 && J(order) === J(['user:ai_access', 'ai_reserve', 'ai_bind_source', 'claude', 'ai_settle']) && d.lookups.length === 1 && f.eq.org_id === A
+      && f.eq.source_sha256 === SHA3 && !('engine' in f.eq) && f.is.voided_at === null && u.source_sha256 === SHA3 && J(b.detected_documents) === J(['packing_list']) && b.prompt_version === 'ai-doc-v3' && b.reused === false
+      && b.source_sha256 === SHA3 && b.containers.length === 1 && b.ai_detail.prompt_version === 'ai-doc-v3' && b.kind === 'packing_list'
+      && d.params.system === X.SYSTEM_V3) || J({ s: r.status, order, f, keys: Object.keys(b) });
+  });
+  await check('handler v3, the same file already read and saved: reused:true with extraction_id, NO ai_reserve, NO Claude call, NO charge; fields rebuilt with their confidences', async () => {
+    await resetUsage();
+    const d = v3Deps([stored()]);
+    const r = await H.handleRequest(hReq(body3()), d);
+    const b = JSON.parse(r.body);
+    const n = (await one(`SELECT count(*)::int n FROM app.ai_usage`)).n;
+    const f = b.fields.find(x => x.name === 'packing_list_number');
+    return (r.status === 200 && b.reused === true && b.extraction_id === 'e-1' && b.usage_id === 'u-1' && !d.calls.includes('ai_reserve') && !d.calls.includes('claude')
+      && n === 0 && b.usage.cost_usd === 0 && f.value === 'PL-77' && f.confidence === 0.95 && b.containers.length === 1 && b.review_status === 'reviewed'
+      && d.calls.includes('log:ai-extract: reading reused (no charge)')) || J({ s: r.status, b: Object.keys(b), calls: d.calls, n });
+  });
+  await check('handler v3 dedupe picks the requested transaction\'s reading, then an unlinked one; a v2 / OCR reading of the same bytes is reused AS ITSELF only in the scope a save would collide with (no charge), else read again with v3', async () => {
+    const TXA = '0b5e0000-0000-4000-8000-000000000201';
+    const d1 = v3Deps([stored({ id: 'e-other', transaction_id: '0b5e0000-0000-4000-8000-0000000000aa' }), stored({ id: 'e-free' }), stored({ id: 'e-mine', transaction_id: TXA })], { tx: true });
+    const b1 = JSON.parse((await H.handleRequest(hReq(body3({ transaction_id: TXA })), d1)).body);
+    const d2 = v3Deps([stored({ id: 'e-other', transaction_id: '0b5e0000-0000-4000-8000-0000000000aa' }), stored({ id: 'e-free' })], { tx: true });
+    const b2 = JSON.parse((await H.handleRequest(hReq(body3({ transaction_id: TXA })), d2)).body);
+    const d3 = v3Deps([stored({ id: 'e-v2', ai_detail: null, transaction_id: '0b5e0000-0000-4000-8000-0000000000aa' }),
+      stored({ id: 'e-v2b', ai_detail: { prompt_version: 'ai-doc-v2' }, transaction_id: '0b5e0000-0000-4000-8000-0000000000aa' })]);
+    const r3 = await H.handleRequest(hReq(body3()), d3);
+    const b3 = JSON.parse(r3.body);
+    await resetUsage();
+    const d4 = v3Deps([stored({ id: 'e-ocr', engine: 'tesseract.js@5.1.1', ai_usage_id: null, ai_detail: null, doc_type: 'packing_list' })]);
+    const b4 = JSON.parse((await H.handleRequest(hReq(body3()), d4)).body);
+    const n4 = (await one(`SELECT count(*)::int n FROM app.ai_usage`)).n;
+    return (b1.extraction_id === 'e-mine' && b2.extraction_id === 'e-free' && r3.status === 200 && b3.reused === false && d3.calls.includes('claude')
+      && b4.reused === true && b4.extraction_id === 'e-ocr' && b4.engine === 'tesseract.js@5.1.1' && b4.prompt_version === null && b4.model === null
+      && !d4.calls.includes('ai_reserve') && !d4.calls.includes('claude') && n4 === 0) || J({ b1: b1.extraction_id, b2: b2.extraction_id, b3: b3.reused, b4 });
+  });
+  await check('handler v3: a failing lookup never blocks the read (it goes ahead and is charged normally); the AI-off / forbidden gates still come first', async () => {
+    const d = v3Deps(new Error('down'));
+    const r = await H.handleRequest(hReq(body3()), d);
+    await saveSettings('admin', A, { enabled: false });
+    const d2 = v3Deps([stored()]);
+    const r2 = await H.handleRequest(hReq(body3()), d2);
+    await enableA();
+    return (r.status === 200 && JSON.parse(r.body).reused === false && d.calls.includes('claude') && r2.status === 403 && JSON.parse(r2.body).error === 'ai_disabled'
+      && d2.lookups.length === 0) || J({ r: r.status, r2: r2.status, l: d2.lookups.length });
+  });
+  await check('handler v2 (no prompt_version): no dedupe lookup at all, the v2 response keys unchanged (no containers / ai_detail / reused)', async () => {
+    const d = v3Deps([stored()], { msg: msgOf(modelOut()) });
+    const r = await H.handleRequest(hReq(goodBody()), d);
+    const b = JSON.parse(r.body);
+    return (r.status === 200 && d.lookups.length === 0 && b.prompt_version === 'ai-doc-v2' && !('containers' in b) && !('ai_detail' in b) && !('reused' in b)
+      && J(Object.keys(b)) === J(['usage_id', 'engine', 'model', 'prompt_version', 'doc_type', 'detected_type', 'kind', 'transaction_id', 'fields',
+        'extracted_fields', 'line_items', 'warnings', 'mean_confidence', 'raw_text', 'usage'])) || J(Object.keys(b));
+  });
+  await check('review: handler v3, the hash cannot be bound → nothing sent to Claude, the reservation settled at no cost (error), 500 internal', async () => {
+    await resetUsage();
+    const d = v3Deps([], { bindFails: true });
+    const r = await H.handleRequest(hReq(body3()), d);
+    const u = await one(`SELECT status, cost_usd::float c FROM app.ai_usage ORDER BY created_at DESC LIMIT 1`);
+    return (r.status === 500 && JSON.parse(r.body).error === 'internal' && !d.calls.includes('claude') && d.calls.includes('ai_settle')
+      && u.status === 'error' && u.c === 0 && d.calls.includes('log:ai-extract: source bind failed')) || J({ r: r.status, calls: d.calls, u });
+  });
+  await check('review: v3 combined file — detected_documents (main type first, unknown / other dropped) in the result and ai_detail; no doc_type_mismatch when the slot type is in the file', () => {
+    const r = X.postProcess(v3Out({ doc_type: 'bill_of_lading', detected_documents: ['commercial_invoice', 'packing_list', 'passport', 'other', 'commercial_invoice'] }), 'packing_list', 'ai-doc-v3');
+    const lone = X.postProcess(v3Out({ doc_type: 'bill_of_lading', detected_documents: [] }), 'packing_list', 'ai-doc-v3');
+    return (J(r.detected_documents) === J(['bill_of_lading', 'commercial_invoice', 'packing_list']) && J(r.ai_detail.detected_documents) === J(r.detected_documents)
+      && !r.warnings.some(w => w.code === 'doc_type_mismatch') && lone.warnings.some(w => w.code === 'doc_type_mismatch')
+      && J(lone.detected_documents) === J(['bill_of_lading'])) || J({ r: r.detected_documents, w: r.warnings.map(w => w.code) });
+  });
+  await check('handler sha256Hex = node crypto SHA-256 of the decoded bytes (the source_sha256 the browser saves)', async () =>
+    (await H.sha256Hex(PDF3)) === SHA3);
 }
 
 /* inbox-sync worker + the Claude provider, with the shared ledger bound to the real ai_reserve / ai_settle (review B-11 / B-14 / B-15) */
@@ -1269,7 +1490,7 @@ async function secFrontEnd() {
   const supa = rd('assets/js/supa.js'), ocr = rd('assets/js/ocr.js'), html = rd('ocr.html'), adm = rd('assets/js/admin.js');
   await check('supa.js exports aiAccess / aiExtract / aiGetSettings / aiSaveSettings; ai_usage_id insertable; Edge call via functions.invoke', () =>
     (/aiAccess: aiAccess, aiExtract: aiExtract, aiGetSettings: aiGetSettings, aiSaveSettings: aiSaveSettings/.test(supa)
-      && /c\.functions\.invoke\('ai-extract', \{ body: body \}\)/.test(supa) && /'ai_usage_id'\];/.test(supa)
+      && /c\.functions\.invoke\('ai-extract', \{ body: body \}\)/.test(supa) && /'ai_usage_id',/.test(supa) && /'ai_detail'\];/.test(supa)
       && /rpc\('ai_access'/.test(supa) && /rpc\('ai_get_settings'/.test(supa) && /rpc\('ai_save_settings'/.test(supa)) || 'supa.js');
   // run supa.js in a vm with a fake supabase client: aiExtract → functions.invoke, edge error codes → MRS_*
   const invoked = [];
@@ -1407,6 +1628,7 @@ async function secFrontEnd() {
   await secHelper();
   await secReviewHelper();
   await secHandler();
+  await secV3();
   await secInboxLedger();
   await secStatic();
   await secFrontEnd();

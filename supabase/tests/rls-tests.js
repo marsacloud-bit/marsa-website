@@ -237,6 +237,23 @@ async function matchFixtures() {
   await as('staffB', `SELECT public.save_document_match($1, $2)`, [B, p(B_EXT, blB)]);
 }
 
+// legacy docs (20261119000100): per org, a document batch approved by the org's own staff through the RPCs into its
+// transaction (org A: TX3, org B: B_TX) → a row in doc_batches, doc_batch_documents, transaction_shipment_data and both item tables
+async function docBatchFixtures() {
+  const rpcAs = async (who, sql, params) => (await as(who, sql, params))[0].r;
+  for (const [who, org, tx, tag] of [['staffA', A, TX3, 'A'], ['staffB', B, B_TX, 'B']]) {
+    const ext = (await q(`INSERT INTO public.document_extractions (org_id, transaction_id, doc_type, source_name, source_sha256, engine, languages, raw_text,
+                            extracted_fields, created_by) VALUES ($1, $2, 'commercial_invoice', 'inv.pdf', $3, 'tesseract.js@5.1.1', 'eng', 'INV', $4, $5) RETURNING id`,
+      [org, tx, hex(tag === 'A' ? '6' : '7'), JSON.stringify({ invoice_number: 'RLS-INV-' + tag }), U[who]]))[0].id;
+    const b = await rpcAs(who, `SELECT public.create_doc_batch($1, $2) r`, [org, { transaction_id: tx }]);
+    await rpcAs(who, `SELECT public.attach_doc_batch_document($1, $2) r`, [b.id, { extraction_id: ext, slot: 'commercial_invoice' }]);
+    const draft = { invoice: { invoice_number: 'RLS-INV-' + tag, items: [{ description: 'بند ' + tag, quantity: 1 }] },
+      packing: { packing_list_number: 'RLS-PL-' + tag, items: [{ description: 'تعبئة ' + tag, packages: 1 }] } };
+    const s1 = await rpcAs(who, `SELECT public.save_doc_batch_draft($1, $2) r`, [b.id, { version: b.version, draft }]);
+    await rpcAs(who, `SELECT public.approve_doc_batch($1, $2) r`, [b.id, { version: s1.version }]);
+  }
+}
+
 // G3 (20261103000100 / 0200): one row per org in every new tenant table, written through the real
 // RLS-guarded inserts / RPCs by each org's own staff. Org A uses TX3 (air, no containers) so the
 // G1/G2 status tests below are unaffected; document requirements are export-only so nothing is gated.
@@ -494,6 +511,12 @@ const TENANT_TABLES = [
   ['document_extractions', `SELECT id::text id FROM public.document_extractions WHERE org_id = $1 LIMIT 1`, 'id::text', 'review_note = review_note'],
   // document matching (20261116000100): staff SELECT only (branch-scoped like the extractions), written only through RPCs
   ['document_matches',   `SELECT id::text id FROM public.document_matches WHERE org_id = $1 LIMIT 1`,   'id::text',  'review_note = review_note'],
+  // legacy docs (20261119000100): staff SELECT only (branch-scoped), written only through the doc batch RPCs
+  ['doc_batches',        `SELECT id::text id FROM public.doc_batches WHERE org_id = $1 LIMIT 1`,        'id::text',  'note = note'],
+  ['doc_batch_documents', `SELECT id::text id FROM public.doc_batch_documents WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
+  ['transaction_shipment_data', `SELECT transaction_id::text id FROM public.transaction_shipment_data WHERE org_id = $1 LIMIT 1`, 'transaction_id::text', 'org_id = org_id'],
+  ['shipment_invoice_items', `SELECT id::text id FROM public.shipment_invoice_items WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
+  ['shipment_packing_items', `SELECT id::text id FROM public.shipment_packing_items WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
   ['invitations',        `SELECT id::text id FROM public.invitations WHERE org_id = $1 LIMIT 1`,        'id::text',  'email = email'],
   // G3 registry (20261103000100)
   ['parties',            `SELECT id::text id FROM public.parties WHERE org_id = $1 LIMIT 1`,            'id::text',  'name_ar = name_ar'],
@@ -578,6 +601,8 @@ async function main() {
   catch (e) { fail('G6b fixtures', errText(e)); return finish(); }
   try { await matchFixtures(); pass('doc-match fixtures: a document_matches row per org (invoice ↔ B/L, through save_document_match)'); }
   catch (e) { fail('doc-match fixtures', errText(e)); return finish(); }
+  try { await docBatchFixtures(); pass('legacy docs fixtures: an approved document batch per org (batch, slot, shipment data, invoice / packing items)'); }
+  catch (e) { fail('legacy docs fixtures', errText(e)); return finish(); }
 
   /* ---------------------------------------------------------------- catalog */
   section('catalog: RLS, grants, function privileges');
@@ -671,9 +696,13 @@ async function main() {
       // legacy core (20261117000100): void-only cancel of a transaction (ops writers of its branch)
       'cancel_transaction',
       // legacy tx (20261118000100): duplicate pre-check, stepper, combined movement, movements list, driver directory, operators by port
-      'check_tx_duplicates', 'tx_lifecycle', 'save_movement', 'list_movements', 'driver_directory', 'port_operators'];
+      'check_tx_duplicates', 'tx_lifecycle', 'save_movement', 'list_movements', 'driver_directory', 'port_operators',
+      // legacy docs (20261119000100): document batches, approval into the transaction, shipment data, client matching v2, shipping agents
+      'create_doc_batch', 'attach_doc_batch_document', 'detach_doc_batch_document', 'merge_doc_batch', 'save_doc_batch_draft', 'get_doc_batch',
+      'list_pending_doc_batches', 'discard_doc_batch', 'archive_doc_batch', 'approve_doc_batch', 'get_transaction_shipment', 'match_client_v2',
+      'confirm_client_match', 'reject_client_alias', 'seed_shipping_agents', 'match_shipping_agent'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 201) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 217) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');

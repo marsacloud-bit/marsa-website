@@ -8,7 +8,9 @@
 //   user client calls public.ai_access(org) — staff roles only, the MFA rule of app.has_role (an admin-only member needs
 //   an aal2 session) — and reads the optional transaction under the caller's own RLS.
 // - Body: {org_id, doc_type: bill_of_lading | commercial_invoice | customs_declaration | supplier_invoice | auto,
-//   file: {media_type: image/jpeg | image/png | image/webp | image/gif | application/pdf, data_b64}, transaction_id?, lang?}
+//   file: {media_type: image/jpeg | image/png | image/webp | image/gif | application/pdf, data_b64}, transaction_id?, lang?,
+//   prompt_version?: 'ai-doc-v3' (20261119000100: + doc_type packing_list, extended keys, containers; the same file already
+//   read with v3 and saved is returned without a Claude call or a charge — reused: true)}
 //   Images up to 5 MB, PDFs up to 10 MB (decoded); the media type must match the file's magic bytes. The body is read
 //   with a byte limit (also when chunked, without content-length).
 // - Usage: a service client calls public.ai_reserve(org, user, 'doc_extract', held estimate) (enabled + consent, daily

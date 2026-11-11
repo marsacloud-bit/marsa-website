@@ -662,7 +662,12 @@ const NOT_EXERCISED = ['accept_invitation', 'ack_alert', 'import_commit', 'porta
   'void_supplier_payment', 'save_bl[min]', 'save_msg_channel[min]', 'save_msg_contact[min]',
   // document matching (20261116000100): they take a match id (the builder sends a transaction id); isolation of the
   // matches (org, branch, client, anon) is asserted by doc-match-sql-tests.js
-  'review_document_match', 'review_document_match[min]', 'void_document_match'];
+  'review_document_match', 'review_document_match[min]', 'void_document_match',
+  // legacy docs (20261119000100): they take a doc batch / batch document / alias id (the builder sends a transaction id); isolation of
+  // the batches, shipment data and aliases (org, branch, client, anon) is asserted by legacy-docs-sql-tests.js
+  'approve_doc_batch', 'approve_doc_batch[min]', 'archive_doc_batch', 'attach_doc_batch_document', 'attach_doc_batch_document[min]',
+  'detach_doc_batch_document', 'discard_doc_batch', 'get_doc_batch', 'merge_doc_batch', 'reject_client_alias', 'save_doc_batch_draft',
+  'save_doc_batch_draft[min]'];
 async function positiveControl() {
   section('8. positive control: the §1 argument builder with B\'s own staff');
   const fns = (await listRpcs()).filter(f => !PUBLIC_BY_DESIGN[f.proname] && !/^platform_/.test(f.proname));
