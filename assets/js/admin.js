@@ -761,6 +761,8 @@
       orgId: S.orgId, roles: S.roles.slice(), branches: S.branches.slice(), userId: S.ctx ? S.ctx.user_id : null,
       // legacy step 6: the active org's display name (the payment form shows it as the default payer; the server uses the org settings)
       orgName: activeOrgName(),
+      // legacy step 7 review: the org OWNER = an admin membership without a branch (mirrors app.daftra_is_owner)
+      orgOwner: isOrgAdmin(),
       // can('opsWriter') · can('transportWriter', tx.branch_id) · can(['admin', 'supervisor'], branchId)
       can: function (set, branchId) {
         var roles = Array.isArray(set) ? set : R[set];

@@ -15,6 +15,21 @@
     - read before every update; a remote edit → conflict, no update is sent; foreign lines are never touched;
     - a non-draft remote invoice is never updated (outcome 'frozen' → pull effects);
     - the worker is given no fetch and calls nothing but rpc() and the adapter.
+
+  Legacy port step 7 (docs/online/LEGACY_DAFTRA_AR.md «عقد المهام»), on top:
+    - KSA account guard: a write kind (invoice_push, purchase_push, client_ensure, client_push, item_ensure) whose
+      connection.account is not a checked KSA account (SAR, Saudi Arabia, an active 15 % VAT) fails 'account_not_ksa'
+      before ANY adapter call (fail closed: no account → refused);
+    - write policy (connection.policy, fail closed): allow_draft_update !== true (HF5) → updateDraftInvoice is never
+      sent (the recorder refuses it: draft_update_disabled) and an existing draft is never changed; allow_product_create
+      !== true → products are resolved by code without leading zeros (000186 = 186) and createProduct is never sent;
+      a read-only kind can send no write at all;
+    - invoice_push: required custom fields missing → custom_required, an inactive / Daftra-suspended client →
+      client_inactive / client_suspended, before any write; the new draft carries the Riyadh invoice date, po_number,
+      the CustomModel custom fields and the opening zero line; it is read back (date / client / total / line count →
+      read_back) and its https view URL is reported;
+    - the new kinds product_match, client_import, invoice_lookup, legacy_scan, supplier_search (GET only) and
+      purchase_push (a new zero-tax purchase draft, looked up by reference first).
 */
 (function () {
   'use strict';
@@ -72,16 +87,40 @@
 
   // fencing failure: this worker no longer holds the job, nothing is written
   class LeaseLost extends Error { constructor(m) { super(m || 'lease lost'); this.lease_lost = true; } }
+  // review: the account read again right before the first write is not KSA (nothing was sent)
+  class AccountBlocked extends Error { constructor(r) { super('account not KSA: ' + r); this.reason = r; } }
 
   // records every adapter call as {op, at, ms, request, response, error, applied};
   // opts.beforeWrite(op) runs right before every WRITE (lease renewal); a failure there sends nothing
+  // step 7: opts.policy (A.writePolicy) refuses updateDraftInvoice under HF5 and createProduct under resolve-only, and
+  // opts.readOnly refuses every write, BEFORE anything is sent (logged with applied 'no')
   function recorder(adapter, A, clock, opts) {
     const o = opts || {};
     const calls = [];
     const rec = {};
     const timeoutMs = o.callTimeoutMs === undefined ? DEFAULT_CALL_TIMEOUT_MS : o.callTimeoutMs;
+    const pol = o.policy || null;
+    let gated = false;
+    const refusal = op => {
+      if (o.readOnly && A.WRITE_METHODS.includes(op)) return ['read_only_kind', 'a read-only job never writes to Daftra'];
+      if (pol && op === 'updateDraftInvoice' && !pol.allow_draft_update) return ['draft_update_disabled', 'editing an existing Daftra draft is not allowed (HF5): change it by hand in Daftra'];
+      if (pol && op === 'createProduct' && !pol.allow_product_create) return ['product_create_disabled', 'Marsa never creates Daftra products: map the product code'];
+      return null;
+    };
     for (const op of A.ADAPTER_METHODS) {
       rec[op] = async function (...args) {
+        const no = refusal(op);
+        if (no) {
+          const e = new A.AdapterError('validation', no[1], { applied: 'no', code: no[0] });
+          calls.push({ op, at: clock(), ms: 0, request: null, response: null, error: errJson(e), applied: 'no' });
+          throw e;
+        }
+        // review: opts.accountGate() (a live account) re-reads the account profile ONCE, right before the first write of the job
+        if (A.WRITE_METHODS.includes(op) && typeof o.accountGate === 'function' && !gated) {
+          gated = true;
+          const why = await o.accountGate(rec);
+          if (why) throw new AccountBlocked(why);
+        }
         if (A.WRITE_METHODS.includes(op) && typeof o.beforeWrite === 'function') {
           try { await o.beforeWrite(op); }
           catch (e) { throw new LeaseLost(String((e && e.message) || e).slice(0, 300)); }
@@ -153,7 +192,7 @@
     }
 
     // §4 ensure algorithm for one item key
-    async function ensureItem(R, it) {
+    async function ensureItem(R, it, opts) {
       if (!it || !it.link_id) throw new Outcome('failed', {}, { kind: 'validation', code: 'item', message: 'no item link', http_status: null });
       if (it.external_product_id && it.status === 'linked') return null;
       const byCode = await R.findProductByCode(it.product_code);
@@ -173,6 +212,11 @@
       if (hits.length) {
         throw new Outcome('conflict', { item_link_id: it.link_id, candidates: hits.slice(0, 10).map(candidateProduct) },
           { kind: 'conflict', code: 'item_review', message: 'Daftra products with the same name and another code exist', http_status: null });
+      }
+      if (opts && opts.noCreate) {
+        // step 7 resolve-only: Marsa never creates Daftra products (the code is mapped by a human: save_daftra_product_code)
+        throw new Outcome('failed', { item_link_id: it.link_id }, { kind: 'validation', code: 'product_create_disabled',
+          message: 'no Daftra product for this item and Marsa never creates products (fields: ' + it.item_key + ')', http_status: null });
       }
       const p = await R.createProduct({ code: it.product_code, name_ar: it.name_ar, name_en: it.name_en || null, tax_code: it.tax_code || null, vat_rate: it.default_vat_rate });
       return { item_link_id: it.link_id, external_product_id: String(p.id), found_by: 'created', remote_snapshot: productSnapshot(p) };
@@ -215,10 +259,23 @@
       return e;
     }
 
-    // the Marsa-intended remote line of a local line
+    // the Marsa-intended remote line of a local line. Step 7: a line with a Daftra description rule (daftra_description: the
+    // TAS number only for an appointment fee, empty for the clearance line) names its product in Daftra's item field
+    // (legacy: item = product name, description = TAS / empty): item_name + daftra_description go to the adapter, and its
+    // canonical description is the product name (what the item field reads back as, mock and live alike)
     function marsaLine(l, productOf) {
-      return { line_ref: l.line_ref, product_id: productOf(l.item_key), description: l.description,
+      const named = l.item_name !== undefined && l.item_name !== null && l.item_name !== '';
+      const out = { line_ref: l.line_ref, product_id: productOf(l.item_key), description: named ? l.item_name : l.description,
         quantity: A.fixed(l.quantity, 3), unit_price: A.fixed(l.unit_price, 2), tax_rate: A.fixed(l.vat_rate, 2) };
+      if (named) { out.item_name = l.item_name; out.daftra_description = l.daftra_description; }
+      return out;
+    }
+    // the intent with its lines' item_name (the item's Arabic name) where a Daftra description rule applies
+    function withNames(it) {
+      if (!it || !Array.isArray(it.lines)) return it;
+      const names = new Map((it.items || []).map(x => [x.item_key, x.name_ar || null]));
+      return Object.assign({}, it, { lines: it.lines.map(l => (l && l.daftra_description !== undefined && l.daftra_description !== null && names.get(l.item_key))
+        ? Object.assign({}, l, { item_name: names.get(l.item_key) }) : l) });
     }
     const sameLine = (a, b) => A.stableStringify(A.canonicalLine(a)) === A.stableStringify(A.canonicalLine(b));
 
@@ -310,7 +367,7 @@
       return res;
     }
 
-    async function pushOk(it, back, foundBy, inline) {
+    async function pushOk(it, back, foundBy, inline, extra) {
       const h = await A.invoiceHash(back);
       const e = {
         intent_id: it.id, external_invoice_id: String(back.id), found_by: foundBy, daftra_status: String(back.status || '').slice(0, 40),
@@ -320,18 +377,84 @@
       };
       if (e.daftra_number === null) delete e.daftra_number;
       if (e.remote_version === null) delete e.remote_version;
+      // step 7: the Daftra view link (https only) and, for a draft just created, what Daftra stored (date / client / total / lines)
+      const url = urlOf(back);
+      if (url) e.daftra_url = url;
+      if (extra && extra.readBack) {
+        e.read_back = { date: A.normalizeDate(back.date), client_id: back.client_id === undefined || back.client_id === null ? null : String(back.client_id),
+          total: remoteTotals(back).total, line_count: (back.lines || []).length };
+      }
       return e;
     }
+    const urlOf = x => (x && typeof x.url === 'string' && /^https:\/\/[A-Za-z0-9.-]+(\/[A-Za-z0-9_./?=&%-]*)?$/.test(x.url) && x.url.length <= 500) ? x.url : null;
 
-    async function invoicePush(R, ctx) {
-      const it = ctx.intent;
+    /* ---------------------------------------------------------------- step 7 helpers */
+    const failed = (base, code, message, fields) => new Outcome('failed', base || {},
+      { kind: 'validation', code, message: message + (fields && fields.length ? ' (fields: ' + fields.join(', ') + ')' : ''), http_status: null });
+
+    // a product by its configured code, compared without leading zeros (legacy resolveDaftraProductByCode_); never created.
+    // → {external_product_id}; failed unmapped_product (no code) / product_not_found (none); conflict item_review (several)
+    async function resolveItem(R, item, base) {
+      if (!item) throw failed(base, 'unmapped_product', 'no Daftra product mapping in context');
+      if (item.external_product_id && item.status === 'linked') return String(item.external_product_id);
+      const code = item.remote_product_code;
+      if (!code || !A.codeNorm(code)) throw failed(base, 'unmapped_product', 'service item without a confirmed Daftra product code', [item.item_key]);
+      const n = A.codeNorm(code);
+      const hits = ((await R.findProductsByCodeNorm(code)) || []).filter(p => p && p.id && A.codeNorm(p.code) === n);
+      if (hits.length === 1) return String(hits[0].id);
+      if (!hits.length) throw failed(base, 'product_not_found', 'no Daftra product with the configured code', [String(code)]);
+      throw new Outcome('conflict', Object.assign({}, base, { reason: 'item_review', items: [{ item_link_id: item.link_id,
+        candidates: hits.slice(0, 10).map(candidateProduct) }] }),
+        { kind: 'conflict', code: 'item_review', message: 'several Daftra products carry the configured code', http_status: null });
+    }
+    // the Daftra client of a new draft must not be suspended (legacy verifyDaftraClientForInvoice_)
+    async function checkClientActive(R, ext, base) {
+      let c;
+      try { c = await R.getClient(ext); }
+      catch (e) {
+        if (A.isAdapterError(e) && e.kind === 'not_found') throw failed(base, 'client_not_linked', 'the linked Daftra client does not exist');
+        throw e;
+      }
+      if (c && c.id !== undefined && c.id !== null && String(c.id) !== String(ext)) throw failed(base, 'client_not_linked', 'Daftra answered another client');
+      if (c && c.suspended === true) throw failed(base, 'client_suspended', 'the Daftra client is suspended');
+    }
+    // the invoice date: the Riyadh date the claim pinned (billing_intents.invoice_date = app.rpt_today()), else today in
+    // Asia/Riyadh from the worker clock (Intl) — never UTC, never the host zone
+    function invoiceDate(it, clock, conn) {
+      return A.normalizeDate(it && it.invoice_date) || A.normalizeDate(conn && conn.today) || A.riyadhDate(clock());
+    }
+    // the custom fields of the draft: {payload, dateKeys} from intent.custom_fields (app.daftra_custom_fields)
+    function customOf(it) {
+      const cf = it && it.custom_fields && typeof it.custom_fields === 'object' ? it.custom_fields : null;
+      if (!cf) return { payload: null, dateKeys: [] };
+      const payload = cf.payload && typeof cf.payload === 'object' && !Array.isArray(cf.payload) ? cf.payload : {};
+      const dateKeys = (Array.isArray(cf.fields) ? cf.fields : []).filter(f => f && f.name === 'declaration_date' && f.key).map(f => String(f.key));
+      return { payload, dateKeys };
+    }
+
+    async function invoicePush(R, ctx, env) {
+      const it = withNames(ctx.intent);
       const job = ctx.job || {};
       const opt = job.options || {};
+      const pol = (env && env.policy) || A.writePolicy(null);
+      const hf5 = !pol.allow_draft_update;
+      const resolveOnly = !pol.allow_product_create;
+      const clock = (env && env.clock) || (() => new Date().toISOString());
       if (!it) throw new Outcome('failed', {}, { kind: 'validation', code: 'intent', message: 'no intent in context', http_status: null });
       const inline = { clients: [], items: [] };
       const base = { intent_id: it.id };
       if (it.status === 'issued' || it.status === 'cancelled') {
         throw new Outcome('failed', base, { kind: 'validation', code: 'intent_' + it.status, message: 'intent is ' + it.status, http_status: null });
+      }
+      // step 7, before any call: required custom fields, the Marsa client, the opening's linked client
+      const cf = it.custom_fields && typeof it.custom_fields === 'object' ? it.custom_fields : null;
+      if (cf && Array.isArray(cf.missing) && cf.missing.length) {
+        throw failed(base, 'custom_required', 'required Daftra custom fields have no value; nothing was sent', cf.missing.map(String).slice(0, 20));
+      }
+      if (it.client && it.client.active === false) throw failed(base, 'client_inactive', 'the client is inactive in Marsa; nothing was sent');
+      const opening = it.origin === 'opening' || opt.opening === true;
+      if (opening && !(it.client && it.client.external_id && LINKED.includes(it.client.status))) {
+        throw failed(base, 'client_not_linked', 'an opening draft needs a client linked to Daftra');
       }
 
       // 1. client + items, inline (same lookups as the dedicated jobs)
@@ -346,8 +469,11 @@
         throw e;
       }
       const productIds = {};
+      const names = {};
       for (const item of it.items || []) {
+        names[item.item_key] = item.name_ar || null;
         if (item.external_product_id && item.status === 'linked') { productIds[item.item_key] = String(item.external_product_id); continue; }
+        if (resolveOnly) { productIds[item.item_key] = await resolveItem(R, item, base); continue; }
         try {
           const ie = await ensureItem(R, item);
           if (ie) { inline.items.push(ie); productIds[item.item_key] = ie.external_product_id; }
@@ -359,18 +485,20 @@
         }
       }
       const productOf = k => {
-        if (!productIds[k]) throw new Outcome('failed', Object.assign({}, base, inline), { kind: 'validation', code: 'item_unmapped', message: 'no Daftra product for ' + k, http_status: null });
+        if (!productIds[k]) throw failed(Object.assign({}, base, inline), resolveOnly ? 'unmapped_product' : 'item_unmapped', 'no Daftra product for an item', [k]);
         return productIds[k];
       };
+      const nameOf = k => names[k] || null;
       const itc = Object.assign({}, it, { client: Object.assign({}, it.client || {}, { external_id: clientExt }) });
       const safeProductOf = k => productIds[k] || null;
       const dcx = { it: itc, productOf: safeProductOf };
 
       // 2. identity: reference lookup before every create (first push, retry, reconcile, recreate)
+      const reference = it.po_number || it.operational_ref;
       let extId = opt.recreate ? null : (it.external_invoice_id || null);
       let foundBy = 'existing';
       if (job.previous_status === 'unknown' || !extId) {
-        const hits = (await R.findInvoiceByReference(it.operational_ref)) || [];
+        const hits = (await R.findInvoiceByReference(reference)) || [];
         const others = extId ? hits.filter(h => String(h.id) !== String(extId)) : hits;
         if (hits.length > 1 || (extId && others.length > 0)) {
           throw new Outcome('conflict', Object.assign({}, base, {
@@ -382,9 +510,22 @@
           extId = String(hits[0].id);
           foundBy = it.external_invoice_id && String(it.external_invoice_id) === extId ? 'existing' : 'ref';
         } else if (!extId) {
-          // 0 hits: create the draft with every pending_add + synced line
-          const lines = (it.lines || []).filter(l => l.state === 'pending_add' || l.state === 'synced').map(l => marsaLine(l, productOf));
-          const payload = { reference: it.operational_ref, client_id: clientExt, currency: it.currency, date: it.invoice_date, notes: it.notes || null, lines };
+          // 0 hits: create the draft with every pending_add + synced line (+ the opening zero line)
+          const lines = (it.lines || []).filter(l => (l.state === 'pending_add' || l.state === 'synced') && !l.manual_in_daftra)
+            .map(l => marsaLine(l, productOf));
+          const ol = it.opening_line && typeof it.opening_line === 'object' ? it.opening_line : null;
+          if (ol) {
+            const on = nameOf(ol.item_key);
+            lines.push({ line_ref: null, product_id: productOf(ol.item_key), description: on || '', item_name: on || null,
+              daftra_description: ol.description === undefined || ol.description === null ? '' : String(ol.description), quantity: A.fixed(ol.quantity === undefined ? 1 : ol.quantity, 3), unit_price: A.fixed(ol.unit_price || 0, 2),
+              tax_rate: A.fixed(ol.vat_rate === undefined || ol.vat_rate === null ? 15 : ol.vat_rate, 2) });
+          }
+          if (!lines.length) throw failed(base, 'validation', 'nothing to put on the draft', ['lines']);
+          // the Daftra client of a new draft must exist and not be suspended (a client created just now is fresh)
+          if (!inline.clients.some(c => c.found_by === 'created')) await checkClientActive(R, clientExt, base);
+          const cm = customOf(it);
+          const payload = { reference, client_id: clientExt, currency: it.currency, date: invoiceDate(it, clock, ctx.connection), notes: it.notes || null, lines };
+          if (cm.payload && Object.keys(cm.payload).length) { payload.custom_fields = cm.payload; payload.custom_date_keys = cm.dateKeys; }
           const expected = await A.contentHash(A.canonicalInvoice(payload));
           let created;
           try { created = await R.createDraftInvoice(payload); }
@@ -393,7 +534,8 @@
             throw e;
           }
           const back = await R.getInvoice(created.id);
-          return { outcome: 'ok', effects: await pushOk(itc, back, 'created', inline) };
+          if (!back.url && created.url) back.url = created.url;
+          return { outcome: 'ok', effects: await pushOk(itc, back, 'created', inline, { readBack: true }) };
         }
       }
 
@@ -420,6 +562,18 @@
         throw new Outcome('frozen', pe);
       }
       const rh = await A.invoiceHash(remote);
+      if (hf5) {
+        // HF5 (allow_draft_update false): an existing draft is NEVER changed by Marsa. A draft found by reference (a lost
+        // create) is adopted as it is; the lines still missing on it become the manual_in_daftra review item in SQL.
+        if (foundBy === 'ref' || (job.expected_hash && rh === job.expected_hash)) {
+          return { outcome: 'ok', effects: await pushOk(itc, remote, foundBy, inline) };
+        }
+        const d0 = mergeLines(itc, remote, safeProductOf, false);
+        const same = (await A.contentHash(A.canonicalInvoice({ client_id: remote.client_id, currency: remote.currency, lines: d0 }))) === rh;
+        if (same) return { outcome: 'ok', effects: await pushOk(itc, remote, foundBy, inline) };
+        throw failed(Object.assign({}, base, inline, { external_invoice_id: String(extId) }), 'draft_update_disabled',
+          'the Daftra draft exists and editing it is not allowed (HF5): change it by hand in Daftra; nothing was sent');
+      }
       let baseline = it.pushed_hash || null;
       const editedConflict = d => new Outcome('conflict', Object.assign({}, base, { reason: 'remote_edited', remote_hash: rh, remote_snapshot: invoiceSnapshot(remote), diff: d, external_invoice_id: String(extId) }));
       // what this run would leave on the remote (Marsa's pending operations applied to it)
@@ -460,7 +614,7 @@
     }
 
     async function invoicePull(R, ctx) {
-      const it = ctx.intent;
+      const it = withNames(ctx.intent);
       if (!it || !it.external_invoice_id) throw new Outcome('failed', { intent_id: it && it.id }, { kind: 'validation', code: 'no_external_invoice', message: 'nothing to pull', http_status: null });
       let inv;
       try { inv = await R.getInvoice(it.external_invoice_id); }
@@ -474,6 +628,8 @@
       const pids = {};
       for (const item of it.items || []) if (item.external_product_id) pids[item.item_key] = String(item.external_product_id);
       const e = await pullEffects(R, it.id, inv, { it, productOf: k => pids[k] || null });
+      // step 7: the Daftra client of the invoice (client_mismatch in SQL when it is not the linked one)
+      if (inv.client_id !== undefined && inv.client_id !== null && String(inv.client_id) !== '') e.remote_client_id = String(inv.client_id);
       return { outcome: 'ok', effects: e };
     }
 
@@ -507,10 +663,11 @@
       return { outcome: 'ok', effects: { client_link_id: c.link_id, external_id: String(back.id), found_by: 'pushed', remote_snapshot: A.normalizeClient(back), pushed_snapshot: data } };
     }
 
-    async function itemJob(R, ctx) {
+    async function itemJob(R, ctx, env) {
       const it = ctx.item;
       if (!it) throw new Outcome('failed', {}, { kind: 'validation', code: 'item', message: 'no item in context', http_status: null });
-      const e = await ensureItem(R, Object.assign({}, it, { status: 'pending' }));
+      const pol = (env && env.policy) || A.writePolicy(null);
+      const e = await ensureItem(R, Object.assign({}, it, { status: 'pending' }), { noCreate: !pol.allow_product_create });
       return { outcome: 'ok', effects: e };
     }
 
@@ -524,7 +681,272 @@
       return { outcome: 'ok', effects: { capabilities: caps, account: (p && p.account) || {} } };
     }
 
-    return { ensureClient, ensureItem, invoicePush, invoicePull, clientJob, itemJob, probeJob };
+    /* ================================================================ step 7 kinds (read-only, except purchase_push) */
+    const clamp = (v, lo, hi, d) => { const n = Math.floor(Number(v)); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
+    const cut = (v, n) => { if (v === null || v === undefined) return null; const t = String(v).replace(/\s+/g, ' ').trim(); return t === '' ? null : t.slice(0, n); };
+    const idSeq = id => Number(String(id === null || id === undefined ? '' : id).replace(/^\D+/, '')) || 0;
+    const hasArabic = t => /[؀-ۿ]/.test(String(t || ''));
+    const runOf = ctx => (ctx && ctx.run && typeof ctx.run === 'object') ? ctx.run : {};
+    const keyOf = (map, name) => {
+      const f = map && map.fields && map.fields[name];
+      return f && typeof f === 'object' && typeof f.key === 'string' && A.CUSTOM_KEY_RE.test(f.key) ? f.key : null;
+    };
+    const fieldText = v => Array.isArray(v) ? v.map(x => (x === null || x === undefined ? '' : String(x))).filter(Boolean).join('، ') : (v === null || v === undefined ? '' : String(v));
+    // the composite keys of a Daftra invoice from its custom fields (the org's custom_field_map keys)
+    function fieldsOf(inv, map) {
+      const cf = inv && inv.custom_fields && typeof inv.custom_fields === 'object' ? inv.custom_fields : {};
+      const val = name => { const k = keyOf(map, name); return k && cf[k] !== undefined ? cut(fieldText(cf[k]), 1000) : null; };
+      const ctr = val('containers');
+      const f = { declaration_no: cut(val('declaration_no'), 60), bl: cut(val('bl'), 80) };
+      if (ctr) f.containers = A.containerSet(ctr);
+      return f;
+    }
+    const hasFields = (inv, map) => {
+      const cf = inv && inv.custom_fields && typeof inv.custom_fields === 'object' ? inv.custom_fields : {};
+      return ['declaration_no', 'bl', 'containers'].some(n => { const k = keyOf(map, n); return k && cf[k] !== undefined && fieldText(cf[k]) !== ''; });
+    };
+    function invoiceRow(inv, map) {
+      const t = (inv && inv.totals) || {};
+      return {
+        external_invoice_id: String(inv.id), daftra_number: cut(inv.number, 60), daftra_status: cut(inv.status, 40), remote_state: A.remoteState(inv.status),
+        date: A.normalizeDate(inv.date), currency: inv.currency && /^[A-Za-z]{3}$/.test(String(inv.currency)) ? String(inv.currency).toUpperCase() : null,
+        total: t.total === undefined || t.total === null ? null : A.money(t.total),
+        client_id: inv.client_id === undefined || inv.client_id === null || inv.client_id === '' ? null : cut(inv.client_id, 64),
+        client_name: cut(inv.client_name, 300), po_number: cut(inv.reference, 80), fields: fieldsOf(inv, map)
+      };
+    }
+    // a listing row without its custom fields is read in full (GET invoices/{id}), within a per-job budget
+    async function withFields(R, inv, map, budget) {
+      if (hasFields(inv, map) || budget.left <= 0) return inv;
+      budget.left--;
+      try {
+        const full = await R.getInvoice(inv.id);
+        return Object.assign({}, inv, { custom_fields: full.custom_fields || {}, client_id: full.client_id === undefined ? inv.client_id : full.client_id,
+          client_name: inv.client_name || full.client_name || null, totals: inv.totals || full.totals });
+      } catch (e) {
+        if (A.isAdapterError(e) && e.kind === 'not_found') return inv;
+        throw e;
+      }
+    }
+
+    // product_match: the configured codes against the Daftra products (zero-insensitive), name hits for the others; nothing linked
+    async function productMatchJob(R, ctx) {
+      const run = runOf(ctx);
+      const prods = Array.isArray(ctx.products) ? ctx.products : [];
+      const size = clamp(run.page_size, 20, 500, 100);
+      const pages = clamp(run.pages_per_job, 1, 10, 5);
+      const remote = [];
+      let complete = false;
+      for (let p = 1; p <= pages; p++) {
+        const r = (await R.listProducts({ page: p, limit: size })) || {};
+        const items = Array.isArray(r.items) ? r.items : [];
+        remote.push(...items);
+        if (!items.length || !r.more) { complete = true; break; }
+      }
+      let targeted = 0;
+      const out = [];
+      for (const pr of prods.slice(0, 500)) {
+        const n = A.codeNorm(pr.remote_product_code);
+        let hits = n ? remote.filter(x => A.codeNorm(x.code) === n) : [];
+        if (n && !hits.length && !complete && targeted < 30) {
+          targeted++;
+          hits = ((await R.findProductsByCodeNorm(pr.remote_product_code)) || []).filter(x => A.codeNorm(x.code) === n);
+        }
+        const nm = A.normalizeName(pr.name_ar);
+        const byName = nm ? remote.filter(x => !hits.includes(x) && (A.normalizeName(x.name_ar) === nm || (x.name_en && A.normalizeName(x.name_en) === nm))) : [];
+        const seen = new Set();
+        const cands = hits.concat(byName).filter(x => x && x.id && !seen.has(String(x.id)) && seen.add(String(x.id))).slice(0, 10)
+          .map(x => ({ external_product_id: cut(x.id, 64), code: cut(x.code, 40), name: cut(x.name_ar, 300) }));
+        out.push({ item_key: pr.item_key, candidates: cands });
+      }
+      return { outcome: 'ok', effects: { run_id: run.id, scanned: remote.length, products: out } };
+    }
+
+    // client_import: GET client pages from the run cursor (never a write, never a delete); next_cursor schedules the rest
+    function importRow(c) {
+      const primary = cut(c.name, 300);
+      const secondary = cut(c.secondary_name, 300);
+      let name = primary || secondary, en = null;
+      if (hasArabic(primary)) { name = primary; if (secondary && !hasArabic(secondary)) en = secondary; }
+      else if (hasArabic(secondary)) { name = secondary; en = primary; }
+      else if (secondary && secondary !== name) en = secondary;
+      return { external_id: cut(c.id, 64), client_number: cut(c.ref, 40), name: cut(name, 160), name_en: cut(en || c.name_en, 160),
+        vat_number: cut(c.vat_number, 40), cr_number: cut(c.cr_number, 40), phone: cut(c.phone, 40), email: cut(c.email, 160), city: cut(c.city, 80),
+        suspended: c.suspended === true };
+    }
+    async function clientImportJob(R, ctx) {
+      const run = runOf(ctx);
+      const cur = run.cursor && typeof run.cursor === 'object' ? run.cursor : {};
+      const size = clamp(run.page_size, 1, 500, 100);
+      const pages = clamp(run.pages_per_job, 1, Math.max(1, Math.floor(500 / size)), 5);
+      let page = clamp(cur.page, 1, 100000, 1);
+      const rows = [];
+      let next = null;
+      for (let i = 0; i < pages; i++) {
+        const r = (await R.listClients({ page, limit: size })) || {};
+        const items = Array.isArray(r.items) ? r.items : [];
+        for (const c of items) if (c && c.id !== undefined && c.id !== null) rows.push(importRow(c));
+        if (!items.length || !r.more) { next = null; break; }     // the end (an empty page ends the run: 0 rows in all → aborted in SQL)
+        page++;
+        next = { page };
+      }
+      return { outcome: 'ok', effects: { run_id: run.id, rows: rows.slice(0, 500), next_cursor: next } };
+    }
+
+    // invoice_lookup: by number, or the composite candidates (declaration keywords + the client's invoices); SQL decides
+    async function invoiceLookupJob(R, ctx) {
+      const t = ctx.transaction || {};
+      const lk = ctx.lookup || {};
+      const map = (ctx.connection && ctx.connection.custom_field_map) || {};
+      const budget = { left: 40 };
+      const base = { transaction_id: t.id };
+      let heads = [];
+      if (lk.mode === 'composite') {
+        const byId = new Map();
+        const add = list => { for (const h of list || []) if (h && h.id !== undefined && h.id !== null && !byId.has(String(h.id))) byId.set(String(h.id), h); };
+        for (const d of (Array.isArray(t.declaration_nos) ? t.declaration_nos : []).slice(0, 5)) {
+          if (!cut(d, 60)) continue;
+          add(((await R.listInvoices({ keywords: d, page: 1, limit: 50, direction: 'DESC' })) || {}).items);
+        }
+        if (t.client_external_id) {
+          for (let p = 1; p <= 2; p++) {
+            const r = (await R.listInvoices({ client_id: t.client_external_id, page: p, limit: 100, direction: 'DESC' })) || {};
+            add(r.items);
+            if (!r.more) break;
+          }
+        }
+        heads = Array.from(byId.values());
+      } else {
+        if (!cut(lk.number, 60)) throw failed(base, 'validation', 'an invoice number is needed', ['number']);
+        heads = ((await R.findInvoicesByNumber(lk.number)) || []).slice(0, 10);
+      }
+      const norm = v => String(v === null || v === undefined ? '' : v).toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const decl = new Set((t.declaration_nos || []).map(norm).filter(Boolean));
+      const bls = new Set((t.bl_numbers || []).map(norm).filter(Boolean));
+      const ctrs = new Set((t.containers || []).map(norm).filter(Boolean));
+      const score = r => (r.fields.declaration_no && decl.has(norm(r.fields.declaration_no)) ? 1 : 0) + (r.fields.bl && bls.has(norm(r.fields.bl)) ? 1 : 0)
+        + ((r.fields.containers || []).some(c => ctrs.has(norm(c))) ? 1 : 0);
+      const rows = [];
+      for (const h of heads) {
+        const full = await withFields(R, h, map, budget);
+        rows.push(invoiceRow(full, map));
+      }
+      const out = lk.mode === 'composite' ? rows.filter(r => score(r) > 0).sort((a, b) => score(b) - score(a)) : rows;
+      return { outcome: 'ok', effects: { transaction_id: t.id, invoices: out.slice(0, 50) } };
+    }
+
+    // legacy_scan: one resumable batch of older invoices (id ascending, GET only); the cursor {page, last_id} resumes it
+    async function legacyScanJob(R, ctx) {
+      const run = runOf(ctx);
+      const map = (ctx.connection && ctx.connection.custom_field_map) || {};
+      const cur = run.cursor && typeof run.cursor === 'object' ? run.cursor : {};
+      const size = clamp(run.page_size, 1, 500, 100);
+      const pages = clamp(run.pages_per_job, 1, Math.max(1, Math.floor(500 / size)), 5);
+      const budget = { left: 40 };
+      let page = clamp(cur.page, 1, 1000000, 1);
+      let lastId = cur.last_id === undefined || cur.last_id === null ? null : String(cur.last_id);
+      const out = [];
+      let next = null;
+      let ended = false;
+      for (let i = 0; i < pages && !ended; i++) {
+        const r = (await R.listInvoices({ page, limit: size, direction: 'ASC' })) || {};
+        const items = Array.isArray(r.items) ? r.items : [];
+        let stopped = false;
+        for (const h of items) {
+          if (!h || h.id === undefined || h.id === null) continue;
+          if (lastId !== null && idSeq(h.id) <= idSeq(lastId)) continue;            // already reported by an earlier batch
+          if (!hasFields(h, map) && budget.left <= 0) { stopped = true; break; }       // the detail budget is spent: resume here
+          out.push(invoiceRow(await withFields(R, h, map, budget), map));
+          lastId = String(h.id);
+        }
+        if (stopped) { next = { page, last_id: lastId }; ended = true; break; }
+        if (!items.length || !r.more) { next = null; ended = true; break; }
+        page++;
+        next = { page, last_id: lastId };
+      }
+      if (next && next.last_id === null) delete next.last_id;
+      return { outcome: 'ok', effects: { run_id: run.id, invoices: out.slice(0, 500), next_cursor: next } };
+    }
+
+    // supplier_search: GET suppliers by name (a suspended supplier is never offered); SQL links only a unique exact name
+    async function supplierSearchJob(R, ctx) {
+      const run = runOf(ctx);
+      const q = cut(run.params && run.params.q, 120);
+      if (!q) throw failed({ run_id: run.id }, 'validation', 'a supplier name is needed', ['q']);
+      const list = ((await R.searchSuppliers(q)) || []).filter(x => x && x.id !== undefined && x.id !== null && cut(x.name, 300) && x.suspended !== true);
+      const seen = new Set();
+      const suppliers = list.filter(x => !seen.has(String(x.id)) && seen.add(String(x.id))).slice(0, 50)
+        .map(x => { const o = { external_supplier_id: cut(x.id, 64), name: cut(x.name, 300), supplier_number: cut(x.supplier_number, 60) };
+          if (cut(x.secondary_name, 300)) o.secondary_name = cut(x.secondary_name, 300);      // review: legacy exact match on the secondary name too
+          return o; });
+      return { outcome: 'ok', effects: { run_id: run.id, suppliers } };
+    }
+
+    // purchase_push: ONE new zero-tax purchase draft per trip (legacy ensureMovementPurchaseDraftR12_): a known id is only
+    // read, never re-created; the reference is looked up first; the id is reported as soon as it is known
+    async function purchasePush(R, ctx, env) {
+      const p = ctx.purchase;
+      const job = ctx.job || {};
+      const clock = (env && env.clock) || (() => new Date().toISOString());
+      if (!p) throw new Outcome('failed', {}, { kind: 'validation', code: 'purchase', message: 'no purchase in context', http_status: null });
+      const base = { purchase_id: p.id };
+      if (p.status === 'cancelled') throw failed(base, 'validation', 'the purchase draft is cancelled', ['status']);
+      if (!p.supplier_external_id) throw failed(base, 'supplier_not_linked', 'the transport party is not linked to a Daftra supplier');
+      const viewOk = (x, by) => {
+        const e = { purchase_id: p.id, external_purchase_id: String(x.id), found_by: by };
+        if (x.number) e.daftra_number = cut(x.number, 60);
+        const url = urlOf(x);
+        if (url) e.daftra_url = url;
+        return e;
+      };
+      if (p.external_purchase_id) {
+        let x;
+        try { x = await R.getPurchase(p.external_purchase_id); }
+        catch (e) {
+          if (A.isAdapterError(e) && e.kind === 'not_found') throw failed(Object.assign({}, base, { external_purchase_id: String(p.external_purchase_id) }), 'not_found',
+            'the saved Daftra purchase draft is missing; no second draft is created');
+          throw e;
+        }
+        return { outcome: 'ok', effects: viewOk(x, 'ref') };
+      }
+      if (!cut(p.reference, 80)) throw failed(base, 'validation', 'purchase reference missing', ['reference']);
+      const item = p.item && typeof p.item === 'object' ? p.item : null;
+      const productId = await resolveItem(R, item, base);
+      const look = (await R.findPurchaseByReference(p.reference)) || { hits: [], complete: false };
+      const hits = Array.isArray(look.hits) ? look.hits : [];
+      if (hits.length === 1) return { outcome: 'ok', effects: viewOk(hits[0], 'ref') };
+      if (hits.length > 1) {
+        throw new Outcome('conflict', Object.assign({}, base, { external_ids: hits.map(h => String(h.id)).slice(0, 10) }),
+          { kind: 'conflict', code: 'reference_conflict', message: 'several Daftra purchase drafts carry this reference', http_status: null });
+      }
+      if (!look.complete && job.previous_status === 'unknown') {
+        throw failed(base, 'reference_lookup_incomplete', 'cannot prove that no purchase draft carries this reference; nothing was sent');
+      }
+      const lines = (Array.isArray(p.lines) ? p.lines : []).map(l => ({ product_id: productId, item_name: (item && item.name_ar) || null,
+        description: cut(l.description, 900) || '', quantity: A.fixed(l.quantity === undefined ? 1 : l.quantity, 3), unit_price: A.fixed(l.unit_price, 2), tax_rate: '0.00' }));
+      if (!lines.length || lines.some(l => !(Number(l.unit_price) > 0))) throw failed(base, 'validation', 'the trip cost is not a positive amount', ['amount']);
+      const payload = { reference: p.reference, supplier_id: String(p.supplier_external_id), currency: p.currency || 'SAR',
+        date: A.normalizeDate(p.invoice_date) || A.riyadhDate(clock()), lines };
+      let created;
+      try { created = await R.createPurchaseDraft(payload); }
+      catch (e) {
+        if (A.isAdapterError(e) && e.applied === 'unknown') {
+          const eff = Object.assign({}, base);
+          if (e.external_id) eff.external_purchase_id = String(e.external_id);
+          throw new Outcome('unknown', eff, errJson(e));
+        }
+        throw e;
+      }
+      let back = created, unread = false;
+      try { back = Object.assign({}, created, await R.getPurchase(created.id)); } catch (_) { back = created; unread = true; }   // the id is kept even if the read fails
+      // review (legacy re-read after the POST): Daftra applied a tax, or the record is no longer a draft → flagged for a human
+      const eff = viewOk(back, 'created');
+      eff.checks = { tax_nonzero: back.tax_nonzero === true, not_draft: !unread && !!back.status && back.status !== 'draft', unread };
+      return { outcome: 'ok', effects: eff };
+    }
+
+    return { ensureClient, ensureItem, invoicePush, invoicePull, clientJob, itemJob, probeJob,
+      productMatchJob, clientImportJob, invoiceLookupJob, legacyScanJob, supplierSearchJob, purchasePush };
   }
 
   // target effects for an error outcome (so completion stamps last_error_* on the right row)
@@ -533,6 +955,9 @@
     if (k === 'invoice_push' || k === 'invoice_pull') return ctx.intent ? { intent_id: ctx.intent.id } : {};
     if (k && k.startsWith('client_')) return ctx.client ? { client_link_id: ctx.client.link_id } : {};
     if (k === 'item_ensure') return ctx.item ? { item_link_id: ctx.item.link_id } : {};
+    if (k === 'purchase_push') return ctx.purchase ? { purchase_id: ctx.purchase.id } : {};
+    if (k === 'invoice_lookup') return ctx.transaction ? { transaction_id: ctx.transaction.id } : {};
+    if (['product_match', 'client_import', 'legacy_scan', 'supplier_search'].includes(k)) return ctx.run ? { run_id: ctx.run.id } : {};
     return {};
   }
 
@@ -549,21 +974,45 @@
     const A = o.deps;
     if (!A || typeof A.canonicalInvoice !== 'function') throw new Error('runJob: deps (adapter API) required');
     const clock = typeof o.clock === 'function' ? o.clock : () => new Date().toISOString();
-    const R = recorder(adapter, A, clock, { beforeWrite: o.beforeWrite, callTimeoutMs: o.callTimeoutMs });
+    const kind = ctx && ctx.job && ctx.job.kind;
+    const conn = (ctx && ctx.connection) || {};
+    // step 7: the org's write policy (fail closed) and the read-only kinds, enforced on every adapter call
+    const policy = A.writePolicy(conn.policy);
+    // review: a live (enforced) account is read again right before the first write (GET site_info + taxes, read only): the
+    // probe's cached profile may be stale (the account switched back to Egypt after the last probe); fail closed on any doubt
+    const enforced = A.WRITE_KINDS.includes(kind) && conn.account && conn.account.enforced === true;
+    const R = recorder(adapter, A, clock, { beforeWrite: o.beforeWrite, callTimeoutMs: o.callTimeoutMs, policy,
+      readOnly: !A.WRITE_KINDS.includes(kind),
+      accountGate: enforced ? async rec => A.accountCheck(await rec.getAccountProfile()) : null });
     const K = makeCtx(A);
+    const env = { policy, clock };
     let res;
     try {
-      const kind = ctx && ctx.job && ctx.job.kind;
-      if (kind === 'probe') res = await K.probeJob(R.api);
-      else if (kind === 'invoice_push') res = await K.invoicePush(R.api, ctx);
+      // step 7: the KSA account guard before ANY call of a write kind (the Daftra account must be SAR / Saudi Arabia / 15 %)
+      const acc = A.WRITE_KINDS.includes(kind) ? A.ksaBlock(conn.account) : null;
+      if (acc) {
+        res = { outcome: 'failed', effects: targetOf(ctx), error: { kind: 'validation', code: 'account_not_ksa',
+          message: 'the Daftra account is not a KSA account (SAR, Saudi Arabia, 15 % VAT); nothing was sent (fields: ' + acc + ')', http_status: null } };
+      }
+      else if (kind === 'probe') res = await K.probeJob(R.api);
+      else if (kind === 'invoice_push') res = await K.invoicePush(R.api, ctx, env);
       else if (kind === 'invoice_pull') res = await K.invoicePull(R.api, ctx);
       else if (kind === 'client_ensure' || kind === 'client_refresh' || kind === 'client_push') res = await K.clientJob(R.api, ctx);
-      else if (kind === 'item_ensure') res = await K.itemJob(R.api, ctx);
+      else if (kind === 'item_ensure') res = await K.itemJob(R.api, ctx, env);
+      else if (kind === 'product_match') res = await K.productMatchJob(R.api, ctx);
+      else if (kind === 'client_import') res = await K.clientImportJob(R.api, ctx);
+      else if (kind === 'invoice_lookup') res = await K.invoiceLookupJob(R.api, ctx);
+      else if (kind === 'legacy_scan') res = await K.legacyScanJob(R.api, ctx);
+      else if (kind === 'supplier_search') res = await K.supplierSearchJob(R.api, ctx);
+      else if (kind === 'purchase_push') res = await K.purchasePush(R.api, ctx, env);
       else res = { outcome: 'failed', error: { kind: 'validation', code: 'job_kind', message: 'unknown job kind ' + kind, http_status: null }, effects: {} };
     } catch (e) {
       if (e instanceof Outcome) {
         res = { outcome: e.outcome, effects: e.effects || {}, error: e.error };
         if (e.extra && e.extra.expected_hash) res.expected_hash = e.extra.expected_hash;
+      } else if (e instanceof AccountBlocked) {
+        res = { outcome: 'failed', effects: targetOf(ctx), error: { kind: 'validation', code: 'account_not_ksa',
+          message: 'the Daftra account read before the write is not a KSA account (SAR, Saudi Arabia, 15 % VAT); nothing was sent (fields: ' + e.reason + ')', http_status: null } };
       } else if (e instanceof LeaseLost) {
         // fencing refused the next write: nothing more was sent. An earlier write of this run may have landed → unknown.
         const wrote = R.calls.some(c => A.WRITE_METHODS.includes(c.op) && c.applied !== 'no');
@@ -637,5 +1086,6 @@
   }
 
   const API = { createWorker, runJob, redactCalls: redact, scrubText };
+  // the UI's dictionary key of a job error (status_labels domain 'daftra_error') + its {fields}: A.errorCode / A.errorFields
   (typeof module === 'object' && module.exports) ? (module.exports = API) : (globalThis.MarsaDaftra = Object.assign(globalThis.MarsaDaftra || {}, API));
 })();

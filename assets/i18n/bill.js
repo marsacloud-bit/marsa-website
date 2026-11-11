@@ -112,7 +112,7 @@
       job_attempts: 'المحاولات', job_attempts_of: 'محاولات: {kind}', job_retry: 'إعادة المحاولة', job_requeued: 'أُعيد الطلب إلى الطابور.', job_queued: 'أُضيف الطلب إلى الطابور.',
       attempts_none: 'لا محاولات بعد.', attempt_n: 'المحاولة {n}', attempt_open: 'مفتوحة', attempt_error: 'الخطأ', applied: 'التنفيذ',
       call_request: 'الطلب', call_response: 'الرد', call_error: 'الخطأ', calls_none: 'لا استدعاءات مسجلة.',
-      target_client: 'عميل', target_item: 'صنف', target_org: 'المنشأة',
+      target_client: 'عميل', target_item: 'صنف', target_org: 'المنشأة', target_run: 'تشغيلة دفترة',
 
       // #billing/queue
       queue_title: 'طابور المزامنة والمراجعة', queue_sub: 'طلبات المزامنة مع دفترة وما يحتاج قرارًا بشريًا.',
@@ -169,7 +169,7 @@
       external_client_hint: 'اتركه فارغًا ليبحث العامل بمرجع مرسى ثم ينشئ العميل إن لم يجده.', external_invalid: 'معرّف غير صالح (حروف إنجليزية وأرقام و _ . : - حتى 64).',
       // items
       items: 'الأصناف والخدمات', items_sub: 'مفتاح صنف واحد ↔ منتج واحد في دفترة؛ لا يُنشأ منتج ثانٍ بالاسم نفسه.',
-      items_rule: 'تُنشأ الأصناف عند أول إرسال يحتاجها: يُبحث بالرمز ثم بالاسم، وأي تطابق بالاسم برمز مختلف يتوقف للمراجعة.',
+      items_rule: 'مرسى لا ينشئ أصنافًا في دفترة (قرار المالك): كل صنف يُحل بكوده الموجود في دفترة ويؤكَّد من تبويب «الأصناف بالكود»؛ الصنف غير المؤكد يمنع المسودة.',
       items_empty_title: 'لا أصناف', items_empty_text: 'لم تُرجع قائمة الأصناف أي مفتاح.',
       col_item: 'الصنف', col_product_code: 'رمز المنتج', col_names: 'الاسم', col_tax: 'الضريبة الافتراضية', col_external_product: 'معرّف المنتج في دفترة',
       item_edit: 'تعديل الصنف', item_saved: 'حُفظ الصنف.', f_name_ar: 'الاسم بالعربية', f_name_en: 'الاسم بالإنجليزية', f_tax_code: 'التصنيف الضريبي',
@@ -317,7 +317,7 @@
       job_attempts: 'Attempts', job_attempts_of: 'Attempts: {kind}', job_retry: 'Retry', job_requeued: 'The request was queued again.', job_queued: 'The request was queued.',
       attempts_none: 'No attempts yet.', attempt_n: 'Attempt {n}', attempt_open: 'Open', attempt_error: 'Error', applied: 'Applied',
       call_request: 'Request', call_response: 'Response', call_error: 'Error', calls_none: 'No calls recorded.',
-      target_client: 'Client', target_item: 'Item', target_org: 'Organization',
+      target_client: 'Client', target_item: 'Item', target_org: 'Organization', target_run: 'Daftra run',
 
       queue_title: 'Sync queue & review', queue_sub: 'Daftra sync requests and what needs a human decision.',
       tile_queued: 'Queued', tile_unknown_jobs: 'Awaiting reconcile', tile_failed: 'Failed / dead', tile_late: 'Late charges', tile_review_other: 'Other reviews',
@@ -370,7 +370,7 @@
       link_intro: 'Link {name} to a Daftra client.', f_external_client: 'Daftra client id (optional)',
       external_client_hint: 'Leave empty to let the worker look up Marsa\'s reference and create the client if not found.', external_invalid: 'Invalid id (letters, digits, _ . : - up to 64).',
       items: 'Items & services', items_sub: 'One item key ↔ one Daftra product; no second product with the same name.',
-      items_rule: 'Items are created on the first push that needs them: looked up by code, then by name; a name match with another code stops for review.',
+      items_rule: 'Marsa never creates Daftra products (owner decision): each product is resolved by its existing Daftra code and confirmed on the "Products by code" tab; an unconfirmed product blocks the draft.',
       items_empty_title: 'No items', items_empty_text: 'The item list returned no key.',
       col_item: 'Item', col_product_code: 'Product code', col_names: 'Name', col_tax: 'Default tax', col_external_product: 'Daftra product id',
       item_edit: 'Edit item', item_saved: 'Item saved.', f_name_ar: 'Arabic name', f_name_en: 'English name', f_tax_code: 'Tax classification',

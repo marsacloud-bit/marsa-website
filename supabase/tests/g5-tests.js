@@ -388,7 +388,7 @@ async function secCatalog() {
                                 count(*) FILTER (WHERE label_ar = '' OR label_en = '')::int e,
                                 count(*) FILTER (WHERE domain = 'daftra_capability')::int caps
                            FROM public.status_labels WHERE domain LIKE 'daftra\\_%' OR domain LIKE 'bill\\_%'`);
-    return (r.d === 14 && r.v === 0 && r.e === 0 && r.caps === 17) || JSON.stringify(r);
+    return (r.d === 14 + 8 /* + 8 legacy step 7 domains (20261123000100) */ && r.v === 0 && r.e === 0 && r.caps === 17) || JSON.stringify(r);
   });
   await check('roles: bill_admin = accounts_manager, admin; push gate = 8 capabilities', async () => {
     const r = await one(`SELECT app.bill_admin_roles() a, app.bill_required_caps() c, app.bill_capability_keys() k`);
@@ -1812,6 +1812,9 @@ async function main() {
   const migFiles = fs.readdirSync(migDir).filter(f => /^\d+_.*\.sql$/.test(f)).sort();
   if (!await runFile(db, path.join(SUPA, 'tests', 'shim.sql'))) return finish();
   for (const m of migFiles) if (!await runFile(db, path.join(migDir, m))) return finish();
+  // legacy step 7 (20261123000100): the owner decisions default to HF5 (no edit of an existing Daftra draft) and resolve-only
+  // products (never created); this suite tests the G5 behaviour, so the connections it creates start with the G5 write policy
+  await db.exec(`ALTER TABLE public.daftra_connections ALTER COLUMN allow_draft_update SET DEFAULT true, ALTER COLUMN allow_product_create SET DEFAULT true`);
   if (!await runFile(db, path.join(SUPA, 'seed.sql'))) return finish();
   try { await fixtures(); pass('fixtures: two orgs, finance roles by branch, approved G4 charges'); }
   catch (e) { fail('fixtures', errText(e)); return finish(); }

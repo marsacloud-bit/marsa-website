@@ -491,7 +491,7 @@ async function reviewFlow() {
       && ap.a.o.declarationDateHijri === '1447/01/01' && ap.a.o.items[0].hs_code === '08041000' && ap.a.o.containers.length === 2 && !ap.a.o.confirmBlMismatch) || J(ap));
   check('the result: action, B/L, containers added / updated, HS rows, filled / kept fields, Daftra deferred, link back', () =>
     (/اعتُمد البيان/.test(root.textContent) && /أُضيفت 1، حُدّثت 1/.test(root.textContent) && /TGHU7654321/.test(root.textContent) && /مُلئت في المعاملة: الباخرة/.test(root.textContent)
-      && /بقيت كما هي في المعاملة: بلد المنشأ/.test(root.textContent) && /مؤجلة/.test(root.textContent) && root.querySelectorAll('a').some(a => a.href === 'admin.html#tx/' + TX)) || root.textContent.slice(0, 500));
+      && /بقيت كما هي في المعاملة: بلد المنشأ/.test(root.textContent) && /دفترة: حالة المسودة الافتتاحية/.test(root.textContent) && root.querySelectorAll('a').some(a => a.href === 'admin.html#tx/' + TX)) || root.textContent.slice(0, 500));
 
   // B/L mismatch: blocked until the explicit confirmation
   const M2 = mockApi({ cmp: { bl: { status: 'mismatch', transaction_bls: ['OOLU999'], candidates: ['123456 MEDU'], matched_with: null }, conflicts: [{ code: 'bl_mismatch', blocking: true, confirmable: true }] } });

@@ -288,6 +288,24 @@ async function apptFixtures() {
 // legacy pay (20261122000100): per org, a payment register entry with an invoice line (record_payment_bundle: the G4 invoice
 // and payment it books), a typed attachment, and a custody deposit + deduction (save_custody_entry), by a finance role of the
 // org (org A: adminA on TX1; org B: finB on B_TX)
+// legacy daftra (20261123000100): per org, one row in each step-7 table, inserted by the owner (superuser) because the natural
+// paths need a worker result (a Daftra page / invoice / supplier / purchase draft); every RPC path is exercised by
+// legacy-daftra-sql-tests.js
+async function daftraFixtures() {
+  for (const [org, tx, tag] of [[A, TX1, 'a'], [B, B_TX, 'b']]) {
+    const run = (await q(`INSERT INTO public.daftra_runs (org_id, kind, status) VALUES ($1, 'client_file', 'ready') RETURNING id`, [org]))[0].id;
+    await q(`INSERT INTO public.daftra_client_import_rows (org_id, run_id, seq, source, name_ar, proposed_action) VALUES ($1, $2, 1, 'file', 'عميل ملف', 'create')`, [org, run]);
+    await q(`INSERT INTO public.daftra_invoice_candidates (org_id, transaction_id, source, external_invoice_id, client_check) VALUES ($1, $2, 'lookup_number', $3, 'ok')`,
+      [org, tx, 'rls-inv-' + tag]);
+    const sl = (await q(`INSERT INTO public.daftra_supplier_links (org_id, name, name_norm, external_supplier_id) VALUES ($1, 'مورد', 'مورد', $2) RETURNING id`,
+      [org, 'rls-sup-' + tag]))[0].id;
+    let trip = (await q(`SELECT id FROM public.transport_trips WHERE transaction_id = $1 LIMIT 1`, [tx]))[0];
+    if (!trip) trip = (await q(`INSERT INTO public.transport_trips (org_id, transaction_id, status) VALUES ($1, $2, 'delivered') RETURNING id`, [org, tx]))[0];
+    await q(`INSERT INTO public.daftra_purchase_drafts (org_id, transaction_id, trip_id, supplier_link_id, reference, amount, item_key)
+             VALUES ($1, $2, $3, $4, $5, 10, 'item:transportation_cost')`, [org, tx, trip.id, sl, 'MRSP-' + (tag === 'a' ? 'AAAAAAAAAAAA' : 'BBBBBBBBBBBB')]);
+  }
+}
+
 async function payFixtures() {
   const rpcAs = async (who, sql, params) => (await as(who, sql, params))[0].r;
   for (const [who, org, br, tx, cl, tag] of [['adminA', A, JED, TX1, CL101, 'A'], ['finB', B, B_BR, B_TX, B_CL, 'B']]) {
@@ -578,6 +596,12 @@ const TENANT_TABLES = [
   ['disbursement_allocations', `SELECT id::text id FROM public.disbursement_allocations WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
   ['payment_documents', `SELECT id::text id FROM public.payment_documents WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
   ['client_custody_entries', `SELECT id::text id FROM public.client_custody_entries WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
+  // legacy daftra (20261123000100): finance readers (branch scope through the transaction) / staff for supplier links; written only by RPCs and the worker completion
+  ['daftra_runs', `SELECT id::text id FROM public.daftra_runs WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
+  ['daftra_client_import_rows', `SELECT id::text id FROM public.daftra_client_import_rows WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
+  ['daftra_invoice_candidates', `SELECT id::text id FROM public.daftra_invoice_candidates WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
+  ['daftra_supplier_links', `SELECT id::text id FROM public.daftra_supplier_links WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
+  ['daftra_purchase_drafts', `SELECT id::text id FROM public.daftra_purchase_drafts WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
   ['invitations',        `SELECT id::text id FROM public.invitations WHERE org_id = $1 LIMIT 1`,        'id::text',  'email = email'],
   // G3 registry (20261103000100)
   ['parties',            `SELECT id::text id FROM public.parties WHERE org_id = $1 LIMIT 1`,            'id::text',  'name_ar = name_ar'],
@@ -643,6 +667,9 @@ async function main() {
   const migs = fs.readdirSync(migDir).filter(f => /^\d+_.*\.sql$/.test(f)).sort().map(f => path.join(migDir, f));
   if (!await runFile(path.join(SUPA, 'tests', 'shim.sql'))) return finish();
   for (const m of migs) if (!await runFile(m)) return finish();
+  // legacy step 7 (20261123000100): the owner decisions default to HF5 (no edit of an existing Daftra draft) and resolve-only
+  // products (never created); the fixtures push G5 drafts, so the connections start with the G5 write policy
+  await db.exec(`ALTER TABLE public.daftra_connections ALTER COLUMN allow_draft_update SET DEFAULT true, ALTER COLUMN allow_product_create SET DEFAULT true`);
   if (!await runFile(path.join(SUPA, 'seed.sql'))) return finish();
   try { await fixtures(); pass('fixtures: 2 tenants, 6 users, docs, storage objects'); }
   catch (e) { fail('fixtures', errText(e)); return finish(); }
@@ -670,6 +697,8 @@ async function main() {
   catch (e) { fail('legacy appt fixtures', errText(e)); return finish(); }
   try { await payFixtures(); pass('legacy pay fixtures: a payment entry with an attachment and a custody deposit + deduction per org'); }
   catch (e) { fail('legacy pay fixtures', errText(e)); return finish(); }
+  try { await daftraFixtures(); pass('legacy daftra fixtures: one row per org in each step-7 table'); }
+  catch (e) { fail('legacy daftra fixtures', errText(e)); return finish(); }
 
   /* ---------------------------------------------------------------- catalog */
   section('catalog: RLS, grants, function privileges');
@@ -778,9 +807,18 @@ async function main() {
       // the duplicate / transaction checks) and the client custody
       'record_payment_bundle', 'correct_payment', 'void_payment', 'review_payment', 'add_payment_documents', 'remove_payment_document',
       'get_payment', 'list_payments', 'tx_disbursements', 'check_payment_duplicates', 'match_payment_transaction', 'save_custody_entry',
-      'void_custody_entry', 'list_custody_entries', 'custody_balances', 'client_custody_balance'];
+      'void_custody_entry', 'list_custody_entries', 'custody_balances', 'client_custody_balance',
+      // legacy daftra (20261123000100): owner-only write policy, custom fields, products by code, opening draft, HF5 reviews, client
+      // import, invoice lookup / link / legacy scan, read-only refresh, supplier search, purchase drafts
+      'set_daftra_write_policy', 'save_daftra_custom_fields', 'test_daftra_custom_fields', 'list_daftra_product_map', 'save_daftra_product_code',
+      'request_daftra_product_match', 'confirm_daftra_product_mapping', 'retry_daftra_opening', 'resolve_daftra_review', 'list_daftra_reviews',
+      'request_daftra_client_import', 'list_daftra_client_import', 'apply_daftra_client_import', 'import_clients', 'request_daftra_invoice_lookup',
+      'confirm_invoice_link', 'reject_invoice_candidate', 'request_daftra_legacy_scan', 'get_daftra_run', 'refresh_tx_daftra',
+      'request_daftra_supplier_search', 'list_daftra_supplier_links', 'request_daftra_purchase_draft',
+      // legacy daftra review: the audited supplier unlink (bill_admin, reason)
+      'unlink_daftra_supplier'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 250) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 274) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');

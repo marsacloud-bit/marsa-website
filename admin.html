@@ -265,6 +265,7 @@
   <script src="assets/i18n/fin.js" defer></script>
   <script src="assets/i18n/pay.js" defer></script>
   <script src="assets/i18n/bill.js" defer></script>
+  <script src="assets/i18n/dft.js" defer></script>
   <script src="assets/i18n/rpt.js" defer></script>
   <script src="assets/i18n/msg.js" defer></script>
   <script src="assets/i18n/docb.js" defer></script>
@@ -277,8 +278,11 @@
   <script src="assets/js/pwa.js" defer></script>
   <!-- G3 operations modules: register MarsaOps.views / txSections before admin.js reads them -->
   <script src="assets/js/legacy-norm.js" defer></script>
+  <script src="assets/js/xlsx-lite.js" defer></script>
   <script src="assets/js/hs-picker.js" defer></script>
   <script src="assets/js/ops/alerts.js" defer></script>
+  <!-- legacy step 7 (docs/online/LEGACY_DAFTRA_AR.md): MarsaOps.dftKit — worker error dictionary, KSA guard, opening note, trip supplier search -->
+  <script src="assets/js/bill/dft-kit.js" defer></script>
   <script src="assets/js/ops/schedule.js" defer></script>
   <script src="assets/js/ops/parties.js" defer></script>
   <script src="assets/js/ops/exceptions.js" defer></script>
@@ -303,6 +307,8 @@
   <script src="assets/js/fin/tx-fin.js" defer></script>
   <!-- G5 billing & Daftra (docs/online/G5_SPEC.md): MarsaOps views #billing, #daftra + tx section bill-invoices -->
   <script src="assets/js/bill/billing.js" defer></script>
+  <!-- legacy step 7: the #daftra tabs products / fields / import / reviews + account guard / policy / org settings cards -->
+  <script src="assets/js/bill/dft-settings.js" defer></script>
   <script src="assets/js/bill/daftra.js" defer></script>
   <script src="assets/js/bill/tx-bill.js" defer></script>
   <!-- G6a reports, advanced search & role dashboards (docs/online/G6A_SPEC.md): views #search, #reports + window.MarsaDash -->

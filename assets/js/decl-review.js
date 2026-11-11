@@ -1168,7 +1168,14 @@
       if (r.kept.length) li(T('r_kept', { list: r.kept.map(function (f) { return T('tf_' + f); }).join(sep) }));
       if (r.replaced.length) li(T('r_replaced', { list: r.replaced.map(function (f) { return T('tf_' + f); }).join(sep) }));
       r.warnings.forEach(function (w) { li(T('w_' + w) === 'w_' + w ? String(w) : T('w_' + w)); });
-      li(T('r_daftra'));
+      // legacy step 7: whether the approval requested the opening Daftra draft (org setting, OFF by default; finance only)
+      var DK = window.MarsaOps && window.MarsaOps.dftKit;
+      if (DK && API && S.route && S.route.tx) {
+        // review: the <li> stays hidden (no empty bullet) until the note has text — non-finance users see nothing
+        var liD = el('li'); liD.hidden = true;
+        liD.appendChild(DK.openingNote(API, S.route.tx, { cls: 'decl-result-daftra', host: liD })); ul.appendChild(liD);
+      }
+      else li(T('r_daftra'));
       box.appendChild(ul);
       var bar = el('div', 'decl-actions');
       var a = el('a', 'btn btn-sm btn-primary', T('open_tx')); a.href = txLink(S.route.tx);

@@ -286,7 +286,7 @@ async function unitChecks() {
   await check('worker.runJob: an AdapterError applied:unknown → outcome unknown, never failed / retry; secrets redacted from calls', async () => {
     const m = createMockAdapter({ orgId: 'o', deps: AD });
     m.control.loseResponse('createClient');
-    const ctx = { job: { id: 'j', org_id: 'o', kind: 'client_ensure', attempt_no: 1, options: {}, previous_status: 'queued' },
+    const ctx = { connection: { account: { ok: true, reason: null, enforced: false }, policy: { allow_draft_update: true, allow_product_create: true } }, job: { id: 'j', org_id: 'o', kind: 'client_ensure', attempt_no: 1, options: {}, previous_status: 'queued' },
       client: { link_id: 'L', client_id: 'C', client_ref: 'MRSC-C', external_id: null, status: 'pending', data: { name: 'x', vat_number: null } } };
     const r = await runJob(ctx, m, { deps: AD, clock: FIXED_CLOCK });
     const m2 = { probe: async () => ({ capabilities: {}, account: { api_key: 'SHOULD-NOT-APPEAR', nested: { Authorization: 'Bearer x', token: 't' } } }) };
@@ -298,7 +298,7 @@ async function unitChecks() {
   await check('worker.runJob: VAT hit → conflict with candidates, no client created', async () => {
     const m = createMockAdapter({ orgId: 'o', deps: AD });
     await m.createClient({ ref: 'OTHER', name: 'عميل قديم', vat_number: '300000000000003' });
-    const ctx = { job: { id: 'j', org_id: 'o', kind: 'client_ensure', options: {} },
+    const ctx = { connection: { account: { ok: true, reason: null, enforced: false }, policy: { allow_draft_update: true, allow_product_create: true } }, job: { id: 'j', org_id: 'o', kind: 'client_ensure', options: {} },
       client: { link_id: 'L', client_ref: 'MRSC-C', status: 'pending', data: { name: 'x', vat_number: '300000000000003' } } };
     const r = await runJob(ctx, m, { deps: AD });
     return (r.outcome === 'conflict' && r.effects.candidates.length === 1 && r.effects.candidates[0].external_id === 'c-1' && m.control.count('client') === 1) || JSON.stringify(r);
@@ -857,6 +857,9 @@ async function main() {
   if (!migFiles.includes(G5_MIGRATION)) { fail('G5 migration present', G5_MIGRATION + ' not found (DB agent writes it)'); return finish(); }
   if (!await runFile(path.join(SUPA, 'tests', 'shim.sql'))) return finish();
   for (const m of migFiles) if (!await runFile(path.join(migDir, m))) return finish();
+  // legacy step 7 (20261123000100): the owner decisions default to HF5 (no edit of an existing Daftra draft) and resolve-only
+  // products (never created); this suite tests the G5 behaviour, so the connections it creates start with the G5 write policy
+  await db.exec(`ALTER TABLE public.daftra_connections ALTER COLUMN allow_draft_update SET DEFAULT true, ALTER COLUMN allow_product_create SET DEFAULT true`);
   if (!await runFile(path.join(SUPA, 'seed.sql'))) return finish();
   try { await fixtures(); pass('fixtures: finance users A + B, org B (OBB), TX-A..D (org A), TX-OB (org B)'); }
   catch (e) { fail('fixtures', errText(e)); return finish(); }

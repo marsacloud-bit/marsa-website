@@ -14,6 +14,9 @@
      direction; the Marsa client row is never changed from here.
    * Settings / catalog / unlink = can('billAdmin'); link / refresh =
      can('finWrite'); drift resolution = can('finApprove'). The server decides.
+   * Legacy step 7 (docs/online/LEGACY_DAFTRA_AR.md): the tabs #daftra/products, /fields, /import, /reviews and the
+     account guard / write policy / org settings / older-invoice scan cards of «الاتصال» come from
+     assets/js/bill/dft-settings.js (MarsaOps.dftSettings, loaded before this file).
    ========================================================================== */
 (function () {
   'use strict';
@@ -42,7 +45,10 @@
     var B = Ops.billKit && Ops.billKit();
     if (!B) return noKit(root);
     var U = B.U, F = B.F, el = B.el, t = B.t, sc = U.scope(root);
-    var tab = param === 'clients' || param === 'items' ? param : 'connection';
+    // legacy step 7: + products / fields / import / reviews (assets/js/bill/dft-settings.js, MarsaOps.dftSettings)
+    var L7 = Ops.dftSettings && Ops.dftKit ? Ops.dftSettings : null, D = Ops.dftKit;
+    var L7_TABS = L7 ? L7.TABS : [];
+    var tab = param === 'clients' || param === 'items' || L7_TABS.indexOf(param) !== -1 ? param : 'connection';
     var admin = B.canAdmin(api), writer = B.canOrg(api, 'finWrite'), approver = B.canOrg(api, 'finApprove');
     U.clear(root);
     root.classList.add('ops-view', 'fin-view', 'bill-view', 'bill-daftra');
@@ -51,13 +57,15 @@
     root.appendChild(tabBox); root.appendChild(body);
     function drawTabs() {
       U.clear(tabBox);
-      tabBox.appendChild(F.tabs([['connection', t('tab_connection')], ['clients', t('tab_clients')], ['items', t('tab_items')]], tab, function (v) { tab = v; CF.offset = 0; load(); }, t('daftra_title')));
+      var items = [['connection', t('tab_connection')], ['clients', t('tab_clients')], ['items', t('tab_items')]].concat(L7_TABS.map(function (k) { return [k, D.t('tab_' + k)]; }));
+      tabBox.appendChild(F.tabs(items, tab, function (v) { tab = v; CF.offset = 0; load(); }, t('daftra_title')));
     }
     function load() {
       drawTabs();
       U.loadingInto(body);
       if (tab === 'clients') return loadClients();
       if (tab === 'items') return loadItems();
+      if (L7 && L7_TABS.indexOf(tab) !== -1) return L7.render(tab, { B: B, api: api, body: body, sc: sc, reload: load });
       return loadConnection();
     }
 
@@ -99,7 +107,8 @@
         [t('f_subdomain'), c.subdomain ? el('span', null, [B.ref(c.subdomain), el('span', { class: 'cell-sub', text: ' ' + t('subdomain_placeholder') })]) : el('span', { class: 'ops-muted', text: U.NONE })],
         [t('f_sync_enabled'), U.pill(c.sync_enabled ? 'success' : 'neutral', c.sync_enabled ? t('yes') : t('no'))],
         [t('last_check'), c.last_check_at ? el('span', null, [B.when(c.last_check_at), ' ', c.last_check_status ? U.pill(c.last_check_status === 'ok' ? 'success' : 'danger', B.lab('bill_check_status', c.last_check_status)) : null]) : el('span', { class: 'ops-muted', text: t('never_checked') })],
-        [t('col_last_error'), c.last_error_code || c.last_error_message ? el('span', { class: 'fin-text-danger' }, [B.ref(c.last_error_code), ' ' + (c.last_error_message || '')]) : null],
+        [t('col_last_error'), c.last_error_code || c.last_error_message ? el('span', { class: 'fin-text-danger' }, [B.ref(c.last_error_code), D && c.last_error_code ? '' : ' ' + (c.last_error_message || ''),   // the Arabic dictionary text replaces the raw worker message
+          D && c.last_error_code ? D.errNode({ code: c.last_error_code, message: c.last_error_message }, 'cell-sub') : null]) : null],
         [t('push_ready'), U.pill(d.push_ready ? 'success' : 'warning', d.push_ready ? t('push_ready_yes') : t('push_ready_no'))],
         [t('missing_capabilities'), B.list(d.missing_capabilities).length ? el('span', null, B.list(d.missing_capabilities).map(function (k) { return U.pill('danger', B.lab('daftra_capability', k)); })) : null]
       ]);
@@ -115,6 +124,7 @@
       body.appendChild(capabilitiesCard(c));
       body.appendChild(taxCard(c));
       body.appendChild(policyCard());
+      if (L7) L7.connectionCards({ B: B, api: api, body: body, sc: sc, reload: load }, d).forEach(function (n) { body.appendChild(n); });
     }
     function capabilitiesCard(c) {
       var caps = c.capabilities && typeof c.capabilities === 'object' ? c.capabilities : {};

@@ -108,6 +108,9 @@
         cancel_err_open_exceptions: 'توجد استثناءات تشغيلية مفتوحة؛ عالجها أولًا.',
         cancel_err_open_demurrage: 'توجد قضية أرضيات مفتوحة على المعاملة.',
         cancel_err_open_returns: 'توجد حاويات خرجت من الميناء (أو لها موعد إرجاع) ولم يثبت إرجاعها؛ أثبت الإرجاع أو وثّق الإعفاء أولًا.',
+        cancel_err_daftra_invoice_issued: 'للمعاملة فاتورة صادرة (معتمدة) في دفترة؛ لا يمكن إلغاء المعاملة.',
+        cancel_err_daftra_sync_in_flight: 'مزامنة دفترة قيد التنفيذ أو نتيجتها غير مؤكدة لهذه المعاملة؛ انتظر اكتمالها ثم أعد المحاولة.',
+        cancel_err_daftra_purchase: 'لإحدى نقلات المعاملة مسودة مشتريات في دفترة؛ لا يمكن إلغاء المعاملة.',
         cancel_err_role: 'لا تملك صلاحية إلغاء هذه المعاملة في مرحلتها الحالية.',
         // list filters / pills
         f_cancelled_all: 'كل المعاملات', f_cancelled_exclude: 'غير الملغاة فقط', f_cancelled_only: 'الملغاة فقط',
@@ -211,6 +214,9 @@
         cancel_err_open_exceptions: 'Open operational exceptions exist; resolve them first.',
         cancel_err_open_demurrage: 'An open demurrage case exists on this transaction.',
         cancel_err_open_returns: 'Containers left the port (or have a return deadline) without return proof; record the proof or a documented waiver first.',
+        cancel_err_daftra_invoice_issued: 'The transaction has an issued (approved) Daftra invoice; it cannot be cancelled.',
+        cancel_err_daftra_sync_in_flight: 'A Daftra sync of this transaction is running or its result is unconfirmed; wait for it, then retry.',
+        cancel_err_daftra_purchase: 'A trip of this transaction has a Daftra purchase draft; the transaction cannot be cancelled.',
         cancel_err_role: 'You cannot cancel this transaction at its current stage.',
         f_cancelled_all: 'All transactions', f_cancelled_exclude: 'Not cancelled', f_cancelled_only: 'Cancelled only',
         f_cancelled_label: 'Cancellation', f_type_all: 'All types', f_unit_all: 'All units',
@@ -258,7 +264,9 @@
   var SENIOR = ['operations_manager', 'branch_manager', 'supervisor', 'admin'];
   var TRIP_FIN = ['accountant', 'accounts_manager', 'operations_manager', 'branch_manager', 'supervisor', 'admin'];
   var CANCEL_ERRS = ['already_cancelled', 'closed', 'billed', 'billing_intent', 'invoiced_charge', 'open_charges', 'open_appointments',
-    'open_trips', 'open_exceptions', 'open_demurrage', 'open_returns'];
+    'open_trips', 'open_exceptions', 'open_demurrage', 'open_returns',
+    // legacy step 7 (20261123000100): the Daftra cancel guard (fail closed)
+    'daftra_invoice_issued', 'daftra_sync_in_flight', 'daftra_purchase'];
   var LIVE_MOVEMENT = ['registered', 'incomplete'];
   var MV_TONE = { registered: 'blue', incomplete: 'warning', delivered: 'success', cancelled: 'muted' };
 
@@ -1025,6 +1033,8 @@
           e3.addEventListener('click', function (e) { e.preventDefault(); cancelMv(m); });
           acts = [e1, e2, e3];
         }
+        // legacy step 7: the Daftra supplier of a trip carried by a supplier / company (read-only search, MarsaOps.dftKit)
+        if (OPS.dftKit) acts = acts.concat(OPS.dftKit.tripActions(api, tx, m));
         cells.push(el('td', null, el('div', { class: 'adm-row-actions' }, acts)));
         return el('tr', { class: m.movement_status === 'cancelled' ? 'adm-voided' : null }, cells);
       });

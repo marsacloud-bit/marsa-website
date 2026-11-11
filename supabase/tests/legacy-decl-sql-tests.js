@@ -261,7 +261,7 @@ async function secFile() {
   await check('no personal data / legacy organization name copied from the legacy code (no e-mail, phone number, real org name)', () =>
     (!/@[a-z0-9-]+\.[a-z]/i.test(src.replace(/--.*$/gm, '')) && !/\b05[0-9]{8}\b/.test(src) && !/رأس الحكمة/.test(src)) || 'personal data');
   // later phases may follow this file (20261121000100 legacy_appt: re-creates extraction_field_keys / extraction_detail_ok / the conversion lists)
-  const LATER_PHASES = ['20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql'];
+  const LATER_PHASES = ['20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -913,14 +913,14 @@ async function secRls() {
                          AND has_function_privilege('anon', p.oid, 'EXECUTE')`);
     return (r.length === RPCS.length && r.every(x => x.au && !x.an && !x.sr) && h.length === 0 && n.length === 0) || J({ r, h, n });
   });
-  await check('conversion lists: the 3 tables in app.convert_delete_tables (78 with the 3 tables of 20261121000100 and the 4 of 20261122000100), their no-delete guards in app.convert_delete_guards (39), every table classified', async () => {
+  await check('conversion lists: the 3 tables in app.convert_delete_tables (83 with the 3 tables of 20261121000100, the 4 of 20261122000100 and the 5 of 20261123000100), their no-delete guards in app.convert_delete_guards (44), every table classified', async () => {
     const t = (await one(`SELECT app.convert_delete_tables() t`)).t;
     const g = (await one(`SELECT app.convert_delete_guards() g`)).g;
     const keep = (await one(`SELECT app.convert_keep_tables() k`)).k;
     const all = (await q(`SELECT 'public.' || relname n FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r'`)).map(x => x.n);
     const un = all.filter(x => !t.includes(x) && !keep.includes(x) && !['public.status_labels', 'public.schema_versions', 'public.organizations',
       'public.profiles', 'public.platform_admins', 'public.plans', 'public.customs_ports', 'public.daftra_mock_accounts'].includes(x));
-    return (T.every(x => t.includes('public.' + x) && g.includes('public.' + x + ':trg_no_delete')) && g.length === 39 && t.length === 78 && un.length === 0) || J({ g: g.length, t: t.length, un });
+    return (T.every(x => t.includes('public.' + x) && g.includes('public.' + x + ':trg_no_delete')) && g.length === 44 && t.length === 83 && un.length === 0) || J({ g: g.length, t: t.length, un });
   });
   await check('the trail: the approval / items / HS rows are audited without the document content (descriptions, result)', async () => {
     const r = await q(`SELECT table_name, new_data FROM public.audit_log WHERE table_name IN ('declaration_items','hs_reference','declaration_approvals') LIMIT 50`);

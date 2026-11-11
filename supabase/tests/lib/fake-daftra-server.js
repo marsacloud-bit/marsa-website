@@ -25,6 +25,17 @@
     server.reset()                        clears requests and faults (the account stays)
   createNodeHttp({onRequest}) → http(req) for daftra-live.js (node http to 127.0.0.1) + .stats {requests}
     rejects with name 'TimeoutError' on its own timer, `phase: 'connect'` when the connection never opened.
+
+  Legacy port step 7 (docs/online/LEGACY_DAFTRA_AR.md):
+    options  listCustomModel (listings carry CustomModel; default false: only GET invoices/{id} does), returnCustomModel
+             (default true), keywordsCoverCustom (invoice keywords also search the custom field values; default false)
+    routes   suppliers.json (name / keywords), purchase_invoices.json (POST ?send=draft → 202 id; GET list: keywords on
+             notes / no, sort=id + direction), purchase_invoices/{id}.json; invoices.json?client_id=; Client.suspend /
+             secondary_name / city; POST invoices keeps CustomModel + 'type_CustomModel.*'
+    control  addSupplier({business_name, supplier_number, suspend}), addClient(c), addProduct(p), storeDateAs(date) (the
+             next created invoice keeps this date: "Daftra stored another date"), setInvoiceFields(id, CustomModel)
+    server.inProcess() → http(req) WITHOUT sockets (a stubbed fetch): the same routes, faults, request log and 401 check;
+             a dropped request rejects (NetworkError), a delay over req.timeoutMs rejects (TimeoutError).
 */
 'use strict';
 const http = require('http');
@@ -43,7 +54,10 @@ function createFakeDaftraServer(opts) {
     clientLimit: Number.isInteger(o.clientLimit) ? o.clientLimit : null,
     forbidden: o.forbidden || [],                     // entity names refused with 403 (API key role)
     echoItemDescription: o.echoItemDescription !== false,
-    inheritProductTax: !!o.inheritProductTax
+    inheritProductTax: !!o.inheritProductTax,
+    listCustomModel: !!o.listCustomModel,
+    returnCustomModel: o.returnCustomModel !== false,
+    keywordsCoverCustom: !!o.keywordsCoverCustom
   };
   let tick = 0;
   const stamp = () => {
@@ -57,7 +71,8 @@ function createFakeDaftraServer(opts) {
       { id: 2, name: 'VAT inclusive', value: 15, included: 1, is_active: 1 },
       { id: 3, name: 'Old VAT', value: 5, included: 0, is_active: 0 }
     ]).map(t => Object.assign({ description: null, site_id: 1, created: '2018-05-10 00:42:00', modified: '2018-05-10 00:42:00' }, t)),
-    clients: [], products: [], invoices: [], seq: { client: 100, product: 200, invoice: 2400, item: 9000, payment: 500, number: 0, client_number: 714 }
+    clients: [], products: [], invoices: [], suppliers: [], purchases: [], storeDateAs: null,
+    seq: { client: 100, product: 200, invoice: 2400, item: 9000, payment: 500, number: 0, client_number: 714, supplier: 300, purchase: 700, purchase_number: 0 }
   };
   const requests = [];
   const faults = [];
@@ -73,8 +88,11 @@ function createFakeDaftraServer(opts) {
   }
   const findInv = id => S.invoices.find(x => String(x.Invoice.id) === String(id));
   function invoiceOut(x) {
-    return { Invoice: Object.assign({}, x.Invoice), InvoiceItem: x.items.map(i => Object.assign({}, i)), InvoicePayment: x.payments.map(p => Object.assign({}, p)) };
+    const o2 = { Invoice: Object.assign({}, x.Invoice), InvoiceItem: x.items.map(i => Object.assign({}, i)), InvoicePayment: x.payments.map(p => Object.assign({}, p)) };
+    if (cfg.returnCustomModel && x.custom) o2.CustomModel = JSON.parse(JSON.stringify(x.custom));
+    return o2;
   }
+  const customText = x => Object.values(x.custom || {}).map(v => Array.isArray(v) ? v.join(' ') : String(v)).join(' ');
   function summary(x) {
     let sub = 0, tax = 0;
     for (const it of x.items) {
@@ -112,8 +130,8 @@ function createFakeDaftraServer(opts) {
 
   /* ------------------------------------------------------------ routes */
   function route(method, path, query, body) {
-    const entity = (/^(clients|products|invoices|taxes|site_info)/.exec(path) || [])[1];
-    const ent = { clients: 'client', products: 'product', invoices: 'invoice', taxes: 'tax', site_info: 'site' }[entity];
+    const entity = (/^(clients|products|invoices|taxes|site_info|suppliers|purchase_invoices)/.exec(path) || [])[1];
+    const ent = { clients: 'client', products: 'product', invoices: 'invoice', taxes: 'tax', site_info: 'site', suppliers: 'supplier', purchase_invoices: 'purchase' }[entity];
     if (ent && cfg.forbidden.includes(ent)) return [403, failed(403, 'Forbidden')];
     let m;
     if (method === 'GET' && path === 'site_info.json') return [200, ok({ Site: Object.assign({}, S.site) })];
@@ -175,11 +193,17 @@ function createFakeDaftraServer(opts) {
       if (query.po_number && cfg.poNumbers) list = list.filter(x => String(x.Invoice.po_number || '') === String(query.po_number));
       if (query.keywords) {
         const k = lc(query.keywords);
-        list = list.filter(x => [x.Invoice.no, cfg.poNumbers ? x.Invoice.po_number : null, x.Invoice.client_business_name].some(v => lc(v).includes(k)));
+        list = list.filter(x => [x.Invoice.no, cfg.poNumbers ? x.Invoice.po_number : null, x.Invoice.client_business_name, cfg.keywordsCoverCustom ? customText(x) : null]
+          .some(v => lc(v).includes(k)));
       }
+      if (query.client_id) list = list.filter(x => String(x.Invoice.client_id) === String(query.client_id));
       if (String(query.draft) === '1') list = list.filter(x => isDraft(x.Invoice.draft));
       const rec = String(query.recursive) === '1';
-      return [200, page(list, query, x => rec ? { Invoice: Object.assign({}, x.Invoice), InvoiceItem: x.items.map(i => Object.assign({}, i)) } : { Invoice: Object.assign({}, x.Invoice) })];
+      return [200, page(list, query, x => {
+        const row = rec ? { Invoice: Object.assign({}, x.Invoice), InvoiceItem: x.items.map(i => Object.assign({}, i)) } : { Invoice: Object.assign({}, x.Invoice) };
+        if (cfg.listCustomModel && x.custom) row.CustomModel = JSON.parse(JSON.stringify(x.custom));
+        return row;
+      })];
     }
     if (method === 'GET' && (m = /^invoices\/(\d+)\.json$/.exec(path))) {
       const x = findInv(m[1]);
@@ -201,10 +225,14 @@ function createFakeDaftraServer(opts) {
       const id = String(++S.seq.invoice);
       const draft = isDraft(inv.draft) ? 1 : 0;
       const head = Object.assign({}, inv, { id, client_id: String(inv.client_id), draft, type: 0, currency_code: inv.currency_code || S.site.currency_code,
-        date: inv.date || '2026-11-03', no: draft ? 'D-' + id : String(++S.seq.number).padStart(6, '0'), payment_status: draft ? -1 : 0,
+        date: S.storeDateAs || inv.date || '2026-11-03', no: draft ? 'D-' + id : String(++S.seq.number).padStart(6, '0'), payment_status: draft ? -1 : 0,
         client_business_name: cl.business_name, external_source: 'api', created: stamp(), modified: stamp() });
+      S.storeDateAs = null;
       if (!cfg.poNumbers) delete head.po_number;
       const x = { Invoice: head, items: [], payments: [] };
+      if (body.CustomModel && typeof body.CustomModel === 'object') x.custom = JSON.parse(JSON.stringify(body.CustomModel));
+      x.customTypes = {};
+      for (const k of Object.keys(body)) if (/^type_CustomModel\./.test(k)) x.customTypes[k] = body[k];
       storeItems(x, body.InvoiceItem);
       summary(x);
       S.invoices.push(x);
@@ -223,50 +251,114 @@ function createFakeDaftraServer(opts) {
       summary(x);
       return [200, { code: 200, result: 'successful' }];
     }
+
+    /* suppliers (step 7, read only) */
+    if (method === 'GET' && path === 'suppliers.json') {
+      let list = S.suppliers.slice();
+      for (const f of ['name', 'keywords']) {
+        if (query[f]) { const k = lc(query[f]); list = list.filter(x => ['business_name', 'supplier_number', 'first_name', 'last_name'].some(g => lc(x[g]).includes(k))); }
+      }
+      return [200, page(list, query, 'Supplier')];
+    }
+    /* purchase invoices (step 7: drafts only, ?send=draft) */
+    const findPur = id => S.purchases.find(x => String(x.PurchaseOrder.id) === String(id));
+    if (method === 'GET' && path === 'purchase_invoices.json') {
+      let list = S.purchases.slice();
+      if (query.sort === 'id') list.sort((a, b) => (Number(a.PurchaseOrder.id) - Number(b.PurchaseOrder.id)) * (String(query.direction).toUpperCase() === 'DESC' ? -1 : 1));
+      if (query.keywords) { const k = lc(query.keywords); list = list.filter(x => [x.PurchaseOrder.no, x.PurchaseOrder.notes].some(v => lc(v).includes(k))); }
+      return [200, page(list, query, x => ({ PurchaseOrder: Object.assign({}, x.PurchaseOrder) }))];
+    }
+    if (method === 'GET' && (m = /^purchase_invoices\/(\d+)\.json$/.exec(path))) {
+      const x = findPur(m[1]);
+      return x ? [200, ok({ PurchaseOrder: Object.assign({}, x.PurchaseOrder), PurchaseOrderItem: x.items.map(i => Object.assign({}, i)) })] : [404, failed(404, 'Item not found')];
+    }
+    if (method === 'POST' && path === 'purchase_invoices.json') {
+      const po = body && body.PurchaseOrder;
+      if (!po || !po.supplier_id) return [400, failed(400, 'Bad Request', { validation_errors: { 'PurchaseOrder.supplier_id': 'required' } })];
+      if (!S.suppliers.some(x => String(x.id) === String(po.supplier_id))) return [400, failed(400, 'Bad Request', { validation_errors: { 'PurchaseOrder.supplier_id': 'invalid' } })];
+      const id = String(++S.seq.purchase);
+      const draft = query.send === 'draft' ? 1 : 0;
+      const head = Object.assign({}, po, { id, supplier_id: String(po.supplier_id), draft, no: draft ? 'PD-' + id : String(++S.seq.purchase_number).padStart(6, '0'),
+        created: stamp(), modified: stamp() });
+      S.purchases.push({ PurchaseOrder: head, items: (body.PurchaseOrderItem || []).map(it => Object.assign({ id: String(++S.seq.item) }, it)) });
+      return [202, { code: 202, result: 'successful', id }];
+    }
     return [404, failed(404, 'Item not found')];
   }
 
   /* ------------------------------------------------------------ server */
   let server = null;
   let port = null;
+  // one request through the account: → Promise<{status, text, headers} | {dropped: 'before'|'after'}>
+  function dispatch(method, rawUrl, headers, text) {
+    const u = new URL(rawUrl, 'http://127.0.0.1');
+    const path = u.pathname.replace(/^\/api2\//, '');
+    const query = {};
+    for (const [k, v] of u.searchParams) query[k] = v;
+    let body = null;
+    if (text) { try { body = JSON.parse(text); } catch (_) { body = { __unparsed: true }; } }
+    const h = {};
+    for (const k of Object.keys(headers || {})) h[k.toLowerCase()] = headers[k];
+    const entry = { method, path, query, apikey: h.apikey === apiKey, apikeyHeader: h.apikey !== undefined,
+      authorization: h.authorization !== undefined, body, status: null };
+    requests.push(entry);
+    const send = (status, obj) => {
+      entry.status = status;
+      const out = obj === undefined ? '' : (typeof obj === 'string' ? obj : JSON.stringify(obj));
+      const hdr = { 'content-type': 'application/json; charset=utf-8' };
+      if (status === 302) hdr.location = '/error500.php';
+      return { status, text: out, headers: hdr };
+    };
+    if (!u.pathname.startsWith('/api2/')) return Promise.resolve(send(404, failed(404, 'Item not found')));
+    if (h.apikey !== apiKey) return Promise.resolve(send(401, failed(401, 'Unauthorized')));
+    const fi = faults.findIndex(f => (!f.method || f.method === method) && (!f.path || f.path.test(path)));
+    const f = fi >= 0 ? faults.splice(fi, 1)[0] : null;
+    const run = () => {
+      if (f && f.drop === 'before') { entry.status = 'dropped'; return { dropped: 'before' }; }
+      if (f && f.status && !f.apply) return send(f.status, f.body === undefined ? failed(f.status, 'fault') : f.body);
+      let r;
+      try { r = route(method, path, query, body); } catch (e) { r = [500, failed(500, 'Internal Server Error')]; }
+      if (f && f.drop === 'after') { entry.status = 'dropped_after'; entry.applied = r[0] < 300; return { dropped: 'after' }; }
+      if (f && f.status && f.apply) return send(f.status, f.body === undefined ? failed(f.status, 'fault') : f.body);
+      if (f && f.rawText !== undefined) return send(r[0], f.rawText);
+      return send(r[0], r[1]);
+    };
+    const delay = f && f.delayMs ? f.delayMs : 0;
+    return { then: (a, b) => (delay ? new Promise(res => setTimeout(() => res(run()), delay)) : Promise.resolve().then(run)).then(a, b), delayMs: delay };
+  }
   function handle(req, res) {
     const chunks = [];
     req.on('data', c => chunks.push(c));
     req.on('end', () => {
-      const u = new URL(req.url, 'http://127.0.0.1');
-      const path = u.pathname.replace(/^\/api2\//, '');
-      const query = {};
-      for (const [k, v] of u.searchParams) query[k] = v;
       const text = Buffer.concat(chunks).toString('utf8');
-      let body = null;
-      if (text) { try { body = JSON.parse(text); } catch (_) { body = { __unparsed: true }; } }
-      const entry = { method: req.method, path, query, apikey: req.headers.apikey === apiKey, apikeyHeader: req.headers.apikey !== undefined,
-        authorization: req.headers.authorization !== undefined, body, status: null };
-      requests.push(entry);
-      const send = (status, obj) => {
-        entry.status = status;
-        const out = obj === undefined ? '' : (typeof obj === 'string' ? obj : JSON.stringify(obj));
-        const hdr = { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(out) };
-        if (status === 302) hdr.location = '/error500.php';
-        res.writeHead(status, hdr);
-        res.end(out);
-      };
-      if (!u.pathname.startsWith('/api2/')) return send(404, failed(404, 'Item not found'));
-      if (req.headers.apikey !== apiKey) return send(401, failed(401, 'Unauthorized'));
-      const fi = faults.findIndex(f => (!f.method || f.method === req.method) && (!f.path || f.path.test(path)));
-      const f = fi >= 0 ? faults.splice(fi, 1)[0] : null;
-      const run = () => {
-        if (f && f.drop === 'before') { entry.status = 'dropped'; req.socket.destroy(); return; }
-        if (f && f.status && !f.apply) return send(f.status, f.body === undefined ? failed(f.status, 'fault') : f.body);
-        let r;
-        try { r = route(req.method, path, query, body); } catch (e) { r = [500, failed(500, 'Internal Server Error')]; }
-        if (f && f.drop === 'after') { entry.status = 'dropped_after'; entry.applied = r[0] < 300; req.socket.destroy(); return; }
-        if (f && f.status && f.apply) return send(f.status, f.body === undefined ? failed(f.status, 'fault') : f.body);
-        if (f && f.rawText !== undefined) return send(r[0], f.rawText);
-        send(r[0], r[1]);
-      };
-      if (f && f.delayMs) setTimeout(run, f.delayMs); else run();
+      dispatch(req.method, req.url, req.headers, text).then(out => {
+        if (out.dropped) { req.socket.destroy(); return; }
+        res.writeHead(out.status, Object.assign({}, out.headers, { 'content-length': Buffer.byteLength(out.text) }));
+        res.end(out.text);
+      });
     });
+  }
+  // http(req) for daftra-live.js WITHOUT sockets (a stubbed fetch): req = {method, url, headers, body, timeoutMs}
+  function inProcess(o2) {
+    const opts2 = o2 || {};
+    const fn = function (req) {
+      fn.stats.requests++;
+      if (typeof opts2.onRequest === 'function') opts2.onRequest(req);
+      let u;
+      try { u = new URL(req.url); } catch (_) { const e = new Error('bad url'); e.phase = 'connect'; return Promise.reject(e); }
+      if (u.hostname !== '127.0.0.1' && u.hostname !== 'fake.daftra.test') { const e = new Error('stub: no such host'); e.phase = 'connect'; return Promise.reject(e); }
+      const p = dispatch(req.method, u.pathname + u.search, req.headers || {}, req.body === undefined ? '' : req.body);
+      const timeoutMs = Math.max(1, req.timeoutMs || 15000);
+      if (p.delayMs && p.delayMs > timeoutMs) {
+        return new Promise((_, reject) => setTimeout(() => { const e = new Error('timeout'); e.name = 'TimeoutError'; reject(e); }, timeoutMs));
+      }
+      return Promise.resolve(p).then(out => {
+        if (out.dropped) { const e = new Error('connection reset'); e.name = 'NetworkError'; throw e; }
+        return { status: out.status, headers: out.headers, text: out.text };
+      });
+    };
+    fn.stats = { requests: 0 };
+    return fn;
   }
 
   const control = {
@@ -298,11 +390,17 @@ function createFakeDaftraServer(opts) {
       return id;
     },
     deleteInvoice(id) { const k = S.invoices.findIndex(x => String(x.Invoice.id) === String(id)); if (k >= 0) S.invoices.splice(k, 1); },
-    touch(id) { findInv(id).Invoice.modified = stamp(); }
+    touch(id) { findInv(id).Invoice.modified = stamp(); },
+    /* step 7 */
+    addSupplier(x) { const id = String(++S.seq.supplier); S.suppliers.push(Object.assign({ id, suspend: 0 }, x || {}, { id })); return id; },
+    addClient(c) { const id = String(++S.seq.client); S.clients.push(Object.assign({ id, suspend: 0, created: stamp(), modified: stamp() }, c || {}, { id })); return id; },
+    addProduct(p) { const id = String(++S.seq.product); S.products.push(Object.assign({ id, type: 2, status: 0, tax1: 1, tax2: 0, created: stamp(), modified: stamp() }, p || {}, { id })); return id; },
+    storeDateAs(date) { S.storeDateAs = date; },
+    setInvoiceFields(id, custom) { findInv(id).custom = JSON.parse(JSON.stringify(custom)); }
   };
 
   return {
-    state: S, requests, faults, control, config: cfg,
+    state: S, requests, faults, control, config: cfg, inProcess, dispatch,
     async start() {
       server = http.createServer(handle);
       await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });

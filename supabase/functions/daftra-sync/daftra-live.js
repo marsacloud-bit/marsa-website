@@ -37,6 +37,20 @@
     - errors: fixed messages + HTTP status only (validation_errors field NAMES only); a write whose response is lost
       (timeout, dropped connection, 5xx, unreadable 2xx) is applied:'unknown', never 'no';
     - probe() is READ-ONLY: GET site_info, taxes, one page of clients / products / invoices, one page of API invoices.
+
+  Legacy port step 7 (docs/online/LEGACY_DAFTRA_AR.md «عقد المهام»):
+    - config.policy = connection.policy (fail closed): unless allow_draft_update === true the guard refuses EVERY write on
+      an existing invoice (PUT invoices/{id}: draft_update_refused) and updateDraftInvoice refuses before any request;
+      unless allow_product_create === true it refuses POST products (product_create_refused);
+    - a new draft carries the CustomModel custom fields (legacy: {CustomModel: {<key>: [value]}}, a date field as one
+      DD/MM/YYYY value + 'type_CustomModel.<key>': 'date'), po_number, the Riyadh date; a line with item_name sends
+      item = "<product name> [MRSL-…]" and description = the Daftra description (TAS only / empty clearance);
+    - reads: invoices with their custom fields, client name and the https view URL; clients with suspend / secondary
+      name / city; products by code without leading zeros (000186 = 186: product_code filter, then keywords + exact
+      zero-insensitive match); paged listings; invoices by number; suppliers (GET suppliers.json?name=);
+    - purchase drafts (legacy R12TransportPurchases): POST purchase_invoices.json?send=draft with PurchaseOrder.draft = 1,
+      every item tax1 = tax2 = 0 (the guard refuses anything else), the "[MARSA-REF:MRSP-…]" marker in notes; looked up
+      by that marker first (keywords, then a bounded id DESC scan). Never a PUT on a purchase invoice.
 */
 (function () {
   'use strict';
@@ -59,10 +73,16 @@
     ['GET', /^site_info\.json$/], ['GET', /^taxes\.json$/],
     ['GET', /^clients\.json$/], ['GET', /^clients\/[0-9]{1,18}\.json$/], ['POST', /^clients\.json$/], ['PUT', /^clients\/[0-9]{1,18}\.json$/],
     ['GET', /^products\.json$/], ['POST', /^products\.json$/],
-    ['GET', /^invoices\.json$/], ['GET', /^invoices\/[0-9]{1,18}\.json$/], ['POST', /^invoices\.json$/], ['PUT', /^invoices\/[0-9]{1,18}\.json$/]
+    ['GET', /^invoices\.json$/], ['GET', /^invoices\/[0-9]{1,18}\.json$/], ['POST', /^invoices\.json$/], ['PUT', /^invoices\/[0-9]{1,18}\.json$/],
+    // step 7: suppliers (read only) and purchase drafts (create + read; never a PUT)
+    ['GET', /^suppliers\.json$/], ['GET', /^purchase_invoices\.json$/], ['GET', /^purchase_invoices\/[0-9]{1,18}\.json$/], ['POST', /^purchase_invoices\.json$/]
   ]);
+  const PAYMENT_KEYS = ['Payment', 'InvoicePayment', 'Deposit', 'InvoiceReminder', 'PurchaseOrderPayment'];
   // null = allowed; else a fixed refusal code. Never issues (update_draft), never a non-draft invoice write, never a payment.
-  function guardDaftraRequest(method, path, body, query) {
+  // Step 7: policy = the org's write policy (fail closed: anything but an explicit true is refused) — no write on an existing
+  // invoice (HF5) unless allow_draft_update, no product create unless allow_product_create; a purchase draft only with
+  // ?send=draft, PurchaseOrder.draft = 1 and zero taxes on every item.
+  function guardDaftraRequest(method, path, body, query, policy) {
     const p = String(path === undefined || path === null ? '' : path);
     const q = String(query === undefined || query === null ? '' : query);
     if (/update_draft/i.test(p) || /update_draft/i.test(q)) return 'issue_refused';
@@ -74,6 +94,18 @@
       if (!inv || typeof inv !== 'object' || inv.draft !== 1) return 'draft_required';
       for (const k of ['Payment', 'InvoicePayment', 'Deposit', 'InvoiceReminder']) if (body[k] !== undefined) return 'payment_refused';
       for (const k of ['Payment', 'InvoicePayment', 'Deposit', 'InvoiceReminder']) if (inv[k] !== undefined) return 'payment_refused';
+    }
+    const pol = policy && typeof policy === 'object' ? policy : {};
+    if (m !== 'GET' && /^invoices\/[0-9]/.test(p) && pol.allow_draft_update !== true) return 'draft_update_refused';
+    if (m === 'POST' && /^products/.test(p) && pol.allow_product_create !== true) return 'product_create_refused';
+    if (m !== 'GET' && /^purchase_invoices/.test(p)) {
+      if (!/(^|[?&])send=draft(&|$)/.test(q)) return 'draft_required';
+      const po = body && typeof body === 'object' ? body.PurchaseOrder : null;
+      if (!po || typeof po !== 'object' || po.draft !== 1) return 'draft_required';
+      for (const k of PAYMENT_KEYS) if (body[k] !== undefined || po[k] !== undefined) return 'payment_refused';
+      const items = Array.isArray(body.PurchaseOrderItem) ? body.PurchaseOrderItem : null;
+      if (!items || !items.length) return 'body_required';
+      if (items.some(it => !it || typeof it !== 'object' || Number(it.tax1) !== 0 || Number(it.tax2) !== 0)) return 'tax_refused';
     }
     if (m !== 'GET' && (body === null || typeof body !== 'object')) return 'body_required';
     return null;
@@ -161,6 +193,9 @@
       if (r !== null && (v === 0 || v === '0' || ID_RE.test(String(v)))) taxMap[r] = String(v);
     }
     let taxCache = null;
+    // step 7: the org's write policy (connection.policy), fail closed
+    const policy = typeof A.writePolicy === 'function' ? A.writePolicy(c.policy) : { allow_draft_update: false, allow_product_create: false };
+    const codeNorm = A.codeNorm;
 
     const err = (kind, message, code, o) => new AdapterError(kind, message, Object.assign({ applied: 'no', code }, o || {}));
     const invalid = (message, code) => err('validation', message, code || 'validation');
@@ -170,7 +205,7 @@
     async function call(ctx, method, path, query, body) {
       const write = method !== 'GET';
       const qstr = qs(query);
-      const refusal = guardDaftraRequest(method, path, body, qstr);
+      const refusal = guardDaftraRequest(method, path, body, qstr, policy);
       if (refusal) throw err('validation', 'request refused by the Marsa Daftra guard: ' + refusal, refusal);
       const want = write ? T.write : T.read;
       if (runDeadline !== null) {
@@ -226,7 +261,10 @@
       if (status >= 500 && status <= 599) {
         return err('http_5xx', 'Daftra server error (HTTP ' + status + ')', 'http_5xx', Object.assign(o, { applied: write ? 'unknown' : 'no' }));
       }
-      if (status >= 300 && status <= 399) return err('not_configured', 'Daftra redirected the request (HTTP ' + status + '): check the subdomain', 'redirect', o);
+      // review: a 3xx to a WRITE may follow a server error after the record was written (the account answers 302 →
+      // /error500.php): possibly applied, reconciled by reference before any retry — never «definitely not applied»
+      if (status >= 300 && status <= 399) return err('not_configured', 'Daftra redirected the request (HTTP ' + status + '): check the subdomain', 'redirect',
+        Object.assign(o, { applied: write ? 'unknown' : 'no' }));
       return err('network', 'Daftra answered HTTP ' + (Number.isFinite(status) ? status : '?'), 'http_' + (Number.isFinite(status) ? status : 'none'),
         Object.assign(o, { applied: write ? 'unknown' : 'no' }));
     }
@@ -317,9 +355,48 @@
     function viewClient(raw) {
       const x = unwrap(raw, 'Client');
       // name_en has no documented Daftra client field: reported null (open issue in G5B_DAFTRA_LIVE_AR.md)
-      return { id: idOf(x.id), ref: s(x.client_number), name: s(x.business_name), name_en: null, vat_number: s(x.bn1), cr_number: s(x.bn2),
-        address_short: s(x.address2), address: s(x.address1), email: s(x.email), phone: s(x.phone1) };
+      // step 7: + suspended (Client.suspend), the secondary name, the city (client import, suspended-client refusal)
+      return { id: idOf(x.id), ref: s(x.client_number), name: s(x.business_name) || s([x.first_name, x.last_name].filter(Boolean).join(' ')),
+        name_en: null, vat_number: s(x.bn1), cr_number: s(x.bn2),
+        address_short: s(x.address2), address: s(x.address1), email: s(x.email), phone: s(x.phone1) || s(x.phone2),
+        secondary_name: s(x.secondary_name), city: s(x.city), suspended: truthy01(x.suspend) };
     }
+    function viewSupplier(raw) {
+      const x = unwrap(raw, 'Supplier');
+      return { id: idOf(x.id), name: s(x.business_name) || s([x.first_name, x.last_name].filter(Boolean).join(' ')) || s(x.secondary_name),
+        secondary_name: s(x.secondary_name), supplier_number: s(x.supplier_number), suspended: truthy01(x.suspend) };
+    }
+    // the custom fields of an invoice read (CustomModel / custom_data / InvoiceCustomField …, legacy collectDaftraCustomFieldPairs_)
+    // → {<key>: text} (bounded; Daftra does not always return them: the lookups then read the invoice in full)
+    const CF_KEY_RE = /^[A-Za-z][A-Za-z0-9_]{0,59}$/;
+    function customFieldsOf(d, inv) {
+      const raw = [d && d.CustomModel, inv && inv.CustomModel, d && d.custom_model, d && d.custom_data, d && d.InvoiceCustomField,
+        d && d.invoice_custom_fields, d && d.custom_fields, inv && inv.custom_fields].find(x => x && typeof x === 'object');
+      const out = {};
+      if (!raw) return out;
+      const text = v => {
+        if (Array.isArray(v)) return v.map(x => (x && typeof x === 'object') ? text(x) : s(x)).filter(Boolean).join('، ');
+        if (v && typeof v === 'object') return s(v.value !== undefined ? v.value : v.field_value !== undefined ? v.field_value : v.custom_value !== undefined ? v.custom_value : v.text);
+        return s(v);
+      };
+      const put = (k, v) => {
+        if (Object.keys(out).length >= 50 || typeof k !== 'string' || !CF_KEY_RE.test(k)) return;
+        const t = text(v);
+        if (t !== null && t !== '') out[k] = String(t).slice(0, 1000);
+      };
+      if (Array.isArray(raw)) {
+        for (const it of raw) {
+          if (!it || typeof it !== 'object') continue;
+          const k = s(it.key || it.field_key || it.field || it.slug || it.name) || (it.field_id !== undefined ? 'field_' + it.field_id : null);
+          put(k, it.value !== undefined ? it.value : it.field_value !== undefined ? it.field_value : it.custom_value !== undefined ? it.custom_value : it.text);
+        }
+      } else {
+        for (const k of Object.keys(raw)) put(k, raw[k]);
+      }
+      return out;
+    }
+    // the Daftra owner view of an invoice / a purchase invoice (https on the account's own host only; never a URL Daftra returns)
+    const viewUrl = (kind, id) => (hostSub && id && ID_RE.test(String(id))) ? 'https://' + hostSub + '.daftra.com/owner/' + kind + '/view/' + id : null;
     function viewProduct(raw) {
       const x = unwrap(raw, 'Product');
       return { id: idOf(x.id), code: s(x.product_code), name_ar: s(x.name), name_en: s(x.description), tax_code: null,
@@ -361,7 +438,29 @@
       }
       const notes = s(String(inv.notes || '').replace(REF_MARK_RE, ' '));
       return { id: idOf(inv.id), reference: referenceOf(inv), client_id: idOf(inv.client_id), currency: s(inv.currency_code), date: s(inv.date),
-        notes, status: draft ? 'draft' : 'issued', number: draft ? null : s(inv.no), version: s(inv.modified), lines, totals };
+        notes, status: draft ? 'draft' : 'issued', number: draft ? null : s(inv.no), version: s(inv.modified), lines, totals,
+        client_name: s(inv.client_business_name) || s(d.Client && d.Client.business_name), custom_fields: customFieldsOf(d, inv),
+        url: viewUrl('invoices', idOf(inv.id)) };
+    }
+    // a listing / lookup row: the view + the Daftra number of a draft too (lookups match the number the staff types)
+    function viewHead(raw) {
+      const d = raw && typeof raw === 'object' ? raw : {};
+      const v = viewInvoice(d.Invoice ? d : { Invoice: d });
+      v.number = s(unwrap(d, 'Invoice').no);
+      delete v.lines;
+      return v;
+    }
+    function viewPurchase(raw) {
+      const d = raw && typeof raw === 'object' ? raw : {};
+      const po = unwrap(d, 'PurchaseOrder');
+      const m = REF_MARK_RE.exec(String(po.notes || ''));
+      const draft = po.draft === undefined || po.draft === null ? true : (truthy01(po.draft) || String(po.draft).toLowerCase() === 'draft');
+      // review: a non-zero tax Daftra stored (item tax1 / tax2 / summary_tax) — legacy re-read after the POST
+      const its = (Array.isArray(d.PurchaseOrderItem) ? d.PurchaseOrderItem : (Array.isArray(po.PurchaseOrderItem) ? po.PurchaseOrderItem : [])).map(x => unwrap(x, 'PurchaseOrderItem'));
+      const nz = v => v !== undefined && v !== null && v !== '' && Number(v) !== 0 && Number.isFinite(Number(v));
+      const taxNonzero = its.some(x => nz(x.tax1) || nz(x.tax2) || nz(x.summary_tax1) || nz(x.summary_tax2)) || nz(po.summary_tax);
+      return { id: idOf(po.id), reference: m ? m[1] : null, supplier_id: idOf(po.supplier_id), currency: s(po.currency_code), date: s(po.date),
+        status: draft ? 'draft' : 'issued', number: s(po.no), url: viewUrl('purchase_invoices', idOf(po.id)), tax_nonzero: taxNonzero };
     }
     function paymentsOf(d) {
       const inv = unwrap(d, 'Invoice');
@@ -397,9 +496,13 @@
       if (!l || typeof l !== 'object') throw invalid('line must be an object', 'line');
       const q = Number(l.quantity), up = Number(l.unit_price);
       if (!(q > 0) || !(up >= 0) || !Number.isFinite(q + up)) throw invalid('line figures', 'line_figures');
-      const text = String(s(l.description) || '');
+      // step 7: a line naming its product (item_name) keeps the Daftra description apart (TAS only / empty for clearance)
+      const named = l.item_name !== undefined && l.item_name !== null && s(l.item_name) !== null;
+      const desc = String(s(named ? l.daftra_description : l.description) || '');
+      const text = named ? String(s(l.item_name)) : desc;
       const out = { item: text.slice(0, 500), unit_price: Number(fixed(up, 2)), quantity: Number(fixed(q, 3)),
         tax1: await taxIdFor(ctx, l.tax_rate), tax2: 0, discount: 0, discount_type: 2 };
+      if (named) out.description = desc.slice(0, 900);
       if (l.line_ref !== undefined && l.line_ref !== null) {
         if (!LINE_REF_RE.test(String(l.line_ref))) throw invalid('line_ref malformed', 'line_ref');
         // the marker rides in `item` (documented on read); the text is cut first so the marker itself is never truncated
@@ -568,6 +671,7 @@
         return Array.from(seen.values()).sort(byId).slice(0, 10).map(viewProduct);
       },
       async createProduct(ctx, d) {
+        if (!policy.allow_product_create) throw invalid('Marsa never creates Daftra products (allow_product_create is off)', 'product_create_refused');
         if (!d || !s(d.code) || !s(d.name_ar)) throw invalid('product code and name required', 'product');
         const code = checkRef(d.code, 'product');
         const rate = d.vat_rate === undefined || d.vat_rate === null ? 0 : d.vat_rate;
@@ -633,12 +737,18 @@
         const notes = (s(d.notes) ? String(d.notes).trim().slice(0, 2000) + '\n' : '') + '[MARSA-REF:' + ref + ']';
         const body = { Invoice: { client_id: Number(d.client_id), date, currency_code: cur, draft: 1, is_offline: 1, po_number: ref, notes },
           InvoiceItem: items };
+        // step 7: the custom fields ride in the same POST (CustomModel; never a later PUT)
+        if (d.custom_fields && typeof d.custom_fields === 'object' && Object.keys(d.custom_fields).length) {
+          Object.assign(body, A.customModel(d.custom_fields, d.custom_date_keys));
+        }
         const parsed = await call(ctx, 'POST', 'invoices.json', undefined, body);
         const id = idOf(parsed.id);
         if (!id) throw err('network', 'Daftra create answered without an id', 'no_id', { applied: 'unknown' });
-        return { id, reference: ref, client_id: String(d.client_id), currency: cur, status: 'draft' };
+        return { id, reference: ref, client_id: String(d.client_id), currency: cur, status: 'draft', url: viewUrl('invoices', id) };
       },
       async updateDraftInvoice(ctx, id, d) {
+        // step 7 (HF5): refused before any request unless the owner allowed draft updates
+        if (!policy.allow_draft_update) throw invalid('editing an existing Daftra draft is not allowed (HF5)', 'draft_update_refused');
         const iid = checkId(id, 'invoice');
         await taxes(ctx);
         // re-read first: never a PUT on a non-draft, a moved version or a draft that already carries payments
@@ -685,6 +795,133 @@
         // completed (1) and overpaid (4) payments only; pending / failed / draft payments are not money received
         return paymentsOf(data).filter(p => p.status === undefined || p.status === null || ['1', '4'].includes(String(p.status)))
           .map(p => ({ amount: money(p.amount), date: s(p.date) ? String(s(p.date)).slice(0, 10) : null }));
+      },
+
+      /* ---------------------------------------------------------- step 7: read-only lookups */
+      // products whose code equals the given one without leading zeros (000186 = 186): the exact product_code filter (as
+      // given, then without zeros), then keywords (contains) + the zero-insensitive comparison client-side
+      async findProductsByCodeNorm(ctx, code) {
+        const raw = s(code);
+        if (raw === null || !REF_RE.test(raw)) throw invalid('product code missing or malformed', 'product_ref');
+        const n = codeNorm(raw);
+        const seen = new Map();
+        const tries = [[{ product_code: raw }, 1, 20]];
+        if (n !== raw) tries.push([{ product_code: n }, 1, 20]);
+        tries.push([{ keywords: n }, L.searchPages, L.searchLimit]);
+        for (const [q, pages, limit] of tries) {
+          const r = await listPages(ctx, 'products.json', q, 'Product', pages, limit);
+          for (const x of r.items) if (idOf(x.id) && codeNorm(x.product_code) === n) seen.set(String(x.id), x);
+          if (seen.size) break;
+        }
+        return Array.from(seen.values()).sort(byId).slice(0, 10).map(viewProduct);
+      },
+      async listProducts(ctx, q) {
+        const page = Math.max(1, Number(q && q.page) || 1), limit = Math.max(1, Math.min(500, Number(q && q.limit) || 100));
+        const parsed = await call(ctx, 'GET', 'products.json', { page, limit });
+        const total = parsed && parsed.pagination && Number.isFinite(Number(parsed.pagination.total_results)) ? Number(parsed.pagination.total_results) : null;
+        return { items: dataList(parsed, 'Product').filter(x => idOf(x.id)).map(viewProduct), more: morePages(parsed, page), total };
+      },
+      async listClients(ctx, q) {
+        const page = Math.max(1, Number(q && q.page) || 1), limit = Math.max(1, Math.min(500, Number(q && q.limit) || 100));
+        const parsed = await call(ctx, 'GET', 'clients.json', { page, limit });
+        const total = parsed && parsed.pagination && Number.isFinite(Number(parsed.pagination.total_results)) ? Number(parsed.pagination.total_results) : null;
+        return { items: dataList(parsed, 'Client').filter(x => idOf(x.id)).map(viewClient), more: morePages(parsed, page), total };
+      },
+      // invoices (and drafts) by their Daftra number: keywords, then a bounded scan newest id first; exact (letters / digits)
+      async findInvoicesByNumber(ctx, no) {
+        const key = String(s(no) || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        if (!key || key.length > 60) throw invalid('invoice number missing or malformed', 'number');
+        await taxes(ctx);
+        const exact = list => list.map(x => unwrap(x, 'Invoice')).filter(h => String(s(h.no) || '').toUpperCase().replace(/[^A-Z0-9]/g, '') === key);
+        for (const [q, pages, limit] of [[{ keywords: String(s(no)) }, L.searchPages, 50], [INVOICE_SCAN_QUERY, L.invoiceScanPages, L.invoiceScanLimit]]) {
+          const r = await listPages(ctx, 'invoices.json', q, 'Invoice', pages, limit);
+          const hits = exact(r.items);
+          if (hits.length) {
+            const seen = new Set();
+            return hits.sort(byId).filter(h => !seen.has(String(h.id)) && seen.add(String(h.id))).slice(0, 10).map(h => viewHead({ Invoice: h }));
+          }
+        }
+        return [];
+      },
+      // one page of invoices, id ascending (stable cursor for the legacy scan) or descending; optional client / keywords filter
+      async listInvoices(ctx, q) {
+        const o = q || {};
+        await taxes(ctx);
+        const page = Math.max(1, Number(o.page) || 1), limit = Math.max(1, Math.min(500, Number(o.limit) || 100));
+        const query = { sort: 'id', direction: String(o.direction || 'ASC').toUpperCase() === 'DESC' ? 'DESC' : 'ASC', page, limit };
+        if (o.client_id !== undefined && o.client_id !== null) query.client_id = checkId(o.client_id, 'client');
+        if (s(o.keywords)) query.keywords = String(s(o.keywords)).slice(0, 80);
+        const parsed = await call(ctx, 'GET', 'invoices.json', query);
+        const list = (Array.isArray(parsed && parsed.data) ? parsed.data : []).filter(x => idOf(unwrap(x, 'Invoice').id));
+        let items = list.map(viewHead);
+        if (query.client_id) items = items.filter(h => h.client_id === query.client_id);     // the filter is not trusted blindly
+        return { items, more: morePages(parsed, page), total: parsed && parsed.pagination ? Number(parsed.pagination.total_results) || null : null };
+      },
+      async searchSuppliers(ctx, q) {
+        const text = s(q);
+        if (!text || text.length > 120) throw invalid('supplier name missing or too long', 'q');
+        let r = await listPages(ctx, 'suppliers.json', { name: text }, 'Supplier', 1, 50);
+        if (!r.items.length) r = await listPages(ctx, 'suppliers.json', { keywords: text }, 'Supplier', 1, 50);
+        return r.items.map(viewSupplier).filter(x => x.id).slice(0, 50);
+      },
+      // a purchase draft by Marsa's reference marker in notes: keywords, then a bounded scan newest id first → {hits, complete}
+      async findPurchaseByReference(ctx, ref) {
+        checkRef(ref, 'purchase');
+        const exact = list => list.map(x => unwrap(x, 'PurchaseOrder')).filter(h => { const m = REF_MARK_RE.exec(String(h.notes || '')); return !!m && m[1] === ref; });
+        let complete = false;
+        for (const [q, pages, limit] of [[{ keywords: ref }, L.searchPages, 50], [INVOICE_SCAN_QUERY, L.invoiceScanPages, L.invoiceScanLimit]]) {
+          const r = await listPages(ctx, 'purchase_invoices.json', q, 'PurchaseOrder', pages, limit);
+          const hits = exact(r.items);
+          if (hits.length) {
+            const seen = new Set();
+            return { hits: hits.sort(byId).filter(h => !seen.has(String(h.id)) && seen.add(String(h.id))).map(h => viewPurchase({ PurchaseOrder: h })), complete: true };
+          }
+          if (q === INVOICE_SCAN_QUERY) complete = r.complete;
+        }
+        return { hits: [], complete };
+      },
+      // review: the account profile right before a write (read only): GET site_info + taxes (fresh, not the cached list)
+      async getAccountProfile(ctx) {
+        const site = unwrap((await call(ctx, 'GET', 'site_info.json', {})).data, 'Site');
+        taxCache = null;
+        const tx = await taxes(ctx);
+        return { currency: s(site.currency_code) || s(site.currency), country: s(site.country_code) || s(site.country),
+          taxes: tx.map(t => ({ value: t.value, active: t.active })) };
+      },
+      async getPurchase(ctx, id) {
+        const pid = checkId(id, 'purchase');
+        const parsed = await call(ctx, 'GET', 'purchase_invoices/' + pid + '.json', {});
+        const v = viewPurchase(parsed.data);
+        if (!v.id) throw err('not_found', 'Daftra item not found', 'not_found');
+        return v;
+      },
+
+      /* ---------------------------------------------------------- step 7: the purchase draft (write) */
+      async createPurchaseDraft(ctx, d) {
+        if (!d || typeof d !== 'object') throw invalid('purchase payload required', 'purchase');
+        const ref = checkRef(d.reference, 'purchase');
+        if (!ID_RE.test(String(d.supplier_id === null || d.supplier_id === undefined ? '' : d.supplier_id))) throw invalid('supplier id is not a Daftra id', 'supplier_id');
+        const cur = String(d.currency || 'SAR');
+        if (!/^[A-Z]{3}$/.test(cur)) throw invalid('currency', 'currency');
+        const date = d.date ? String(d.date).slice(0, 10) : String(clock()).slice(0, 10);
+        if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)) throw invalid('date', 'date');
+        const lines = Array.isArray(d.lines) ? d.lines : [];
+        if (!lines.length || lines.length > L.maxLines) throw invalid('lines', 'lines');
+        const items = lines.map(l => {
+          const q = Number(l.quantity), up = Number(l.unit_price);
+          if (!(q > 0) || !(up > 0) || !Number.isFinite(q + up)) throw invalid('line figures', 'line_figures');
+          if (Number(l.tax_rate || 0) !== 0) throw invalid('purchase drafts carry no tax', 'tax_refused');
+          if (!ID_RE.test(String(l.product_id === null || l.product_id === undefined ? '' : l.product_id))) throw invalid('product id is not a Daftra id', 'product_id');
+          const o = { item: String(s(l.item_name) || s(l.description) || '').slice(0, 250), description: String(s(l.description) || '').slice(0, 900),
+            unit_price: Number(fixed(up, 2)), quantity: Number(fixed(q, 3)), tax1: 0, tax2: 0, product_id: Number(l.product_id) };
+          return o;
+        });
+        const body = { PurchaseOrder: { supplier_id: Number(d.supplier_id), currency_code: cur, date, draft: 1, notes: '[MARSA-REF:' + ref + ']' },
+          PurchaseOrderItem: items };
+        const parsed = await call(ctx, 'POST', 'purchase_invoices.json', { send: 'draft' }, body);
+        const id = idOf(parsed.id !== undefined ? parsed.id : (parsed.data && parsed.data.id));
+        if (!id) throw err('network', 'Daftra create answered without an id', 'no_id', { applied: 'unknown' });
+        return { id, reference: ref, supplier_id: String(d.supplier_id), currency: cur, status: 'draft', url: viewUrl('purchase_invoices', id) };
       }
     };
 

@@ -183,6 +183,9 @@ async function dbMain() {
   const migFiles = fs.readdirSync(migDir).filter(f => /^\d+_.*\.sql$/.test(f)).sort();
   if (!await runFile(path.join(SUPA, 'tests', 'shim.sql'))) return;
   for (const m of migFiles) if (!await runFile(path.join(migDir, m))) return;
+  // legacy step 7 (20261123000100): the owner decisions default to HF5 (no edit of an existing Daftra draft) and resolve-only
+  // products (never created); this suite drives the G5 billing cycle, so its connections start with the G5 write policy
+  await db.exec(`ALTER TABLE public.daftra_connections ALTER COLUMN allow_draft_update SET DEFAULT true, ALTER COLUMN allow_product_create SET DEFAULT true`);
   if (!await runFile(path.join(SUPA, 'seed.sql'))) return;
   try { const r = await fixtures(); r.n === 15 ? pass('fixtures: auth users (sign-up rows), platform admin, org A staff (seed-style)') : fail('fixtures', 'requirements ' + r.n); }
   catch (e) { fail('fixtures', errText(e)); return; }

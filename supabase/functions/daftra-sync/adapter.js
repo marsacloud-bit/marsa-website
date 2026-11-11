@@ -23,10 +23,18 @@
     'probe',
     'findClientByRef', 'findClientsByVat', 'getClient', 'createClient', 'updateClient',
     'findProductByCode', 'findProductsByName', 'createProduct',
-    'findInvoiceByReference', 'getInvoice', 'createDraftInvoice', 'updateDraftInvoice', 'listPayments'
+    'findInvoiceByReference', 'getInvoice', 'createDraftInvoice', 'updateDraftInvoice', 'listPayments',
+    // legacy port step 7 (docs/online/LEGACY_DAFTRA_AR.md «عقد المهام»): read-only lookups + the purchase draft
+    'findProductsByCodeNorm', 'listProducts', 'listClients', 'findInvoicesByNumber', 'listInvoices',
+    'searchSuppliers', 'findPurchaseByReference', 'getPurchase', 'createPurchaseDraft',
+    // review: the account profile read again right before a write (GET site_info + taxes; read only)
+    'getAccountProfile'
   ]);
   // methods that change the remote account (a lost response on these is "unknown", never "failed")
-  const WRITE_METHODS = Object.freeze(['createClient', 'updateClient', 'createProduct', 'createDraftInvoice', 'updateDraftInvoice']);
+  const WRITE_METHODS = Object.freeze(['createClient', 'updateClient', 'createProduct', 'createDraftInvoice', 'updateDraftInvoice', 'createPurchaseDraft']);
+  // step 7: the job kinds that may write to Daftra (the KSA account guard runs before each, in SQL at the claim and here)
+  const WRITE_KINDS = Object.freeze(['invoice_push', 'purchase_push', 'client_ensure', 'client_push', 'item_ensure']);
+  const READ_ONLY_KINDS = Object.freeze(['probe', 'invoice_pull', 'client_refresh', 'product_match', 'client_import', 'invoice_lookup', 'legacy_scan', 'supplier_search']);
 
   const CAPABILITY_KEYS = Object.freeze([
     'clients.search_by_ref', 'clients.read', 'clients.create', 'clients.update',
@@ -154,6 +162,144 @@
     return 'issued';
   }
 
+  /* ---------------------------------------------------------------- step 7 helpers (legacy port) */
+  // a Daftra product / client code compared without leading zeros (mirror of app.daftra_code_norm: 000186 = 186; Arabic
+  // digits → western; letters upper-cased; blank → null)
+  function toWestern(t) {
+    return String(t).replace(/[\u0660-\u0669]/g, d => String(d.charCodeAt(0) - 0x0660)).replace(/[\u06F0-\u06F9]/g, d => String(d.charCodeAt(0) - 0x06F0));
+  }
+  // review: like the legacy normalizeDaftraProductCode_, a leading '#' and every whitespace are ignored (#000186 = 000 186 = 186)
+  function codeNorm(v) {
+    if (v === null || v === undefined) return null;
+    const t = toWestern(String(v)).replace(/^\s*#/, '').replace(/\s+/g, '');
+    if (t === '') return null;
+    if (/^[0-9]+$/.test(t)) return t.replace(/^0+/, '') || '0';
+    return t.toUpperCase();
+  }
+  // today in Asia/Riyadh as YYYY-MM-DD (never UTC, never the host zone): Intl, from an ISO clock value or a Date
+  function riyadhDate(at) {
+    const d = at instanceof Date ? at : new Date(at === undefined || at === null ? Date.now() : at);
+    if (isNaN(d.getTime())) return null;
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d);
+    const g = k => (parts.find(p => p.type === k) || {}).value;
+    return g('year') + '-' + g('month') + '-' + g('day');
+  }
+  // a Daftra date (YYYY-MM-DD[ hh:mm:ss], YYYY/MM/DD, DD/MM/YYYY, DD-MM-YYYY) → YYYY-MM-DD, or null (legacy normalizeDaftraInvoiceDate_)
+  function normalizeDate(v) {
+    const t = v === null || v === undefined ? '' : toWestern(String(v)).trim();
+    let y, m, d, x;
+    if ((x = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:$|[ T])/.exec(t))) { y = +x[1]; m = +x[2]; d = +x[3]; }
+    else if ((x = /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:$|[ T])/.exec(t))) { d = +x[1]; m = +x[2]; y = +x[3]; }
+    else return null;
+    const c = new Date(Date.UTC(y, m - 1, d));
+    if (isNaN(c.getTime()) || c.getUTCFullYear() !== y || c.getUTCMonth() + 1 !== m || c.getUTCDate() !== d) return null;
+    return String(y).padStart(4, '0') + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  }
+  // the KSA account guard on the probe's account profile (connection.account = app.daftra_account_check): SAR, Saudi Arabia,
+  // an active 15 % VAT. Fail closed: no account / ok !== true → blocked; an enforced (live) account must also show the three
+  // values; a mock account is blocked by any contradiction it reports. → null (may write) or the reason.
+  const KSA_COUNTRIES = Object.freeze(['sa', 'sau', 'ksa', 'saudi arabia', 'kingdom of saudi arabia', 'السعودية', 'المملكة العربية السعودية']);
+  function ksaBlock(account) {
+    const a = account && typeof account === 'object' ? account : null;
+    if (!a) return 'not_checked';
+    if (a.ok !== true) return String(a.reason || 'not_ksa').slice(0, 40);
+    const cur = a.currency === null || a.currency === undefined || a.currency === '' ? null : String(a.currency).trim().toUpperCase();
+    const ctry = a.country === null || a.country === undefined || a.country === '' ? null : String(a.country).trim().toLowerCase();
+    if (a.enforced === true) {
+      if (cur !== 'SAR') return 'currency';
+      if (!ctry || !KSA_COUNTRIES.includes(ctry)) return 'country';
+      if (a.vat_15 !== true) return 'vat_rate';
+      return null;
+    }
+    if (cur !== null && cur !== 'SAR') return 'currency';
+    if (ctry !== null && !KSA_COUNTRIES.includes(ctry)) return 'country';
+    if (a.vat_15 === false && Array.isArray(a.vat_rates) && a.vat_rates.length) return 'vat_rate';
+    return null;
+  }
+  // review: the KSA check on an account profile read just now (getAccountProfile → {currency, country, taxes:[{value, active}]}),
+  // the mirror of app.daftra_account_check for a live account: SAR + Saudi Arabia + an active 15 % tax (a tax without an
+  // active flag counts as active, as in SQL). → null (may write) or the reason (currency | country | vat_rate | not_checked)
+  function accountCheck(p) {
+    const a = p && typeof p === 'object' ? p : null;
+    if (!a) return 'not_checked';
+    const cur = a.currency === null || a.currency === undefined ? '' : String(a.currency).trim().toUpperCase();
+    const ctry = a.country === null || a.country === undefined ? '' : String(a.country).trim().toLowerCase();
+    if (cur !== 'SAR') return 'currency';
+    if (!KSA_COUNTRIES.includes(ctry)) return 'country';
+    const ok = (Array.isArray(a.taxes) ? a.taxes : []).some(t => t && Number(t.value) === 15
+      && !(t.active === false || t.active === 0 || t.active === '0' || t.is_active === false || t.is_active === 0 || t.is_active === '0'));
+    return ok ? null : 'vat_rate';
+  }
+  // the write policy of the org (connection.policy). Fail closed: anything but an explicit true is false (HF5 / resolve only)
+  function writePolicy(p) {
+    const o = p && typeof p === 'object' ? p : {};
+    return { allow_draft_update: o.allow_draft_update === true, allow_product_create: o.allow_product_create === true };
+  }
+  // the CustomModel body of a new draft (legacy buildDaftraCustomModelPayload_, proven on the account 2026-08-11):
+  // {CustomModel: {<key>: [value]}, plus a date field as a single DD/MM/YYYY value with 'type_CustomModel.<key>': 'date'}
+  const CUSTOM_KEY_RE = /^[A-Za-z][A-Za-z0-9_]{0,59}$/;
+  function customModel(payload, dateKeys) {
+    const out = {};
+    const dates = new Set(Array.isArray(dateKeys) ? dateKeys : []);
+    const model = {};
+    for (const k of Object.keys(payload || {})) {
+      if (!CUSTOM_KEY_RE.test(k)) throw new AdapterError('validation', 'custom field key malformed', { applied: 'no', code: 'custom_field_key' });
+      const v = payload[k] === null || payload[k] === undefined ? '' : String(payload[k]).replace(/\s+/g, ' ').trim().slice(0, 1000);
+      model[k] = dates.has(k) ? v : [v];
+    }
+    if (!Object.keys(model).length) return out;
+    out.CustomModel = model;
+    for (const k of dates) if (Object.prototype.hasOwnProperty.call(model, k)) out['type_CustomModel.' + k] = 'date';
+    return out;
+  }
+  // a container / chassis text of an invoice custom field → the compact identifiers (legacy parseDaftraContainerSetR12110HF2_):
+  // ISO container numbers (4 letters + 7 digits) when present; else the parts split on ، , ; | newline, a Ro-Ro "chassis / plate"
+  // part reduced to its chassis
+  function containerSet(text) {
+    const t = toWestern(String(text === null || text === undefined ? '' : text)).toUpperCase();
+    const found = [];
+    const re = /([A-Z]{4})\s*[-_/]?\s*(\d{7})/g;
+    let m;
+    while ((m = re.exec(t)) !== null) if (!found.includes(m[1] + m[2])) found.push(m[1] + m[2]);
+    if (found.length) return found.slice(0, 300);
+    // review: the legacy Ro-Ro value «Ro-Ro — شاسيه <chassis> — لوحة <plate>» → the chassis (buildDaftraInvoiceCustomFields_)
+    const ch = /شاسيه\s*:?\s*([A-Z0-9][A-Z0-9 -]{2,40}?)(?=\s*(?:—|-\s|\/|،|,|;|\||لوحة|$))/.exec(t);
+    if (ch) { const c = ch[1].replace(/[^A-Z0-9]/g, ''); if (c) return [c]; }
+    for (const part of t.split(/[،,;|\n]+/)) {
+      const head = part.split(/\s+\/\s+|\s+—\s+/)[0];
+      const c = head.replace(/[^A-Z0-9]/g, '');
+      if (c && !found.includes(c)) found.push(c);
+    }
+    return found.slice(0, 300);
+  }
+  // the worker error codes → the Arabic / English dictionary (status_labels domain 'daftra_error'); a code outside it falls
+  // back to its kind (validation / timeout / network / http_5xx / rate_limited / not_found / not_configured), else 'worker'
+  const DAFTRA_ERROR_CODES = Object.freeze(['account_not_ksa', 'custom_required', 'unmapped_product', 'product_not_found', 'client_not_linked',
+    'client_suspended', 'client_inactive', 'draft_update_disabled', 'product_create_disabled', 'date_mismatch', 'readback_mismatch',
+    'client_mismatch', 'empty_result', 'reference_lookup_incomplete', 'vat_scan_incomplete', 'auth_failed', 'forbidden', 'account_mismatch',
+    'not_configured', 'validation', 'not_found', 'rate_limited', 'http_5xx', 'timeout', 'network', 'lease_lost', 'tax_map_invalid',
+    'invoice_issued', 'supplier_not_linked', 'worker', 'setting_disabled', 'purchase_review']);
+  const ERROR_ALIASES = Object.freeze({ draft_update_refused: 'draft_update_disabled', product_create_refused: 'product_create_disabled',
+    tax_unmapped: 'tax_map_invalid', tax_ambiguous: 'tax_map_invalid', intent_issued: 'invoice_issued', not_draft: 'invoice_issued',
+    redirect: 'not_configured', mock_disabled: 'not_configured', offline: 'network', bad_response: 'network', no_id: 'network',
+    run_deadline: 'timeout', deadline: 'timeout', lease_expired: 'lease_lost', exception: 'worker', before_complete: 'worker', internal: 'worker',
+    plan_limit: 'validation', item_unmapped: 'unmapped_product' });
+  function errorCode(e) {
+    const code = e && e.code ? String(e.code) : '';
+    if (DAFTRA_ERROR_CODES.includes(code)) return code;
+    if (ERROR_ALIASES[code]) return ERROR_ALIASES[code];
+    if (/^config_/.test(code)) return 'not_configured';
+    const kind = e && e.kind ? String(e.kind) : '';
+    if (DAFTRA_ERROR_CODES.includes(kind)) return kind;
+    if (kind === 'conflict') return 'validation';
+    return 'worker';
+  }
+  // the field names an error message carries ("… (fields: a, b)") for the dictionary's {fields}
+  function errorFields(e) {
+    const m = /\(fields: ([^)]{0,400})\)/.exec(String(e && e.message || ''));
+    return m ? m[1].split(',').map(x => x.trim()).filter(Boolean).slice(0, 20) : [];
+  }
+
   /* ---------------------------------------------------------------- real adapter */
   // Data only — never called. G5b status per item: VERIFIED = answered 200 with the documented shape from Supabase staging
   // on 2026-11-03 (GET clients / products / invoices / taxes / site_info .json, header APIKEY, envelope
@@ -177,7 +323,16 @@
     { capability: 'invoices.update_draft', method: 'PUT', path: '/api2/invoices/{id}.json', note: 'DOCUMENTED full payload: items REPLACED; always draft = 1; Marsa re-reads first (draft, modified, no payments)' },
     { capability: 'invoices.version_token', method: '-', path: 'Invoice.modified', note: 'DOCUMENTED "YYYY-MM-DD HH:MM:SS" (second granularity)' },
     { capability: 'invoices.multi_currency', method: '-', path: 'Invoice.currency_code', note: 'DOCUMENTED; defaults to the account currency' },
-    { capability: 'payments.read', method: 'GET', path: '/api2/invoices/{id}.json InvoicePayment[]', note: 'DOCUMENTED (no invoice_id filter on invoice_payments.json); status 1 completed / 4 overpaid counted' }
+    { capability: 'payments.read', method: 'GET', path: '/api2/invoices/{id}.json InvoicePayment[]', note: 'DOCUMENTED (no invoice_id filter on invoice_payments.json); status 1 completed / 4 overpaid counted' },
+    // legacy port step 7 (the legacy Apps Script used these on the account; not exercised by Marsa yet)
+    { capability: 'step7.custom_fields', method: 'POST', path: '/api2/invoices.json CustomModel', note: 'LEGACY-PROVEN 2026-08-11: {CustomModel:{<key>:[value]}}, a date field as one DD/MM/YYYY value + "type_CustomModel.<key>":"date", in the create POST only (never a PUT); keys are per-org configuration' },
+    { capability: 'step7.products_by_code', method: 'GET', path: '/api2/products.json?product_code=<code>', note: 'codes compared without leading zeros (000186 = 186): exact filter, then keywords + client-side match; never POST products under resolve-only' },
+    { capability: 'step7.suppliers', method: 'GET', path: '/api2/suppliers.json?name=<q>', note: 'LEGACY-USED: data[].Supplier {id, business_name, supplier_number, suspend}' },
+    { capability: 'step7.purchase_draft', method: 'POST', path: '/api2/purchase_invoices.json?send=draft', note: 'LEGACY-USED: {PurchaseOrder:{supplier_id, currency_code, date}, PurchaseOrderItem:[{item, description, unit_price, quantity, tax1:0, tax2:0, product_id}]}; Marsa adds draft = 1 and a [MARSA-REF:MRSP-…] notes marker; UNVERIFIED: the marker searchable by keywords' },
+    { capability: 'step7.clients_page', method: 'GET', path: '/api2/clients.json?page=&limit=', note: 'LEGACY-USED for the client import (read only; never a delete)' },
+    { capability: 'step7.invoice_view', method: '-', path: 'https://<subdomain>.daftra.com/owner/invoices/view/<id>', note: 'UNVERIFIED path of the owner view link stored as billing_intents.daftra_url' },
+    { capability: 'step7.account_recheck', method: 'GET', path: '/api2/site_info.json + /api2/taxes.json', note: 'review: re-read right before the first write of a live job (shapes as the probe); country_code / currency_code field names as the probe' },
+    { capability: 'step7.redirect_after_write', method: 'POST', path: '/api2/*.json → 3xx', note: 'review: UNVERIFIED whether a 302 after a POST means the record was written; treated as possibly applied (unknown), reconciled by reference' }
   ]);
 
   // the documented stub: every method throws not_configured (no key read, no network)
@@ -204,10 +359,12 @@
   }
 
   const API = {
-    ADAPTER_METHODS, WRITE_METHODS, CAPABILITY_KEYS, PUSH_REQUIRED_CAPABILITIES, ERROR_KINDS, CLIENT_FIELDS,
+    ADAPTER_METHODS, WRITE_METHODS, WRITE_KINDS, READ_ONLY_KINDS, CAPABILITY_KEYS, PUSH_REQUIRED_CAPABILITIES, ERROR_KINDS, CLIENT_FIELDS,
     AdapterError, isAdapterError,
     canonicalInvoice, canonicalLine, contentHash, invoiceHash, stableStringify, fixed, money,
     normalizeClient, normalizeName, remoteState,
+    codeNorm, riyadhDate, normalizeDate, ksaBlock, accountCheck, KSA_COUNTRIES, writePolicy, customModel, containerSet, CUSTOM_KEY_RE,
+    DAFTRA_ERROR_CODES, errorCode, errorFields,
     createRealAdapter, REAL_ENDPOINTS_TO_VERIFY
   };
   (typeof module === 'object' && module.exports) ? (module.exports = API) : (globalThis.MarsaDaftra = Object.assign(globalThis.MarsaDaftra || {}, API));

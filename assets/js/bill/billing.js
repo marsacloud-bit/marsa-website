@@ -173,10 +173,22 @@
     function idOf(d) { return d ? (d.id || (d.intent && d.intent.id) || (d.job && d.job.id) || (d.link && d.link.id) || null) : null; }
 
     /* --- jobs: table + attempts (calls in collapsible <pre>) ------------------ */
+    // a worker error → the Arabic / English Daftra dictionary (legacy step 7, MarsaOps.dftKit) when it knows the code, else the raw message
+    function errText(e) {
+      if (!e) return '';
+      var K = window.MarsaOps && window.MarsaOps.dftKit;
+      if (K && typeof K.errorText === 'function' && e.code && K.ERROR_CODES.indexOf(K.errorCode(e)) !== -1 && K.errorCode(e) !== 'worker') {
+        try { return K.errorText(e); } catch (x) { /* fall through */ }
+      }
+      return e.message || '';
+    }
     function jobTarget(j) {
       if (j.intent_id) return intentLink(j.intent_id, j.operational_ref);
       if (j.client_link_id) return el('a', { class: 'ops-ref', href: '#daftra/clients', text: j.client_name || t('target_client') });
       if (j.item_link_id) return el('a', { class: 'ops-ref', href: '#daftra/items' }, j.item_key ? itemLabel(j.item_key) : t('target_item'));
+      // legacy step 7: invoice_lookup / purchase_push target a transaction; runs (import / match / scan / supplier search) a run
+      if (j.transaction_id) return el('a', { class: 'ops-ref', href: '#tx/' + j.transaction_id }, [el('bdi', { dir: 'ltr', text: j.operational_ref || String(j.transaction_id).slice(0, 8) })]);
+      if (j.run_id) return el('a', { class: 'ops-ref', href: j.kind === 'client_import' ? '#daftra/import' : j.kind === 'product_match' ? '#daftra/products' : '#daftra', text: t('target_run') });
       return el('span', { text: t('target_org') });
     }
     function attemptsNode(api, data) {
@@ -190,7 +202,7 @@
             a.outcome ? pill('bill_attempt_outcome', a.outcome, api) : U.pill('info', t('attempt_open')), ' ',
             el('span', { class: 'text-xs text-muted', text: [a.adapter_mode ? lab('daftra_mode', a.adapter_mode) : null, a.worker, when(a.started_at) + (a.finished_at ? ' → ' + when(a.finished_at) : '')].filter(Boolean).join(' · ') })
           ]),
-          a.error ? el('p', { class: 'form-error bill-attempt-err' }, [t('attempt_error') + ': ', ref([a.error.kind, a.error.code].filter(Boolean).join(' / ')), a.error.message ? ' ' + a.error.message : '']) : null,
+          a.error ? el('p', { class: 'form-error bill-attempt-err' }, [t('attempt_error') + ': ', ref([a.error.kind, a.error.code].filter(Boolean).join(' / ')), errText(a.error) ? ' ' + errText(a.error) : '']) : null,
           calls.length ? el('div', { class: 'bill-calls' }, calls.map(function (c) {
             return el('details', { class: 'bill-call' + (c.error ? ' is-error' : '') }, [
               el('summary', null, [ref(c.op || '?'), el('span', { class: 'text-xs text-muted', text: ' · ' + (c.ms != null ? c.ms + ' ms' : '') + ' · ' + t('applied') + ': ' + lab('bill_applied', c.applied || 'no') + (c.error ? ' · ' + (c.error.kind || '') : '') })]),
@@ -236,7 +248,7 @@
           U.td(el('bdi', { dir: 'ltr', class: 'num', text: (j.attempts || 0) + ' / ' + (j.max_attempts || 0) }), 'num'),
           U.td(la ? [la.outcome ? pill('bill_attempt_outcome', la.outcome, api) : U.pill('info', t('attempt_open')), el('span', { class: 'cell-sub', text: when(la.finished_at || la.started_at) })] : null),
           U.td(j.status === 'queued' || j.status === 'unknown' ? when(j.next_run_at) : when(j.finished_at || j.updated_at), 'is-nowrap'),
-          U.td(j.last_error_code || j.last_error_message ? [ref(j.last_error_code || j.last_error_kind), el('span', { class: 'cell-sub', text: j.last_error_message || '' })] : null),
+          U.td(j.last_error_code || j.last_error_message ? [ref(j.last_error_code || j.last_error_kind), el('span', { class: 'cell-sub', text: errText({ code: j.last_error_code, kind: j.last_error_kind, message: j.last_error_message }) })] : null),
           U.td(acts, 'ops-col-actions')
         ]);
       });
@@ -816,7 +828,7 @@
       var all = function (lbl) { return lbl + ': ' + t('all'); };
       var fl = [
         U.select('status', t('f_status'), [['', all(t('f_status'))]].concat(['queued', 'running', 'unknown', 'done', 'conflict', 'failed', 'dead', 'cancelled'].map(function (s) { return [s, B.lab('bill_job_status', s)]; })), QF.status, function (v) { QF.status = v; QF.offset = 0; load(); }),
-        U.select('kind', t('col_job_kind'), [['', all(t('col_job_kind'))]].concat(['probe', 'client_ensure', 'client_refresh', 'client_push', 'item_ensure', 'invoice_push', 'invoice_pull'].map(function (s) { return [s, B.lab('bill_job_kind', s)]; })), QF.kind, function (v) { QF.kind = v; QF.offset = 0; load(); })
+        U.select('kind', t('col_job_kind'), [['', all(t('col_job_kind'))]].concat(['probe', 'client_ensure', 'client_refresh', 'client_push', 'item_ensure', 'invoice_push', 'invoice_pull', 'product_match', 'client_import', 'invoice_lookup', 'legacy_scan', 'supplier_search', 'purchase_push'].map(function (s) { return [s, B.lab('bill_job_kind', s)]; })), QF.kind, function (v) { QF.kind = v; QF.offset = 0; load(); })
       ];
       var bo = F.branchOptions(api, 'finRead', true);
       if (bo.length > 2) fl.push(U.select('branch_id', t('f_branch'), bo, QF.branch_id, function (v) { QF.branch_id = v; load(); }));

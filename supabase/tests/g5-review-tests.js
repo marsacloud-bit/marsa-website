@@ -158,6 +158,7 @@ async function unit() {
   const invB = await m.createDraftInvoice({ reference: REF, client_id: cB.id, currency: 'SAR', lines: [{ line_ref: 'MRSL-B1', product_id: p.id, description: 'تخليص ب', quantity: 1, unit_price: 400, tax_rate: 15 }] });
   const cA = await m.createClient({ ref: 'MRSC-a', name: 'عميل أ' });
   const ctxFor = (clientExt, currency) => ({
+    connection: { account: { ok: true, reason: null, enforced: false }, policy: { allow_draft_update: true, allow_product_create: true } }, 
     job: { id: 'j', org_id: 'orgA', kind: 'invoice_push', attempt_no: 1, options: {}, previous_status: 'queued' },
     intent: { id: 'iA', operational_ref: REF, currency, status: 'open', sync_state: 'pending', external_invoice_id: null, pushed_hash: null,
       client: { link_id: 'LA', client_ref: 'MRSC-a', external_id: clientExt, status: 'linked', data: { name: 'عميل أ' } },
@@ -206,13 +207,13 @@ async function unit() {
   await check('a write that never answers times out as applied:unknown → outcome unknown', async () => {
     const mm = createMockAdapter({ orgId: 't', deps: AD, clock: CLOCK });
     const hang = Object.assign(Object.create(mm), { createClient: () => new Promise(() => {}) });
-    const ctx = { job: { id: 'j', org_id: 't', kind: 'client_ensure', options: {} }, client: { link_id: 'L', client_ref: 'MRSC-t', status: 'pending', data: { name: 'x' } } };
+    const ctx = { connection: { account: { ok: true, reason: null, enforced: false }, policy: { allow_draft_update: true, allow_product_create: true } }, job: { id: 'j', org_id: 't', kind: 'client_ensure', options: {} }, client: { link_id: 'L', client_ref: 'MRSC-t', status: 'pending', data: { name: 'x' } } };
     const r = await runJob(ctx, hang, { deps: AD, clock: CLOCK, callTimeoutMs: 30 });
     return (r.outcome === 'unknown' && r.calls.some(c => c.op === 'createClient' && c.applied === 'unknown')) || JSON.stringify(r);
   });
   await check('a refused lease renewal sends no write (outcome retry, lease_lost)', async () => {
     const mm = createMockAdapter({ orgId: 't2', deps: AD, clock: CLOCK });
-    const ctx = { job: { id: 'j', org_id: 't2', kind: 'client_ensure', options: {} }, client: { link_id: 'L', client_ref: 'MRSC-t2', status: 'pending', data: { name: 'x' } } };
+    const ctx = { connection: { account: { ok: true, reason: null, enforced: false }, policy: { allow_draft_update: true, allow_product_create: true } }, job: { id: 'j', org_id: 't2', kind: 'client_ensure', options: {} }, client: { link_id: 'L', client_ref: 'MRSC-t2', status: 'pending', data: { name: 'x' } } };
     const r = await runJob(ctx, mm, { deps: AD, clock: CLOCK, beforeWrite: async () => { throw new Error('MRS_BAD_TRANSITION lease_lost'); } });
     return (r.outcome === 'retry' && r.error.kind === 'lease_lost' && mm.control.count('client') === 0) || JSON.stringify(r);
   });
@@ -637,6 +638,9 @@ async function main() {
   const dir = path.join(SUPA, 'migrations');
   await db.exec(fs.readFileSync(path.join(SUPA, 'tests', 'shim.sql'), 'utf8'));
   for (const f of fs.readdirSync(dir).filter(f => /^\d+_.*\.sql$/.test(f)).sort()) await db.exec(fs.readFileSync(path.join(dir, f), 'utf8'));
+  // legacy step 7 (20261123000100): the owner decisions default to HF5 (no edit of an existing Daftra draft) and resolve-only
+  // products (never created); this suite tests the G5 behaviour, so the connections it creates start with the G5 write policy
+  await db.exec(`ALTER TABLE public.daftra_connections ALTER COLUMN allow_draft_update SET DEFAULT true, ALTER COLUMN allow_product_create SET DEFAULT true`);
   await db.exec(fs.readFileSync(path.join(SUPA, 'seed.sql'), 'utf8'));
   await fixtures();
   pass('shim + migrations + seed + fixtures');

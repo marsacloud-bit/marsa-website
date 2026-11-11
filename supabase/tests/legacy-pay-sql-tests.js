@@ -270,19 +270,21 @@ async function secFile() {
       && !/INSERT INTO public\.(billing_|daftra_)|functions\.invoke|net\.http/i.test(c) && /IF v_bal - v_e\.signed_amount < 0 THEN PERFORM app\.fin_fail\('MRS_CUSTODY_NEGATIVE'/.test(c)
       && !/review_status = 'approved'[^;]*INSERT/.test(c) && /v_review NOT IN \('draft','pending'\)/.test(c)) || 'decisions';
   });
-  const LATER_PHASES = [];
+  // later phases may follow this file (20261123000100 legacy_daftra: re-creates the conversion lists)
+  const LATER_PHASES = ['20261123000100_legacy_daftra.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
   });
-  await check('all_migrations.sql holds this file verbatim (appended last, in order) + a header line', () => {
+  await check('all_migrations.sql holds this file verbatim (appended in order; only the listed later phases follow it) + a header line', () => {
     const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
     const marker = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(marker);
     const next = all.indexOf('\n-- ===== migrations/', i + marker.length);
+    const after = next < 0 ? [] : (all.slice(next).match(/^-- ===== migrations\/(\S+) =====$/gm) || []).map(l => l.split('/')[1].split(' ')[0]);
     const body = all.slice(i + marker.length, next < 0 ? undefined : next);
     const order = (all.match(/^-- ===== migrations\/(\S+) =====$/gm) || []).map(l => l.split('/')[1].split(' ')[0]);
-    return (i > 0 && next < 0 && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
+    return (i > 0 && after.every(f => LATER_PHASES.includes(f)) && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
       && all.slice(0, 16000).includes(MIG) && J(order) === J(migFiles())) || 'not appended verbatim / no header line / order';
   });
   await check('docs/online/LEGACY_PAY_AR.md exists and names the migration, every RPC, the error codes, the doc types and the rules', () => {
@@ -1022,14 +1024,14 @@ async function secRls() {
                                 has_function_privilege('authenticated', 'app.tg_payment_totals()', 'EXECUTE') t`);
     return (r.length === RPCS.length && r.every(x => x.au && !x.an && !x.sr) && h.length === 0 && c.a === true && c.b === false && c.t === false) || J({ r, h, c });
   });
-  await check('conversion lists: the 4 tables in app.convert_delete_tables (78), their no-delete guards in app.convert_delete_guards (39), every table classified', async () => {
+  await check('conversion lists: the 4 tables in app.convert_delete_tables (83 with the 5 tables of 20261123000100), their no-delete guards in app.convert_delete_guards (44), every table classified', async () => {
     const t = (await one(`SELECT app.convert_delete_tables() t`)).t;
     const g = (await one(`SELECT app.convert_delete_guards() g`)).g;
     const keep = (await one(`SELECT app.convert_keep_tables() k`)).k;
     const all = (await q(`SELECT 'public.' || relname n FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r'`)).map(x => x.n);
     const un = all.filter(x => !t.includes(x) && !keep.includes(x) && !['public.status_labels', 'public.schema_versions', 'public.organizations',
       'public.profiles', 'public.platform_admins', 'public.plans', 'public.customs_ports', 'public.daftra_mock_accounts'].includes(x));
-    return (T.every(x => t.includes('public.' + x) && g.includes('public.' + x + ':trg_no_delete')) && g.length === 39 && t.length === 78 && un.length === 0) || J({ g: g.length, t: t.length, un });
+    return (T.every(x => t.includes('public.' + x) && g.includes('public.' + x + ':trg_no_delete')) && g.length === 44 && t.length === 83 && un.length === 0) || J({ g: g.length, t: t.length, un });
   });
   await check('the trail: the 4 tables are audited (insert / update)', async () => {
     const r = await q(`SELECT DISTINCT table_name FROM public.audit_log WHERE table_name = ANY ($1)`, [T]);

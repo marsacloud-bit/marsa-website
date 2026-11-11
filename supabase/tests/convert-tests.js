@@ -178,7 +178,7 @@ async function secFile() {
   });
   // later phases may follow this file (20261116000100 doc_match: re-creates convert_delete_tables / convert_delete_guards
   // with public.document_matches); none may sort before it unnoticed
-  const LATER_PHASES = ['20261116000100_doc_match.sql', '20261117000100_legacy_core.sql', '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql'];
+  const LATER_PHASES = ['20261116000100_doc_match.sql', '20261117000100_legacy_core.sql', '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql'];
   await check('this file is present; only the listed later phases follow it', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -440,7 +440,7 @@ async function secRefusals() {
   });
   await check('every listed guard is enabled (no refusal left a guard disabled)', async () =>
     (await num(`SELECT count(*) n FROM unnest(app.convert_delete_guards()) g JOIN pg_trigger t
-                  ON t.tgrelid = split_part(g, ':', 1)::regclass AND t.tgname = split_part(g, ':', 2) WHERE t.tgenabled = 'O'`)) === 39);   // 23 + document_matches (20261116000100) + 5 legacy docs tables (20261119000100) + 3 legacy decl tables (20261120000100) + 3 legacy appt tables (20261121000100) + 4 legacy pay tables (20261122000100)
+                  ON t.tgrelid = split_part(g, ':', 1)::regclass AND t.tgname = split_part(g, ':', 2) WHERE t.tgenabled = 'O'`)) === 44);   // 23 + document_matches (20261116000100) + 5 legacy docs tables (20261119000100) + 3 legacy decl tables (20261120000100) + 3 legacy appt tables (20261121000100) + 4 legacy pay tables (20261122000100) + 5 legacy daftra tables (20261123000100)
 }
 
 /* ================================================================== 6. org-level refusals (SIDE database) */
@@ -503,11 +503,11 @@ async function secConvert() {
   await setAck(PRE.ack);
   try { R = await convert(A, NEW_SLUG, NAME_AR, NAME_EN, CONFIRM); pass('convert_org_to_production runs (' + (Date.now() - t0) + ' ms)'); }
   catch (e) { fail('convert_org_to_production runs', errText(e)); return; }
-  await check('summary: deleted per table = the rows the org had; total; memberships 8; counters reset; 2 mock channels switched off; 39 guards (23 + document_matches + 5 legacy docs tables + 3 legacy decl tables + 3 legacy appt tables + 4 legacy pay tables)', () => {
+  await check('summary: deleted per table = the rows the org had; total; memberships 8; counters reset; 2 mock channels switched off; 44 guards (23 + document_matches + 5 legacy docs tables + 3 legacy decl tables + 3 legacy appt tables + 4 legacy pay tables + 5 legacy daftra tables)', () => {
     const diff = Object.keys(PRE.counts).filter(k => R.deleted[k] !== PRE.counts[k]);
     const total = Object.values(PRE.counts).reduce((a, b) => a + b, 0) + 8;
     return (diff.length === 0 && R.deleted.memberships === 8 && R.deleted_total === total && R.reset.org_counters >= 3 && R.reset.org_usage_counters >= 1
-      && R.mock_channels_disabled === 2 && R.guards_bypassed === 39 && R.from_slug === 'blue-sea' && R.slug === NEW_SLUG) || J({ diff, R: Object.assign({}, R, { deleted: undefined }) });
+      && R.mock_channels_disabled === 2 && R.guards_bypassed === 44 && R.from_slug === 'blue-sea' && R.slug === NEW_SLUG) || J({ diff, R: Object.assign({}, R, { deleted: undefined }) });
   });
   await check('[D1] summary.daftra_cleared = the acknowledged list (counts, ack, invoice / client lists); the acknowledgement setting is cleared', async () => {
     const d = R.daftra_cleared;
@@ -736,6 +736,9 @@ async function main() {
   try {
     await db.exec(fs.readFileSync(path.join(SUPA, 'tests', 'shim.sql'), 'utf8'));
     for (const f of migFiles()) await db.exec(fs.readFileSync(path.join(MIG_DIR, f), 'utf8'));
+    // legacy step 7 (20261123000100): the owner decisions default to HF5 (no edit of an existing Daftra draft) and resolve-only
+    // products; the population pushes G5 drafts through the real worker, so the connections start with the G5 write policy
+    await db.exec(`ALTER TABLE public.daftra_connections ALTER COLUMN allow_draft_update SET DEFAULT true, ALTER COLUMN allow_product_create SET DEFAULT true`);
     await db.exec(fs.readFileSync(path.join(SUPA, 'seed.sql'), 'utf8'));
     pass('MAIN loaded (' + migFiles().length + ' migrations + seed)');
   } catch (e) { fail('MAIN load', errText(e)); return finish(); }

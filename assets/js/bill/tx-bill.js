@@ -20,10 +20,24 @@
    * Strings: own namespace 'billtx' (ar + en) registered below; labels of the
      daftra_* / bill_* domains come from 'bill.<domain>_<code>' (assets/i18n/bill.js)
      when present, else from 'billtx.lbl_<domain>_<code>', else admin.js labels.
+   * Legacy step 7 (docs/online/LEGACY_DAFTRA_AR.md, MarsaOps.dftKit from assets/js/bill/dft-kit.js): the Daftra link of
+     each draft (daftra_url, https only), the KSA account banner, HF5 (an existing draft is never edited: push is not
+     offered, the «تعديل يدوي مطلوب في دفترة» item lists the lines to change by hand), the read-only refresh on open when
+     the last read is older than 15 minutes (refresh_tx_daftra, once per transaction and quarter hour), the opening draft
+     of the declaration approval (state + retry_daftra_opening), linking an existing Daftra invoice (number / composite
+     look-up, read only; a visual side-by-side confirmation with the number typed again; another client = hard block),
+     the step-7 review items (date_mismatch, readback_mismatch, client_mismatch, opening_blocked) and the purchase
+     drafts per trip (behind the org flag). Worker error codes are shown from the Arabic / English dictionary.
    * Server and user data are inserted with textContent / createElement only.
    ========================================================================== */
 (function () {
   'use strict';
+
+  // Daftra's invoice state → its label (legacy step 7 dictionary, MarsaOps.dftKit); unknown values stay as Daftra wrote them
+  function dftState(v) {
+    var K = window.MarsaOps && window.MarsaOps.dftKit, s = String(v);
+    return K && K.has('rstate_' + s) ? K.t('rstate_' + s) : s;
+  }
 
   var I = window.MarsaI18n;
   var OPS = window.MarsaOps = window.MarsaOps || { views: {}, txSections: [] };
@@ -146,6 +160,9 @@
     financial_status: { not_started: 'info', estimate_only: 'info', draft_pending: 'warning', invoiced: 'brand', settled: 'success' }
   };
   var FLIGHT = ['in_flight', 'unknown'];
+  // legacy step 7: the read-only refresh on open is asked at most once per transaction and quarter hour in this page
+  var REFRESHED = {};
+  var REFRESH_MS = 15 * 60 * 1000;
 
   /* ------------------------------------------------------------------
      Toolkit — one per render (closes over the api object)
@@ -282,6 +299,12 @@
       var settings = el('a', { class: 'btn btn-sm btn-ghost', href: '#daftra', text: k.t('open_settings') });
       if (status !== 'connected') out.push(k.alert('info', k.t('not_connected', { s: k.L('daftra_conn_status', status) }), [settings]));
       else if (conn.sync_enabled === false) out.push(k.alert('info', k.t('sync_disabled'), [settings]));
+      var D = OPS.dftKit;
+      if (D && conn.account_check && conn.account_check.ok === false) {
+        out.push(el('div', { class: 'alert alert-danger dft-ksa-banner', role: 'alert', 'data-bill': 'ksa-banner' }, [
+          el('div', { text: D.t('tx_ksa_banner', { reason: D.accountReason(conn.account_check) }) }), el('a', { class: 'btn btn-sm btn-ghost', href: '#daftra', text: k.t('open_settings') })]));
+      }
+      if (D && conn.allow_draft_update !== true) out.push(el('p', { class: 'text-xs text-muted dft-hf5-line', 'data-bill': 'hf5-line', text: D.t('tx_policy_line') }));
       out.push(el('div', { class: 'bill-tx-strip adm-meta' }, [
         el('span', { class: 'text-sm', text: k.t('conn') + ': ' }), k.badge('daftra_mode', mode), ' ', k.badge('daftra_conn_status', status),
         el('span', { class: 'text-sm', text: ' · ' + k.t('fin_status') + ': ' }), k.badge('financial_status', finStatus || tx.financial_status || 'not_started')
@@ -294,6 +317,11 @@
       if (!canWrite) return k.t('why_role');
       if (i.status === 'issued') return k.t('why_issued');
       if (i.status === 'cancelled') return k.t('why_cancelled');
+      var D = OPS.dftKit;
+      if (D && i.origin === 'linked') return D.t('tx_why_linked');
+      // HF5: an existing Daftra draft is never edited (allow_draft_update FALSE, owner only)
+      if (D && i.external_invoice_id && (!conn || conn.allow_draft_update !== true)) return D.t('tx_why_hf5');
+      if (D && conn && conn.account_check && conn.account_check.ok === false) return D.t('tx_why_ksa', { reason: D.accountReason(conn.account_check) });
       if (i.sync_state === 'conflict') return k.t('why_conflict');
       if (FLIGHT.indexOf(i.sync_state) !== -1) return k.t('why_flight');
       if (!conn || conn.status !== 'connected' || conn.sync_enabled === false) return k.t('why_conn');
@@ -364,16 +392,23 @@
       }
       var syncCell = [k.badge('bill_sync_state', i.sync_state || 'idle')];
       if (queued(i)) syncCell.push(el('span', { class: 'adm-sub bill-queued', text: k.t('queued_hint') }));
-      if (i.last_error_message || i.last_error_code) syncCell.push(el('span', { class: 'adm-sub text-danger', text: k.t('last_error', { e: i.last_error_message || i.last_error_code }) }));
+      var D = OPS.dftKit;
+      if (D && (i.last_error_code || i.job_error)) {
+        syncCell.push(el('span', { class: 'adm-sub text-danger dft-err', 'data-code': D.errorCode({ code: i.last_error_code || i.job_error }),
+          text: D.t('tx_job_error', { e: D.errorText({ code: i.last_error_code || i.job_error, message: i.last_error_message }) }) }));
+      } else if (i.last_error_message || i.last_error_code) syncCell.push(el('span', { class: 'adm-sub text-danger', text: k.t('last_error', { e: i.last_error_message || i.last_error_code }) }));
+      var url = D ? D.safeUrl(i.daftra_url) : null;
       var tr = el('tr', { 'data-intent': i.id, 'data-status': i.status || null, 'data-sync': i.sync_state || null, class: i.sync_state === 'conflict' ? 'bill-row-conflict' : null }, [
-        el('td', null, k.ltr(i.operational_ref)),
+        el('td', null, [k.ltr(i.operational_ref), D && i.origin && i.origin !== 'marsa' ? el('span', { class: 'adm-sub dft-origin', 'data-origin': i.origin, text: D.t('tx_origin_' + i.origin) }) : null]),
         el('td', null, k.L('bill_purpose', i.purpose || 'final')),
         el('td', null, el('bdi', { dir: 'ltr', text: cur })),
         el('td', null, k.badge('bill_intent_status', i.status || 'open')),
         el('td', null, syncCell),
         k.moneyCell(marsaTotal, cur),
         el('td', null, [i.daftra_number ? k.ltr(i.daftra_number) : el('span', { text: k.t('none') }),
-          i.daftra_status ? el('span', { class: 'adm-sub', dir: 'ltr', text: String(i.daftra_status) }) : null]),
+          i.daftra_status ? el('span', { class: 'adm-sub', text: dftState(i.daftra_status) }) : null,
+          D && i.invoice_date ? el('span', { class: 'adm-sub', text: D.t('tx_invoice_date', { d: String(i.invoice_date).slice(0, 10) }) }) : null,
+          url ? el('a', { class: 'adm-sub dft-daftra-link', href: url, target: '_blank', rel: 'noopener noreferrer', 'data-act': 'bill-daftra-url', text: D.t('open_in_daftra') }) : null]),
         el('td', { class: 'num' + (diff ? ' bill-total-diff' : '') }, [el('bdi', { dir: 'ltr', text: k.money(remoteTotal, cur) }),
           diff ? el('span', { class: 'adm-sub text-warning', text: k.t('total_diff') }) : null]),
         el('td', null, pay),
@@ -425,6 +460,8 @@
     }
 
     function reviewBlock(items) {
+      var D = OPS.dftKit;
+      if (D) items = items.filter(function (r) { return D.REVIEW_KINDS.indexOf(r.kind) === -1; });
       if (!items.length) return null;
       return el('div', { class: 'bill-tx-review' }, [
         k.subHead(k.t('review'), [el('a', { class: 'btn btn-sm btn-ghost', href: '#billing/queue', text: k.t('review_open_queue') })]),
@@ -473,6 +510,224 @@
       });
     }
 
+    /* ---- legacy step 7 ------------------------------------------------------ */
+    var D = OPS.dftKit, UI = OPS.ui;
+    var can = { write: canWrite, approve: api.can('finApprove', tx.branch_id) };
+    function ukey(scope, payload) { return UI && UI.idemKey ? UI.idemKey(api, scope, payload) : keyFor(scope, JSON.stringify(payload || {})); }
+    function settle(scope, err) { if (UI && UI.idemSettle) UI.idemSettle(scope, err); }
+    // the read-only refresh on open (refresh_tx_daftra): only when the server says a Daftra invoice is stale
+    function maybeRefresh(d, host) {
+      var conn = d.connection || {};
+      if (!D || !d.stale || conn.status !== 'connected' || conn.sync_enabled === false) return;
+      var last = REFRESHED[tx.id];
+      if (last && Date.now() - last < REFRESH_MS) return;
+      REFRESHED[tx.id] = Date.now();
+      M(api, 'refreshTxDaftra')(tx.id).then(function (r) {
+        if (r.error || !r.data || !(+r.data.enqueued > 0)) return;
+        host.appendChild(el('p', { class: 'text-xs text-muted dft-refresh-note', 'data-bill': 'refresh-sent', text: D.t('tx_refresh_sent') }));
+      });
+    }
+    // the opening draft of the declaration approval
+    function openingBlock(d) {
+      var conn = d.connection || {}, st = D.openingState(d);
+      var text = st.state === 'queued' ? D.t('op_queued', { ref: st.ref || '' }) : st.state === 'blocked' ? D.t('op_blocked', { reason: st.reason })
+        : st.state === 'off' ? D.t('op_off') : D.t('op_none');
+      var failed = st.intent && ['failed', 'dead'].indexOf(st.intent.job_status) !== -1;
+      var retry = conn.auto_draft_on_declaration && canWrite && (st.state === 'blocked' || st.state === 'none' || failed)
+        ? k.btn(D.t('op_retry'), 'btn-ghost', function (b) {
+          b.disabled = true;
+          var scope = 'dft-opening-' + tx.id, key = ukey(scope, { tx: tx.id });
+          M(api, 'retryDaftraOpening')(tx.id, { idemKey: key }).then(function (r) {
+            settle(scope, r.error);
+            if (r.error) { b.disabled = false; api.toast(api.errText(r.error), 'error'); return; }
+            var x = r.data || {};
+            api.toast(D.t('op_res_' + (x.status || 'queued'), { reason: D.openingReason(x) }), x.status === 'blocked' ? 'warning' : 'success');
+            api.refresh();
+          });
+        }, { 'data-act': 'dft-opening-retry' }) : null;
+      return el('div', { class: 'dft-opening', 'data-opening': st.state }, [
+        k.subHead(D.t('op_title'), [retry]),
+        el('p', { class: 'text-sm' + (st.state === 'blocked' ? ' text-danger' : ''), text: text }),
+        st.intent && st.intent.job_error ? D.errNode({ code: st.intent.job_error }) : null,
+        st.state !== 'off' ? el('p', { class: 'text-xs text-muted', text: D.t('op_never_undo') }) : null
+      ]);
+    }
+    // the Marsa side of an invoice candidate (client, declarations, B/L, containers)
+    function marsaKeys() {
+      var decl = M(api, 'listDeclarations')(tx.id), bls = M(api, 'listBLs')(tx.id);
+      return Promise.all([decl, bls]).then(function (res) {
+        var rows = function (r) { var x = r && !r.error ? r.data : null; return Array.isArray(x) ? x : (x && (x.items || x.rows)) || []; };
+        var dn = rows(res[0]).filter(function (x) { return ['cancelled', 'replaced'].indexOf(x.status) === -1; }).map(function (x) { return x.declaration_no; });
+        var bl = rows(res[1]).map(function (x) { return x.bl_number || (x.bills_of_lading && x.bills_of_lading.bl_number); }).filter(Boolean);
+        if (tx.bl_number && bl.indexOf(tx.bl_number) === -1) bl.push(tx.bl_number);
+        var ctr = tx.cargo_unit_type === 'roro' ? [tx.chassis_no].filter(Boolean) : arr(tx.containers).map(function (c) { return c && c.container_no; }).filter(Boolean);
+        return { client: (tx.clients && tx.clients.name_ar) || tx.client_name || null, declaration_nos: dn, bl_numbers: bl, containers: ctr, ref: tx.ref };
+      });
+    }
+    function compareTable(c, m) {
+      var rows = D.compareRows(c, m).map(function (x) {
+        var tone = x.check === 'ok' ? 'success' : x.check === 'bad' ? 'danger' : x.check === 'missing' ? 'warning' : null;
+        return el('tr', { 'data-cmp': x.field, 'data-check': x.check || '' }, [
+          el('th', { scope: 'row', text: D.t('tx_cmp_' + x.field) }),
+          el('td', null, x.marsa ? el('bdi', { text: x.marsa }) : el('span', { class: 'text-muted', text: k.t('none') })),
+          el('td', null, x.daftra ? el('bdi', { text: x.daftra }) : el('span', { class: 'text-muted', text: k.t('none') })),
+          el('td', null, tone ? k.pill(tone, x.note ? D.t(x.note) : D.t('tx_cmp_' + x.check)) : null)
+        ]);
+      });
+      return el('div', { class: 'table-wrap adm-table-wrap dft-cmp' }, el('table', { class: 'table adm-table dft-cmp-table' }, [
+        el('thead', null, el('tr', null, [D.t('tx_cmp_field'), D.t('tx_cmp_marsa'), D.t('tx_cmp_daftra'), D.t('tx_cmp_check')].map(function (h) { return el('th', { scope: 'col', text: h }); }))),
+        el('tbody', null, rows)]));
+    }
+    function confirmDialog(c) {
+      if (!UI || !UI.formModal) return;
+      marsaKeys().then(function (m) {
+        var review = c.state === 'review';
+        var intro = el('div', { class: 'dft-cmp-intro' }, [compareTable(c, m), review ? k.alert('warning', D.t('tx_review_text')) : null]);
+        var fields = [{ name: 'confirm_number', label: D.t('tx_confirm_number'), required: true, ltr: true, max: 60, autocomplete: 'off' }];
+        if (review) {
+          fields.push({ name: 'choose', label: D.t('tx_confirm_multi'), type: 'checkbox', value: false });
+          fields.push({ name: 'note', label: D.t('note'), type: 'textarea', required: true, max: 2000, rows: 2 });
+        }
+        UI.formModal({
+          title: D.t('tx_cmp_title', { n: c.daftra_number || c.external_invoice_id }), size: 'lg', intro: intro, submitText: D.t('tx_confirm_ok'), fields: fields,
+          validate: function (v) {
+            var bad = {};
+            if (v.confirm_number && !D.numberMatches(v.confirm_number, c)) bad.confirm_number = D.t('tx_confirm_number_bad');
+            if (review && !v.choose) bad.choose = D.t('tx_confirm_multi_need');
+            return bad;
+          },
+          fieldMap: { confirm_number: 'confirm_number', note: 'note' },
+          submit: function (v) {
+            var p = { confirm_number: v.confirm_number };
+            if (review) { p.choose_among_multiple = true; p.note = v.note; }
+            var scope = 'dft-link-' + c.id, key = ukey(scope, p);
+            return M(api, 'confirmInvoiceLink')(c.id, p, { idemKey: key }).then(function (r) { settle(scope, r.error); return r; });
+          }
+        }).then(function (ok) { if (ok) { api.toast(D.t('tx_linked'), 'success'); api.refresh(); } });
+      });
+    }
+    function rejectDialog(c) {
+      if (!UI || !UI.formModal) return;
+      UI.formModal({
+        title: D.t('tx_reject_title', { n: c.daftra_number || c.external_invoice_id }), size: 'sm', submitText: D.t('tx_cand_reject'), danger: true,
+        fields: [{ name: 'note', label: D.t('reason'), type: 'textarea', required: true, max: 2000, rows: 2 }],
+        submit: function (v) { return M(api, 'rejectInvoiceCandidate')(c.id, v.note); }
+      }).then(function (ok) { if (ok) { api.toast(D.t('tx_cand_rejected'), 'success'); api.refresh(); } });
+    }
+    function lookup(mode) {
+      return function (b) {
+        if (mode === 'composite') { send(b, { mode: 'composite' }); return; }
+        if (!UI || !UI.formModal) return;
+        UI.formModal({
+          title: D.t('tx_find_number'), size: 'sm', submitText: D.t('tx_find_number'),
+          fields: [{ name: 'number', label: D.t('tx_number'), required: true, ltr: true, max: 60, hint: D.t('tx_number_hint') }],
+          submit: function (v) {
+            var p = { mode: 'number', number: D.western(v.number).trim() }, scope = 'dft-lookup-' + tx.id, key = ukey(scope, p);
+            return M(api, 'requestDaftraInvoiceLookup')(tx.id, p, { idemKey: key }).then(function (r) { settle(scope, r.error); return r; });
+          }
+        }).then(function (ok) { if (ok) { api.toast(D.t('tx_lookup_queued'), 'success'); api.refresh(); } });
+      };
+      function send(btn, p) {
+        btn.disabled = true;
+        var scope = 'dft-lookup-' + tx.id, key = ukey(scope, p);
+        M(api, 'requestDaftraInvoiceLookup')(tx.id, p, { idemKey: key }).then(function (r) {
+          settle(scope, r.error);
+          btn.disabled = false;
+          if (r.error) { api.toast(api.errText(r.error), 'error'); return; }
+          api.toast(D.t('tx_lookup_queued'), 'success'); api.refresh();
+        });
+      }
+    }
+    function candidatesBlock(d) {
+      var conn = d.connection || {}, cands = arr(d.invoice_candidates);
+      var ready = conn.status === 'connected' && conn.sync_enabled !== false;
+      var acts = canWrite && ready ? [k.btn(D.t('tx_find_number'), 'btn-ghost', lookup('number'), { 'data-act': 'dft-find-number' }),
+        k.btn(D.t('tx_find_composite'), 'btn-ghost', lookup('composite'), { 'data-act': 'dft-find-composite' })] : [];
+      var rows = cands.map(function (c) {
+        var tone = c.state === 'blocked' ? 'danger' : c.state === 'review' || c.state === 'partial' ? 'warning' : 'info';
+        var a = [];
+        // review: a partial composite match is a hint only (what differs), never linkable — staff link by number
+        if (can.approve && c.state !== 'blocked' && c.state !== 'partial') a.push(k.btn(D.t('tx_cand_confirm'), 'btn-primary', function () { confirmDialog(c); }, { 'data-act': 'dft-cand-confirm' }));
+        if (canWrite && c.state !== 'partial') a.push(k.btn(D.t('tx_cand_reject'), 'btn-ghost', function () { rejectDialog(c); }, { 'data-act': 'dft-cand-reject' }));
+        var diff = c.state === 'partial' ? ['declaration', 'bl', 'containers'].filter(function (p) { return !(c.match && c.match[p] === true); })
+          .map(function (p) { return D.t('diff_' + p); }).join(D.t('list_sep')) : '';
+        return el('tr', { 'data-cand': c.id, 'data-state': c.state, class: c.state === 'blocked' ? 'bill-row-conflict' : null }, [
+          el('td', null, [k.ltr(c.daftra_number || c.external_invoice_id), el('span', { class: 'adm-sub', text: D.t('src_' + c.source) })]),
+          el('td', null, [k.pill(tone, D.t('cand_st_' + c.state)), c.state === 'blocked' ? el('span', { class: 'adm-sub text-danger', text: D.t('tx_blocked_text') }) : null,
+            c.state === 'partial' ? el('span', { class: 'adm-sub', 'data-dft': 'cand-partial', text: D.t('tx_partial_text', { diff: diff || D.t('none') }) }) : null]),
+          el('td', null, c.client_name || k.t('none')),
+          el('td', null, c.invoice_date ? el('bdi', { dir: 'ltr', text: String(c.invoice_date).slice(0, 10) }) : k.t('none')),
+          k.moneyCell(c.total, c.currency || 'SAR'),
+          el('td', null, k.actions(a))
+        ]);
+      });
+      if (!acts.length && !rows.length) return null;
+      return el('div', { class: 'dft-link-block' }, [
+        k.subHead(D.t('tx_link_title'), acts),
+        el('p', { class: 'text-xs text-muted', text: D.t('tx_link_hint') }),
+        rows.length ? k.table([D.t('tx_number'), k.t('col_status'), D.t('tx_cmp_client'), D.t('tx_cmp_date'), { label: D.t('tx_cmp_total'), num: true }, k.t('col_actions')],
+          rows, k.t('none'), 'dft-cands-table') : null
+      ]);
+    }
+    function l7Reviews(items) {
+      var mine = items.filter(function (r) { return D.REVIEW_KINDS.indexOf(r.kind) !== -1 && (r.status || 'open') === 'open'; });
+      if (!mine.length || !OPS.dftSettings) return null;
+      return el('div', { class: 'dft-tx-reviews' }, [k.subHead(D.t('rv_title'), [el('a', { class: 'btn btn-sm btn-ghost', href: '#daftra/reviews', text: D.t('tab_reviews') })])]
+        .concat(mine.map(function (r) {
+          return el('div', { class: 'dft-tx-review' }, [k.pill(r.kind === 'manual_in_daftra' ? 'warning' : 'danger', D.t('rv_kind_' + r.kind)),
+            OPS.dftSettings.reviewBlock(api, r, can, function () { api.refresh(); })]);
+        })));
+    }
+    // purchase drafts per trip (behind purchase_drafts_enabled, OFF by default)
+    function purchaseBlock(d) {
+      var conn = d.connection || {}, drafts = arr(d.purchase_drafts);
+      if (!conn.purchase_drafts_enabled && !drafts.length) return null;
+      var box = el('div', { class: 'dft-purchase' }, [k.subHead(D.t('pd_title'))]);
+      if (!conn.purchase_drafts_enabled) box.appendChild(el('p', { class: 'text-xs text-muted', text: D.t('pd_off') }));
+      if (drafts.length) box.appendChild(k.table([D.t('pd_col_ref'), { label: D.t('pd_col_amount'), num: true }, D.t('pd_col_status'), k.t('col_last_sync')], drafts.map(function (p) {
+        var url = D.safeUrl(p.daftra_url);
+        return el('tr', { 'data-purchase': p.id, 'data-status': p.status }, [
+          el('td', null, [k.ltr(p.reference), p.daftra_number ? el('span', { class: 'adm-sub' }, k.ltr(p.daftra_number)) : null,
+            url ? el('a', { class: 'adm-sub', href: url, target: '_blank', rel: 'noopener noreferrer', text: D.t('open_in_daftra') }) : null]),
+          k.moneyCell(p.amount, p.currency || 'SAR'),
+          el('td', null, [k.pill(p.status === 'draft' ? 'success' : p.status === 'failed' ? 'danger' : 'info', D.t('pd_st_' + p.status)),
+            p.last_error_code ? D.errNode({ code: p.last_error_code, message: p.last_error_message }) : null]),
+          el('td', null, k.when(p.updated_at || p.created_at))
+        ]);
+      }), D.t('pd_empty')));
+      if (conn.purchase_drafts_enabled && canWrite) {
+        var host = el('div', { class: 'dft-purchase-trips', 'aria-live': 'polite' });
+        box.appendChild(host);
+        M(api, 'listMovements')(tx.id).then(function (r) {
+          if (r.error) return;
+          var list = Array.isArray(r.data) ? r.data : (r.data && (r.data.items || r.data.rows)) || [];
+          var taken = {};
+          drafts.forEach(function (p) { if (p.status !== 'cancelled' && p.status !== 'failed') taken[p.trip_id] = true; });
+          var seen = {}, trips = list.filter(function (m) {
+            if (!m || !m.trip_id || seen[m.trip_id] || taken[m.trip_id] || m.movement_status === 'cancelled' || ['supplier', 'company'].indexOf(m.party_type) === -1) return false;
+            seen[m.trip_id] = true; return true;
+          });
+          host.appendChild(el('p', { class: 'text-xs text-muted', text: trips.length ? D.t('pd_trips') : D.t('pd_no_trips') }));
+          trips.forEach(function (m) {
+            host.appendChild(el('div', { class: 'dft-trip', 'data-trip': m.trip_id }, [
+              el('span', { text: [m.appointment_at ? api.fmtDate(m.appointment_at, true) : null, m.container_no, m.party_name].filter(Boolean).join(' · ') || k.t('none') }),
+              m.transport_order_no ? el('bdi', { dir: 'ltr', class: 'adm-sub', text: m.transport_order_no }) : null,
+              k.btn(D.t('pd_request'), 'btn-ghost', function (b) {
+                b.disabled = true;
+                var scope = 'dft-purchase-' + m.trip_id, key = ukey(scope, { trip: m.trip_id });
+                M(api, 'requestDaftraPurchaseDraft')(m.trip_id, { idemKey: key }).then(function (x) {
+                  settle(scope, x.error);
+                  if (x.error) { b.disabled = false; api.toast(api.errText(x.error), 'error'); return; }
+                  api.toast(x.data && x.data.deduplicated ? D.t('pd_dedup') : D.t('pd_queued'), 'success'); api.refresh();
+                });
+              }, { 'data-act': 'dft-purchase' })
+            ]));
+          });
+        });
+      }
+      return box;
+    }
+
     return M(api, 'txBilling')(tx.id).then(function (r) {
       if (r.error) {
         // finance hidden for this role at this branch: the server has the last word, show nothing more
@@ -493,9 +748,19 @@
         { label: k.t('col_marsa_total'), num: true }, k.t('col_daftra'), { label: k.t('col_daftra_total'), num: true }, k.t('col_payment'),
         k.t('col_last_sync'), k.t('col_actions')], intents.map(function (i) { return intentRow(i, conn, eligible); }), k.t('intents_empty'), 'bill-intents-table'));
       intents.filter(live).forEach(function (i) { var b = linesBlock(i); if (b) kids.push(b); });
+      if (D) {
+        var l7r = l7Reviews(reviews); if (l7r) kids.push(l7r);
+        var op = d.opening || {};
+        if ((d.connection && d.connection.auto_draft_on_declaration) || op.intent_id || op.blocked) kids.push(openingBlock(d));
+        var cb = candidatesBlock(d); if (cb) kids.push(cb);
+      }
       kids.push(eligibleBlock(eligible, intents));
       var rv = reviewBlock(reviews); if (rv) kids.push(rv);
+      if (D) { var pb = purchaseBlock(d); if (pb) kids.push(pb); }
+      var note = el('div', { class: 'dft-refresh-host' });
+      kids.push(note);
       fill(kids);
+      if (D) maybeRefresh(d, note);
     }, function (e) { fill(k.alert('danger', k.t('load_failed', { e: String(e && e.message || e) }))); });
   }
 

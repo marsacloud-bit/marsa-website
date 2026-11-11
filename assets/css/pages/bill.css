@@ -110,11 +110,51 @@ html[dir="rtl"] .bill-job-failed td:first-child, html[dir="rtl"] .bill-job-dead 
 .bill-tx-info p { margin: 0; }
 .bill-tx-info { display: grid; gap: 4px; }
 
+/* ---- legacy step 7 «مواءمة دفترة» (bill/dft-kit.js, bill/dft-settings.js, bill/tx-bill.js) ---- */
+.dft-account.is-blocked { border-color: rgba(200, 50, 60, .35); }
+.dft-ksa-block, .dft-ksa-banner { margin: 0 0 10px; }
+.dft-fix { margin: 0 0 10px; }
+.dft-fix-list { margin: 6px 0 0; padding-inline-start: 1.4em; display: grid; gap: 4px; font-size: var(--fs-sm); }
+.dft-toggle { display: grid; gap: 4px; padding-block: 8px; border-block-end: 1px solid var(--border); }
+.dft-toggle:last-of-type { border-block-end: 0; }
+.dft-toggle .form-hint { margin: 0; }
+.dft-toggle .btn { justify-self: start; }
+.dft-cands { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.dft-cands li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: var(--fs-sm); }
+.dft-unmapped { margin: 0 0 10px; }
+.dft-review { display: grid; gap: 4px; min-width: 0; }
+.dft-review-line { margin: 0; font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.dft-review-line.is-add::before { content: "+ "; color: var(--success, #1b7f4b); font-weight: 700; }
+.dft-review-line.is-remove::before { content: "− "; color: var(--danger, #c8323c); font-weight: 700; }
+.dft-review .btn { justify-self: start; }
+.dft-tx-reviews, .dft-opening, .dft-link-block, .dft-purchase { margin-block-start: 12px; }
+.dft-tx-review { display: grid; gap: 6px; padding: 8px 10px; margin-block-end: 8px; border: 1px solid var(--border); border-radius: var(--r-sm); }
+.dft-tx-review > .badge { justify-self: start; }
+.dft-cmp-table th[scope="row"] { white-space: nowrap; font-weight: 600; }
+.dft-cmp-table td { overflow-wrap: anywhere; }
+.dft-trip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-block: 4px; font-size: var(--fs-sm); }
+.dft-runs { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: var(--fs-sm); }
+.dft-runs li.is-current { font-weight: 600; }
+.dft-row-review td { background: var(--warning-bg, #fff7e0); }
+.dft-sup-list { margin: 4px 0; padding-inline-start: 1.2em; font-size: var(--fs-sm); }
+.dft-opening-note:empty { display: none; }
+.dft-err { overflow-wrap: anywhere; }
+.dft-daftra-link { display: block; }
+
 @media (max-width: 767.98px) {
   .bill-check-text { min-width: 0; }
   .bill-pre { max-height: 200px; }
+  .dft-cands li .btn, .dft-trip .btn { flex: 1 1 100%; }
+  .dft-cmp-table th[scope="row"] { white-space: normal; }
 }
 @media print {
   .bill-actions, .bill-job-detail, .bill-call { display: none !important; }
   .bill-fig-off td, .bill-check { background: none !important; }
 }
+
+/* ---- phone width: the view's grid items must not grow to their tables' width (a min-width:auto grid item takes its
+   content's min-content, so a wide table inside .table-wrap pushed the whole page past 375px) — the tables scroll in
+   their own .table-wrap instead (legacy step 7 browser check; same rule as .pay-view > *) ---- */
+.bill-view, .bill-view > * { min-width: 0; }
+/* a long reference in a definition list (item:transportation_cost in the opening / purchase item settings) wraps instead of overflowing */
+.bill-view dd .bill-ref { white-space: normal; overflow-wrap: anywhere; }

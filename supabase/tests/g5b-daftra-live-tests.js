@@ -57,8 +57,10 @@ let SRV, BASE;
 const nodeHttp = FDS.createNodeHttp();
 function live(o) {
   return AD.createRealAdapter(Object.assign({ impl: DL.createDaftraLive, deps: DEPS, http: nodeHttp, apiKey: KEY, baseUrl: BASE,
-    allowLoopback: true, clock, timeouts: { read: 2000, write: 2000 }, deadlineMs: 8000 }, o || {}));
+    allowLoopback: true, clock, timeouts: { read: 2000, write: 2000 }, deadlineMs: 8000, policy: G5_POLICY }, o || {}));
 }
+// the G5b behaviour tests run under the legacy G5 write policy (step 7 sections pass the fail-closed default)
+const G5_POLICY = { allow_draft_update: true, allow_product_create: true };
 const reqs = (pred) => SRV.requests.filter(r => !pred || pred(r));
 const writes = () => SRV.requests.filter(r => r.method !== 'GET');
 const mark = () => SRV.requests.length;
@@ -115,7 +117,7 @@ async function secGuard() {
   await check('invoice writes need Invoice.draft === 1 exactly (0, false, true, "1", missing → refused)', () => {
     const r = [0, false, true, '1', undefined].map(d => g('POST', 'invoices.json', { Invoice: { draft: d, client_id: 1 } }))
       .concat([g('PUT', 'invoices/5.json', { Invoice: { draft: 0 } }), g('POST', 'invoices.json', { InvoiceItem: [] }), g('POST', 'invoices.json', null)]);
-    return (r.every(x => x === 'draft_required') && g('POST', 'invoices.json', draft) === null && g('PUT', 'invoices/5.json', draft) === null) || J(r);
+    return (r.every(x => x === 'draft_required') && g('POST', 'invoices.json', draft) === null && g('PUT', 'invoices/5.json', draft, '', G5_POLICY) === null) || J(r);
   });
   await check('payments / deposits / reminders never sent with an invoice', () => {
     const r = ['Payment', 'InvoicePayment', 'Deposit', 'InvoiceReminder'].map(k => g('POST', 'invoices.json', Object.assign({}, draft, { [k]: [{}] })));
@@ -127,11 +129,16 @@ async function secGuard() {
       g('GET', '/clients.json'), g('GET', 'clients/5.json?x'), g('POST', 'invoices/5/send.json', draft), g('GET', 'clients/abc.json')];
     return r.every(x => x === 'path_refused') || J(r);
   });
-  await check('the 12 allowed pairs pass', () => {
+  await check('the 12 G5b pairs pass under the legacy G5 write policy (+ 4 step-7 pairs: suppliers, purchase drafts)', () => {
     const r = [['GET', 'site_info.json'], ['GET', 'taxes.json'], ['GET', 'clients.json'], ['GET', 'clients/9.json'], ['POST', 'clients.json', {}],
       ['PUT', 'clients/9.json', {}], ['GET', 'products.json'], ['POST', 'products.json', {}], ['GET', 'invoices.json'], ['GET', 'invoices/9.json'],
-      ['POST', 'invoices.json', draft], ['PUT', 'invoices/9.json', draft]].map(x => g(x[0], x[1], x[2]));
-    return (r.every(x => x === null) && DL.DAFTRA_LIVE_ALLOWED.length === 12) || J(r);
+      ['POST', 'invoices.json', draft], ['PUT', 'invoices/9.json', draft]].map(x => g(x[0], x[1], x[2], '', G5_POLICY));
+    return (r.every(x => x === null) && DL.DAFTRA_LIVE_ALLOWED.length === 16) || J(r);
+  });
+  await check('step 7 (fail closed): without an explicit policy every write on an existing invoice and every product create is refused', () => {
+    const r = [g('PUT', 'invoices/9.json', draft), g('PUT', 'invoices/9.json', draft, '', { allow_draft_update: 'true' }), g('POST', 'products.json', {}),
+      g('POST', 'products.json', {}, '', { allow_draft_update: true }), g('PUT', 'invoices/9.json', draft, '', { allow_product_create: true })];
+    return J(r) === J(['draft_update_refused', 'draft_update_refused', 'product_create_refused', 'product_create_refused', 'draft_update_refused']) || J(r);
   });
 }
 
@@ -508,12 +515,12 @@ async function secErrors() {
     }
     return bad.length === 0 || bad.join(' | ');
   });
-  await check('writes: 4xx → applied no; 5xx and unknown statuses → applied unknown (may have landed)', async () => {
+  await check('writes: 4xx → applied no; 5xx, 3xx (legacy review: a 302 → /error500.php after a write) and unknown statuses → applied unknown (may have landed)', async () => {
     const bad = [];
     for (const [st, kind] of table) {
       SRV.faults.push({ method: 'PUT', path: /^clients\/\d+\.json$/, status: st });
       const e = await keepErr(L.updateClient(cl.id, { phone: '0500000009' }));
-      const want = (st >= 500 || st === 418) ? 'unknown' : 'no';
+      const want = (st >= 500 || st === 418 || (st >= 300 && st <= 399)) ? 'unknown' : 'no';
       if (!e || e.kind !== kind || e.applied !== want) bad.push(st + ':' + (e && e.kind + '/' + e.applied));
     }
     return bad.length === 0 || bad.join(' | ');
@@ -575,7 +582,7 @@ async function secErrors() {
   });
   await check('worker.runJob: a lost createClient → outcome unknown (never failed / retry), the call recorded applied unknown', async () => {
     SRV.faults.push({ method: 'POST', path: /^clients\.json$/, drop: 'after' });
-    const ctx = { job: { id: 'j', org_id: 'o', kind: 'client_ensure', attempt_no: 1, options: {}, previous_status: 'queued' },
+    const ctx = { connection: { account: { ok: true, reason: null, enforced: false }, policy: { allow_draft_update: true, allow_product_create: true } }, job: { id: 'j', org_id: 'o', kind: 'client_ensure', attempt_no: 1, options: {}, previous_status: 'queued' },
       client: { link_id: 'L', client_id: 'C', client_ref: 'MRSC-0b5e0000-0000-4000-8000-000000000777', external_id: null, status: 'pending', data: { name: 'ضائع', vat_number: null } } };
     const r = keep(await runJob(ctx, L, { deps: AD, clock }));
     const ctx2 = JSON.parse(J(ctx)); ctx2.job.previous_status = 'unknown';
@@ -600,6 +607,7 @@ async function freshAccount(opts) {
 // a worker invoice_push context (the shape worker.js reads)
 function pushCtx(o) {
   return {
+    connection: { account: { ok: true, reason: null, enforced: false }, policy: { allow_draft_update: true, allow_product_create: true } }, 
     job: { id: 'j', org_id: 'o', kind: 'invoice_push', attempt_no: 1, options: {}, previous_status: o.prev || 'queued' },
     intent: { id: 'iR', operational_ref: o.ref, currency: 'SAR', status: 'open', sync_state: 'pending', external_invoice_id: o.ext || null,
       pushed_hash: o.pushedHash || null, invoice_date: '2026-11-03',
@@ -769,7 +777,7 @@ async function secReview() {
       });
       await check('M2: worker ensureClient on that account → failed vat_scan_incomplete with no client created', async () => {
         const n = F.srv.requests.length;
-        const ctx = { job: { id: 'j', org_id: 'o', kind: 'client_ensure', attempt_no: 1, options: {}, previous_status: 'queued' },
+        const ctx = { connection: { account: { ok: true, reason: null, enforced: false }, policy: { allow_draft_update: true, allow_product_create: true } }, job: { id: 'j', org_id: 'o', kind: 'client_ensure', attempt_no: 1, options: {}, previous_status: 'queued' },
           client: { link_id: 'L', client_id: 'C', client_ref: 'MRSC-0b5e0000-0000-4000-8000-00000000c0m2', external_id: null, status: 'pending', data: { name: 'مكرر', vat_number: '311111111111113' } } };
         const r = await runJob(ctx, F.L({ limits: { scanPages: 1, scanLimit: 10 } }), { deps: AD, clock });
         return (r.outcome === 'failed' && r.error.code === 'vat_scan_incomplete' && !F.srv.requests.slice(n).some(x => x.method === 'POST')) || J(r);
@@ -926,6 +934,9 @@ async function secCycle() {
   db = new PGlite();
   await db.exec(fs.readFileSync(path.join(SUPA, 'tests', 'shim.sql'), 'utf8'));
   for (const f of fs.readdirSync(MIG_DIR).filter(f => /^\d+_.*\.sql$/.test(f)).sort()) await db.exec(fs.readFileSync(path.join(MIG_DIR, f), 'utf8'));
+  // legacy step 7 (20261123000100): the owner decisions default to HF5 (no edit of an existing Daftra draft) and resolve-only
+  // products (never created); this suite tests the G5 behaviour, so the connections it creates start with the G5 write policy
+  await db.exec(`ALTER TABLE public.daftra_connections ALTER COLUMN allow_draft_update SET DEFAULT true, ALTER COLUMN allow_product_create SET DEFAULT true`);
   await db.exec(fs.readFileSync(path.join(SUPA, 'seed.sql'), 'utf8'));
   await fixtures();
   pass('shim + migrations + seed + fixtures');
@@ -1175,6 +1186,55 @@ async function secSecrets() {
   });
 }
 
+/* ================================================================== 8c. legacy step 7 over real loopback HTTP */
+async function secStep7() {
+  section('8c. legacy port step 7 over loopback HTTP: fail-closed policy, account profile, CustomModel, zero-insensitive codes, purchase drafts');
+  const S7 = FDS.createFakeDaftraServer({ apiKey: KEY });
+  const base = (await S7.start()).baseUrl;
+  try {
+    const L7 = o => AD.createRealAdapter(Object.assign({ impl: DL.createDaftraLive, deps: DEPS, http: nodeHttp, apiKey: KEY, baseUrl: base, allowLoopback: true,
+      expectSubdomain: 'marsa-fake', clock, timeouts: { read: 2000, write: 2000 }, deadlineMs: 8000 }, o || {}));
+    await check('step 7: the probe reports the account currency / country / taxes the KSA guard reads (SAR / SA / 15 % active)', async () => {
+      const p = await L7().probe();
+      return (p.account.currency === 'SAR' && p.account.country === 'SA' && p.account.taxes.some(t => t.value === '15.00' && t.active && !t.included)) || J(p.account);
+    });
+    await check('step 7: without a policy (fail closed) createProduct / updateDraftInvoice are refused with NO request', async () => {
+      const n = S7.requests.length;
+      const e1 = await keepErr(L7().createProduct({ code: 'X-1', name_ar: 'x' }));
+      const e2 = await keepErr(L7().updateDraftInvoice('1', { lines: [] }));
+      return (e1.code === 'product_create_refused' && e2.code === 'draft_update_refused' && S7.requests.length === n) || J({ e1: e1.code, e2: e2.code });
+    });
+    await check('step 7: a new draft carries CustomModel (+ type_CustomModel date) and a named line (item = product name + marker, description = TAS) in the same POST', async () => {
+      const cl = S7.control.addClient({ business_name: 'عميل', client_number: 'C-1' });
+      const pid = S7.control.addProduct({ name: 'موعد', product_code: '000186', tax1: 1 });
+      const d = await L7().createDraftInvoice({ reference: 'S7-1/F', client_id: cl, currency: 'SAR', date: '2026-11-11', custom_fields: { cf_a: 'D-1', cf_d: '05/11/2026' },
+        custom_date_keys: ['cf_d'], lines: [{ line_ref: lref('S7'), product_id: pid, description: 'موعد', item_name: 'موعد', daftra_description: 'TAS1', quantity: 1, unit_price: 50, tax_rate: 15 }] });
+      const post = S7.requests.filter(r => r.method === 'POST').pop();
+      const v = await L7().getInvoice(d.id);
+      return (J(post.body.CustomModel) === J({ cf_a: ['D-1'], cf_d: '05/11/2026' }) && post.body['type_CustomModel.cf_d'] === 'date'
+        && post.body.InvoiceItem[0].item === 'موعد [' + lref('S7') + ']' && post.body.InvoiceItem[0].description === 'TAS1'
+        && v.custom_fields.cf_a === 'D-1' && v.lines[0].line_ref === lref('S7') && v.url === 'https://marsa-fake.daftra.com/owner/invoices/view/' + d.id) || J({ post: post.body, v });
+    });
+    await check('step 7: products by code without leading zeros (186 finds 000186), GET only', async () => {
+      const n = S7.requests.length;
+      const r = await L7().findProductsByCodeNorm('186');
+      return (r.length === 1 && r[0].code === '000186' && S7.requests.slice(n).every(x => x.method === 'GET')) || J(r);
+    });
+    await check('step 7: a purchase draft over HTTP: POST purchase_invoices.json?send=draft, zero taxes, then found by its reference', async () => {
+      const sup = S7.control.addSupplier({ business_name: 'مورد النقل' });
+      const pid = S7.control.addProduct({ name: 'تكلفة النقل', product_code: '191' });
+      const a = L7({ policy: { allow_draft_update: false, allow_product_create: false } });
+      const c = await a.createPurchaseDraft({ reference: 'MRSP-ABCDEF012345', supplier_id: sup, currency: 'SAR', date: '2026-11-11',
+        lines: [{ product_id: pid, item_name: 'تكلفة النقل', description: 'MRS-1', quantity: 1, unit_price: 750, tax_rate: 0 }] });
+      const post = S7.requests.filter(r => r.method === 'POST').pop();
+      const f = await a.findPurchaseByReference('MRSP-ABCDEF012345');
+      const e = await keepErr(a.createPurchaseDraft({ reference: 'MRSP-X', supplier_id: sup, lines: [{ product_id: pid, quantity: 1, unit_price: 1, tax_rate: 15 }] }));
+      return (post.path === 'purchase_invoices.json' && post.query.send === 'draft' && post.body.PurchaseOrderItem[0].tax1 === 0 && f.hits.length === 1
+        && f.hits[0].id === c.id && e.code === 'tax_refused') || J({ post, f, e: e && e.code });
+    });
+  } finally { await S7.stop(); }
+}
+
 async function main() {
   SRV = FDS.createFakeDaftraServer({ apiKey: KEY });
   BASE = (await SRV.start()).baseUrl;
@@ -1189,6 +1249,7 @@ async function main() {
     await secTaxes();
     await secErrors();
     await secReview();
+    await secStep7();
     await secSecrets();
     try { await secCycle(); await secSql(); } catch (e) { fail('cycle / sql', errText(e) + ' ' + (e && e.stack)); }
     await check('across the suite: the guard was never bypassed (no update_draft request, every invoice write draft 1), no fetch', () =>

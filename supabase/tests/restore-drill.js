@@ -300,6 +300,9 @@ async function main() {
   const migs = fs.readdirSync(migDir).filter(f => /^\d+_.*\.sql$/.test(f)).sort().map(f => path.join(migDir, f));
   if (!await runFile(path.join(SUPA, 'tests', 'shim.sql'))) return finish();
   for (const m of migs) if (!await runFile(m)) return finish();
+  // legacy step 7 (20261123000100): the owner decisions default to HF5 (no edit of an existing Daftra draft) and resolve-only
+  // products (never created); the fixtures push G5 drafts, so the connections start with the G5 write policy
+  await db.exec(`ALTER TABLE public.daftra_connections ALTER COLUMN allow_draft_update SET DEFAULT true, ALTER COLUMN allow_product_create SET DEFAULT true`);
   if (!await runFile(path.join(SUPA, 'seed.sql'))) return finish();
   let r1;
   try { r1 = await buildSample(); pass('sample data for two orgs (fixtures + RPC activity)'); }

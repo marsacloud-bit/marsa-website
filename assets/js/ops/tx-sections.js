@@ -737,7 +737,9 @@
             ]) : null
           ]);
         }));
-        return [ol, el('p', { class: 'form-hint', text: k.t('dec_hint') })];
+        // legacy step 7: whether the approval requested the opening Daftra draft (finance readers; MarsaOps.dftKit)
+        var opening = OPS.dftKit && api.can('finRead', tx.branch_id) ? OPS.dftKit.openingNote(api, tx.id) : null;
+        return [ol, el('p', { class: 'form-hint', text: k.t('dec_hint') }), opening];
       });
     }, 'ops-tx-declarations');
   }

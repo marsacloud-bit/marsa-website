@@ -128,6 +128,15 @@
       MRS_PAY_LOCKED: 'لا يمكن إلغاء هذا السداد أو تعديله ({f}).',
       MRS_CUSTODY_NEGATIVE: 'لا يمكن أن يصبح رصيد عهدة العميل سالبًا. الرصيد الحالي {x} ريال.',
       MRS_CUSTODY_LINK: 'ربط حركة العهدة غير صحيح ({f}).',
+      // legacy step 7 (20261123000100): Daftra alignment
+      MRS_DAFTRA_ACCOUNT_NOT_KSA: 'حساب دفترة ليس حسابًا سعوديًا ({f}): يجب أن تكون العملة الريال السعودي والدولة السعودية وضريبة 15 % مفعّلة. لم يُرسل شيء؛ يحوّل المالك الحساب ثم يعيد فحص الاتصال.',
+      MRS_DAFTRA_UNMAPPED: 'بنود خدمة بلا كود صنف دفترة معتمد: {x}. اضبط كود الصنف وطابقه وأكّده في «إعداد دفترة» (مرسى لا ينشئ أصنافًا في دفترة).',
+      MRS_DAFTRA_CUSTOM_REQUIRED: 'حقول دفترة الإضافية المطلوبة ناقصة في المعاملة: {x}. أكمل البيانات ثم أعد المحاولة؛ لم يُرسل شيء.',
+      MRS_DAFTRA_DRAFT_LOCKED: 'مسودة دفترة لهذه الفاتورة موجودة، وتعديل المسودات القائمة غير مسموح. نفّذ التغييرات يدويًا في دفترة كما في بند «تعديل يدوي مطلوب»، ثم أكّد التنفيذ.',
+      MRS_DAFTRA_CLIENT_CONFLICT: 'عميل فاتورة دفترة يختلف عن عميل المعاملة المربوط بدفترة؛ الربط مرفوض.',
+      MRS_DAFTRA_PURCHASE_DISABLED: 'مسودات فواتير المشتريات للنقلات غير مفعّلة لهذه المؤسسة.',
+      MRS_DAFTRA_CONFIRM_MISMATCH: 'رقم الفاتورة المُدخل للتأكيد لا يطابق رقم فاتورة دفترة المعروضة. تحقق من الرقم ثم أعد الإدخال.',
+      MRS_DAFTRA_IMPORT: 'بيانات الاستيراد غير مقبولة ({f}).',
       // G4 (docs/online/G4_SPEC.md)
       MRS_OVER_ALLOCATED: 'مجموع التوزيع يتجاوز صافي البند؛ التوزيع لا يضاعف الفاتورة (المتبقي القابل للتوزيع: {f}).',
       MRS_OVERPAID: 'المبلغ يتجاوز المتبقي من الإجمالي (المتبقي: {f}).',
@@ -371,6 +380,30 @@
       'MRS_CUSTODY_LINK:exceeds_payment': 'مبلغ الخصم أكبر من مبلغ السداد المرتبط بهذه المعاملة. الحد الأعلى {x} ريال.',
       'MRS_CUSTODY_LINK:duplicate_deduction': 'هذا السداد خُصم مسبقًا من عهدة العميل لهذه المعاملة.',
       'MRS_CUSTODY_LINK:payment_void': 'السداد المختار ملغى.',
+      // legacy step 7 (20261123000100)
+      'MRS_FORBIDDEN:owner_only': 'هذا الإجراء للمالك فقط (مدير النظام على مستوى المؤسسة بجلسة مؤكدة).',
+      'MRS_BAD_TRANSITION:daftra_invoice_issued': 'للمعاملة فاتورة صادرة (معتمدة) في دفترة؛ لا يمكن إلغاء المعاملة.',
+      'MRS_BAD_TRANSITION:daftra_sync_in_flight': 'مزامنة دفترة قيد التنفيذ أو نتيجتها غير مؤكدة لهذه المعاملة؛ انتظر اكتمالها ثم أعد المحاولة.',
+      'MRS_BAD_TRANSITION:daftra_purchase': 'لإحدى نقلات المعاملة مسودة مشتريات في دفترة؛ لا يمكن إلغاء المعاملة.',
+      'MRS_BAD_TRANSITION:opening_disabled': 'فتح مسودة دفترة عند اعتماد البيان غير مفعّل لهذه المؤسسة.',
+      'MRS_BAD_TRANSITION:review_required': 'وُجدت أكثر من فاتورة مطابقة؛ اختر الفاتورة الصحيحة صراحة مع ملاحظة.',
+      'MRS_BAD_TRANSITION:client_inactive': 'العميل غير نشط؛ لا تُنشأ له مسودة في دفترة.',
+      'MRS_BAD_TRANSITION:party_type': 'مسودة المشتريات لنقلة جهة نقلها مورد أو شركة نقل فقط.',
+      'MRS_BAD_TRANSITION:trip_cancelled': 'النقلة ملغاة.',
+      'MRS_BAD_TRANSITION:partial': 'هذه فاتورة بتطابق جزئي للاطلاع فقط؛ تحقق منها ثم اربطها بالبحث بالرقم.',
+      'MRS_REQUIRED:supplier_link': 'جهة النقل غير مربوطة بمورد في دفترة. ابحث عنها في موردي دفترة أولًا.',
+      'MRS_REQUIRED:cost_accruals': 'لا توجد تكلفة مسجلة للنقلة.',
+      'MRS_REQUIRED:remote_product_code': 'اضبط كود صنف دفترة للبند أولًا.',
+      'MRS_REQUIRED:client_link': 'اربط عميل المعاملة بعميل دفترة أولًا.',
+      'MRS_INVALID:not_a_candidate': 'الصنف المختار ليس من نتائج المطابقة الأخيرة. أعد المطابقة.',
+      'MRS_INVALID:code_mismatch': 'كود الصنف في دفترة ({x}) لا يطابق الكود المضبوط.',
+      'MRS_INVALID:code_taken': 'كود الصنف مضبوط لبند آخر ({x}).',
+      'MRS_INVALID:field_key_taken': 'مفتاح الحقل الإضافي ({x}) مستخدم لحقل آخر.',
+      'MRS_INVALID:draft_update_disabled': 'رفض النظام نتيجة مزامنة عدّلت مسودة دفترة قائمة؛ التعديل غير مسموح.',
+      'MRS_INVALID:product_create_disabled': 'رفض النظام نتيجة مزامنة أنشأت صنفًا في دفترة؛ الإنشاء غير مسموح.',
+      'MRS_DAFTRA_IMPORT:empty': 'الملف لا يحتوي صفوفًا.',
+      'MRS_DAFTRA_IMPORT:too_many_rows': 'الحد الأقصى 2000 صف في الاستيراد الواحد.',
+      'MRS_DAFTRA_ACCOUNT_NOT_KSA:not_checked': 'لم يُفحص حساب دفترة بعد. شغّل «فحص الاتصال» أولًا.',
       'MRS_CUSTODY_NEGATIVE:void_deposit': 'لا يمكن إلغاء هذا الإيداع لأن رصيد العهدة سيصبح سالبًا (الرصيد الحالي {x} ريال). ألغِ حركات الخصم أو الإرجاع التي استخدمته أولًا.',
       'MRS_CUSTODY_NEGATIVE:deduction': 'رصيد عهدة العميل لا يكفي لهذا الخصم (الرصيد الحالي {x} ريال). الرصيد لا يصبح سالبًا أبدًا.',
       'MRS_CUSTODY_NEGATIVE:refund': 'رصيد عهدة العميل لا يكفي لهذا الإرجاع (الرصيد الحالي {x} ريال). الرصيد لا يصبح سالبًا أبدًا.',
@@ -3348,6 +3381,158 @@
   function txBilling(txId) { return txRpc('tx_billing', txId); }
 
   /* ------------------------------------------------------------------
+     Legacy port step 7 — Daftra alignment (docs/online/LEGACY_DAFTRA_AR.md). Staff RPCs only: they write
+     settings / staging rows and queue READ-ONLY or draft-only outbox jobs for the server-side worker; the
+     worker RPCs (daftra_*) are never exposed. Owner decisions: no edit of an existing Daftra draft (HF5),
+     products resolved by code and never created, the KSA account guard before any write, the opening
+     draft and the purchase drafts are org settings (OFF).
+     ------------------------------------------------------------------ */
+  function dftId(id, field) { return isUuid(id) ? null : Promise.resolve(fail('MRS_INVALID', field)); }
+  // OWNER ONLY (org-wide admin): p = { allow_draft_update?, allow_product_create? }, reason required → connection
+  function setDaftraWritePolicy(p, reason, o) {
+    o = o || {};
+    p = Object.assign({}, p || {}); delete p.orgId;
+    return billOrg(o.orgId, function (oid) { return rpc('set_daftra_write_policy', { p_org: oid, p_payload: p, p_reason: billText(reason) }); });
+  }
+  // map = { fields: { declaration_no|declaration_date|bl|port|declaration_type|containers|goods|origin: { key, required } },
+  //         port_values: { <port code>: value }, type_values: { import|export|clearance: value } } → connection
+  function saveDaftraCustomFields(map, o) {
+    o = o || {};
+    return billOrg(o.orgId, function (oid) { return rpc('save_daftra_custom_fields', { p_org: oid, p_map: map || {} }); });
+  }
+  // OWNER ONLY, read-only dry run → { payload, fields, values, missing[], unmapped[], account_check, ok, would_send:false }
+  function testDaftraCustomFields(txId) { return txRpc('test_daftra_custom_fields', txId); }
+  // → { items:[{ item_key, service_item, link, mapped }], counts, policy }
+  function listDaftraProductMap(o) { o = o || {}; return billOrg(o.orgId, function (oid) { return rpc('list_daftra_product_map', { p_org: oid }); }); }
+  // the existing Daftra product code of an item key (null clears it) → item link
+  function saveDaftraProductCode(itemKey, code, o) {
+    o = o || {};
+    return billOrg(o.orgId, function (oid) {
+      return rpc('save_daftra_product_code', { p_org: oid, p_item_key: billText(itemKey), p_code: code == null || code === '' ? null : String(code) });
+    });
+  }
+  // read-only match job; itemKeys null = every key with a configured code → run (+ job)
+  function requestDaftraProductMatch(itemKeys, opts) {
+    opts = opts || {};
+    var p = Array.isArray(itemKeys) && itemKeys.length ? { item_keys: itemKeys.slice() } : {};
+    return billOrg(opts.orgId, function (oid) {
+      return idemRpc('request_daftra_product_match', opts.idemKey, function (k) { return { p_org: oid, p_payload: p, p_idem_key: k }; });
+    });
+  }
+  // the human confirmation of a candidate (its code = the configured one without leading zeros) → item link
+  function confirmDaftraProductMapping(itemKey, externalProductId, o) {
+    o = o || {};
+    return billOrg(o.orgId, function (oid) {
+      return rpc('confirm_daftra_product_mapping', { p_org: oid, p_item_key: billText(itemKey), p_payload: { external_product_id: billText(externalProductId) } });
+    });
+  }
+  // → { status: queued|exists|retried|blocked|disabled, reason?, intent_id?, job? }
+  function retryDaftraOpening(txId, opts) {
+    if (!configured) return demoOnly();
+    opts = opts || {};
+    var bad = dftId(txId, 'transaction_id'); if (bad) return bad;
+    return idemRpc('retry_daftra_opening', opts.idemKey, function (k) { return { p_tx: txId, p_idem_key: k }; });
+  }
+  // manual_in_daftra: done_in_daftra | dismiss · date_mismatch / readback_mismatch / client_mismatch: acknowledge · opening_blocked: dismiss
+  function resolveDaftraReview(id, decision, note) {
+    if (!configured) return demoOnly();
+    var bad = dftId(id, 'id'); if (bad) return bad;
+    return rpc('resolve_daftra_review', { p_id: id, p_decision: billText(decision), p_note: billText(note) });
+  }
+  // f = { kind, status (open), branch_id, limit, offset, orgId } → { items, total, counts }
+  function listDaftraReviews(f) { return finOrgRpc('list_daftra_reviews', f); }
+  // read-only paged import of the Daftra clients into staging → run (+ job)
+  function requestDaftraClientImport(opts) {
+    opts = opts || {};
+    return billOrg(opts.orgId, function (oid) {
+      return idemRpc('request_daftra_client_import', opts.idemKey, function (k) { return { p_org: oid, p_idem_key: k }; });
+    });
+  }
+  // f = { action, status, q, limit ≤ 500, offset } → { run, rows, total, counts }
+  function listDaftraClientImport(runId, f) {
+    if (!configured) return demoOnly();
+    var bad = dftId(runId, 'run_id'); if (bad) return bad;
+    var x = Object.assign({}, f || {}); delete x.orgId;
+    return rpc('list_daftra_client_import', { p_run: runId, p_filters: x });
+  }
+  // p = { decisions?: [{ row_id, action: create|link|skip, client_id? }], apply_safe? (true) } → run + { applied, waiting }
+  function applyDaftraClientImport(runId, p, opts) {
+    if (!configured) return demoOnly();
+    opts = opts || {};
+    var bad = dftId(runId, 'run_id'); if (bad) return bad;
+    var x = Object.assign({}, p || {});
+    return idemRpc('apply_daftra_client_import', opts.idemKey, function (k) { return { p_run: runId, p_payload: x, p_idem_key: k }; });
+  }
+  // the tenant's own CSV / XLSX rows (parsed in the page): [{ client_number?, name, name_en?, vat_number?, cr_number?, phone?, email?,
+  // city?, port_category? }] ≤ 2000; options = { dry_run?, file_name? } → run + { applied, waiting, dry_run }
+  function importClients(rows, options, opts) {
+    opts = opts || {};
+    if (!Array.isArray(rows) || !rows.length) return Promise.resolve(fail('MRS_DAFTRA_IMPORT', 'empty'));
+    var o = Object.assign({}, options || {});
+    return billOrg(opts.orgId, function (oid) {
+      return idemRpc('import_clients', opts.idemKey, function (k) { return { p_org: oid, p_rows: rows, p_options: o, p_idem_key: k }; });
+    });
+  }
+  // p = { mode: 'number', number } | { mode: 'composite' } → { transaction_id, mode, job }
+  function requestDaftraInvoiceLookup(txId, p, opts) {
+    if (!configured) return demoOnly();
+    opts = opts || {};
+    var bad = dftId(txId, 'transaction_id'); if (bad) return bad;
+    var x = Object.assign({}, p || {});
+    return idemRpc('request_daftra_invoice_lookup', opts.idemKey, function (k) { return { p_tx: txId, p_payload: x, p_idem_key: k }; });
+  }
+  // the visual confirmation: p = { confirm_number (typed again), choose_among_multiple?, note? } → { intent, candidate, job }
+  function confirmInvoiceLink(candidateId, p, opts) {
+    if (!configured) return demoOnly();
+    opts = opts || {};
+    var bad = dftId(candidateId, 'candidate_id'); if (bad) return bad;
+    var x = Object.assign({}, p || {});
+    return idemRpc('confirm_invoice_link', opts.idemKey, function (k) { return { p_candidate: candidateId, p_payload: x, p_idem_key: k }; });
+  }
+  function rejectInvoiceCandidate(candidateId, note) {
+    if (!configured) return demoOnly();
+    var bad = dftId(candidateId, 'candidate_id'); if (bad) return bad;
+    return rpc('reject_invoice_candidate', { p_candidate: candidateId, p_note: billText(note) });
+  }
+  // p = { restart?, page_size? ≤ 100, pages_per_job? ≤ 10 } → run (+ job, resumed)
+  function requestDaftraLegacyScan(p, opts) {
+    opts = opts || {};
+    var x = Object.assign({}, p || {}); delete x.orgId;
+    return billOrg(opts.orgId, function (oid) {
+      return idemRpc('request_daftra_legacy_scan', opts.idemKey, function (k) { return { p_org: oid, p_payload: x, p_idem_key: k }; });
+    });
+  }
+  function getDaftraRun(runId) {
+    if (!configured) return demoOnly();
+    var bad = dftId(runId, 'run_id'); if (bad) return bad;
+    return rpc('get_daftra_run', { p_run: runId });
+  }
+  // on opening a transaction: read-only pulls of its stale Daftra invoices → { enqueued, jobs, reason? }
+  function refreshTxDaftra(txId) { return txRpc('refresh_tx_daftra', txId); }
+  // p = { q?, party_id?, trip_id? } → run (+ job); the supplier id is stored only on a unique exact match
+  function requestDaftraSupplierSearch(p, opts) {
+    opts = opts || {};
+    var x = Object.assign({}, p || {}); delete x.orgId;
+    return billOrg(opts.orgId, function (oid) {
+      return idemRpc('request_daftra_supplier_search', opts.idemKey, function (k) { return { p_org: oid, p_payload: x, p_idem_key: k }; });
+    });
+  }
+  function listDaftraSupplierLinks(o) { o = o || {}; return billOrg(o.orgId, function (oid) { return rpc('list_daftra_supplier_links', { p_org: oid }); }); }
+  // review: bill_admin, reason required, audited → the link (status unlinked); frees the party / name / Daftra supplier id
+  function unlinkDaftraSupplier(linkId, reason) {
+    if (!configured) return demoOnly();
+    var bad = dftId(linkId, 'link_id'); if (bad) return bad;
+    return rpc('unlink_daftra_supplier', { p_link: linkId, p_reason: billText(reason) });
+  }
+  // behind the org flag purchase_drafts_enabled (OFF) → purchase draft (+ job, deduplicated)
+  function requestDaftraPurchaseDraft(tripId, opts) {
+    if (!configured) return demoOnly();
+    opts = opts || {};
+    var bad = dftId(tripId, 'trip_id'); if (bad) return bad;
+    return idemRpc('request_daftra_purchase_draft', opts.idemKey, function (k) { return { p_trip: tripId, p_idem_key: k }; });
+  }
+
+  /* ------------------------------------------------------------------
      App shell: global search (command palette) + dashboard counters.
      Plain RLS-scoped PostgREST reads, limited to the active org (or o.orgId).
      ------------------------------------------------------------------ */
@@ -4000,6 +4185,15 @@
     requestBillingPull: requestBillingPull, resolveBillingConflict: resolveBillingConflict, cancelBillingIntent: cancelBillingIntent,
     listBillingJobs: listBillingJobs, getBillingJob: getBillingJob, retryBillingJob: retryBillingJob,
     billingReviewQueue: billingReviewQueue, resolveBillingReview: resolveBillingReview, txBilling: txBilling,
+    // legacy step 7 — Daftra alignment (docs/online/LEGACY_DAFTRA_AR.md)
+    setDaftraWritePolicy: setDaftraWritePolicy, saveDaftraCustomFields: saveDaftraCustomFields, testDaftraCustomFields: testDaftraCustomFields,
+    listDaftraProductMap: listDaftraProductMap, saveDaftraProductCode: saveDaftraProductCode, requestDaftraProductMatch: requestDaftraProductMatch,
+    confirmDaftraProductMapping: confirmDaftraProductMapping, retryDaftraOpening: retryDaftraOpening, resolveDaftraReview: resolveDaftraReview,
+    listDaftraReviews: listDaftraReviews, requestDaftraClientImport: requestDaftraClientImport, listDaftraClientImport: listDaftraClientImport,
+    applyDaftraClientImport: applyDaftraClientImport, importClients: importClients, requestDaftraInvoiceLookup: requestDaftraInvoiceLookup,
+    confirmInvoiceLink: confirmInvoiceLink, rejectInvoiceCandidate: rejectInvoiceCandidate, requestDaftraLegacyScan: requestDaftraLegacyScan,
+    getDaftraRun: getDaftraRun, refreshTxDaftra: refreshTxDaftra, requestDaftraSupplierSearch: requestDaftraSupplierSearch,
+    listDaftraSupplierLinks: listDaftraSupplierLinks, unlinkDaftraSupplier: unlinkDaftraSupplier, requestDaftraPurchaseDraft: requestDaftraPurchaseDraft,
     // G6a portal, dashboards, advanced search, reports & export log (docs/online/G6A_SPEC.md §8)
     searchRecords: searchRecords, dashOps: dashOps, dashFinance: dashFinance, dashManagement: dashManagement,
     reportTransactions: reportTransactions, reportContainers: reportContainers, reportTrips: reportTrips,

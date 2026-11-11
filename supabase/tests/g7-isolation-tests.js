@@ -679,7 +679,13 @@ const NOT_EXERCISED = ['accept_invitation', 'ack_alert', 'import_commit', 'porta
   // payload has no key the RPC needs); isolation of the register, allocations, attachments and custody (org, branch, finance roles,
   // client, anon) is asserted by legacy-pay-sql-tests.js and rls-tests.js
   'add_payment_documents', 'add_payment_documents[min]', 'correct_payment', 'correct_payment[min]', 'get_payment', 'remove_payment_document',
-  'review_payment', 'void_custody_entry', 'void_payment'];
+  'review_payment', 'void_custody_entry', 'void_payment',
+  // legacy daftra (20261123000100): they take a run / candidate / review item / trip id (the builder sends another id; the minimal payload
+  // has no key the RPC needs); isolation of the runs, staging rows, candidates, supplier links and purchase drafts (org, branch, finance
+  // roles, client, anon) is asserted by legacy-daftra-sql-tests.js and rls-tests.js
+  'apply_daftra_client_import', 'apply_daftra_client_import[min]', 'confirm_invoice_link', 'confirm_invoice_link[min]', 'get_daftra_run',
+  'list_daftra_client_import', 'list_daftra_client_import[min]', 'reject_invoice_candidate', 'request_daftra_purchase_draft', 'resolve_daftra_review',
+  'unlink_daftra_supplier'];
 async function positiveControl() {
   section('8. positive control: the §1 argument builder with B\'s own staff');
   const fns = (await listRpcs()).filter(f => !PUBLIC_BY_DESIGN[f.proname] && !/^platform_/.test(f.proname));
@@ -729,6 +735,9 @@ async function dbMain() {
   const migFiles = fs.readdirSync(migDir).filter(f => /^\d+_.*\.sql$/.test(f)).sort();
   if (!await runFile(path.join(SUPA, 'tests', 'shim.sql'))) return;
   for (const m of migFiles) if (!await runFile(path.join(migDir, m))) return;
+  // legacy step 7 (20261123000100): the owner decisions default to HF5 (no edit of an existing Daftra draft) and resolve-only
+  // products (never created); this suite drives the G5 billing cycle, so its connections start with the G5 write policy
+  await db.exec(`ALTER TABLE public.daftra_connections ALTER COLUMN allow_draft_update SET DEFAULT true, ALTER COLUMN allow_product_create SET DEFAULT true`);
   if (!await runFile(path.join(SUPA, 'seed.sql'))) return;
   try { const r = await fixtures(); r.n === 15 ? pass('fixtures: auth users, platform admin, org A staff in JED / DMM (seed-style)') : fail('fixtures', 'requirements ' + r.n); }
   catch (e) { fail('fixtures', errText(e)); return; }

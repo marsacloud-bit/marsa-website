@@ -18,6 +18,10 @@
 //   MARSA_DAFTRA_LIVE_ORG (the one org UUID), MARSA_DAFTRA_TAX_MAP (optional JSON {"15": <tax id>, "0": 0}).
 // - Marsa only creates / updates DRAFTS: daftra-live.js refuses every path outside its allowlist, update_draft (issuing)
 //   and any invoice write with draft !== 1. Probe jobs are read-only.
+// - Legacy port step 7 (docs/online/LEGACY_DAFTRA_AR.md): the live adapter gets the org's write policy from the job
+//   context (connection.policy, fail closed): no write on an existing invoice (HF5) unless allow_draft_update, no product
+//   create unless allow_product_create; the worker refuses every write job of a non-KSA account (account_not_ksa) before
+//   any request. Redirects are never followed (fetch redirect: 'manual'; a 3xx is an error).
 // - Run budget (2 s CPU / 150 s wall clock per request): one job per claim, at most 5 jobs, no new job after 80 s, and a
 //   hard run deadline (start + 130 s) passed to the live adapter: no Daftra write starts unless it can finish (write
 //   timeout + 5 s) before it, no read after it — a job is never killed with a write in flight.
@@ -122,6 +126,7 @@ function liveDaftraFor(connection: any, orgId: string, runDeadline: number): { a
   const adapter = D.createRealAdapter({
     impl: D.createDaftraLive, deps: D, http: fetchHttp, apiKey, baseUrl: `https://${sub}.daftra.com/api2`, taxMap,
     deadlineMs: LIVE_DEADLINE_MS, runDeadline, timeouts: { read: 15000, write: 25000 }, clock: () => new Date().toISOString(),
+    policy: { allow_draft_update: connection?.policy?.allow_draft_update === true, allow_product_create: connection?.policy?.allow_product_create === true },
   });
   return { adapter };
 }
@@ -163,10 +168,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return adapter;
     }
     if (connection?.mode === 'live') {
-      const hit = lives.get(orgId);
+      // one adapter per org AND write policy (the policy is bound into the adapter's request guard)
+      const lkey = `${orgId}:${connection?.policy?.allow_draft_update === true ? 1 : 0}${connection?.policy?.allow_product_create === true ? 1 : 0}`;
+      const hit = lives.get(lkey);
       if (hit) return hit;
       const live = liveDaftraFor(connection, orgId, runStart + RUN_HARD_DEADLINE_MS);
-      if (live.adapter) { lives.set(orgId, live.adapter); return live.adapter; }
+      if (live.adapter) { lives.set(lkey, live.adapter); return live.adapter; }
       liveRefused[String(orgId ?? '').slice(0, 36)] = live.refused ?? 'refused';
     }
     // live_pending, a refused live connection (or anything else): the documented stub, every method throws not_configured
