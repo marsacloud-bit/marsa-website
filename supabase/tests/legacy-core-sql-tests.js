@@ -249,7 +249,7 @@ async function secFile() {
   await check('no personal data / legacy organization name copied from the legacy code (no e-mail, phone number, real org name)', () =>
     (!/@[a-z0-9-]+\.[a-z]/i.test(src.replace(/--.*$/gm, '')) && !/\b05[0-9]{8}\b/.test(src) && !/رأس الحكمة/.test(src)) || 'personal data');
   // later phases may follow this file (20261118000100 legacy_tx: re-creates public_track)
-  const LATER_PHASES = ['20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql'];
+  const LATER_PHASES = ['20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -1196,7 +1196,7 @@ async function secConvert() {
   section('12. convert_org_to_production: party_ports deleted with the parties, the service catalog kept');
   await check('conversion lists: party_ports right after parties (deleted); org_service_items kept; customs_ports has no org (not listed)', async () => {
     const t = (await one(`SELECT app.convert_delete_tables() t`)).t, k = (await one(`SELECT app.convert_keep_tables() k`)).k;
-    return (t.indexOf('public.party_ports') === t.indexOf('public.parties') + 1 && t.length === 71 /* + 5 legacy docs tables (20261119000100) + 3 legacy decl tables (20261120000100) */ && k.includes('public.org_service_items') && k.length === 21
+    return (t.indexOf('public.party_ports') === t.indexOf('public.parties') + 1 && t.length === 74 /* + 5 legacy docs tables (20261119000100) + 3 legacy decl tables (20261120000100) + 3 legacy appt tables (20261121000100) */ && k.includes('public.org_service_items') && k.length === 21
       && !t.includes('public.customs_ports') && !k.includes('public.customs_ports')) || J({ t: t.length, k: k.length });
   });
   await check('convert_check: every org-scoped table classified, no unexpected delete guard', async () => {

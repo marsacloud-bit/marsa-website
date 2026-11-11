@@ -99,6 +99,23 @@
       MRS_DECL_BL_MISMATCH: 'رقم البوليصة في البيان لا يطابق بوليصة المعاملة. راجع الرقم، أو أكد صراحةً أن البيان يخص هذه المعاملة (يبقى رقم البوليصة الأصلي دون تغيير).',
       MRS_DECL_NUMBER_CONFLICT: 'للمعاملة بيان جمركي نشط برقم آخر. ألغِ البيان الحالي أو استبدله أولًا ثم اعتمد القراءة.',
       MRS_DECL_ALREADY_APPROVED: 'اعتُمدت قراءة البيان هذه من قبل. لتعديل البيان استخدم «تصحيح البيان» في المعاملة.',
+      // legacy step 5 (20261121000100): appointment card drafts, empty-return proofs, TASTO carrier order
+      MRS_APPT_DRAFT_EXISTS: 'للمعاملة مسودة بطاقات مواعيد مفتوحة. افتحها واستكملها بدل إنشاء مسودة جديدة (لا حاجة لإعادة القراءة).',
+      MRS_APPT_DRAFT_CLOSED: 'مسودة المواعيد مغلقة ({f}) ولا تقبل التعديل أو الاعتماد.',
+      MRS_APPT_DRAFT_APPROVED: 'اعتُمدت بطاقات من هذه المسودة، فلا يمكن إلغاؤها أو نقلها إلى معاملة أخرى.',
+      MRS_APPT_DRAFT_STALE: 'عدّل شخص آخر مسودة المواعيد بعد فتحك لها. أعد تحميلها ثم راجع التعديلات.',
+      MRS_APPT_DRAFT_LIMIT: 'تجاوزت حد المسودة ({f}): 20 بطاقة و25 ميغابايت لكل معاملة كحد أقصى.',
+      MRS_APPT_CARD_DUPLICATE: 'بطاقة الموعد هذه مقروءة من قبل ({f}): معتمدة في حركة قائمة، أو بانتظار الاعتماد في مسودة معاملة أخرى (يمكن نقل تلك المسودة إلى هنا).',
+      MRS_APPT_CONTAINER_NOT_IN_TX: 'رقم الحاوية في البطاقة ليس من حاويات هذه المعاملة ({f}). اختر حاوية المعاملة أو أضفها قبل الاعتماد.',
+      MRS_APPT_PARTY_REQUIRED: 'حدد جهة النقل للبطاقة (مورد أو شركة نقل أو مباشر) واسمها قبل الاعتماد.',
+      MRS_DATETIME_REQUIRED: 'أدخل التاريخ والوقت معًا ({f}): التاريخ وحده لا يكفي.',
+      MRS_EMPTY_RETURN_CLOSED: 'إثبات إعادة الفارغ هذا مغلق ({f}): المعتمد لا يُعتمد مرة أخرى، والملغى لا يُعدَّل.',
+      MRS_EMPTY_RETURN_LOCKED: 'لا يمكن إلغاء آخر إثبات إعادة للحاوية بعد انتهاء المعاملة تشغيليًا ({f}). صحّح المرحلة أولًا.',
+      MRS_EMPTY_RETURN_FILE: 'ملف إثبات إعادة الفارغ غير مقبول ({f}): صورة أو PDF بحد أقصى 8 ميغابايت.',
+      MRS_TASTO_INVALID: 'رقم أمر النقل يجب أن يبدأ بـ TASTO ثم أرقام فقط، مثل TASTO2026111000001.',
+      MRS_TASTO_TAKEN: 'رقم أمر النقل مسجل مسبقًا في معاملة أخرى ({f}).',
+      MRS_TASTO_STAGE: 'لا يمكن تسجيل أمر نقل لشركة قبل انتهاء المعاملة جمركيًا (المرحلة الحالية: {f}).',
+      MRS_AI_WRONG_DOCUMENT: 'المستند المرفوع ليس من النوع المطلوب ({f}). إن كان فاتورة موعد فارفع بطاقة الموعد نفسها، وإن كان غير إيصال إعادة الفارغ فارفع الإيصال.',
       // G4 (docs/online/G4_SPEC.md)
       MRS_OVER_ALLOCATED: 'مجموع التوزيع يتجاوز صافي البند؛ التوزيع لا يضاعف الفاتورة (المتبقي القابل للتوزيع: {f}).',
       MRS_OVERPAID: 'المبلغ يتجاوز المتبقي من الإجمالي (المتبقي: {f}).',
@@ -387,6 +404,7 @@
         MRS_AI_UNSUPPORTED: 'This file type is not supported for AI reading. Use JPG, PNG, WEBP, GIF or PDF.',
         MRS_AI_UNAVAILABLE: 'The AI reading service is not available right now. Try later or use in-browser reading.',
         MRS_AI_FAILED: 'AI reading failed. Try again or use in-browser reading.',
+        MRS_AI_WRONG_DOCUMENT: 'The uploaded document is not of the expected type ({f}). For an appointment invoice upload the appointment card itself; otherwise upload the empty-return receipt.',
         // document matching (20261116000100)
         MRS_MATCH_DOC_KIND: 'The document saved as “{f}” is not of the expected type (commercial invoice, bill of lading, customs declaration). Check the document type and read it again.',
         MRS_MATCH_DOC_VOIDED: 'The “{f}” reading is void, so the match cannot be saved on it. Read the document again, then save.',
@@ -1693,6 +1711,94 @@
     var lim = o.limit == null ? 10 : Math.max(1, Math.min(30, parseInt(o.limit, 10) || 10));
     return inActiveOrg(o.orgId, function (oid) { return rpc('search_hs_reference', { p_org: oid, p_q: String(q == null ? '' : q), p_limit: lim }); });
   }
+  /* legacy step 5 (20261121000100, docs/online/LEGACY_APPT_AR.md): appointment cards (TAS) and the empty return. Every AI
+     value stays a DRAFT until a staff member approves (approveAppointmentDraft / verifyEmptyReturnProof); an EIR reading is
+     never applied automatically; a TASTO carrier order never bypasses the empty-return proof. */
+  // before reading cards: the state of each file (SHA-256, 64 hex) across the org → [{sha256, state free|pending|approved|released,
+  //   same_transaction, card_id, batch_id, transaction_id, ref (null when not visible), appointment_id, can_move}]  (≤ 20)
+  function appointmentCardState(txId, sha256s, o) {
+    o = o || {};
+    if (!Array.isArray(sha256s)) return Promise.resolve(fail('MRS_REQUIRED', 'sha256'));
+    return inActiveOrg(o.orgId, function (oid) {
+      return rpc('appointment_card_state', { p_org: oid, p_tx: txId || null, p_sha256s: sha256s.map(function (x) { return String(x || '').toLowerCase(); }) });
+    });
+  }
+  // o = { batchId? (absent = create the transaction's open batch), version?, note?, cards?: [ new: {source_sha256, file_name, file_size,
+  //   media_type?, extraction_id?, document_id?, reading? (the ai-extract appointment / fields / warnings), review?, status?} |
+  //   existing: {card_id, review? (replaces the card review), status? 'pending'|'discarded', extraction_id?, document_id?} ] }
+  //   review keys: container_id, container_no, appointment_at, booking_ref, operator_ticket_no, operator_name, terminal_party_id,
+  //   zone_gate, barcode, movement_type, driver_name, driver_phone, truck_plate, party_type supplier|company|direct, carrier_id,
+  //   party_name, transport_order_no, destination, origin, notes, return_deadline, return_location, cost_amount / sell_amount
+  //   (trip-finance roles). → the batch {id, transaction_id, ref, status, version, cards [...], counts, containers, total_bytes, …}
+  function saveAppointmentDraft(txId, o) {
+    o = o || {};
+    if (!isUuid(txId)) return Promise.resolve(fail('MRS_REQUIRED', 'transaction_id'));
+    var p = {};
+    if (o.batchId) p.batch_id = o.batchId;
+    if (typeof o.version === 'number') p.version = o.version;
+    if (o.note !== undefined) p.note = o.note == null ? null : String(o.note);
+    if (Array.isArray(o.cards)) p.cards = o.cards;
+    return rpc('save_appointment_draft', { p_tx: txId, p_payload: p });
+  }
+  // restore without a re-read: the open batch of the transaction (null when none), or a given batch of it
+  function getAppointmentDraft(txId, batchId) { return rpc('get_appointment_draft', { p_tx: txId, p_batch: batchId || null }); }
+  // → the batch (status cancelled) + released_cards
+  function cancelAppointmentDraft(batchId, reason) { return rpc('cancel_appointment_draft', { p_batch: batchId, p_reason: reason == null ? null : String(reason) }); }
+  // targetRef = the other transaction's number (ref) → the target batch
+  function moveAppointmentDraft(batchId, targetRef, reason) {
+    return rpc('move_appointment_draft', { p_batch: batchId, p_target_ref: String(targetRef || ''), p_reason: reason == null ? null : String(reason) });
+  }
+  // o = { version?, cardIds? (default: every pending / failed card), idemKey? } → { batch_id, status pending|partial|approved,
+  //   results [{card_id, seq, file_name, outcome saved|already_existed|skipped|failed, code, detail, appointment_id, trip_id}],
+  //   counts {saved, already_existed, skipped, failed}, batch, readiness }
+  function approveAppointmentDraft(batchId, o) {
+    o = o || {};
+    if (!isUuid(batchId)) return Promise.resolve(fail('MRS_REQUIRED', 'appointment_draft'));
+    var p = {};
+    if (typeof o.version === 'number') p.version = o.version;
+    if (Array.isArray(o.cardIds)) p.card_ids = o.cardIds;
+    return idemRpc('approve_appointment_draft', o.idemKey, function (k) { return { p_batch: batchId, p_payload: withKey(p, k) }; });
+  }
+  // o = { documentId (required), source?: 'ai'|'manual', extractionId?, containerId? | containerNo?, deliveredAt? (date AND time),
+  //   depot?, confidence? 0..1, matchNotes?, unreadable?, idemKey? } → proof {id, status pending_review|unreadable, …, container_matched}
+  function createEmptyReturnProof(txId, o) {
+    o = o || {};
+    if (!isUuid(txId)) return Promise.resolve(fail('MRS_REQUIRED', 'transaction_id'));
+    if (!isUuid(o.documentId)) return Promise.resolve(fail('MRS_REQUIRED', 'document_id'));
+    var p = { document_id: o.documentId };
+    var MAP = { source: 'source', extractionId: 'extraction_id', containerId: 'container_id', containerNo: 'container_no', deliveredAt: 'delivered_at',
+      depot: 'depot', confidence: 'confidence', matchNotes: 'match_notes' };
+    Object.keys(MAP).forEach(function (k) { if (o[k] !== undefined && o[k] !== null) p[MAP[k]] = o[k]; });
+    if (o.unreadable) p.unreadable = true;
+    return idemRpc('create_empty_return_proof', o.idemKey, function (k) { return { p_tx: txId, p_payload: withKey(p, k) }; });
+  }
+  // staff confirmation (writes the container return). o = { containerId?, deliveredAt?, depot?, matchNotes?, idemKey? }
+  //   → proof (approved) + {container {id, container_no, return_status, returned_at}, container_already_returned, readiness}
+  function verifyEmptyReturnProof(proofId, o) {
+    o = o || {};
+    var p = {};
+    var MAP = { containerId: 'container_id', deliveredAt: 'delivered_at', depot: 'depot', matchNotes: 'match_notes' };
+    Object.keys(MAP).forEach(function (k) { if (o[k] !== undefined) p[MAP[k]] = o[k]; });
+    return idemRpc('verify_empty_return_proof', o.idemKey, function (k) { return { p_proof: proofId, p_payload: withKey(p, k) }; });
+  }
+  // → proof (voided) + {container_reverted, replaced_by_proof_id, readiness}
+  function voidEmptyReturnProof(proofId, reason) { return rpc('void_empty_return_proof', { p_proof: proofId, p_reason: reason == null ? null : String(reason) }); }
+  // deadline 'YYYY-MM-DD' | null (clears) → the container return plan (set_container_return)
+  function saveEmptyReturnDeadline(containerId, deadline) { return rpc('save_empty_return_deadline', { p_container: containerId, p_deadline: deadline || null }); }
+  // → { transaction_id, proofs [...], readiness }
+  function listEmptyReturnProofs(txId) { return rpc('list_empty_return_proofs', { p_tx: txId }); }
+  // o = { orderNo (TASTO…), orderDate 'YYYY-MM-DD', partyId? | companyName?, idemKey? } → { transaction_id, ref, operational_status,
+  //   transport_mode, order_no, order_date, party_id, party_name, party_created, already_exists, readiness }  (no stage change)
+  function saveTransportCarrierOrder(txId, o) {
+    o = o || {};
+    if (!isUuid(txId)) return Promise.resolve(fail('MRS_REQUIRED', 'transaction_id'));
+    var p = { order_no: String(o.orderNo || ''), order_date: o.orderDate || null };
+    if (o.partyId) p.party_id = o.partyId; else if (o.companyName) p.company_name = String(o.companyName);
+    return idemRpc('save_transport_carrier_order', o.idemKey, function (k) { return { p_tx: txId, p_payload: withKey(p, k) }; });
+  }
+  // the readiness banner → { policy {empty_return_blocks_billing, switchable}, pending_containers [...], pending_count,
+  //   declared_missing, billing_gate_open, blocking, proofs {...}, movements, carrier_order | null, … }
+  function txReadiness(txId) { return rpc('tx_readiness', { p_tx: txId }); }
   // o = { orgId?, name (consignee block or name), vatNumber?, crNumber?, limit? } → { source_name, latin_key, candidates
   //   [{client_id, name_ar, name_en, confidence 0..100, method, review, reasons}], best {client_id, confidence, method} | null,
   //   suggested, conflict, confirmed:false, thresholds {suggest:90, review:70} }   (never links: confirm with confirmClientMatch)
@@ -2047,12 +2153,17 @@
     truncated: 'MRS_AI_TRUNCATED', too_large: 'MRS_AI_TOO_LARGE', unsupported_media: 'MRS_AI_UNSUPPORTED',
     forbidden: 'MRS_FORBIDDEN', mfa_required: 'MRS_MFA_REQUIRED', unauthorized: 'MRS_AUTH_REQUIRED',
     transaction_not_found: 'MRS_NOT_FOUND', not_configured: 'MRS_AI_UNAVAILABLE', upstream_busy: 'MRS_AI_UNAVAILABLE',
-    upstream_error: 'MRS_AI_FAILED', bad_output: 'MRS_AI_FAILED', bad_request: 'MRS_AI_FAILED', internal: 'MRS_AI_FAILED'
+    upstream_error: 'MRS_AI_FAILED', bad_output: 'MRS_AI_FAILED', bad_request: 'MRS_AI_FAILED', internal: 'MRS_AI_FAILED',
+    // 20261121000100: an appointment card / EIR read — the wrong document (field = the reason), a card without a transaction
+    wrong_document_type: 'MRS_AI_WRONG_DOCUMENT', transaction_required: 'MRS_REQUIRED'
   };
   var AI_MEDIA = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'];
   var AI_DOC_TYPES = ['bill_of_lading', 'commercial_invoice', 'customs_declaration', 'supplier_invoice', 'auto'];
   // prompt ai-doc-v3 (20261119000100): + packing_list; o.promptVersion 'ai-doc-v3' opts in (v2 callers unchanged)
-  var AI_DOC_TYPES_V3 = ['bill_of_lading', 'commercial_invoice', 'packing_list', 'customs_declaration', 'supplier_invoice', 'auto'];
+  // 20261121000100: + appointment_ticket (needs transactionId) / empty_return_receipt (≤ 8 MB)
+  var AI_DOC_TYPES_V3 = ['bill_of_lading', 'commercial_invoice', 'packing_list', 'customs_declaration', 'supplier_invoice', 'auto',
+    'appointment_ticket', 'empty_return_receipt'];
+  var AI_MAX_EIR_BYTES = 8 * 1024 * 1024;
   var AI_PROMPT_V3 = 'ai-doc-v3';
   var AI_MAX_BYTES = 10 * 1024 * 1024;          // PDF
   var AI_MAX_IMAGE_BYTES = 5 * 1024 * 1024;     // image (the API's per-image limit)
@@ -2078,6 +2189,8 @@
     var body = ctx && typeof ctx.json === 'function' ? Promise.resolve().then(function () { return ctx.json(); }).catch(function () { return null; }) : Promise.resolve(null);
     return body.then(function (b) {
       var code = b && typeof b.error === 'string' && Object.prototype.hasOwnProperty.call(AI_EDGE_ERRORS, b.error) ? AI_EDGE_ERRORS[b.error] : null;
+      if (code === 'MRS_AI_WRONG_DOCUMENT') return fail(code, typeof b.reason === 'string' ? b.reason : null);
+      if (b && b.error === 'transaction_required') return fail('MRS_REQUIRED', 'transaction_id');
       if (code) return fail(code);
       if (err && (err.name === 'FunctionsFetchError' || err.name === 'FunctionsRelayError')) return fail('MRS_NETWORK');
       return fail('MRS_AI_FAILED');
@@ -2087,6 +2200,10 @@
   //       file: { media_type, data_b64 }, transactionId?, lang?, promptVersion?: 'ai-doc-v3' }
   // → { usage_id, engine, model, prompt_version, doc_type, detected_type, kind, fields [{name, value, confidence 0..1, page, valid}],
   //     extracted_fields, line_items, warnings [{source, code, text, field}], mean_confidence (0..100), raw_text, usage }
+  //   (20261121000100: docType appointment_ticket → + appointment {booking_ref, operator_ticket_no, operator_name, appointment_at
+  //   (+03:00), appointment_local, truck_plate, driver_name, driver_phone, zone_gate, barcode, movement_type full_exit|empty_entry,
+  //   container_no, document_title, entry, exit, structural}; empty_return_receipt → + empty_return {container_no, delivered_at |
+  //   null, delivery_date, time_printed, depot, confidence 0..1, movement}; the wrong document → MRS_AI_WRONG_DOCUMENT <reason>)
   //   v3 adds: containers [{container_number, seal_number, size_type, packages_count, net_weight, gross_weight}], ai_detail
   //   (save it with the reading), source_sha256, reused, extraction_id. reused:true = the same file was already read and
   //   saved (no AI call, no charge): use extraction_id, do NOT save the reading again.
@@ -2099,6 +2216,8 @@
     if (Math.floor(f.data_b64.length / 4) * 3 > (f.media_type === 'application/pdf' ? AI_MAX_BYTES : AI_MAX_IMAGE_BYTES)) return Promise.resolve(fail('MRS_AI_TOO_LARGE'));
     var v3 = o.promptVersion === AI_PROMPT_V3;
     var docType = (v3 ? AI_DOC_TYPES_V3 : AI_DOC_TYPES).indexOf(o.docType) !== -1 ? o.docType : 'auto';
+    if (docType === 'empty_return_receipt' && Math.floor(f.data_b64.length / 4) * 3 > AI_MAX_EIR_BYTES) return Promise.resolve(fail('MRS_AI_TOO_LARGE'));
+    if (docType === 'appointment_ticket' && !o.transactionId) return Promise.resolve(fail('MRS_REQUIRED', 'transaction_id'));
     return aiOrg(o.orgId).then(function (r) {
       if (r.error) return r;
       var body = { org_id: r.data, doc_type: docType, file: { media_type: f.media_type, data_b64: f.data_b64 },
@@ -3639,6 +3758,12 @@
     // legacy step 4 (20261120000100)
     getDeclarationReview: getDeclarationReview, approveDeclarationExtraction: approveDeclarationExtraction,
     getTransactionDeclaration: getTransactionDeclaration, searchHsReference: searchHsReference,
+    // legacy step 5 (20261121000100)
+    appointmentCardState: appointmentCardState, saveAppointmentDraft: saveAppointmentDraft, getAppointmentDraft: getAppointmentDraft,
+    cancelAppointmentDraft: cancelAppointmentDraft, moveAppointmentDraft: moveAppointmentDraft, approveAppointmentDraft: approveAppointmentDraft,
+    createEmptyReturnProof: createEmptyReturnProof, verifyEmptyReturnProof: verifyEmptyReturnProof, voidEmptyReturnProof: voidEmptyReturnProof,
+    saveEmptyReturnDeadline: saveEmptyReturnDeadline, listEmptyReturnProofs: listEmptyReturnProofs,
+    saveTransportCarrierOrder: saveTransportCarrierOrder, txReadiness: txReadiness,
     listContainers: listContainers, addContainer: addContainer, updateContainer: updateContainer,
     // documents
     listDocuments: listDocuments, uploadDocument: uploadDocument, documentUrl: documentUrl,

@@ -727,7 +727,8 @@
        MarsaOps.views.<id>  = { allow: 'staff'|'opsWriter'|'transportWriter'|'orgAdmin'|'finance'|'finRead'|'finWrite'|'finApprove'|'billAdmin'|'mgmt'|'tripFin'
                                        |'msgRead'|'msgTriage'|'msgApprove'|'msgSend'|'msgLib'|'msgAdmin' (or a role list),
                                 titleKey, render(root, opsApi, param) }   → route #<id> / #<id>/<param>
-       MarsaOps.txSections  = [{ id, order, render(root, tx, opsApi) }] → inside #tx/<id>, after admin.js' own cards
+       MarsaOps.txSections  = [{ id, order, placement?, render(root, tx, opsApi) }] → inside #tx/<id>, after admin.js' own cards
+                              (placement 'top': above them, under the stages)
      The hook is read on every route, so a module that registers late still shows up.
      ------------------------------------------------------------------ */
   var OPS = window.MarsaOps = window.MarsaOps || { views: {}, txSections: [] };
@@ -837,8 +838,9 @@
     return a;
   }
   // transaction detail sections, sorted by order; each fails on its own
-  function renderTxSections(host, tx) {
-    var list = (Array.isArray(OPS.txSections) ? OPS.txSections : []).filter(function (s) { return s && typeof s.render === 'function'; })
+  // top: only the sections with placement 'top' (rendered above admin.js' own cards: the readiness banner); else the rest
+  function renderTxSections(host, tx, top) {
+    var list = (Array.isArray(OPS.txSections) ? OPS.txSections : []).filter(function (s) { return s && typeof s.render === 'function' && (s.placement === 'top') === !!top; })
       .slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
     var seen = {};
     list.forEach(function (s) {
@@ -2108,6 +2110,12 @@
           if (stepHost) LX.stepper(stepHost, t, opsApi(), function () { var x = document.createElement('template'); x.innerHTML = stagesHtml; return x.content; });
           if (detHost) detHost.appendChild(dKv(LX.detailRows(t, opsApi())));
         }
+        // sections with placement 'top' (the billing readiness banner) go right under the stages, before the cards
+        var topSections = el('div', { class: 'ops-tx-sections ops-tx-sections-top' });
+        var firstCols = out.querySelector('.adm-cols');
+        if (firstCols && firstCols.parentNode) firstCols.parentNode.insertBefore(topSections, firstCols); else out.insertBefore(topSections, out.firstChild);
+        renderTxSections(topSections, t, true);
+        if (!topSections.children.length) topSections.parentNode.removeChild(topSections);
         var sections = el('div', { class: 'ops-tx-sections' });
         out.appendChild(sections);
         renderTxSections(sections, t);

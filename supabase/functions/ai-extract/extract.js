@@ -53,6 +53,21 @@
   The response (and ai_detail) then carries declaration {type_evidence, type_read, status_raw, bl_raw, bl_candidates,
   bl_rtl_affected, date_printed, date_from_hijri, hijri_supported}. A v2 request, and every other v3 doc type, is read
   exactly as before (on a non-declaration v3 reading the declaration keys are dropped).
+  Operational readings (ai-doc-v3, migration 20261121000100_legacy_appt.sql — legacy DocumentAI getAppointmentSchema_ /
+  normalizeAppointmentDraft_, R112AppointmentSafety buildAppointmentPromptR112_ / r112LooksLikeRealAppointmentTicket_,
+  R1212Performance normalizeAppointmentTasR1212_, الرمز.js readEmptyReturnProofWithAiR12110_ / normalizeEmptyReturnDateTimeR12110_):
+  doc_type appointment_ticket (a TAS appointment confirmation card; needs a transaction_id) and empty_return_receipt (an EIR /
+  gate-in receipt of an EMPTY container; ≤ 8 MB), v3 only, each with its own strict schema (outputSchemaOps) in the same SDK
+  call shape (one call = one ai_reserve). Card: booking / TAS ref (TAS + digits), operator ticket no, operator, appointment
+  time (local Riyadh → appointment_at with +03:00), plate, driver, phone (05XXXXXXXX), zone / gate, barcode, the Entry /
+  Exit sections; movement_type is derived from the sections (exit data → full_exit, entry only → empty_entry); destination,
+  price and the empty return are never read. A Fasah / TAS appointment INVOICE, any other document, or a card without the
+  structure (time + booking ref + one operational signal) is rejected: result.rejected {code 'wrong_document_type', reason}
+  (the handler answers 422 after settling). EIR: container (ISO 6346), delivery date AND time (a date alone → delivered_at
+  null, warning eir_time_missing: never a complete proof), depot, a confidence (the lowest field confidence); not an empty
+  return (a gate-out of a full container, another document) → rejected. Neither reading is ever applied: the card becomes
+  a draft card (save_appointment_draft) and the EIR a pending proof (create_empty_return_proof) until a staff member
+  approves / verifies it. The response (and ai_detail) carries appointment {…} or empty_return {…}.
   Every value is a DRAFT: nothing here is saved or approved (approve_doc_batch / approve_declaration_extraction, staff only).
   The document is untrusted data: the system prompt tells the model to ignore instructions inside it.
 */
@@ -78,11 +93,19 @@
   // AI doc type → public.document_extractions.doc_type (app.document_kinds())
   const KIND_OF = Object.freeze({
     bill_of_lading: 'bill_of_lading', commercial_invoice: 'commercial_invoice', customs_declaration: 'customs_declaration',
-    supplier_invoice: 'operator_invoice', packing_list: 'packing_list', other: 'other'
+    supplier_invoice: 'operator_invoice', packing_list: 'packing_list', other: 'other',
+    appointment_ticket: 'appointment', empty_return_receipt: 'empty_return_receipt'
   });
-  // v3: + packing_list (requested and detected)
-  const DOC_TYPES_V3 = Object.freeze(['bill_of_lading', 'commercial_invoice', 'packing_list', 'customs_declaration', 'supplier_invoice', 'auto']);
+  // v3: + packing_list (requested and detected); 20261121000100: + appointment_ticket, empty_return_receipt
+  const DOC_TYPES_V3 = Object.freeze(['bill_of_lading', 'commercial_invoice', 'packing_list', 'customs_declaration', 'supplier_invoice', 'auto',
+    'appointment_ticket', 'empty_return_receipt']);
   const DETECTED_TYPES_V3 = Object.freeze(['bill_of_lading', 'commercial_invoice', 'packing_list', 'customs_declaration', 'supplier_invoice', 'other']);
+  // 20261121000100: the operational readings (v3 only): an appointment card and an empty-return receipt (EIR)
+  const OPS_TYPES = Object.freeze(['appointment_ticket', 'empty_return_receipt']);
+  const OPS_DETECTED = Object.freeze(['appointment_ticket', 'appointment_invoice', 'empty_return_receipt', 'bill_of_lading', 'commercial_invoice',
+    'packing_list', 'customs_declaration', 'supplier_invoice', 'other']);
+  const MAX_EIR_BYTES = 8 * 1024 * 1024;                 // legacy: an empty-return proof ≤ 8 MB
+  function isOps(docType) { return OPS_TYPES.indexOf(docType) !== -1; }
 
   // the field keys of app.extraction_field_keys() (20261114000100 + the 6 match keys of 20261116000100)
   const ALL_KEYS = Object.freeze(['invoice_number', 'invoice_date', 'supplier_name', 'supplier_vat', 'buyer_name', 'buyer_vat',
@@ -112,7 +135,13 @@
   // declaration reading (20261120000100): the legacy declaration draft fields that are not B/L / invoice keys
   const DECL_KEYS = Object.freeze(['declaration_type', 'declaration_status', 'declaration_date', 'declaration_date_hijri',
     'importer_name_ar', 'broker_name', 'local_value', 'payment_method']);
-  const ALL_KEYS_V3 = Object.freeze(ALL_KEYS.concat(V3_KEYS, DECL_KEYS));
+  // appointment card / EIR readings (20261121000100)
+  const APPT_KEYS = Object.freeze(['appointment_booking_ref', 'appointment_ticket_no', 'appointment_operator', 'appointment_at',
+    'appointment_zone_gate', 'appointment_barcode', 'appointment_movement_type', 'vehicle_plate', 'driver_name', 'driver_phone',
+    'appointment_gate_instructions', 'driver_license', 'vehicle_ref_id', 'vehicle_serial_id']);
+  const EIR_KEYS = Object.freeze(['return_delivered_at', 'return_depot']);
+  const SHIP_KEYS_V3 = Object.freeze(ALL_KEYS.concat(V3_KEYS, DECL_KEYS));   // the shipment / declaration keys (auto reads these)
+  const ALL_KEYS_V3 = Object.freeze(SHIP_KEYS_V3.concat(APPT_KEYS, EIR_KEYS));
   const KEYS_FOR_V3 = Object.freeze({
     bill_of_lading: KEYS_FOR.bill_of_lading.concat(['seal_numbers', 'consignee_name', 'notify_party', 'booking_number',
       'place_of_receipt', 'place_of_delivery', 'freight_terms', 'measurement_cbm', 'temperature_c', 'shipping_line']),
@@ -123,8 +152,11 @@
       'goods_description', 'country_of_origin', 'hs_codes'],
     supplier_invoice: KEYS_FOR.supplier_invoice,
     customs_declaration: KEYS_FOR.customs_declaration.concat(['consignee_name', 'seal_numbers'], DECL_KEYS, ['package_type', 'goods_description']),
-    auto: ALL_KEYS_V3
+    auto: SHIP_KEYS_V3,
+    appointment_ticket: APPT_KEYS.concat(['container_numbers', 'bl_number', 'declaration_number']),
+    empty_return_receipt: ['container_numbers'].concat(EIR_KEYS)
   });
+  const APPT_SECTION_KEYS = Object.freeze(['location', 'bl_number', 'declaration_number', 'container_number', 'cargo_type', 'purpose']);
   // v3 line items (legacy invoice items + packing items) and per-container rows
   const ITEM_KEYS_V3 = Object.freeze(['description', 'hs_code', 'quantity', 'unit_price', 'amount', 'unit', 'scientific_name',
     'origin_country', 'net_weight', 'gross_weight', 'packages', 'container_number', 'seal_number', 'notes']);
@@ -177,7 +209,24 @@
     importer_name_ar: 'the importer / exporter name in Arabic, as printed',
     broker_name: 'the customs broker (المخلص الجمركي) name as printed',
     local_value: 'declared value in Saudi riyals (local value) when printed, plain decimal',
-    payment_method: 'duty payment method as printed'
+    payment_method: 'duty payment method as printed',
+    // appointment card / EIR (20261121000100)
+    appointment_booking_ref: 'the booking reference / TAS number of the appointment as printed (e.g. TAS12345678)',
+    appointment_ticket_no: 'the terminal operator ticket number as printed',
+    appointment_operator: 'the port / terminal operator name as printed',
+    appointment_at: 'the appointment date AND time as printed, local time, YYYY-MM-DDTHH:mm',
+    appointment_zone_gate: 'the zone / gate as printed',
+    appointment_barcode: 'the text / number printed under the barcode or QR code, when printed',
+    appointment_movement_type: 'full_exit when the transaction data (container, B/L, declaration) is in the Exit section, empty_entry when it is only in the Entry section',
+    vehicle_plate: 'the vehicle / truck plate number as printed',
+    driver_name: 'the driver name as printed',
+    driver_phone: 'the driver mobile number as printed',
+    appointment_gate_instructions: 'the gate / entry instructions printed on the card, when printed',
+    driver_license: 'the driver licence / ID number as printed, when printed',
+    vehicle_ref_id: 'the vehicle reference ID as printed, when printed',
+    vehicle_serial_id: 'the vehicle serial / sequence number as printed, when printed',
+    return_delivered_at: 'the actual delivery / gate-in date AND time of the empty container, local time, YYYY-MM-DDTHH:mm; the date alone (YYYY-MM-DD) when no time is printed',
+    return_depot: 'the depot / yard / terminal that received the empty container, as printed'
   });
   // per-document overrides of FIELD_HINTS: on a customs declaration the "total" the match compares with the invoice is
   // the DECLARED (customs / invoice) value of the goods — not the duties + VAT payable printed on the same form
@@ -244,6 +293,34 @@
     'line_items are the declared items: hs_code = the tariff code printed on the declaration, description = the Arabic item description',
     'as printed, quantity, unit, amount = the item value, origin_country, net / gross weight in kg.'
   ].join('\n');
+  // 20261121000100: the operational readings (legacy buildAppointmentPromptR112_ / readEmptyReturnProofWithAiR12110_)
+  const SYSTEM_OPS = [SYSTEM,
+    'This request reads a port operations document: a port appointment card (a TAS appointment confirmation ticket) or a receipt',
+    'for an empty container returned to a depot (EIR / gate-in / empty return). Classify the document by its content only, never by',
+    'the file name or by the slot the user uploaded it into.'
+  ].join('\n');
+  const APPT_RULES = [
+    'Set doc_type to appointment_ticket ONLY for an appointment confirmation card (title like Appointment Confirmation Ticket or',
+    'تذكرة تأكيد الموعد) that shows an appointment date and time, vehicle / driver data and an Entry Information or Exit Information',
+    'section. A Fasah / TAS appointments INVOICE (title فاتورة, or Reference No, Internal Invoice No, invoice items, Price, VAT,',
+    'Amount after VAT) is appointment_invoice even when it shows an Appointment No or a TAS number: list those invoice labels in',
+    'invoice_signals. Any other document is its own type (or other).',
+    'For a card: read the booking / TAS reference, the operator ticket number, the operator, the appointment date and time, the',
+    'vehicle plate, the vehicle reference ID and serial number, the driver name, mobile and licence, the zone / gate, the gate',
+    'instructions, the barcode text, and the Entry and Exit sections (location, B/L,',
+    'declaration, container, cargo type, purpose; null when not printed). appointment_movement_type is full_exit when the',
+    'transaction data is in the Exit section and empty_entry when it is only in the Entry section.',
+    'Never guess the customer destination, the transport price, the organisation revenue, or the empty-return place or deadline:',
+    'they are not on the card.'
+  ].join('\n');
+  const EIR_RULES = [
+    'Set doc_type to empty_return_receipt ONLY for a receipt that shows an EMPTY container delivered to a depot / yard / terminal',
+    '(Equipment Interchange Receipt, gate-in, empty return). movement is empty_return for that, full_out for the gate-out or',
+    'delivery of a full container, other otherwise.',
+    'Read only: the container number (4 letters + 7 digits), the actual delivery / gate-in date AND time, and the depot / yard that',
+    'received it. If the time is not clearly printed give the date only and set time_printed false. Do not read damage remarks.',
+    'Do not infer values that are not clearly printed.'
+  ].join('\n');
   function isDeclType(docType) { return docType === 'customs_declaration' || docType === 'auto'; }
 
   /* ------------------------------------------------------------------ schema */
@@ -292,7 +369,47 @@
     };
   }
 
+  function sectionSchema() {
+    const props = {};
+    APPT_SECTION_KEYS.forEach(k => { props[k] = nullable('string'); });
+    return { type: 'object', additionalProperties: false, required: APPT_SECTION_KEYS.slice(), properties: props };
+  }
+  // 20261121000100: the appointment card / EIR schemas (strict, every property required)
+  function outputSchemaOps(docType) {
+    const keys = KEYS_FOR_V3[docType].slice();
+    const fields = {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'value', 'confidence', 'page'],
+        properties: { name: { type: 'string', enum: keys }, value: { type: 'string' }, confidence: { type: 'number' }, page: nullable('integer') }
+      }
+    };
+    if (docType === 'appointment_ticket') {
+      return {
+        type: 'object', additionalProperties: false,
+        required: ['doc_type', 'document_title', 'invoice_signals', 'fields', 'entry', 'exit', 'warnings'],
+        properties: {
+          doc_type: { type: 'string', enum: OPS_DETECTED.slice() }, document_title: nullable('string'),
+          invoice_signals: { type: 'array', items: { type: 'string' } }, fields, entry: sectionSchema(), exit: sectionSchema(),
+          warnings: { type: 'array', items: { type: 'string' } }
+        }
+      };
+    }
+    return {
+      type: 'object', additionalProperties: false,
+      required: ['doc_type', 'document_title', 'movement', 'time_printed', 'fields', 'warnings'],
+      properties: {
+        doc_type: { type: 'string', enum: OPS_DETECTED.slice() }, document_title: nullable('string'),
+        movement: { type: 'string', enum: ['empty_return', 'full_out', 'other'] }, time_printed: { type: 'boolean' }, fields,
+        warnings: { type: 'array', items: { type: 'string' } }
+      }
+    };
+  }
+
   function outputSchemaV3(docType) {
+    if (isOps(docType)) return outputSchemaOps(docType);
     const keys = (KEYS_FOR_V3[docType] || ALL_KEYS_V3).slice();
     const itemProps = { description: { type: 'string' } };
     ITEM_KEYS_V3.slice(1).forEach(k => { itemProps[k] = nullable(ITEM_NUM_V3.indexOf(k) !== -1 ? 'number' : 'string'); });
@@ -416,6 +533,9 @@
     const bytes = b64Bytes(f.data_b64);
     if (bytes > MAX_BYTES || (f.media_type !== 'application/pdf' && bytes > MAX_IMAGE_BYTES)) throw new AiError('too_large', 413);
     if (!magicOk(f.media_type, head(f.data_b64, 12))) throw new AiError('unsupported_media', 415);
+    // 20261121000100: an appointment card is read for a saved transaction; an empty-return proof is ≤ 8 MB
+    if (docType === 'appointment_ticket' && !tx) throw new AiError('transaction_required', 400);
+    if (docType === 'empty_return_receipt' && bytes > MAX_EIR_BYTES) throw new AiError('too_large', 413);
     const pages = f.media_type === 'application/pdf' ? pdfPageCount(f.data_b64) : 1;
     return { org_id: body.org_id.toLowerCase(), doc_type: docType, media_type: f.media_type, data_b64: f.data_b64, bytes, pages,
       transaction_id: tx, lang, prompt_version: version };
@@ -438,15 +558,20 @@
       : { type: 'image', source: { type: 'base64', media_type: v.media_type, data: v.data_b64 } };
     const v3 = isV3(v.prompt_version);
     const keys = keysFor(v.doc_type, v.prompt_version);
-    const typeLine = v.doc_type === 'auto'
+    const ops = isOps(v.doc_type);
+    const typeLine = ops
+      ? 'Document type (as chosen by the user): ' + v.doc_type + '. Set doc_type to what the document actually is.'
+      : v.doc_type === 'auto'
       ? 'Document type: unknown — set doc_type to what the document is (other when none fits).'
       : 'Document type (as chosen by the user): ' + v.doc_type + '. Set doc_type to what the document actually is.';
     const text = [
       typeLine,
       'Fields to extract when present:',
       keys.map(k => '- ' + k + ': ' + hintFor(v.doc_type, k, v3)).join('\n'),
-      v3 ? 'Also fill containers (one row per container) and line_items (the goods / packing table) when printed.' : null,
+      v3 && !ops ? 'Also fill containers (one row per container) and line_items (the goods / packing table) when printed.' : null,
       v3 && isDeclType(v.doc_type) ? DECL_RULES : null,
+      v.doc_type === 'appointment_ticket' ? APPT_RULES : null,
+      v.doc_type === 'empty_return_receipt' ? EIR_RULES : null,
       'Write warnings in ' + (v.lang === 'en' ? 'English' : 'Arabic') + '.'
     ].filter(x => x !== null).join('\n');
     return {
@@ -455,7 +580,7 @@
       betas: BETAS.slice(),
       fallbacks: FALLBACKS,
       output_config: { effort: EFFORT, format: { type: 'json_schema', schema: outputSchema(v.doc_type, v.prompt_version) } },
-      system: v3 ? SYSTEM_V3 : SYSTEM,
+      system: ops ? SYSTEM_OPS : (v3 ? SYSTEM_V3 : SYSTEM),
       messages: [{ role: 'user', content: [fileBlock, { type: 'text', text }] }]
     };
   }
@@ -498,7 +623,7 @@
   // stop_reason first, then the text blocks after the last `fallback` switch point (thinking / fallback blocks and a
   // declined attempt's partial output are skipped). Never throws.
   // → {ok:true, data, usage, model} | {ok:false, code:'refused'|'truncated'|'bad_output', usage, model}
-  function parseMessage(msg, version) {
+  function parseMessage(msg, version, docType) {
     const usage = usageOf(msg), model = modelOf(msg);
     const sr = msg && msg.stop_reason;
     if (sr === 'refusal') return { ok: false, code: 'refused', usage, model };
@@ -510,8 +635,23 @@
     const text = content.slice(start).filter(b => b && b.type === 'text' && typeof b.text === 'string').map(b => b.text).join('');
     let data;
     try { data = JSON.parse(text); } catch (e) { return { ok: false, code: 'bad_output', usage, model }; }
-    if (!shapeOk(data, version)) return { ok: false, code: 'bad_output', usage, model };
+    if (!(isV3(version) && isOps(docType) ? shapeOkOps(data, docType) : shapeOk(data, version))) return { ok: false, code: 'bad_output', usage, model };
     return { ok: true, data, usage, model };
+  }
+  // 20261121000100: the appointment card / EIR output
+  function shapeOkOps(d, docType) {
+    if (!d || typeof d !== 'object' || Array.isArray(d)) return false;
+    if (OPS_DETECTED.indexOf(d.doc_type) === -1) return false;
+    if (!Array.isArray(d.fields) || !Array.isArray(d.warnings) || !d.warnings.every(w => typeof w === 'string')) return false;
+    if (!d.fields.every(f => f && typeof f === 'object' && typeof f.name === 'string' && typeof f.value === 'string')) return false;
+    if (d.document_title != null && typeof d.document_title !== 'string') return false;
+    if (docType === 'appointment_ticket') {
+      if (d.invoice_signals != null && !(Array.isArray(d.invoice_signals) && d.invoice_signals.every(t => typeof t === 'string'))) return false;
+      const sec = x => x == null || (typeof x === 'object' && !Array.isArray(x) && Object.keys(x).every(k => x[k] == null || typeof x[k] === 'string'));
+      return sec(d.entry) && sec(d.exit);
+    }
+    if (d.time_printed != null && typeof d.time_printed !== 'boolean') return false;
+    return d.movement == null || typeof d.movement === 'string';
   }
   function shapeOk(d, version) {
     if (!d || typeof d !== 'object' || Array.isArray(d)) return false;
@@ -779,10 +919,210 @@
     };
   }
 
+
+  /* --------------------------------------------- operational readings (20261121000100): appointment card, EIR */
+  // legacy normalizeAppointmentTasR1212_: TAS + ≥ 8 digits (either order, separators / bidi marks dropped), else the
+  // reference upper case without spaces
+  function normTas(v) {
+    const raw = western(clean(v, 120));
+    const t = raw.toUpperCase().replace(/[‎‏‪-‮⁦-⁩]/g, '').replace(/[\s\-_/\\.]+/g, '');
+    let m = t.match(/TAS(\d{8,})/);
+    if (m) return 'TAS' + m[1];
+    m = t.match(/(\d{8,})TAS/);
+    if (m) return 'TAS' + m[1];
+    return t.slice(0, 40);
+  }
+  function normRef(v, n) { return western(clean(v, 200)).toUpperCase().replace(/[‎‏‪-‮⁦-⁩]/g, '').replace(/\s+/g, '').slice(0, n || 60); }
+  // legacy normalizeTruckNumber_ (= SQL norm_code(replace(translate(plate, 'أإآ', 'ااا'), '-', ''))): western digits, no spaces / dashes
+  function normPlate(v) { return western(clean(v, 60)).replace(/[أإآ]/g, 'ا').replace(/[\s\-]+/g, '').toUpperCase().slice(0, 20); }
+  // legacy normalizePhone_ (= SQL app.norm_sa_phone, mobile): 05XXXXXXXX or '' when not a Saudi mobile
+  function normSaMobile(v) {
+    let d = western(clean(v, 40)).replace(/[^\d+]/g, '');
+    d = d.replace(/^\+/, '').replace(/^00/, '');
+    if (/^9665\d{8}$/.test(d)) d = '0' + d.slice(3);
+    else if (/^5\d{8}$/.test(d)) d = '0' + d;
+    return /^05\d{8}$/.test(d) ? d : '';
+  }
+  // a printed local date / time → {date 'YYYY-MM-DD', time 'HH:mm' | null} or null (legacy normalizeEmptyReturnDateTimeR12110_ /
+  // normalizeDateTimeString_: YYYY-MM-DD or DD/MM/YYYY, 24 h or AM / PM / ص / م)
+  function localDateTime(v) {
+    let t = western(clean(v, 60)).replace(/\//g, '-').replace(/\s+/g, ' ').trim();
+    if (!t) return null;
+    let date = null, rest = '';
+    let m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](.*))?$/.exec(t);
+    if (m) { date = m[1] + '-' + pad(+m[2], 2) + '-' + pad(+m[3], 2); rest = m[4] || ''; }
+    else {
+      m = /^(\d{1,2})-(\d{1,2})-(\d{4})(?:[T ](.*))?$/.exec(t);
+      if (m) { date = m[3] + '-' + pad(+m[2], 2) + '-' + pad(+m[1], 2); rest = m[4] || ''; }
+    }
+    if (!date || !isIsoDate(date)) return null;
+    rest = rest.trim();
+    if (!rest) return { date, time: null };
+    const tm = /^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?\s*(AM|PM|A\.M\.|P\.M\.|ص|م)?(?:\s*(?:Z|[+-]\d{2}:?\d{2}))?$/i.exec(rest);
+    if (!tm) return null;
+    let h = +tm[1];
+    const mi = +tm[2], ap = (tm[3] || '').toUpperCase();
+    if (ap) {
+      if (h < 1 || h > 12) return null;
+      if ((ap[0] === 'P' || ap === 'م') && h < 12) h += 12;
+      if ((ap[0] === 'A' || ap === 'ص') && h === 12) h = 0;
+    }
+    if (h > 23 || mi > 59) return null;
+    return { date, time: pad(h, 2) + ':' + pad(mi, 2) };
+  }
+  const RIYADH = '+03:00';
+  function riyadhIso(dt) { return dt && dt.time ? dt.date + 'T' + dt.time + ':00' + RIYADH : null; }
+
+  function postProcessOps(data, requestedType) {
+    const warnings = [];
+    const W = (source, code, text, field) => warnings.push({ source, code, text: clean(text, 300), field: field || null });
+    (data.warnings || []).slice(0, 30).forEach(w => { const t = clean(w, 300); if (t) W('model', 'model_note', t); });
+    const allowed = KEYS_FOR_V3[requestedType];
+    const by = {};
+    (data.fields || []).slice(0, 100).forEach(f => {
+      if (!f || allowed.indexOf(f.name) === -1) return;
+      const value = clean(f.value, 2000);
+      if (!value) return;
+      (by[f.name] = by[f.name] || []).push({ value, confidence: conf(f.confidence), page: page(f.page) });
+    });
+    const best = k => {
+      const list = by[k];
+      if (!list || !list.length) return null;
+      const b = list.slice().sort((a, c) => c.confidence - a.confidence)[0];
+      if (list.some(x => x.value !== b.value)) W('server', 'conflicting_values', 'Several different values were read for this field.', k);
+      return b;
+    };
+    const fields = [], extracted = {};
+    const put = (k, value, b, valid) => {
+      if (value == null || value === '') return;
+      fields.push({ name: k, value: String(value), confidence: b ? b.confidence : 1, page: b ? b.page : null, valid: valid !== false });
+      extracted[k] = String(value);
+    };
+    const detected = OPS_DETECTED.indexOf(data.doc_type) !== -1 ? data.doc_type : 'other';
+    const title = clean(data.document_title, 300) || null;
+    let rejected = null, appointment = null, emptyReturn = null;
+
+    if (requestedType === 'appointment_ticket') {
+      const sec = x => {
+        const o = {};
+        APPT_SECTION_KEYS.forEach(k => {
+          const raw = x && typeof x === 'object' ? clean(x[k], 300) : '';
+          o[k] = raw || null;
+        });
+        if (o.container_number) {
+          const c = normContainer(o.container_number);
+          if (isValidContainer(c)) o.container_number = c;
+          else { W('server', 'container_check_digit', 'Container number fails the ISO 6346 check digit: ' + c, 'container_numbers'); o.container_number = null; }
+        }
+        if (o.bl_number) o.bl_number = normRef(o.bl_number, 80);
+        if (o.declaration_number) o.declaration_number = normRef(o.declaration_number, 60);
+        return o;
+      };
+      const entry = sec(data.entry), exit = sec(data.exit);
+      const bBook = best('appointment_booking_ref'), bTicket = best('appointment_ticket_no'), bOp = best('appointment_operator');
+      const bAt = best('appointment_at'), bZone = best('appointment_zone_gate'), bBar = best('appointment_barcode');
+      const bMt = best('appointment_movement_type'), bPlate = best('vehicle_plate'), bDrv = best('driver_name'), bPh = best('driver_phone');
+      const bGate = best('appointment_gate_instructions'), bLic = best('driver_license'), bVRef = best('vehicle_ref_id'), bVSer = best('vehicle_serial_id');
+      const gate = bGate ? cleanLine(bGate.value).slice(0, 300) : '';
+      const license = bLic ? normRef(bLic.value, 60) : '';
+      const vRef = bVRef ? normRef(bVRef.value, 60) : '';
+      const vSer = bVSer ? normRef(bVSer.value, 60) : '';
+      const booking = bBook ? normTas(bBook.value) : '';
+      const ticket = bTicket ? normRef(bTicket.value, 60) : '';
+      const operator = bOp ? cleanLine(bOp.value).slice(0, 160) : '';
+      const dt = bAt ? localDateTime(bAt.value) : null;
+      if (bAt && !dt) W('server', 'datetime_format', 'The appointment date / time is not a valid date and time.', 'appointment_at');
+      if (dt && !dt.time) W('server', 'appointment_time_missing', 'The appointment shows a date without a time.', 'appointment_at');
+      const plate = bPlate ? normPlate(bPlate.value) : '';
+      const driver = bDrv ? cleanLine(bDrv.value).slice(0, 120) : '';
+      const phone = bPh ? normSaMobile(bPh.value) : '';
+      if (bPh && !phone) W('server', 'phone_format', 'The driver phone is not a Saudi mobile number (05XXXXXXXX).', 'driver_phone');
+      const zone = bZone ? cleanLine(bZone.value).slice(0, 120) : '';
+      const barcode = bBar ? normRef(bBar.value, 200) : '';
+      // legacy normalizeAppointmentDraft_: the sections decide the movement type
+      const hasData = o => !!(o.container_number || o.declaration_number || o.bl_number);
+      let mt = hasData(exit) ? 'full_exit' : (hasData(entry) ? 'empty_entry' : null);
+      const mtRead = bMt ? String(bMt.value).trim().toLowerCase() : '';
+      if (!mt && (mtRead === 'full_exit' || mtRead === 'empty_entry')) mt = mtRead;
+      if (mt && mtRead && mtRead !== mt) W('server', 'movement_type_corrected', 'The movement type was set from the Entry / Exit sections: ' + mt + '.', 'appointment_movement_type');
+      let containerNo = mt === 'full_exit' ? exit.container_number : (mt === 'empty_entry' ? entry.container_number : null);
+      const bCtr = best('container_numbers');
+      if (!containerNo && bCtr) {
+        const c = normContainer(String(bCtr.value).split(/[,;\n]+/)[0]);
+        if (isValidContainer(c)) containerNo = c;
+        else W('server', 'container_check_digit', 'Container number fails the ISO 6346 check digit: ' + c, 'container_numbers');
+      }
+      // legacy r112LooksLikeRealAppointmentTicket_: a time, a booking reference and one operational signal (the vehicle ref /
+      // serial IDs count too)
+      const signals = [plate, driver, phone, ticket, zone, vRef, vSer, entry.container_number, exit.container_number].filter(Boolean).length;
+      const structural = { ok: !!(dt && dt.time) && !!booking && signals > 0, has_time: !!(dt && dt.time), has_booking: !!booking, signals,
+        reason: !(dt && dt.time) ? 'no_time' : (!booking ? 'no_booking_ref' : (signals ? null : 'no_operational_signal')) };
+      const invoiceSignals = (Array.isArray(data.invoice_signals) ? data.invoice_signals : []).map(x => clean(x, 80)).filter(Boolean);
+      if (detected === 'appointment_invoice' || (detected === 'appointment_ticket' && invoiceSignals.length)) rejected = 'appointment_invoice';
+      else if (detected !== 'appointment_ticket') rejected = 'not_appointment_ticket';
+      else if (!structural.ok) rejected = 'not_ticket_structure';
+      put('appointment_booking_ref', booking, bBook); put('appointment_ticket_no', ticket, bTicket); put('appointment_operator', operator, bOp);
+      if (bAt) put('appointment_at', dt ? dt.date + (dt.time ? 'T' + dt.time : '') : clean(bAt.value, 40), bAt, !!(dt && dt.time));
+      put('appointment_zone_gate', zone, bZone); put('appointment_barcode', barcode, bBar); put('appointment_movement_type', mt, bMt);
+      put('vehicle_plate', plate, bPlate); put('driver_name', driver, bDrv);
+      if (bPh) put('driver_phone', phone || clean(bPh.value, 40), bPh, !!phone);
+      put('appointment_gate_instructions', gate, bGate); put('driver_license', license, bLic);
+      put('vehicle_ref_id', vRef, bVRef); put('vehicle_serial_id', vSer, bVSer);
+      put('container_numbers', containerNo, bCtr || null);
+      const bBl = best('bl_number'), bDec = best('declaration_number');
+      put('bl_number', (mt === 'full_exit' ? exit.bl_number : entry.bl_number) || (bBl ? normRef(bBl.value, 80) : ''), bBl);
+      put('declaration_number', (mt === 'full_exit' ? exit.declaration_number : entry.declaration_number) || (bDec ? normRef(bDec.value, 60) : ''), bDec);
+      appointment = {
+        booking_ref: booking || null, operator_ticket_no: ticket || null, operator_name: operator || null,
+        appointment_at: riyadhIso(dt), appointment_local: dt ? dt.date + (dt.time ? 'T' + dt.time : '') : null,
+        truck_plate: plate || null, driver_name: driver || null, driver_phone: phone || null, zone_gate: zone || null, barcode: barcode || null,
+        movement_type: mt, container_no: containerNo || null, document_title: title, entry, exit, structural,
+        gate_instructions: gate || null, driver_license: license || null, vehicle_ref_id: vRef || null, vehicle_serial_id: vSer || null
+      };
+    } else {
+      const bCtr = best('container_numbers'), bAt = best('return_delivered_at'), bDep = best('return_depot');
+      let containerNo = null;
+      if (bCtr) {
+        const c = normContainer(String(bCtr.value).split(/[,;\n]+/)[0]);
+        if (isValidContainer(c)) containerNo = c;
+        else W('server', 'container_check_digit', 'Container number fails the ISO 6346 check digit: ' + c, 'container_numbers');
+      }
+      const dt = bAt ? localDateTime(bAt.value) : null;
+      if (bAt && !dt) W('server', 'datetime_format', 'The delivery date / time is not a valid date and time.', 'return_delivered_at');
+      const timeOk = !!(dt && dt.time) && data.time_printed !== false;
+      if (dt && !timeOk) W('server', 'eir_time_missing', 'The delivery date was read without a time: enter the delivery time before verifying the proof.', 'return_delivered_at');
+      const depot = bDep ? cleanLine(bDep.value).slice(0, 160) : '';
+      const movement = ['empty_return', 'full_out', 'other'].indexOf(data.movement) !== -1 ? data.movement : 'other';
+      if (detected !== 'empty_return_receipt') rejected = 'not_empty_return_receipt';
+      else if (movement !== 'empty_return') rejected = 'not_empty_return';
+      put('container_numbers', containerNo, bCtr);
+      if (bAt) put('return_delivered_at', dt ? dt.date + (timeOk ? 'T' + dt.time : '') : clean(bAt.value, 40), bAt, timeOk);
+      put('return_depot', depot, bDep);
+      const confs = [bCtr, bAt, bDep].map(b => (b ? b.confidence : 0));
+      emptyReturn = {
+        container_no: containerNo, delivered_at: timeOk ? riyadhIso(dt) : null, delivery_date: dt ? dt.date : null, time_printed: timeOk,
+        depot: depot || null, confidence: Math.min.apply(null, confs), movement
+      };
+    }
+    if (rejected) W('server', 'wrong_document_type', 'The document is not a ' + requestedType + ' (' + rejected + ').', null);
+    const mean = fields.length ? Math.round(fields.reduce((a, f) => a + f.confidence, 0) / fields.length * 1000) / 10 : null;
+    const result = {
+      doc_type: requestedType, detected_type: detected, kind: KIND_OF[requestedType], fields, extracted_fields: extracted, line_items: [],
+      warnings: warnings.slice(0, 60), mean_confidence: mean, prompt_version: PROMPT_VERSION_V3, containers: [], detected_documents: [detected],
+      rejected: rejected ? { code: 'wrong_document_type', reason: rejected } : null
+    };
+    if (appointment) result.appointment = appointment;
+    if (emptyReturn) result.empty_return = emptyReturn;
+    result.ai_detail = aiDetail(result);
+    result.raw_text = renderText(result);
+    return result;
+  }
+
   // model output → the response of ai-extract (and the extraction row): validated, normalized, warnings added.
   // version 'ai-doc-v3' → the v3 keys, packing_list, the wider line items and containers (+ result.containers).
   function postProcess(data, requestedType, version) {
     const v3 = isV3(version);
+    if (v3 && isOps(requestedType)) return postProcessOps(data, requestedType);
     const allowed = keysFor(requestedType, version);
     const KEYS = v3 ? ALL_KEYS_V3 : ALL_KEYS;
     const warnings = [];
@@ -1030,6 +1370,9 @@
     };
     // + the declaration detail (app.extraction_decl_detail_ok of 20261120000100)
     if (r.declaration) o.declaration = r.declaration;
+    // + the card / EIR detail (app.extraction_appt_detail_ok / app.extraction_eir_detail_ok of 20261121000100)
+    if (r.appointment) o.appointment = r.appointment;
+    if (r.empty_return) o.empty_return = r.empty_return;
     return o;
   }
 
@@ -1047,6 +1390,16 @@
       lines.push('', 'declaration:', 'type evidence: ' + (d.type_evidence || '-'), 'status as printed: ' + (d.status_raw || '-'),
         'B/L candidates: ' + (d.bl_candidates.join(' | ') || '-') + (d.bl_rtl_affected ? '  (RTL)' : ''),
         'date printed: ' + (d.date_printed || '-') + ', from Hijri: ' + (d.date_from_hijri || '-'));
+    }
+    if (v3 && r.appointment) {
+      const a = r.appointment, sec = x => APPT_SECTION_KEYS.map(k => x[k] == null ? '' : x[k]).join(' | ');
+      lines.push('', 'appointment:', 'movement: ' + (a.movement_type || '-') + ', container: ' + (a.container_no || '-') + ', time: ' + (a.appointment_local || '-'),
+        'entry: ' + sec(a.entry), 'exit: ' + sec(a.exit), 'structure: ' + (a.structural.ok ? 'ok' : a.structural.reason));
+    }
+    if (v3 && r.empty_return) {
+      const e = r.empty_return;
+      lines.push('', 'empty return:', 'container: ' + (e.container_no || '-') + ', delivered: ' + (e.delivered_at || (e.delivery_date ? e.delivery_date + ' (no time)' : '-')) +
+        ', depot: ' + (e.depot || '-') + ', movement: ' + e.movement);
     }
     if (r.line_items.length) {
       lines.push('', 'line_items:');
@@ -1097,7 +1450,10 @@
     estimateHoldUsd, classifyCallError, pdfPageCount, isValidContainer, iso6346CheckDigit, isSaudiVat, isHs, isIsoDate,
     measure, incotermCode,
     // declaration reading (20261120000100)
-    DECL_KEYS, normDeclarationStatus, normDeclarationType, normalizeHijri, hijriToGregorian, hijriSupported
+    DECL_KEYS, normDeclarationStatus, normDeclarationType, normalizeHijri, hijriToGregorian, hijriSupported,
+    // appointment card / EIR readings (20261121000100)
+    OPS_TYPES, OPS_DETECTED, APPT_KEYS, EIR_KEYS, SHIP_KEYS_V3, APPT_SECTION_KEYS, SYSTEM_OPS, MAX_EIR_BYTES, isOps, normTas,
+    normSaMobile, normPlate, localDateTime
   };
   (typeof module === 'object' && module.exports) ? (module.exports = API) : (globalThis.MarsaAiExtract = Object.assign(globalThis.MarsaAiExtract || {}, API));
 })();

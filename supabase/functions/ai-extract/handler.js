@@ -23,7 +23,10 @@
   the same file (OCR / v2) in the scope a save would collide with (document_extractions_dedupe_uidx: same transaction,
   or unlinked) → returned as itself (its own engine, reused: true), since a new reading could not be saved there] →
   [v3 only: ai_bind_source — the SHA-256 of the bytes sent to Claude bound to the reservation; a v3 reading can only be
-  saved under it] → Claude → ai_settle (always, once). Settle status: ok / refused / error with the reported tokens per attempt, or
+  saved under it] → Claude → ai_settle (always, once). Operational readings (20261121000100: doc_type appointment_ticket /
+  empty_return_receipt, v3): a reading the server rejects (an appointment INVOICE, another document, a card without the
+  ticket structure, an EIR that is not an empty return) is settled as usual (Claude ran) and answered 422
+  {error: 'wrong_document_type', reason, detected_type}; a reused stored reading must be of the same document kind. Settle status: ok / refused / error with the reported tokens per attempt, or
   'unknown' when the call failed after it may have been billed (timeout, connection lost, 5xx / 529): ai_settle then
   charges the held amount. Errors are fixed codes ({error: '<code>'}); upstream / SDK messages are never echoed.
 */
@@ -98,7 +101,9 @@
       const r = await userDb.from('document_extractions').select(DEDUPE_COLS).eq('org_id', v.org_id).eq('source_sha256', sha)
         .is('voided_at', null).order('created_at', { ascending: false }).limit(20);
       if (!r || r.error || !Array.isArray(r.data)) return null;
-      const live = r.data.filter(x => x && x.id);
+      // 20261121000100: an appointment card / EIR read is only answered with a stored reading of the same kind
+      const kind = X.isOps && X.isOps(v.doc_type) ? X.KIND_OF[v.doc_type] : null;
+      const live = r.data.filter(x => x && x.id && (!kind || x.doc_type === kind));
       const rows = live.filter(x => x.engine === X.ENGINE && x.ai_detail && x.ai_detail.prompt_version === X.PROMPT_VERSION_V3 && x.ai_usage_id);
       const pick = f => rows.find(f) || null;
       const v3 = v.transaction_id
@@ -128,6 +133,8 @@
       detected_documents: Array.isArray(det.detected_documents) ? det.detected_documents : [det.detected_type || row.doc_type],
       mean_confidence: row.mean_confidence == null ? null : Number(row.mean_confidence), raw_text: row.raw_text || '',
       declaration: isV3 && det.declaration && typeof det.declaration === 'object' ? det.declaration : null,
+      appointment: isV3 && det.appointment && typeof det.appointment === 'object' ? det.appointment : null,
+      empty_return: isV3 && det.empty_return && typeof det.empty_return === 'object' ? det.empty_return : null,
       ai_detail: det, source_sha256: row.source_sha256, reused: true, extraction_id: row.id, review_status: row.review_status,
       usage: { input_tokens: 0, output_tokens: 0, cost_usd: 0 }
     };
@@ -254,7 +261,7 @@
         log('ai-extract: claude call failed (' + c.code + ', ' + c.settle + ')');
       }
       if (msg) {
-        const parsed = X.parseMessage(msg, v.prompt_version);
+        const parsed = X.parseMessage(msg, v.prompt_version, v.doc_type);
         settle = { input: parsed.usage.input_tokens, output: parsed.usage.output_tokens, model: parsed.model,
           attempts: parsed.usage.attempts, status: parsed.ok ? 'ok' : (parsed.code === 'refused' ? 'refused' : 'error') };
         if (parsed.ok) {
@@ -279,6 +286,12 @@
       if (st.error) log('ai-extract: settle failed');
     } catch (e) { log('ai-extract: settle failed'); }
     if (!out) return fail(errCode, errStatus, origin);
+    // 20261121000100: the wrong document for an appointment card / EIR read (billed: Claude ran) — nothing to save
+    if (out.rejected) {
+      log('ai-extract: wrong document type (' + out.rejected.reason + ')');
+      return json({ error: 'wrong_document_type', reason: out.rejected.reason, detected_type: out.detected_type,
+        usage_id: reservation }, 422, origin);
+    }
 
     const body = {
       usage_id: reservation, engine: X.ENGINE, model: settle.model, prompt_version: v3 ? X.PROMPT_VERSION_V3 : X.PROMPT_VERSION,
@@ -291,6 +304,8 @@
       body.containers = out.containers; body.ai_detail = out.ai_detail; body.source_sha256 = sha;
       body.detected_documents = out.detected_documents;
       body.declaration = out.declaration || null;     // v3 customs declaration (20261120000100), else null
+      body.appointment = out.appointment || null;     // v3 appointment card (20261121000100), else null
+      body.empty_return = out.empty_return || null;   // v3 EIR (20261121000100), else null
       body.reused = false; body.extraction_id = null;
     }
     return json(body, 200, origin);

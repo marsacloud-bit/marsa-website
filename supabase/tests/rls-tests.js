@@ -269,6 +269,22 @@ async function declFixtures() {
   }
 }
 
+// legacy appt (20261121000100): per org, an open appointment-card draft with one card (save_appointment_draft) and a pending
+// empty-return proof on a stored document (create_empty_return_proof) by the org's own staff (nothing approved: the transactions
+// keep their status and containers)
+async function apptFixtures() {
+  const rpcAs = async (who, sql, params) => (await as(who, sql, params))[0].r;
+  for (const [who, org, tx, ctr, tag] of [['staffA', A, TX1, 'TSTU0000001', '1'], ['staffB', B, B_TX, 'BBBU0000001', '2']]) {
+    await rpcAs(who, `SELECT public.save_appointment_draft($1, $2) r`, [tx, { cards: [{ source_sha256: ('c' + tag).repeat(32), file_name: 'card.pdf',
+      file_size: 1000, media_type: 'application/pdf', reading: {}, review: { party_type: 'direct' } }] }]);
+    const doc = (await q(`WITH i AS (SELECT gen_random_uuid() id)
+                          INSERT INTO public.documents (id, org_id, transaction_id, kind, storage_path, sha256, original_name, mime_type, size_bytes, uploaded_by)
+                          SELECT i.id, $1::uuid, $2::uuid, 'other', $1::uuid::text || '/' || $2::uuid::text || '/' || i.id::text || '/eir.pdf', $3, 'eir.pdf', 'application/pdf', 1000, $4::uuid
+                            FROM i RETURNING id`, [org, tx, ('d' + tag).repeat(32), U[who]]))[0].id;
+    await rpcAs(who, `SELECT public.create_empty_return_proof($1, $2) r`, [tx, { document_id: doc, container_no: ctr }]);
+  }
+}
+
 // G3 (20261103000100 / 0200): one row per org in every new tenant table, written through the real
 // RLS-guarded inserts / RPCs by each org's own staff. Org A uses TX3 (air, no containers) so the
 // G1/G2 status tests below are unaffected; document requirements are export-only so nothing is gated.
@@ -536,6 +552,10 @@ const TENANT_TABLES = [
   ['declaration_approvals', `SELECT id::text id FROM public.declaration_approvals WHERE org_id = $1 LIMIT 1`, 'id::text', 'daftra_hook = daftra_hook'],
   ['declaration_items',  `SELECT id::text id FROM public.declaration_items WHERE org_id = $1 LIMIT 1`,  'id::text',  'org_id = org_id'],
   ['hs_reference',       `SELECT id::text id FROM public.hs_reference WHERE org_id = $1 LIMIT 1`,       'id::text',  'org_id = org_id'],
+  // legacy appt (20261121000100): staff SELECT only (branch-scoped; the card review outside the column grant), written only by the RPCs
+  ['appointment_drafts', `SELECT id::text id FROM public.appointment_drafts WHERE org_id = $1 LIMIT 1`, 'id::text',  'org_id = org_id'],
+  ['appointment_draft_cards', `SELECT id::text id FROM public.appointment_draft_cards WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
+  ['empty_return_proofs', `SELECT id::text id FROM public.empty_return_proofs WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
   ['invitations',        `SELECT id::text id FROM public.invitations WHERE org_id = $1 LIMIT 1`,        'id::text',  'email = email'],
   // G3 registry (20261103000100)
   ['parties',            `SELECT id::text id FROM public.parties WHERE org_id = $1 LIMIT 1`,            'id::text',  'name_ar = name_ar'],
@@ -624,6 +644,8 @@ async function main() {
   catch (e) { fail('legacy docs fixtures', errText(e)); return finish(); }
   try { await declFixtures(); pass('legacy decl fixtures: an approved customs declaration reading per org (approval, items, HS reference)'); }
   catch (e) { fail('legacy decl fixtures', errText(e)); return finish(); }
+  try { await apptFixtures(); pass('legacy appt fixtures: an open appointment draft with a card and a pending empty-return proof per org'); }
+  catch (e) { fail('legacy appt fixtures', errText(e)); return finish(); }
 
   /* ---------------------------------------------------------------- catalog */
   section('catalog: RLS, grants, function privileges');
@@ -723,9 +745,13 @@ async function main() {
       'list_pending_doc_batches', 'discard_doc_batch', 'archive_doc_batch', 'approve_doc_batch', 'get_transaction_shipment', 'match_client_v2',
       'confirm_client_match', 'reject_client_alias', 'seed_shipping_agents', 'match_shipping_agent',
       // legacy decl (20261120000100): declaration review / approval, the transaction declaration, the HS reference search
-      'get_declaration_review', 'approve_declaration_extraction', 'get_transaction_declaration', 'search_hs_reference'];
+      'get_declaration_review', 'approve_declaration_extraction', 'get_transaction_declaration', 'search_hs_reference',
+      // legacy appt (20261121000100): appointment card drafts, empty-return proofs, the TASTO carrier order, the readiness banner
+      'appointment_card_state', 'save_appointment_draft', 'get_appointment_draft', 'cancel_appointment_draft', 'move_appointment_draft',
+      'approve_appointment_draft', 'create_empty_return_proof', 'verify_empty_return_proof', 'void_empty_return_proof',
+      'save_empty_return_deadline', 'list_empty_return_proofs', 'save_transport_carrier_order', 'tx_readiness'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 221) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 234) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');

@@ -119,6 +119,8 @@
         mv_terminal: 'المحطة / المشغّل', mv_appt_status: 'حالة الموعد', mv_window: 'النافذة (دقيقة)',
         mv_driver_name: 'اسم السائق', mv_driver_phone: 'جوال السائق', mv_phone_hint: 'جوال سعودي بالصيغة 05XXXXXXXX.',
         mv_truck: 'رقم الشاحنة', mv_suggest: 'سائقون من الدليل', mv_suggest_pick: 'اختيار', mv_carrier: 'الناقل',
+        mv_party: 'جهة النقل', mv_order_no: 'أمر النقل', mv_operator: 'المشغل', mv_zone: 'المنطقة/البوابة',
+        lbl_transport_party_type_supplier: 'مورد', lbl_transport_party_type_company: 'شركة نقل', lbl_transport_party_type_direct: 'مباشر (السائق)',
         mv_origin: 'من', mv_dest: 'وجهة التسليم', mv_cost: 'قيمة النقل', mv_sell: 'عائد المؤسسة', mv_status: 'حالة الحركة',
         mv_delivered_at: 'وقت التسليم', mv_return_deadline: 'آخر موعد لإرجاع الفارغ', mv_return_location: 'مكان الإرجاع',
         mv_return_yard: 'ساحة الإرجاع', mv_return: 'إرجاع الفارغ', mv_notes: 'ملاحظات داخلية',
@@ -218,6 +220,8 @@
         mv_terminal: 'Terminal / operator', mv_appt_status: 'Appointment status', mv_window: 'Window (minutes)',
         mv_driver_name: 'Driver name', mv_driver_phone: 'Driver mobile', mv_phone_hint: 'Saudi mobile, 05XXXXXXXX.',
         mv_truck: 'Truck plate', mv_suggest: 'Drivers in the directory', mv_suggest_pick: 'Pick', mv_carrier: 'Carrier',
+        mv_party: 'Transport party', mv_order_no: 'Transport order', mv_operator: 'Operator', mv_zone: 'Zone / gate',
+        lbl_transport_party_type_supplier: 'Supplier', lbl_transport_party_type_company: 'Transport company', lbl_transport_party_type_direct: 'Direct (the driver)',
         mv_origin: 'From', mv_dest: 'Delivery destination', mv_cost: 'Transport value', mv_sell: 'Organisation revenue', mv_status: 'Movement status',
         mv_delivered_at: 'Delivery time', mv_return_deadline: 'Empty-return deadline', mv_return_location: 'Return place',
         mv_return_yard: 'Return yard', mv_return: 'Empty return', mv_notes: 'Internal notes',
@@ -994,9 +998,15 @@
         if (!roro) cells.push(el('td', null, el('bdi', { dir: 'ltr', class: 'num', text: m.container_no || ctrNo(m.container_id) || T('none') })));
         cells.push(el('td', null, [el('span', { class: 'cell-main', text: m.appointment_at ? fmtDate(api, m.appointment_at, true) : T('none') }),
           m.appointment_no ? el('span', { class: 'adm-sub' }, el('bdi', { dir: 'ltr', text: m.appointment_no })) : null,
+          m.booking_ref && m.booking_ref !== m.appointment_no ? el('span', { class: 'adm-sub' }, el('bdi', { dir: 'ltr', text: m.booking_ref })) : null,
+          m.operator_name || m.operator_ticket_no ? el('span', { class: 'adm-sub', text: T('mv_operator') + ': ' + [m.operator_name, m.operator_ticket_no].filter(Boolean).join(' · ') }) : null,
+          m.zone_gate ? el('span', { class: 'adm-sub', text: T('mv_zone') + ': ' + m.zone_gate }) : null,
           m.appointment_status ? el('span', { class: 'adm-sub', text: lab(api, 'appt_status', m.appointment_status) }) : null]));
+        // step 5: the transport party of the trip (approved appointment cards) and its per-trip order
         cells.push(el('td', null, [el('span', { class: 'cell-main', text: m.driver_name || T('none') }),
-          el('span', { class: 'adm-sub' }, el('bdi', { dir: 'ltr', text: [m.driver_phone, m.truck_plate].filter(Boolean).join(' · ') || T('none') }))]));
+          el('span', { class: 'adm-sub' }, el('bdi', { dir: 'ltr', text: [m.driver_phone, m.truck_plate].filter(Boolean).join(' · ') || T('none') })),
+          m.party_type || m.party_name ? el('span', { class: 'adm-sub', text: T('mv_party') + ': ' + [m.party_type ? lab(api, 'transport_party_type', m.party_type) : null, m.party_name].filter(Boolean).join(' — ') }) : null,
+          m.transport_order_no ? el('span', { class: 'adm-sub' }, [T('mv_order_no') + ': ', el('bdi', { dir: 'ltr', text: m.transport_order_no })]) : null]));
         cells.push(el('td', null, [el('span', { class: 'cell-main', text: m.destination || T('none') }), m.origin ? el('span', { class: 'adm-sub', text: m.origin }) : null]));
         cells.push(el('td', null, [pillNode(el, MV_TONE[m.movement_status] || 'blue', lab(api, 'movement_status', m.movement_status)),
           m.unloaded_at ? el('span', { class: 'adm-sub', text: fmtDate(api, m.unloaded_at, true) }) : null]));

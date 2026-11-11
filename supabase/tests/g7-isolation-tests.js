@@ -670,7 +670,11 @@ const NOT_EXERCISED = ['accept_invitation', 'ack_alert', 'import_commit', 'porta
   'save_doc_batch_draft[min]',
   // legacy decl (20261120000100): they take a reading id (the builder sends a transaction id; the minimal payload has no version);
   // isolation of the readings, approvals, items and the HS library (org, branch, client, anon) is asserted by legacy-decl-sql-tests.js
-  'approve_declaration_extraction[min]', 'get_declaration_review'];
+  'approve_declaration_extraction[min]', 'get_declaration_review',
+  // legacy appt (20261121000100): they take an appointment draft / proof id (the builder sends a transaction id; the minimal payload
+  // has no key the RPC needs); isolation of the drafts, cards and proofs (org, branch, client, anon) is asserted by legacy-appt-sql-tests.js
+  'approve_appointment_draft[min]', 'cancel_appointment_draft', 'get_appointment_draft', 'move_appointment_draft',
+  'verify_empty_return_proof[min]', 'void_empty_return_proof'];
 async function positiveControl() {
   section('8. positive control: the §1 argument builder with B\'s own staff');
   const fns = (await listRpcs()).filter(f => !PUBLIC_BY_DESIGN[f.proname] && !/^platform_/.test(f.proname));

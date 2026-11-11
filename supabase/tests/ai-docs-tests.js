@@ -197,7 +197,7 @@ async function secFile() {
     (!/sk-ant|ANTHROPIC_API_KEY\s*=|api\.anthropic\.com|x-api-key/i.test(src)) || 'secret-like text found');
   // later phases may follow this file (20261115000100 convert_in_place, 20261116000100 doc_match); none may sort before it unnoticed
   const LATER_PHASES = ['20261115000100_convert_in_place.sql', '20261116000100_doc_match.sql', '20261117000100_legacy_core.sql',
-    '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql'];
+    '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql'];
   await check('this file is present; only the listed later phases follow it', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -1161,7 +1161,7 @@ async function secV3() {
   section('7e. prompt ai-doc-v3: packing_list, extended keys, containers, compatibility, dedupe-before-call (mocked Claude)');
   await check('v3 exports; the default stays ai-doc-v2 (v2 callers unchanged): DOC_TYPES / ALL_KEYS / SYSTEM untouched', () =>
     (X.PROMPT_VERSION === 'ai-doc-v2' && X.PROMPT_VERSION_V3 === 'ai-doc-v3' && J(X.PROMPT_VERSIONS) === J(['ai-doc-v2', 'ai-doc-v3'])
-      && !X.DOC_TYPES.includes('packing_list') && X.DOC_TYPES_V3.includes('packing_list') && X.ALL_KEYS.length === 28 && X.ALL_KEYS_V3.length === 50 /* 42 + the 8 declaration keys (20261120000100) */
+      && !X.DOC_TYPES.includes('packing_list') && X.DOC_TYPES_V3.includes('packing_list') && X.ALL_KEYS.length === 28 && X.ALL_KEYS_V3.length === 66 /* 42 + the 8 declaration keys (20261120000100) + the 16 card / EIR keys (20261121000100) */ && X.SHIP_KEYS_V3.length === 50
       && J(X.ALL_KEYS_V3.slice(0, 28)) === J(X.ALL_KEYS) && X.KIND_OF.packing_list === 'packing_list' && X.SYSTEM_V3.startsWith(X.SYSTEM)) || 'exports');
   await check('validateRequest: packing_list only with prompt_version ai-doc-v3; an unknown version → bad_request; no version → ai-doc-v2', () => {
     const t = b => { try { return X.validateRequest(b).prompt_version + ':' + X.validateRequest(b).doc_type; } catch (e) { return e.code; } };
@@ -1363,6 +1363,7 @@ async function secV3() {
     (await H.sha256Hex(PDF3)) === SHA3);
 
   await secDeclV3(v3Deps, body3, stored);
+  await secOpsV3(v3Deps, body3, stored);
 }
 
 /* ai-doc-v3 customs declaration reading (20261120000100 legacy_decl): legacy DocumentAI analyzeDeclarationDocument /
@@ -1388,7 +1389,7 @@ async function secDeclV3(v3Deps, body3, stored) {
     'total', 'vat_amount', 'vessel', 'port_of_loading', 'port_of_discharge', 'consignee', 'shipper', 'gross_weight', 'net_weight', 'packages_count'];
   await check('keys: DECL_KEYS (8) are the tail of ALL_KEYS_V3; v3 customs_declaration asks them; the v2 customs_declaration key list is unchanged', () =>
     (J(X.DECL_KEYS) === J(['declaration_type', 'declaration_status', 'declaration_date', 'declaration_date_hijri', 'importer_name_ar', 'broker_name', 'local_value', 'payment_method'])
-      && J(X.ALL_KEYS_V3.slice(42)) === J(X.DECL_KEYS) && X.DECL_KEYS.every(k => X.KEYS_FOR_V3.customs_declaration.includes(k) && X.KEYS_FOR_V3.auto.includes(k))
+      && J(X.ALL_KEYS_V3.slice(42, 50)) === J(X.DECL_KEYS) && X.DECL_KEYS.every(k => X.KEYS_FOR_V3.customs_declaration.includes(k) && X.KEYS_FOR_V3.auto.includes(k))
       && J(X.KEYS_FOR.customs_declaration) === J(V2_DECL_KEYS) && !X.DECL_KEYS.some(k => X.KEYS_FOR_V3.packing_list.includes(k) || X.KEYS_FOR_V3.bill_of_lading.includes(k))) || J(X.KEYS_FOR_V3.customs_declaration));
   await check('buildRequest v2 customs_declaration is unchanged by step 4 (no declaration object in the schema, no RTL / candidates hint, same keys)', () => {
     const p = X.buildRequest(X.validateRequest(goodBody({ doc_type: 'customs_declaration' })));
@@ -1477,6 +1478,178 @@ async function secDeclV3(v3Deps, body3, stored) {
     const d2 = v3Deps([]);
     const b2 = JSON.parse((await H.handleRequest(hReq(body3()), d2)).body);
     return (b.reused === true && !d.calls.includes('claude') && b.declaration && b.declaration.status_raw === 'تم الفسح' && b2.declaration === null) || J({ b: b.declaration, b2: b2.declaration });
+  });
+}
+
+/* appointment card / EIR readings (20261121000100) */
+const OPS_TX = '0b5e0000-0000-4000-8000-000000000201';
+const OC1 = 'CSQU3054383';
+const cardOut = o => Object.assign({ doc_type: 'appointment_ticket', document_title: 'Appointment Confirmation Ticket', invoice_signals: [],
+  fields: [{ name: 'appointment_booking_ref', value: 'TAS - 2026 1115 0042', confidence: 0.95, page: null },
+    { name: 'appointment_ticket_no', value: 'op 7781', confidence: 0.9, page: null }, { name: 'appointment_operator', value: 'Test Terminal Operator', confidence: 0.9, page: null },
+    { name: 'appointment_at', value: '15/11/2026 02:30 PM', confidence: 0.93, page: null }, { name: 'vehicle_plate', value: 'أ ب ج - ١٢٣٤', confidence: 0.8, page: null },
+    { name: 'driver_name', value: 'Test Driver', confidence: 0.9, page: null }, { name: 'driver_phone', value: '+966 5X'.replace('X', '00000001'), confidence: 0.9, page: null },
+    { name: 'appointment_zone_gate', value: 'Zone B / Gate 4', confidence: 0.8, page: null }, { name: 'appointment_barcode', value: 'BC 0099', confidence: 0.7, page: null },
+    { name: 'appointment_movement_type', value: 'empty_entry', confidence: 0.6, page: null }],
+  entry: { location: null, bl_number: null, declaration_number: null, container_number: null, cargo_type: null, purpose: null },
+  exit: { location: 'Terminal 1', bl_number: 'medu 123456', declaration_number: '3012345', container_number: 'csqu 305438-3', cargo_type: 'FCL', purpose: 'Import' },
+  warnings: [] }, o || {});
+const eirOut = o => Object.assign({ doc_type: 'empty_return_receipt', document_title: 'EIR', movement: 'empty_return', time_printed: true,
+  fields: [{ name: 'container_numbers', value: 'CSQU 3054383', confidence: 0.96, page: null },
+    { name: 'return_delivered_at', value: '2026-11-16 09:15', confidence: 0.82, page: null }, { name: 'return_depot', value: 'Test Empty Depot', confidence: 0.9, page: null }],
+  warnings: [] }, o || {});
+async function secOpsV3(v3Deps, body3, stored) {
+  section('7g. ai-doc-v3 appointment card + empty-return receipt (EIR): schemas, normalisation, structure check, wrong document type (mocked Claude)');
+  await check('exports: OPS_TYPES are v3 doc types only; ALL_KEYS_V3 = the 50 shipment keys + APPT_KEYS (14) + EIR_KEYS (2); auto keeps the 50; kinds appointment / empty_return_receipt', () =>
+    (J(X.OPS_TYPES) === J(['appointment_ticket', 'empty_return_receipt']) && X.OPS_TYPES.every(t => X.DOC_TYPES_V3.includes(t) && !X.DOC_TYPES.includes(t))
+      && J(X.ALL_KEYS_V3.slice(50)) === J(X.APPT_KEYS.concat(X.EIR_KEYS)) && X.APPT_KEYS.length === 14 && X.EIR_KEYS.length === 2
+      && J(X.KEYS_FOR_V3.auto) === J(X.SHIP_KEYS_V3) && X.KIND_OF.appointment_ticket === 'appointment' && X.KIND_OF.empty_return_receipt === 'empty_return_receipt'
+      && !X.APPT_KEYS.some(k => X.KEYS_FOR_V3.bill_of_lading.includes(k))) || 'exports');
+  await check('validateRequest: appointment_ticket / empty_return_receipt only with ai-doc-v3; a card needs transaction_id (transaction_required); an EIR above 8 MB → too_large', () => {
+    const t = b => { try { const v = X.validateRequest(b); return v.prompt_version + ':' + v.doc_type; } catch (e) { return e.code; } };
+    const big = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(8.5 * 1024 * 1024, 32)]).toString('base64');
+    const r = [t(goodBody({ doc_type: 'appointment_ticket' })), t(goodBody({ doc_type: 'appointment_ticket', prompt_version: 'ai-doc-v3' })),
+      t(goodBody({ doc_type: 'appointment_ticket', prompt_version: 'ai-doc-v3', transaction_id: OPS_TX })), t(goodBody({ doc_type: 'empty_return_receipt', prompt_version: 'ai-doc-v3' })),
+      t(goodBody({ doc_type: 'empty_return_receipt', prompt_version: 'ai-doc-v3', file: { media_type: 'application/pdf', data_b64: big } })),
+      t(goodBody({ doc_type: 'packing_list', prompt_version: 'ai-doc-v3', file: { media_type: 'application/pdf', data_b64: big } }))];
+    return J(r) === J(['bad_request', 'transaction_required', 'ai-doc-v3:appointment_ticket', 'ai-doc-v3:empty_return_receipt', 'too_large', 'ai-doc-v3:packing_list']) || J(r);
+  });
+  await check('buildRequest card: the same SDK call shape (model, effort, max_tokens, betas, fallbacks, json_schema, no thinking); SYSTEM_OPS; strict schema with entry / exit / invoice_signals; the invoice and never-guess rules', () => {
+    const p = X.buildRequest(X.validateRequest(goodBody({ doc_type: 'appointment_ticket', prompt_version: 'ai-doc-v3', transaction_id: OPS_TX })));
+    const sc = p.output_config.format.schema, t = p.messages[0].content[1].text;
+    return (p.model === 'claude-opus-5-5' && p.max_tokens === 16000 && p.output_config.effort === 'medium' && p.fallbacks === 'default'
+      && J(p.betas) === J(['server-side-fallback-2026-07-01']) && p.output_config.format.type === 'json_schema' && !('thinking' in p) && p.system === X.SYSTEM_OPS
+      && p.system.startsWith(X.SYSTEM) && J(sc.required) === J(['doc_type', 'document_title', 'invoice_signals', 'fields', 'entry', 'exit', 'warnings'])
+      && J(sc.properties.doc_type.enum) === J(X.OPS_DETECTED) && J(sc.properties.exit.required) === J(X.APPT_SECTION_KEYS)
+      && J(sc.properties.fields.items.properties.name.enum) === J(X.KEYS_FOR_V3.appointment_ticket) && /appointment_invoice even when it shows an Appointment No/.test(t)
+      && /Never guess the customer destination, the transport price/.test(t) && /- appointment_at: the appointment date AND time/.test(t)
+      && p.messages[0].content[0].type === 'image' && !/containers \(one row/.test(t)) || t;
+  });
+  await check('buildRequest EIR: strict schema {doc_type, document_title, movement, time_printed, fields, warnings}; the empty-return / date-only rule', () => {
+    const p = X.buildRequest(X.validateRequest(goodBody({ doc_type: 'empty_return_receipt', prompt_version: 'ai-doc-v3' })));
+    const sc = p.output_config.format.schema, t = p.messages[0].content[1].text;
+    return (J(sc.required) === J(['doc_type', 'document_title', 'movement', 'time_printed', 'fields', 'warnings']) && sc.properties.time_printed.type === 'boolean'
+      && J(sc.properties.movement.enum) === J(['empty_return', 'full_out', 'other']) && J(sc.properties.fields.items.properties.name.enum) === J(['container_numbers', 'return_delivered_at', 'return_depot'])
+      && /give the date only and set time_printed false/.test(t) && /EMPTY container delivered/.test(t) && p.system === X.SYSTEM_OPS) || t;
+  });
+  let C;
+  await check('postProcess card: TAS ref normalised, local time → +03:00, plate / phone (05…) normalised, full_exit from the Exit section (model said empty_entry: corrected), container ISO 6346, structure ok, not rejected', () => {
+    C = X.postProcess(cardOut(), 'appointment_ticket', 'ai-doc-v3');
+    const a = C.appointment, e = C.extracted_fields;
+    return (C.rejected === null && C.kind === 'appointment' && C.doc_type === 'appointment_ticket' && a.booking_ref === 'TAS20261115' + '0042' && a.operator_ticket_no === 'OP7781'
+      && a.appointment_at === '2026-11-15T14:30:00+03:00' && a.appointment_local === '2026-11-15T14:30' && a.driver_phone === '0500000001' && a.truck_plate === 'ابج1234'
+      && a.movement_type === 'full_exit' && a.container_no === OC1 && a.exit.container_number === OC1 && a.exit.bl_number === 'MEDU123456' && a.structural.ok === true
+      && a.structural.signals >= 3 && e.appointment_movement_type === 'full_exit' && e.container_numbers === OC1 && e.declaration_number === '3012345'
+      && C.warnings.some(w => w.code === 'movement_type_corrected') && C.line_items.length === 0 && C.ai_detail.appointment && /\nappointment:\n/.test(C.raw_text)) || J({ a: C.appointment, e: C.extracted_fields, r: C.rejected });
+  });
+  await check('the saved card reading passes the database checks (extraction_field_keys + extraction_detail_ok of 20261121000100); a bad detail is refused', async () => {
+    const r = await one(`SELECT app.extraction_fields_ok($1) f, app.extraction_detail_ok($2) d, app.extraction_detail_ok($3) bad1, app.extraction_detail_ok($4) bad2`,
+      [J(C.extracted_fields), J(C.ai_detail), J(Object.assign({}, C.ai_detail, { appointment: { movement_type: 'sideways' } })),
+        J(Object.assign({}, C.ai_detail, { appointment: { entry: { x: 1 } } }))]);
+    return (r.f === true && r.d === true && r.bad1 === false && r.bad2 === false) || J(r);
+  });
+  await check('postProcess card: gate instructions, driver licence, vehicle ref / serial IDs read (legacy getAppointmentSchema_) and kept in the detail; a vehicle ID alone is an operational signal; the fields pass the database keys', async () => {
+    const o = cardOut(); o.fields = o.fields.concat([{ name: 'appointment_gate_instructions', value: '  Gate 4 only ', confidence: 0.9, page: 1 },
+      { name: 'driver_license', value: 'L 55', confidence: 0.9, page: 1 }, { name: 'vehicle_ref_id', value: 'vr 1', confidence: 0.9, page: 1 }, { name: 'vehicle_serial_id', value: 's-2', confidence: 0.9, page: 1 }]);
+    const R = X.postProcess(o, 'appointment_ticket', 'ai-doc-v3'), a = R.appointment;
+    const only = cardOut({ fields: cardOut().fields.filter(f => ['appointment_booking_ref', 'appointment_at'].includes(f.name)).concat([{ name: 'vehicle_serial_id', value: 'S9', confidence: 0.9, page: 1 }]),
+      exit: { location: 'T1', bl_number: 'B1', declaration_number: null, container_number: null, cargo_type: null, purpose: null } });
+    const R2 = X.postProcess(only, 'appointment_ticket', 'ai-doc-v3');
+    const db = await one(`SELECT app.extraction_fields_ok($1) f, app.extraction_detail_ok($2) d`, [J(R.extracted_fields), J(R.ai_detail)]);
+    const p = X.buildRequest(X.validateRequest(goodBody({ doc_type: 'appointment_ticket', prompt_version: 'ai-doc-v3', transaction_id: OPS_TX })));
+    const en = p.output_config.format.schema.properties.fields.items.properties.name.enum;
+    return (a.gate_instructions === 'Gate 4 only' && a.driver_license === 'L55' && a.vehicle_ref_id === 'VR1' && a.vehicle_serial_id === 'S-2'
+      && R.extracted_fields.vehicle_ref_id === 'VR1' && R2.rejected === null && R2.appointment.structural.ok === true && db.f === true && db.d === true
+      && ['appointment_gate_instructions', 'driver_license', 'vehicle_ref_id', 'vehicle_serial_id'].every(k => en.includes(k)) && p.model === 'claude-opus-5-5')
+      || J({ a, r2: R2.rejected, db });
+  });
+  await check('postProcess card rejections: an appointment INVOICE (doc_type or invoice signals), another document, no time / no booking ref / no operational signal → wrong_document_type with the reason', () => {
+    const rs = [X.postProcess(cardOut({ doc_type: 'appointment_invoice' }), 'appointment_ticket', 'ai-doc-v3'),
+      X.postProcess(cardOut({ invoice_signals: ['Internal Invoice No', 'VAT'] }), 'appointment_ticket', 'ai-doc-v3'),
+      X.postProcess(cardOut({ doc_type: 'bill_of_lading' }), 'appointment_ticket', 'ai-doc-v3'),
+      X.postProcess(cardOut({ fields: cardOut().fields.map(f => f.name === 'appointment_at' ? Object.assign({}, f, { value: '2026-11-15' }) : f) }), 'appointment_ticket', 'ai-doc-v3'),
+      X.postProcess(cardOut({ fields: cardOut().fields.filter(f => f.name !== 'appointment_booking_ref') }), 'appointment_ticket', 'ai-doc-v3'),
+      X.postProcess(cardOut({ fields: cardOut().fields.filter(f => ['appointment_booking_ref', 'appointment_at'].includes(f.name)),
+        exit: { location: 'T1', bl_number: 'B1', declaration_number: null, container_number: null, cargo_type: null, purpose: null } }), 'appointment_ticket', 'ai-doc-v3')];
+    const got = rs.map(r => r.rejected && r.rejected.code + ':' + r.rejected.reason);
+    return (J(got) === J(['wrong_document_type:appointment_invoice', 'wrong_document_type:appointment_invoice', 'wrong_document_type:not_appointment_ticket',
+      'wrong_document_type:not_ticket_structure', 'wrong_document_type:not_ticket_structure', 'wrong_document_type:not_ticket_structure'])
+      && rs[3].appointment.structural.reason === 'no_time' && rs[3].warnings.some(w => w.code === 'appointment_time_missing') && rs[4].appointment.structural.reason === 'no_booking_ref'
+      && rs[5].appointment.structural.reason === 'no_operational_signal') || J(got);
+  });
+  await check('postProcess card: entry data only → empty_entry (the entry container); a bad phone → kept invalid with phone_format; a bad container → null + container_check_digit', () => {
+    const a = X.postProcess(cardOut({ exit: { location: null, bl_number: null, declaration_number: null, container_number: null, cargo_type: null, purpose: null },
+      entry: { location: 'Depot', bl_number: null, declaration_number: null, container_number: OC1, cargo_type: 'MT', purpose: 'Return' } }), 'appointment_ticket', 'ai-doc-v3');
+    const b = X.postProcess(cardOut({ fields: cardOut().fields.map(f => f.name === 'driver_phone' ? Object.assign({}, f, { value: '12345' }) : f),
+      exit: Object.assign({}, cardOut().exit, { container_number: 'CSQU3054384' }) }), 'appointment_ticket', 'ai-doc-v3');
+    const ph = b.fields.find(f => f.name === 'driver_phone');
+    return (a.appointment.movement_type === 'empty_entry' && a.appointment.container_no === OC1 && a.rejected === null && b.appointment.driver_phone === null
+      && ph.valid === false && b.warnings.some(w => w.code === 'phone_format') && b.appointment.exit.container_number === null && b.warnings.some(w => w.code === 'container_check_digit')
+      && b.appointment.movement_type === 'full_exit') || J({ a: a.appointment, b: b.appointment });
+  });
+  await check('postProcess EIR: container, delivered_at with +03:00, depot, confidence = the lowest field confidence; passes the database checks', async () => {
+    const E = X.postProcess(eirOut(), 'empty_return_receipt', 'ai-doc-v3');
+    const r = await one(`SELECT app.extraction_fields_ok($1) f, app.extraction_detail_ok($2) d`, [J(E.extracted_fields), J(E.ai_detail)]);
+    const e = E.empty_return;
+    return (E.rejected === null && E.kind === 'empty_return_receipt' && e.container_no === OC1 && e.delivered_at === '2026-11-16T09:15:00+03:00' && e.delivery_date === '2026-11-16'
+      && e.time_printed === true && e.depot === 'Test Empty Depot' && e.confidence === 0.82 && e.movement === 'empty_return' && E.extracted_fields.return_delivered_at === '2026-11-16T09:15'
+      && r.f === true && r.d === true && /\nempty return:\n/.test(E.raw_text)) || J({ e, r });
+  });
+  await check('postProcess EIR: a date without a time (or time_printed false) is never a complete proof (delivered_at null, eir_time_missing); full_out / another document → wrong_document_type; a bad container → null', () => {
+    const a = X.postProcess(eirOut({ fields: eirOut().fields.map(f => f.name === 'return_delivered_at' ? Object.assign({}, f, { value: '16/11/2026' }) : f) }), 'empty_return_receipt', 'ai-doc-v3');
+    const b = X.postProcess(eirOut({ time_printed: false }), 'empty_return_receipt', 'ai-doc-v3');
+    const c = X.postProcess(eirOut({ movement: 'full_out' }), 'empty_return_receipt', 'ai-doc-v3');
+    const d = X.postProcess(eirOut({ doc_type: 'appointment_ticket' }), 'empty_return_receipt', 'ai-doc-v3');
+    const e = X.postProcess(eirOut({ fields: [{ name: 'container_numbers', value: 'CSQU3054384', confidence: 0.9, page: null }] }), 'empty_return_receipt', 'ai-doc-v3');
+    return (a.empty_return.delivered_at === null && a.empty_return.delivery_date === '2026-11-16' && a.warnings.some(w => w.code === 'eir_time_missing')
+      && a.fields.find(f => f.name === 'return_delivered_at').valid === false && b.empty_return.delivered_at === null && b.empty_return.time_printed === false
+      && c.rejected.reason === 'not_empty_return' && d.rejected.reason === 'not_empty_return_receipt' && e.empty_return.container_no === null
+      && e.empty_return.confidence === 0 && e.warnings.some(w => w.code === 'container_check_digit')) || J({ a: a.empty_return, b: b.empty_return, c: c.rejected, d: d.rejected });
+  });
+  await check('parseMessage (doc type given): the card / EIR shape is checked (bad section / movement / time_printed → bad_output); the v3 shipment shape is not required', () => {
+    const ok1 = X.parseMessage(msgOf(cardOut()), 'ai-doc-v3', 'appointment_ticket').ok, ok2 = X.parseMessage(msgOf(eirOut()), 'ai-doc-v3', 'empty_return_receipt').ok;
+    const bad = [X.parseMessage(msgOf(cardOut({ exit: { location: 5 } })), 'ai-doc-v3', 'appointment_ticket').code,
+      X.parseMessage(msgOf(cardOut({ doc_type: 'ticket' })), 'ai-doc-v3', 'appointment_ticket').code,
+      X.parseMessage(msgOf(eirOut({ time_printed: 'yes' })), 'ai-doc-v3', 'empty_return_receipt').code,
+      X.parseMessage(msgOf(cardOut()), 'ai-doc-v3').code];
+    return (ok1 && ok2 && bad.every(c => c === 'bad_output')) || J({ ok1, ok2, bad });
+  });
+  const bodyC = o => body3(Object.assign({ doc_type: 'appointment_ticket', transaction_id: OPS_TX }, o || {}));
+  await check('handler card (mocked Claude, real ai_reserve / ai_bind_source / ai_settle): 200 with appointment + ai_detail.appointment, kind appointment; one reserve per call', async () => {
+    const d = v3Deps([], { msg: msgOf(cardOut()), tx: true });
+    const r = await H.handleRequest(hReq(bodyC()), d);
+    const b = JSON.parse(r.body);
+    const order = d.calls.filter(c => !/^log:/.test(c));
+    const u = await usageRow(b.usage_id);
+    return (r.status === 200 && J(order) === J(['user:ai_access', 'ai_reserve', 'ai_bind_source', 'claude', 'ai_settle']) && b.kind === 'appointment'
+      && b.appointment && b.appointment.booking_ref === 'TAS202611150042' && b.ai_detail.appointment.movement_type === 'full_exit' && b.empty_return === null
+      && b.declaration === null && u.status === 'ok' && d.params.system === X.SYSTEM_OPS) || J({ s: r.status, order, keys: Object.keys(b) });
+  });
+  await check('handler card: a Fasah appointment INVOICE → 422 wrong_document_type (reason appointment_invoice); the call is still settled (ok, billed); nothing to save', async () => {
+    const d = v3Deps([], { msg: msgOf(cardOut({ doc_type: 'appointment_invoice' })), tx: true });
+    const r = await H.handleRequest(hReq(bodyC()), d);
+    const b = JSON.parse(r.body);
+    const u = await usageRow(b.usage_id);
+    return (r.status === 422 && b.error === 'wrong_document_type' && b.reason === 'appointment_invoice' && b.detected_type === 'appointment_invoice' && !('fields' in b)
+      && d.calls.includes('ai_settle') && u.status === 'ok') || J({ s: r.status, b });
+  });
+  await check('handler card without transaction_id → 400 transaction_required before any reserve; EIR → 200 with empty_return', async () => {
+    const d = v3Deps([]);
+    const r = await H.handleRequest(hReq(body3({ doc_type: 'appointment_ticket' })), d);
+    const d2 = v3Deps([], { msg: msgOf(eirOut()) });
+    const r2 = await H.handleRequest(hReq(body3({ doc_type: 'empty_return_receipt' })), d2);
+    const b2 = JSON.parse(r2.body);
+    return (r.status === 400 && JSON.parse(r.body).error === 'transaction_required' && !d.calls.includes('ai_reserve') && r2.status === 200
+      && b2.kind === 'empty_return_receipt' && b2.empty_return.delivered_at === '2026-11-16T09:15:00+03:00' && b2.appointment === null) || J({ s: r.status, s2: r2.status, b2: Object.keys(b2) });
+  });
+  await check('handler reuse: a stored reading of the same file but another kind (packing list) is NOT served for a card read (Claude called); a stored card reading is (no charge, appointment restored)', async () => {
+    const d = v3Deps([stored()], { msg: msgOf(cardOut()), tx: true });
+    const b = JSON.parse((await H.handleRequest(hReq(bodyC()), d)).body);
+    const det = Object.assign({}, C.ai_detail);
+    const d2 = v3Deps([stored({ doc_type: 'appointment', ai_detail: det, extracted_fields: C.extracted_fields, transaction_id: OPS_TX })], { tx: true });
+    const b2 = JSON.parse((await H.handleRequest(hReq(bodyC()), d2)).body);
+    return (d.calls.includes('claude') && b.reused === false && b2.reused === true && !d2.calls.includes('claude') && !d2.calls.includes('ai_reserve')
+      && b2.appointment && b2.appointment.container_no === OC1 && b2.kind === 'appointment') || J({ b: b.reused, b2: b2.reused, c: d2.calls });
   });
 }
 
