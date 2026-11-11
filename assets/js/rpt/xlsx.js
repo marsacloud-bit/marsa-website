@@ -144,12 +144,18 @@
     return s;
   }
   // styles: 0 default · 1 header bold · 2 int · 3 money · 4 date · 5 datetime · 6 total text bold ·
-  //         7 total int · 8 total money · 9 number · 10 total number · 11 total date · 12 total datetime
+  //         7 total int · 8 total money · 9 number · 10 total number · 11 total date · 12 total datetime ·
+  //         13 / 14 text with the warning / danger fill (legacy step 8)
   var STYLE = { text: 0, int: 2, money: 3, date: 4, datetime: 5, number: 9 };
   var STYLE_TOTAL = { text: 6, int: 7, money: 8, date: 11, datetime: 12, number: 10 };
-  function cell(ref, type, v, bold) {
+  // legacy step 8: a tone fill on a text cell (the follow-up export's attention colours): 13 warning · 14 danger
+  var STYLE_TONE = { warning: 13, danger: 14 };
+  // a multi-line text cell (container numbers one per line): 15 wrap · 16 warning + wrap · 17 danger + wrap
+  var STYLE_WRAP = { 0: 15, 13: 16, 14: 17 };
+  function cell(ref, type, v, bold, tone) {
     type = NUMERIC[type] ? type : 'text';
     var s = (bold ? STYLE_TOTAL : STYLE)[type];
+    if (!bold && type === 'text' && STYLE_TONE[tone]) s = STYLE_TONE[tone];
     if (type !== 'text') {
       var n = type === 'date' ? serial(v, false) : type === 'datetime' ? serial(v, true) : num(v);
       if (type === 'money' && n != null) n = Math.round(n * 100) / 100;
@@ -160,7 +166,8 @@
     }
     var txt = v == null ? '' : String(v);
     if (txt === '') return bold ? '<c r="' + ref + '" s="' + STYLE_TOTAL.text + '"/>' : '';
-    return '<c r="' + ref + '"' + (bold ? ' s="' + STYLE_TOTAL.text + '"' : '') + ' t="inlineStr"><is><t xml:space="preserve">' + esc(txt) + '</t></is></c>';
+    if (!bold && txt.indexOf('\n') >= 0 && STYLE_WRAP[s || 0]) s = STYLE_WRAP[s || 0];
+    return '<c r="' + ref + '"' + (bold ? ' s="' + STYLE_TOTAL.text + '"' : s ? ' s="' + s + '"' : '') + ' t="inlineStr"><is><t xml:space="preserve">' + esc(txt) + '</t></is></c>';
   }
   function headerCell(ref, label) {
     return '<c r="' + ref + '" s="1" t="inlineStr"><is><t xml:space="preserve">' + esc(label) + '</t></is></c>';
@@ -194,7 +201,7 @@
     out.push('</row>');
     function line(r, obj, bold) {
       out.push('<row r="', r, '">');
-      cols.forEach(function (c, i) { out.push(cell(colName(i) + r, c.type, obj ? obj[c.key] : null, bold)); });
+      cols.forEach(function (c, i) { out.push(cell(colName(i) + r, c.type, obj ? obj[c.key] : null, bold, obj ? obj[c.key + '__tone'] : null)); });
       out.push('</row>');
     }
     rows.forEach(function (row, i) { line(i + 2, row, false); });
@@ -210,12 +217,14 @@
     return XML_HEAD + '<styleSheet xmlns="' + NS_MAIN + '">' +
       '<numFmts count="2"><numFmt numFmtId="164" formatCode="yyyy-mm-dd"/><numFmt numFmtId="165" formatCode="yyyy-mm-dd hh:mm"/></numFmts>' +
       '<fonts count="2"><font><sz val="11"/><name val="Calibri"/><family val="2"/></font><font><b/><sz val="11"/><name val="Calibri"/><family val="2"/></font></fonts>' +
-      '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>' +
-      '<fill><patternFill patternType="solid"><fgColor rgb="FFE8EEF2"/><bgColor indexed="64"/></patternFill></fill></fills>' +
+      '<fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>' +
+      '<fill><patternFill patternType="solid"><fgColor rgb="FFE8EEF2"/><bgColor indexed="64"/></patternFill></fill>' +
+      '<fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill>' +
+      '<fill><patternFill patternType="solid"><fgColor rgb="FFF8D7DA"/><bgColor indexed="64"/></patternFill></fill></fills>' +
       '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>' +
       '<border><left/><right/><top style="thin"><color auto="1"/></top><bottom/><diagonal/></border></borders>' +
       '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-      '<cellXfs count="13">' +
+      '<cellXfs count="18">' +
         '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +                                             // 0
         '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>' +                   // 1 header
         '<xf numFmtId="3" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +                         // 2 int
@@ -229,6 +238,11 @@
         '<xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/>' +                 // 10
         '<xf numFmtId="164" fontId="1" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1"/>' + // 11
         '<xf numFmtId="165" fontId="1" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1"/>' + // 12
+        '<xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1"/>' +                                   // 13 tone warning
+        '<xf numFmtId="0" fontId="0" fillId="4" borderId="0" xfId="0" applyFill="1"/>' +                                   // 14 tone danger
+        '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>' +   // 15 wrap
+        '<xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>' + // 16
+        '<xf numFmtId="0" fontId="0" fillId="4" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>' + // 17
       '</cellXfs>' +
       '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
       '</styleSheet>';

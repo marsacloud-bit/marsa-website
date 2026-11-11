@@ -334,8 +334,10 @@ async function secCatalog() {
                          FROM public.status_labels WHERE domain IN ('report_kind','export_format','search_date_field','portal_payment_status')
                         GROUP BY 1 ORDER BY 1`);
     const m = Object.fromEntries(r.map(x => [x.domain, x]));
-    return (m.report_kind.n === 7 && !m.report_kind.anyv && m.export_format.n === 3 && !m.export_format.anyv
-            && m.search_date_field.n === 4 && !m.search_date_field.anyv && m.portal_payment_status.n === 4 && m.portal_payment_status.v
+    // legacy step 8 (20261124000100): + 4 report kinds (movements, payments, tx_followup, fasah_recon) and the 'updated' date field
+    const l8 = fs.readdirSync(path.join(ROOT, 'supabase', 'migrations')).some(f => f.startsWith('20261124000100'));
+    return (m.report_kind.n === 7 + (l8 ? 4 : 0) && !m.report_kind.anyv && m.export_format.n === 3 && !m.export_format.anyv
+            && m.search_date_field.n === 4 + (l8 ? 1 : 0) && !m.search_date_field.anyv && m.portal_payment_status.n === 4 && m.portal_payment_status.v
             && r.every(x => x.l)) || JSON.stringify(r);
   });
   await check('btree indexes exist (8, incl. report_exports and the transaction_events status index); the unusable ones do not', async () => {
@@ -401,6 +403,13 @@ async function secSearch() {
       'container_count', 'financial_status', 'matched'].sort();
     // legacy step 1 (20261117000100) adds cancelled_at to the row when that migration is present
     if (fs.readdirSync(path.join(ROOT, 'supabase', 'migrations')).some(f => f.startsWith('20261117000100'))) { want.push('cancelled_at'); want.sort(); }
+    // legacy step 8 (20261124000100) adds the register columns of the legacy transactions list (additive)
+    if (fs.readdirSync(path.join(ROOT, 'supabase', 'migrations')).some(f => f.startsWith('20261124000100'))) {
+      want.push('port_code', 'port_name', 'port_name_en', 'terminal_party_id', 'operator_name', 'agent_name', 'vessel', 'employee_id', 'employee_name',
+        'client_code', 'client_category', 'cargo_unit_type', 'chassis_no', 'vehicle_plate_no', 'transaction_type', 'transport_mode', 'transport_order_no',
+        'declaration_date', 'unit_count', 'updated_at');
+      want.sort();
+    }
     return JSON.stringify(Object.keys(all.items[0]).sort()) === JSON.stringify(want) || JSON.stringify(Object.keys(all.items[0]));
   });
   await check('container_count = real number of containers (TX4: 2, TX1: 2, TX3: 0)', async () => {

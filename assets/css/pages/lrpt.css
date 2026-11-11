@@ -1,0 +1,150 @@
+/* ==========================================================================
+   مرسى | MARSA — legacy step 8: register, column filter, movements / payments extras, Fasah reconciliation,
+   follow-up rules, operations log, dashboard tx-count tiles, progress overlay + response badge (app-shell.js).
+   Original look (style.css tokens; no dark theme). Logical properties only. Prefixes: lrpt-, cf-, dash-txc, app-progress, app-rt.
+   Loaded after rpt.css / dash.css (admin.html), so equal-specificity rules here win; the row tones use td selectors so
+   they sit above style.css .table-striped tbody tr:nth-child(even) (a tr background).
+   ========================================================================== */
+
+/* grid / stack children that hold wide tables: let the table scroll in its own .table-wrap (step-7 lesson) */
+.lrpt-register > *, .lrpt-recon > *, .lrpt-recon-out > *, .lrpt-changes > *, .lrpt-rules > *, .rpt-results > *,
+.lrpt-rules .app-stack > *, .lrpt-groups > *, .dash-txc > *, .dash-txc-group > * { min-width: 0; }
+.lrpt-register .table-wrap, .lrpt-recon .table-wrap, .rpt-results .table-wrap { max-width: 100%; overflow-x: auto; position: relative; }   /* relative: screen-reader-only spans in cells stay inside the scroller instead of widening the page */
+
+/* ---- column filter (rpt/colfilter.js) ---- */
+.rpt-table th.has-cf { white-space: nowrap; }
+.rpt-th-label { vertical-align: middle; }
+.cf-btn {
+  display: inline-flex; align-items: center; justify-content: center; inline-size: 24px; block-size: 24px; margin-inline-start: 4px;
+  border: 1px solid var(--border); border-radius: var(--r-sm, 6px); background: #fff; color: var(--muted); cursor: pointer;
+  font: inherit; font-size: 12px; line-height: 1; padding: 0; vertical-align: middle;
+}
+.cf-btn:hover, .cf-btn:focus-visible { border-color: var(--teal); color: var(--teal); }
+.cf-btn:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+.cf-btn.is-active { background: var(--teal); border-color: var(--teal); color: #fff; }
+.cf-pop {
+  position: fixed; z-index: 1200; inset-block-start: 15vh; inset-inline-start: 8px;
+  inline-size: min(320px, calc(100vw - 16px)); max-block-size: 70vh; overflow: auto;
+  display: flex; flex-direction: column; gap: 8px; padding: 12px;
+  background: #fff; border: 1px solid var(--border); border-radius: var(--r-md, 10px); box-shadow: 0 12px 32px rgba(10, 30, 50, .18);
+  text-align: start;
+}
+.cf-title { margin: 0; font-weight: 800; color: var(--navy-dark); font-size: var(--fs-sm); }
+.cf-list { max-block-size: 40vh; overflow: auto; display: flex; flex-direction: column; gap: 2px; border-block: 1px solid var(--border); padding-block: 6px; }
+.cf-row { display: flex; align-items: center; gap: 8px; min-block-size: 32px; cursor: pointer; font-size: var(--fs-sm); min-width: 0; }
+.cf-row input { flex: none; inline-size: 16px; block-size: 16px; }
+.cf-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.cf-label.is-empty { color: var(--muted); font-style: italic; }
+.cf-n { flex: none; color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.cf-all { font-weight: 700; }
+.cf-tree, .cf-tree-sub { list-style: none; margin: 0; padding: 0; }
+.cf-tree-sub { padding-inline-start: 22px; }
+.cf-tree-label { display: inline-flex; align-items: center; gap: 8px; flex: 1 1 auto; cursor: pointer; }
+.cf-tree-toggle { flex: none; inline-size: 24px; block-size: 24px; border: 1px solid var(--border); border-radius: 4px; background: #fff; cursor: pointer; font: inherit; line-height: 1; padding: 0; }
+.cf-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.cf-status, .cf-more, .cf-none { margin: 0; }
+@media (max-width: 599px) {
+  /* a bottom sheet at phone width (the JS leaves the position to the CSS below 600 px) */
+  .cf-pop { inset-inline: 8px; inset-block-start: auto; inset-block-end: 8px; inline-size: auto; max-block-size: 75vh; }
+  .cf-list { max-block-size: 45vh; }
+}
+
+/* ---- register (#register) ---- */
+.lrpt-quick { display: flex; flex-wrap: wrap; gap: 6px; }
+.lrpt-chip { cursor: pointer; font: inherit; font-size: var(--fs-sm); }
+.lrpt-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; justify-content: space-between; }
+.lrpt-banner .ops-alert-text { flex: 1 1 240px; min-width: 0; }
+.lrpt-banner-why { font-weight: 400; }
+.lrpt-adv { padding: 0; }
+.lrpt-adv-sum { cursor: pointer; padding: 12px 16px; font-weight: 800; color: var(--navy-dark); }
+.lrpt-adv[open] .lrpt-adv-sum { border-block-end: 1px solid var(--border); }
+.lrpt-refcell { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.lrpt-ctr { display: inline-flex; align-items: center; gap: 4px; cursor: help; border-block-end: 1px dotted var(--muted); }
+.lrpt-ctr:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.lrpt-ctr-dot { color: var(--muted); font-size: 11px; }
+.lrpt-att { display: inline-flex; align-items: center; }
+.lrpt-dft { display: inline-flex; flex-direction: column; gap: 2px; }
+.lrpt-two { display: inline-flex; flex-direction: column; gap: 2px; }
+.lrpt-refs { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.lrpt-late { margin-inline-start: 4px; }
+.lrpt-export { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.rpt-count-box { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.lrpt-page-note { margin: 0; }
+/* stage row tones (legacy stage colours) and the attention stripe — td backgrounds beat the striped tr background */
+.rpt-table tbody tr.lrpt-stage-released > td { background-color: rgba(19, 149, 95, .06); }
+.rpt-table tbody tr.lrpt-stage-release_ready > td { background-color: rgba(20, 163, 168, .07); }
+.rpt-table tbody tr.lrpt-stage-awaiting_duty_payment > td { background-color: rgba(201, 138, 11, .07); }
+.rpt-table tbody tr.lrpt-stage-under_inspection > td { background-color: rgba(201, 138, 11, .04); }
+.rpt-table tbody tr.lrpt-row-warning > td:first-child { box-shadow: inset -3px 0 0 var(--warning); }
+.rpt-table tbody tr.lrpt-row-critical > td:first-child { box-shadow: inset -3px 0 0 var(--danger); }
+[dir="ltr"] .rpt-table tbody tr.lrpt-row-warning > td:first-child { box-shadow: inset 3px 0 0 var(--warning); }
+[dir="ltr"] .rpt-table tbody tr.lrpt-row-critical > td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+.rpt-table tbody tr.is-cancelled > td { color: var(--muted); }
+
+/* ---- trips by carrier / driver ---- */
+.lrpt-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+@media (max-width: 640px) { .lrpt-groups { grid-template-columns: 1fr; } }
+
+/* ---- dashboard tx-count tiles (dash_tx_counts) ---- */
+.dash-txc { display: grid; gap: 12px; margin-block: 8px 20px; }
+.dash-txc-group { display: grid; gap: 8px; }
+.dash-txc-title { margin: 0; font-size: var(--fs-sm); font-weight: 800; color: var(--muted); }
+
+/* ---- Fasah reconciliation ---- */
+.lrpt-drop {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 20px 12px; text-align: center;
+  border: 2px dashed var(--border); border-radius: var(--r-md, 10px); cursor: pointer; background: #FAFCFE;
+}
+.lrpt-drop:hover, .lrpt-drop:focus-within { border-color: var(--teal); }
+.lrpt-drop-title { font-weight: 800; color: var(--navy-dark); }
+.lrpt-file-input { inline-size: 100%; margin-block: 8px; }
+.lrpt-file-list { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 4px; }
+.lrpt-file-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.lrpt-file-name { overflow-wrap: anywhere; min-width: 0; }
+.rpt-table tbody tr.lrpt-fr-missing > td { background-color: rgba(200, 50, 60, .05); }
+.rpt-table tbody tr.lrpt-fr-status_mismatch > td, .rpt-table tbody tr.lrpt-fr-port_mismatch > td, .rpt-table tbody tr.lrpt-fr-ambiguous > td { background-color: rgba(201, 138, 11, .06); }
+
+/* ---- follow-up rules ---- */
+.lrpt-hours { inline-size: 6.5em; text-align: end; }
+.lrpt-rule-fixed td { color: var(--muted); }
+
+/* ---- operations log ---- */
+.lrpt-audit-card { padding: 12px 16px; }
+.lrpt-audit-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.lrpt-audit-item { border-block-end: 1px solid var(--border); padding-block-end: 10px; min-width: 0; }
+.lrpt-audit-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.lrpt-audit-event { margin: 6px 0 0; }
+.lrpt-audit-diff { margin: 6px 0 0; padding-inline-start: 18px; display: grid; gap: 2px; font-size: var(--fs-sm); }
+.lrpt-audit-diff li { overflow-wrap: anywhere; }
+.lrpt-diff-field { font-weight: 700; }
+.lrpt-diff-from { color: var(--danger); text-decoration: line-through; text-decoration-thickness: 1px; }
+.lrpt-diff-to { color: var(--success); font-weight: 700; }
+.lrpt-ch-filters .toolbar-filters { flex-wrap: wrap; }
+
+/* ---- progress overlay + response-time badge (app-shell.js) ---- */
+.app-progress { position: fixed; inset: 0; z-index: 1300; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(10, 30, 50, .28); }
+.app-progress-box { inline-size: min(380px, 100%); display: grid; gap: 10px; padding: 18px; background: #fff; border-radius: var(--r-md, 10px); box-shadow: 0 14px 40px rgba(10, 30, 50, .25); text-align: center; }
+.app-progress-label { margin: 0; font-weight: 800; color: var(--navy-dark); }
+.app-progress-info { margin: 0; color: var(--muted); }
+.app-progress-bar { position: relative; block-size: 8px; border-radius: 99px; background: #E8EEF2; overflow: hidden; }
+.app-progress-fill { position: absolute; inset-block: 0; inset-inline-start: 0; inline-size: 0; background: var(--teal); border-radius: 99px; transition: inline-size .6s ease; }
+.app-progress-bar.is-indeterminate .app-progress-fill { inline-size: 35%; animation: app-progress-slide 1.4s ease-in-out infinite; }
+@keyframes app-progress-slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(310%); } }
+[dir="rtl"] .app-progress-bar.is-indeterminate .app-progress-fill { animation-name: app-progress-slide-rtl; }
+@keyframes app-progress-slide-rtl { 0% { transform: translateX(110%); } 100% { transform: translateX(-310%); } }
+@media (prefers-reduced-motion: reduce) { .app-progress-fill, .app-progress-bar.is-indeterminate .app-progress-fill { animation: none; transition: none; } }
+.app-rt-badge {
+  position: fixed; z-index: 900; inset-block-end: 10px; inset-inline-start: 10px; padding: 3px 10px; border-radius: 99px;
+  background: #fff; border: 1px solid var(--border); color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums;
+  box-shadow: 0 2px 8px rgba(10, 30, 50, .08); pointer-events: none;
+}
+.app-rt-badge.is-mid { color: #8A5E04; border-color: rgba(201, 138, 11, .4); }
+.app-rt-badge.is-slow { color: var(--danger); border-color: rgba(200, 50, 60, .4); }
+
+/* ---- print: the follow-up sheet's attention tones (rpt/export.js printReport) ---- */
+@media print {
+  .rpt-print-table td { white-space: pre-line; } /* container numbers one per line (follow-up «وحدة الشحن») */
+  .rpt-print-table td.is-tone-warning { background: #FFF2CC !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .rpt-print-table td.is-tone-danger { background: #F8D7DA !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .cf-pop, .app-progress, .app-rt-badge { display: none !important; }
+}

@@ -38,5 +38,10 @@ window.MARSA_CONFIG = {
 
   // Optional. Initial UI language when the visitor has not chosen one
   // (localStorage 'marsa_lang' wins): 'ar' (default, RTL) | 'en'.
-  defaultLocale: 'ar'
+  defaultLocale: 'ar',
+
+  // Optional (legacy step 8). Platform switch of the e-mail code login on login.html: true shows «الدخول برمز يُرسل إلى
+  // البريد» to staff. OFF (false) by default. Each organization must ALSO enable it (#attention_rules, owner, aal2) and the
+  // Supabase project must allow e-mail OTP (Auth → Providers → Email; code expiry 10 minutes). MFA rules are unchanged.
+  emailOtpLogin: false
 };

@@ -261,7 +261,7 @@ async function secFile() {
   await check('no personal data / legacy organization name copied from the legacy code (no e-mail, phone number, real org name)', () =>
     (!/@[a-z0-9-]+\.[a-z]/i.test(src.replace(/--.*$/gm, '')) && !/\b05[0-9]{8}\b/.test(src) && !/رأس الحكمة/.test(src)) || 'personal data');
   // later phases may follow this file (20261121000100 legacy_appt: re-creates extraction_field_keys / extraction_detail_ok / the conversion lists)
-  const LATER_PHASES = ['20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql'];
+  const LATER_PHASES = ['20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');

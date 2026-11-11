@@ -59,6 +59,7 @@
       alert_kind_docs_missing: 'مستندات ناقصة', alert_kind_appointment_soon: 'موعد قريب', alert_kind_appointment_missed: 'موعد فائت',
       alert_kind_empty_return_due: 'إرجاع حاوية مستحق', alert_kind_empty_return_overdue: 'إرجاع حاوية متأخر',
       alert_kind_exception_open: 'استثناء مفتوح', alert_kind_declaration_stalled: 'بيان جمركي متوقف',
+      alert_kind_status_stale: 'معاملة متأخرة بلا تحديث', alert_kind_appointment_not_updated: 'موعد مضى دون تحديث الحركة',
 
       // ---- schedule (#schedule)
       sc_title: 'الجدول اليومي', sc_sub: 'مواعيد الموانئ ورحلات النقل لليوم أو للأسبوع، مع حالة كل منها.',
@@ -192,6 +193,7 @@
       alert_kind_docs_missing: 'Missing documents', alert_kind_appointment_soon: 'Upcoming appointment', alert_kind_appointment_missed: 'Missed appointment',
       alert_kind_empty_return_due: 'Empty return due', alert_kind_empty_return_overdue: 'Empty return overdue',
       alert_kind_exception_open: 'Open exception', alert_kind_declaration_stalled: 'Stalled declaration',
+      alert_kind_status_stale: 'Transaction not updated', alert_kind_appointment_not_updated: 'Appointment passed, movement not updated',
 
       sc_title: 'Daily schedule', sc_sub: 'Port appointments and transport trips for the day or the week, with their status.',
       sc_today: 'Today', sc_week: 'Week', sc_prev: 'Previous', sc_next: 'Next', sc_jump: 'Back to today', sc_range: 'Period',

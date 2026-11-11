@@ -905,11 +905,11 @@
   // Each link carries data-nav-id so MarsaShell.setActive / setBadge('alerts') find it.
   var NAV_EXTERNAL = ['bulk', 'ocr', 'platform', 'help'];  // G7: help = the user guide (help.html), the "link from admin"
   // daily work → G3 operations → G6a reports & search → G6b messaging → G4 operating finance → G5 billing → management (unknown module views go last, stable)
-  var NAV_ORDER = ['dashboard', 'requests', 'transactions', 'clients', 'messages', 'imports', 'alerts', 'schedule', 'exceptions', 'parties',
-    'search', 'reports',
+  var NAV_ORDER = ['dashboard', 'requests', 'transactions', 'register', 'clients', 'messages', 'imports', 'alerts', 'schedule', 'exceptions', 'parties',
+    'search', 'reports', 'fasah_recon',
     'inbox', 'contacts', 'templates', 'channels',
     'costs', 'payables', 'payments', 'custody', 'margins', 'demurrage', 'billing', 'daftra',
-    'org', 'branches', 'members', 'requirements', 'audit', 'errors'];
+    'org', 'branches', 'members', 'requirements', 'attention_rules', 'audit', 'changes', 'errors'];
   function buildNav() {
     if (!nav) return;
     nav.textContent = '';
@@ -1015,9 +1015,23 @@
     f.search = ''; f.offset = 0;
     listState(name).page = 0; listState(name).q = '';
   }
+  // legacy step 8: a filtered #transactions link (the dashboard tiles: ?status= / ?stage= / ?daftra_state= / ?attention=) opens the
+  // transactions register (assets/js/rpt/register.js, #register) with the same query; plain #transactions keeps this list
+  function registerRedirect(r) {
+    if (r.name !== 'transactions' || !r.query || !opsView('register')) return null;
+    var q = r.query.split('&').filter(function (p) { return /^(status|stage|daftra_state|attention|branchId)=./.test(p); });
+    if (!q.some(function (p) { return !/^branchId=/.test(p); })) return null;
+    return q.join('&');
+  }
   function route(keepDialog) {
     if (!keepDialog && dlg && dlg.open) closeDialog();
     var r = parseHash(), name = r.name, id = r.id;
+    var rq = registerRedirect(r);
+    if (rq != null) {
+      try { history.replaceState(null, '', '#register?' + rq); } catch (e) { /* ignore */ }
+      r = parseHash(); if (r.name !== 'register') r = { name: 'register', id: null, query: rq };
+      name = r.name; id = null;
+    }
     var parent = DETAIL[name] || name;
     var allowed = allowedViews().map(function (v) { return v.id; });
     if (allowed.indexOf(parent) === -1 || (DETAIL[name] && !(id && UUID_RE.test(id)))) { name = 'dashboard'; parent = 'dashboard'; id = null; }
@@ -1978,8 +1992,10 @@
     return api.listTransactions({ orgId: S.orgId, status: f.status || null, branchId: f.branchId || null, search: f.search, limit: WINDOW, offset: f.offset,
       cancelled: f.cancelled || null, transactionType: f.ttype || null, cargoUnitType: f.unit || null }).then(function (r) {
       var canNew = branchesFor(R.opsWriter).length > 0;
-      var out = frag(dHead(viewLabel('transactions'), t('transactions_sub'),
-        canNew ? [dBtn([svgIcon('plus'), t('txnew_btn')], 'btn-primary', function () { txNew(); })] : null));
+      // legacy step 8: the full register (advanced + column filters, attention, follow-up export) when its module is loaded
+      var regLink = opsView('register') ? el('a', { class: 'btn btn-sm btn-ghost', href: '#register', 'data-act': 'open-register', text: opsT('lrpt.open_register', null, 'سجل المعاملات والمتابعة') }) : null;
+      var acts = [regLink, canNew ? dBtn([svgIcon('plus'), t('txnew_btn')], 'btn-primary', function () { txNew(); }) : null].filter(Boolean);
+      var out = frag(dHead(viewLabel('transactions'), t('transactions_sub'), acts.length ? acts : null));
       var multi = S.branches.length > 1;
       var tools = [filterSelect('transactions', 'status', t('col_op_status'), statusOptions('operational_status'))];
       if (multi) tools.push(filterSelect('transactions', 'branchId', t('col_branch'), [['', t('all_branches')]].concat(S.branches.map(function (b) { return [b.id, (isEn() && b.name_en) || b.name_ar]; }))));

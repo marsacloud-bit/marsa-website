@@ -253,6 +253,9 @@
     if (c === 'MRS_DEMO_MODE') return t('demo');
     if (c === 'MRS_UNAVAILABLE') return t('api_missing', { fn: e.fn || '' });
     if (isForbidden(e)) return t('forbidden');
+    // legacy step 8: a raw technical failure (network, timeout, expired session, 5xx) in plain Arabic / English (MarsaShell.techKnown)
+    var SH = window.MarsaShell;
+    if (!c && SH && typeof SH.techKnown === 'function') { try { var tk = SH.techKnown(e); if (tk) return tk; } catch (x) { /* fall through */ } }
     var M = sdk(api);
     if (M && typeof M.errorMessage === 'function') { try { var s = M.errorMessage(e); if (s) return s; } catch (x) { /* fall through */ } }
     return (e && e.message) || String(e || '');
@@ -643,7 +646,9 @@
      ================================================================== */
   var U = Ops.ui;
   var SEVERITIES = ['critical', 'warning', 'info'];
-  var KINDS = ['docs_missing', 'appointment_soon', 'appointment_missed', 'empty_return_due', 'empty_return_overdue', 'exception_open', 'declaration_stalled'];
+  var KINDS = ['docs_missing', 'appointment_soon', 'appointment_missed', 'empty_return_due', 'empty_return_overdue', 'exception_open', 'declaration_stalled',
+    // legacy step 8 (20261124000100): idle per status (app.status_aging_rules) and a gate-out appointment passed without an update
+    'status_stale', 'appointment_not_updated'];
   var AF = { status: 'active', severity: '', kind: '', q: '' };   // filters survive navigation
 
   function statusOk(s, row) {

@@ -604,7 +604,8 @@ async function secFile() {
       && /IF v_j\.kind = ANY \(app\.daftra_write_kinds\(\)\) THEN/.test(body) && /app\.daftra_fail_at_claim\(v_j, v_worker, 'account_not_ksa', v_acc\)/.test(body)
       && /'updateDraftInvoice' = ANY \(v_ops\) AND NOT app\.daftra_allow_update/.test(body) && /app\.rpt_today\(\)/.test(body)
       && !/review_status = 'approved'/.test(body)) || 'decisions');
-  const LATER_PHASES = [];
+  // later phases may follow this file (20261124000100 legacy_reports: re-creates readers of G6a / G3, never a step-7 function)
+  const LATER_PHASES = ['20261124000100_legacy_reports.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');

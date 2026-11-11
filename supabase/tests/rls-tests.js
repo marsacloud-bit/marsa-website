@@ -816,9 +816,13 @@ async function main() {
       'confirm_invoice_link', 'reject_invoice_candidate', 'request_daftra_legacy_scan', 'get_daftra_run', 'refresh_tx_daftra',
       'request_daftra_supplier_search', 'list_daftra_supplier_links', 'request_daftra_purchase_draft',
       // legacy daftra review: the audited supplier unlink (bill_admin, reason)
-      'unlink_daftra_supplier'];
+      'unlink_daftra_supplier',
+      // legacy reports (20261124000100): KPI counts, attention, movements / payments / Fasah scope readers, aging rules (owner write),
+      // the e-mail code login switch (owner) + own-session check, the audit trail (admin / supervisor)
+      'dash_tx_counts', 'tx_attention', 'report_movements', 'report_payments', 'report_fasah_scope', 'get_status_aging_rules',
+      'set_status_aging_rules', 'set_email_otp_login', 'otp_session_check', 'audit_trail'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 274) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 284) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');
@@ -1909,8 +1913,9 @@ async function main() {
     const r = await q(`SELECT domain, count(*)::int n, count(*) FILTER (WHERE client_visible)::int v FROM public.status_labels
                         WHERE domain IN ('report_kind','export_format','search_date_field','portal_payment_status') GROUP BY 1 ORDER BY 1`);
     const m = Object.fromEntries(r.map(x => [x.domain, x]));
-    const ok = m.report_kind && m.report_kind.n === 7 /* + fasah_sheet (20261120000100) */ && m.report_kind.v === 0 && m.export_format && m.export_format.n === 3 && m.export_format.v === 0
-      && m.search_date_field && m.search_date_field.n === 4 && m.search_date_field.v === 0
+    const ok = m.report_kind && m.report_kind.n === 11 /* + fasah_sheet (20261120000100) + movements, payments, tx_followup, fasah_recon (20261124000100) */
+      && m.report_kind.v === 0 && m.export_format && m.export_format.n === 3 && m.export_format.v === 0
+      && m.search_date_field && m.search_date_field.n === 5 /* + updated (20261124000100) */ && m.search_date_field.v === 0
       && m.portal_payment_status && m.portal_payment_status.n === 4 && m.portal_payment_status.v === 4;
     return ok || JSON.stringify(r);
   });

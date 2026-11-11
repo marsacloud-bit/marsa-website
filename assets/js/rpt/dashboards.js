@@ -493,6 +493,66 @@
   }
 
   /* ------------------------------------------------------------------
+     Legacy step 8 — dash_tx_counts KPI tiles (legacy fastBuildDashboardStats_ / renderDashboardStats /
+     applyDashboardStatFilter): every tile opens the list that reproduces its number (docs/online/LEGACY_REPORTS_AR.md §1):
+     status → #transactions?status=X, Fasah stage → ?stage=X, Daftra drafts → ?daftra_state=draft (admin.js sends these
+     to #register), appointments today / transported containers → #reports/movements. Strings: 'lrpt' (assets/i18n/lrpt.js).
+     ------------------------------------------------------------------ */
+  var DECL_STAGES = ['accepted', 'cco_review_done', 'awaiting_duty_payment', 'release_ready', 'released'];
+  function lt(api, k, vars) {
+    var key = 'lrpt.' + k;
+    if (I && typeof I.t === 'function') { var s = I.t(key, vars); if (s && s !== key) return s; }
+    var D = window.MarsaLrptDict || {}, d = (D[lang(api)] || {})[k];
+    if (d == null) d = (D.ar || {})[k];
+    return interp(d == null ? k : d, vars);
+  }
+  function paintTxCounts(api, box, d) {
+    var br = F.ops.branch_id ? { branchId: F.ops.branch_id } : {}, brR = F.ops.branch_id ? { branch_id: F.ops.branch_id } : {};
+    var bs = obj(d.by_status), ds = obj(d.declaration_stages), dr = obj(d.drafts), at = obj(d.attention), today = /^\d{4}-\d{2}-\d{2}$/.test(d.today || '') ? d.today : riyadhToday();
+    function grid(title, list) {
+      return api.el('section', { class: 'dash-txc-group', 'aria-label': title }, [api.el('h4', { class: 'dash-txc-title', text: title }), tiles(api, list)]);
+    }
+    var status = OPS_ORDER.map(function (c) {
+      return { id: 'st_' + c, label: lbl(api, 'operational_status', c), value: num(bs[c]) || 0, href: '#transactions' + q(Object.assign({ status: c }, br)) };
+    });
+    var stages = DECL_STAGES.map(function (c) {
+      return { id: 'stage_' + c, label: lbl(api, 'declaration_status', c), value: num(ds[c]) || 0, href: '#transactions' + q(Object.assign({ stage: c }, br)),
+        tone: c === 'awaiting_duty_payment' ? 'warning' : null };
+    });
+    var day = [
+      { id: 'appts_today_mv', label: lt(api, 'k_appts_today'), value: d.appointments_today, href: '#reports/movements' + q(Object.assign({ from: today, to: today }, brR)) },
+      { id: 'transported', label: lt(api, 'k_transported'), value: d.transported_containers, href: '#reports/movements' + q(Object.assign({ movement_status: 'delivered' }, brR)) },
+      { id: 'drafts', label: lt(api, 'k_drafts'), value: (num(dr.documents) || 0) + (num(dr.appointments) || 0), href: 'ocr.html',
+        foot: lt(api, 'k_drafts_foot', { d: count(api, dr.documents), a: count(api, dr.appointments) }) },
+      { id: 'att_critical', label: lt(api, 'k_att_critical'), value: at.critical, href: '#transactions' + q(Object.assign({ attention: 'critical' }, br)), tone: 'danger' },
+      { id: 'att_warning', label: lt(api, 'k_att_warning'), value: at.warning, href: '#transactions' + q(Object.assign({ attention: 'warning' }, br)), tone: 'warning' },
+      { id: 'no_decl', label: lt(api, 'k_no_declaration'), value: d.no_declaration, href: false }
+    ];
+    if (d.daftra && typeof d.daftra === 'object') {
+      var df = obj(d.daftra);
+      day.push({ id: 'daftra_draft', label: lt(api, 'k_daftra_draft'), value: df.draft, href: '#transactions' + q(Object.assign({ daftra_state: 'draft' }, br)),
+        foot: lt(api, 'k_daftra_foot', { i: count(api, df.issued), c: count(api, df.cancelled_review) }) });
+    }
+    box.appendChild(api.el('h3', { class: 'dash-title', text: lt(api, 'txc_title') }));
+    box.appendChild(api.el('p', { class: 'text-xs text-muted', text: lt(api, 'txc_sub', { t: count(api, d.total), o: count(api, d.open), c: count(api, d.cancelled) }) }));
+    box.appendChild(grid(lt(api, 'txc_by_status'), status));
+    box.appendChild(grid(lt(api, 'txc_stages'), stages));
+    box.appendChild(grid(lt(api, 'txc_today', { d: today }), day));
+  }
+  function loadTxCounts(api, box) {
+    var M = api.MarsaApi;
+    box.textContent = '';
+    if (!M || typeof M.dashTxCounts !== 'function') return null;
+    box.setAttribute('aria-busy', 'true');
+    return Promise.resolve().then(function () { return M.dashTxCounts(filtersFor('ops')); }).then(function (r) {
+      box.removeAttribute('aria-busy');
+      box.textContent = '';
+      if (!r || r.error) { if (!rpcMissing(r && r.error)) box.appendChild(alertNode(api, 'warning', lt(api, 'txc_failed', { e: api.errText ? api.errText(r && r.error) : '' }))); return; }
+      paintTxCounts(api, box, obj(r.data));
+    }, function () { box.removeAttribute('aria-busy'); box.textContent = ''; });
+  }
+
+  /* ------------------------------------------------------------------
      Entry point
      ------------------------------------------------------------------ */
   var TABS = {
@@ -508,8 +568,10 @@
     if (!M || typeof M[def.fn] !== 'function') { root.appendChild(alertNode(api, 'warning', apiMissingText(api, def.fn))); return null; }
     var seq = 0;
     var body = api.el('div', { class: 'dash-body', 'aria-live': 'polite' });
+    var txBox = tab === 'ops' ? api.el('div', { class: 'dash-txc', 'aria-live': 'polite' }) : null;
     function load() {
       var my = ++seq;
+      if (txBox) loadTxCounts(api, txBox);
       body.textContent = '';
       body.setAttribute('aria-busy', 'true');
       body.appendChild(api.el('div', { class: 'adm-loading', role: 'status' }, [api.el('span', { class: 'adm-spinner', 'aria-hidden': 'true' }), t(api, 'loading')]));
@@ -544,6 +606,7 @@
     }
     root.appendChild(api.el('h3', { class: 'dash-title', text: t(api, def.title) }));
     root.appendChild(filterBar(api, tab, load));
+    if (txBox) root.appendChild(txBox);
     root.appendChild(body);
     return load();
   }

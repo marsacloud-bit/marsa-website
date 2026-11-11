@@ -76,6 +76,14 @@
     inviteUnconfirmed: 'يلزم تأكيد بريدك الإلكتروني أولًا من الرسالة المرسلة إليك، ثم اضغط «قبول الدعوة».',
     inviteRetry: 'تعذّر التحقق من الدعوة الآن. تحقّق من اتصالك ثم أعد تحميل الصفحة.',
     inviteDismissed: 'تم تجاهل الدعوة في هذه النافذة. يمكنك فتح رابطها من جديد لاحقًا.',
+    otpSent: 'إن كان هذا البريد لحساب موظف يُسمح له بالدخول بالرمز فستصله رسالة فيها رمز صالح لمدة محدودة. أدخل الرمز هنا.',
+    otpWait: 'يمكن طلب رمز جديد بعد {s} ثانية.',
+    otpWrong: 'الرمز غير صحيح أو انتهت صلاحيته. المحاولات المتبقية: {n}.',
+    otpLocked: 'تجاوزت عدد المحاولات. اطلب رمزًا جديدًا.',
+    otpCodeError: 'أدخل الرمز المكوّن من 6 أرقام.',
+    otpOrgDisabled: 'الدخول بالرمز غير مفعّل لمؤسستك (أو لإحدى مؤسساتك). ادخل بكلمة المرور.',
+    otpStaffOnly: 'الدخول بالرمز متاح لحسابات الموظفين فقط. ادخل بكلمة المرور.',
+    otpNotAllowed: 'الدخول بالرمز غير متاح الآن. ادخل بكلمة المرور.',
     roleFallback: { admin: 'مدير المؤسسة', branch_manager: 'مدير الفرع', supervisor: 'مشرف', operations_manager: 'مدير العمليات',
       accounts_manager: 'مدير الحسابات', accountant: 'محاسب', clearance_staff: 'موظف تخليص', transport_staff: 'موظف نقل', client: 'عميل (بوابة العميل)' }
   };
@@ -111,6 +119,8 @@
   var fromPwa = query.source === 'pwa';
   var signedOutAtLoad = query.signedout === 'all' ? 'all' : (query.signedout === '1' ? 'one' : '');
   var mfaAtLoad = query.mfa === '1';
+  // legacy step 8: sent back by app-shell.js after an e-mail code session that is not allowed (reason code only)
+  var otpAtLoad = /^[a-z_]{1,40}$/.test(query.otp || '') ? query.otp : '';
   var securityAtLoad = query.security === '1';
   var routing = false;
 
@@ -398,6 +408,88 @@
   }
   bindSignIn($('#client-signin-form'), 'ci-email', 'ci-password', false);
   bindSignIn($('#staff-signin-form'), 'st-email', 'st-password', true);
+
+  /* ---- legacy step 8: optional e-mail code login (staff only; docs/online/LEGACY_REPORTS_AR.md) ----
+     Shown only when the platform switch of this site is on (MARSA_CONFIG.emailOtpLogin === true → api.emailOtpEnabled()).
+     signInWithOtp never creates a user (shouldCreateUser: false) and the page shows ONE message whatever the answer, so
+     nobody learns whether an address has an account. 60 s between codes, at most 5 wrong codes per code on this page (Supabase
+     keeps its own expiry / rate limits). After the code: otpGate() (otp_session_check + the platform switch) — not allowed →
+     signed out at once; allowed → routeByRole, where the two-step verification (aal2) is asked as for a password session. */
+  var OTP_COOLDOWN_S = 60, OTP_MAX_TRIES = 5;
+  var otpBox = $('[data-otp]'), otpReq = $('#otp-request-form'), otpVer = $('#otp-verify-form');
+  var otpEmail = '', otpTries = 0, otpUntil = 0, otpTimer = null;
+  function otpOn() { return !!(otpBox && typeof api.emailOtpEnabled === 'function' && api.emailOtpEnabled() && typeof api.requestEmailOtp === 'function' && typeof api.otpGate === 'function'); }
+  function otpCooldown() {
+    var cd = $('[data-otp-cooldown]'), rs = $('[data-otp-resend]');
+    var left = Math.max(0, Math.ceil((otpUntil - Date.now()) / 1000));
+    if (cd) cd.textContent = left ? tr('otpWait', { s: left }) : '';
+    if (rs) rs.disabled = left > 0;
+    if (!left && otpTimer) { clearInterval(otpTimer); otpTimer = null; }
+  }
+  function otpSend(email, form) {
+    if (Date.now() < otpUntil) { otpCooldown(); return Promise.resolve(); }
+    setBusy(form, true);
+    return api.requestEmailOtp(email).then(function (r) {
+      setBusy(form, false);
+      // the same answer for an unknown address, a portal user or a staff member (no enumeration); only the network differs
+      if (r.error && r.error.code === 'MRS_NETWORK') { showMsg(errText(r.error), 'danger'); return; }
+      otpEmail = email; otpTries = 0; otpUntil = Date.now() + OTP_COOLDOWN_S * 1000;
+      if (otpTimer) clearInterval(otpTimer);
+      otpTimer = setInterval(otpCooldown, 1000); otpCooldown();
+      otpReq.hidden = true; otpVer.hidden = false;
+      var sent = $('[data-otp-sent]'); if (sent) sent.textContent = tr('otpSent');
+      showMsg(tr('otpSent'), 'info');
+      var c = $('#otp-code'); if (c) { c.value = ''; c.focus(); }
+    });
+  }
+  function otpBlockedText(reason) { return tr(reason === 'org_disabled' ? 'otpOrgDisabled' : reason === 'no_staff_membership' ? 'otpStaffOnly' : 'otpNotAllowed'); }
+  if (otpOn()) {
+    otpBox.hidden = false;
+    var opener = $('[data-otp-open]');
+    if (opener) opener.addEventListener('click', function () {
+      hideMsg();
+      var open = otpReq.hidden && otpVer.hidden;
+      otpReq.hidden = !open; otpVer.hidden = true;
+      opener.setAttribute('aria-expanded', String(open));
+      var em = $('#otp-email'), st = $('#st-email');
+      if (open && em) { if (!em.value && st && st.value) em.value = st.value; em.focus(); }
+    });
+    otpReq.addEventListener('submit', function (e) {
+      e.preventDefault(); hideMsg(); clearErrors(otpReq);
+      var em = $('#otp-email');
+      if (!validEmail(em.value)) { fieldError(em, tr('email')); em.focus(); return; }
+      otpSend(em.value.trim().toLowerCase(), otpReq);
+    });
+    var resend = $('[data-otp-resend]');
+    if (resend) resend.addEventListener('click', function () { hideMsg(); if (otpEmail) otpSend(otpEmail, otpVer); });
+    otpVer.addEventListener('submit', function (e) {
+      e.preventDefault(); hideMsg(); clearErrors(otpVer);
+      var c = $('#otp-code'), code = normDigits(c.value).replace(/\D/g, '');
+      if (!/^\d{6,10}$/.test(code)) { fieldError(c, tr('otpCodeError')); c.focus(); return; }
+      if (otpTries >= OTP_MAX_TRIES) { otpVer.hidden = true; otpReq.hidden = false; showMsg(tr('otpLocked'), 'warning'); return; }
+      setBusy(otpVer, true);
+      api.verifyEmailOtp(otpEmail, code).then(function (r) {
+        if (r.error) {
+          setBusy(otpVer, false); c.value = '';
+          otpTries++;
+          if (otpTries >= OTP_MAX_TRIES) { otpVer.hidden = true; otpReq.hidden = false; showMsg(tr('otpLocked'), 'warning'); return; }
+          showMsg(r.error.code === 'AUTH_RATE' ? errText(r.error) : tr('otpWrong', { n: OTP_MAX_TRIES - otpTries }), 'danger');
+          return;
+        }
+        return api.otpGate().then(function (g) {
+          var gd = (g && g.data) || {};
+          if (gd.allowed !== true) {
+            return api.signOut().then(function () {
+              setBusy(otpVer, false); otpVer.hidden = true; otpReq.hidden = false;
+              showMsg(otpBlockedText(gd.reason), 'warning');
+            });
+          }
+          setBusy(otpVer, false);
+          return routeByRole(true);
+        });
+      });
+    });
+  }
 
   /* ---- client sign-up ---- */
   var signupRedirect = location.origin + location.pathname.replace(/[^/]*$/, '') + 'login.html?confirmed=1';
@@ -699,6 +791,21 @@
         showMsg(tr('inviteInvalid'), 'danger');
         return;
       }
+      if (session && typeof api.otpGate === 'function') {
+        return api.otpGate().then(function (g) {
+          var gd = (g && g.data) || {};
+          if (gd.allowed === false) {
+            return api.signOut().then(function () { showView('tabs'); selectTab('staff'); showMsg(otpBlockedText(gd.reason), 'warning'); });
+          }
+          return afterSession(session);
+        });
+      }
+      return afterSession(session);
+    });
+  });
+  // the page state for a (signed-in or not) visitor once the e-mail code gate is passed
+  function afterSession(session) {
+    {   // (kept as a block: the body was the tail of the initial-state handler)
       if (session) {
         if (securityAtLoad) return showSecurity();
         // sent here for two-step verification (app-shell / admin / platform gates): that step at once
@@ -717,6 +824,7 @@
         return;
       }
       if (fromPwa) cleanUrl(location.hash.replace(/^#/, ''));
-    });
-  });
+      if (otpAtLoad) { cleanUrl('staff'); selectTab('staff'); showMsg(otpBlockedText(otpAtLoad), 'warning'); }
+    }
+  }
 })();

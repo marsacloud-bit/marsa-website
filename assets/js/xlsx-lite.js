@@ -6,7 +6,10 @@
    Public API: window.XlsxLite = {
      canRead()                    → boolean (DecompressionStream available)
      sniff(arrayBuffer)           → 'xlsx' | 'xls' | 'html' | 'utf16' | 'text'
-     read(arrayBuffer)            → Promise<{ sheets: [{ name, rows: string[][] }] }>
+     read(arrayBuffer[, limits])  → Promise<{ sheets: [{ name, rows: string[][] }] }>
+                                    limits = { maxInflateBytes (whole workbook, default 256 MB), maxRows (default
+                                    1 048 576), maxCols (default 2048) } — a zip bomb / a far cell reference stops
+                                    with XlsxError 'too_big' / 'too_many_rows' / 'too_wide' before it fills memory
      write(sheets[, opts])        → Blob (.xlsx; sheets = [{ name, rows }])
      writeBytes(sheets[, opts])   → Uint8Array (same bytes as write)
      decodeText(arrayBuffer)      → string (UTF-8 ± BOM, UTF-16 LE/BE BOM, windows-1256 fallback)
@@ -291,16 +294,40 @@
     return new Uint8Array(buf, start, ent.csize);
   }
 
-  function inflate(bytes) {
+  var DEFAULT_LIMITS = { maxInflateBytes: 256 * 1024 * 1024, maxRows: 1048576, maxCols: 2048 };
+  function tooBig() { return XlsxError('too_big', 'حجم محتوى الملف بعد فك الضغط أكبر من المسموح.'); }
+  // budget = { left: bytes } shared by every entry of one workbook; the stream is cancelled as soon as it runs out
+  function inflate(bytes, budget) {
     if (typeof DecompressionStream === 'undefined') {
       return Promise.reject(XlsxError('nodecompress', 'متصفحك لا يدعم قراءة ملفات Excel مباشرة. حدّث المتصفح أو احفظ الملف بصيغة CSV ثم ارفعه.'));
     }
     var ds = new DecompressionStream('deflate-raw');
     var stream = new Blob([bytes]).stream().pipeThrough(ds);
-    return new Response(stream).arrayBuffer().then(function (ab) { return new Uint8Array(ab); });
+    if (!budget || typeof stream.getReader !== 'function') {
+      return new Response(stream).arrayBuffer().then(function (ab) {
+        if (budget) { budget.left -= ab.byteLength; if (budget.left < 0) throw tooBig(); }
+        return new Uint8Array(ab);
+      });
+    }
+    var reader = stream.getReader(), parts = [], total = 0;
+    function pump() {
+      return reader.read().then(function (r) {
+        if (r.done) {
+          var out = new Uint8Array(total), o = 0;
+          parts.forEach(function (p) { out.set(p, o); o += p.length; });
+          return out;
+        }
+        var chunk = r.value instanceof Uint8Array ? r.value : new Uint8Array(r.value);
+        total += chunk.length; budget.left -= chunk.length;
+        if (budget.left < 0) { try { reader.cancel(); } catch (e) { /* already closed */ } throw tooBig(); }
+        parts.push(chunk);
+        return pump();
+      });
+    }
+    return pump();
   }
 
-  function makeZip(buf) {
+  function makeZip(buf, budget) {
     var entries = readZipDirectory(buf);
     var lower = {};
     Object.keys(entries).forEach(function (k) { lower[k.toLowerCase()] = k; });
@@ -309,8 +336,11 @@
       var ent = entries[path] || entries[lower[path.toLowerCase()]];
       if (!ent) return Promise.resolve(null);
       var raw = entryData(buf, ent);
-      if (ent.method === 0) return Promise.resolve(raw);
-      if (ent.method === 8) return inflate(raw);
+      if (ent.method === 0) {
+        if (budget) { budget.left -= raw.length; if (budget.left < 0) return Promise.reject(tooBig()); }
+        return Promise.resolve(raw);
+      }
+      if (ent.method === 8) return inflate(raw, budget);
       return Promise.reject(XlsxError('method', 'طريقة ضغط غير مدعومة داخل الملف. احفظه من Excel مرة أخرى أو بصيغة CSV.'));
     }
     function text(path) {
@@ -411,7 +441,8 @@
     return out;
   }
 
-  function parseSheet(xml, shared, styleKinds, date1904) {
+  function parseSheet(xml, shared, styleKinds, date1904, lim) {
+    lim = lim || DEFAULT_LIMITS;
     var tree = parseXml(xml);
     var data = find(tree, 'sheetData');
     var rows = [];
@@ -420,6 +451,7 @@
       var rAttr = attr(rowNode, 'r');
       var ri = rAttr ? parseInt(rAttr, 10) - 1 : nextRow;
       if (!(ri >= 0)) ri = nextRow;
+      if (ri >= lim.maxRows) throw XlsxError('too_many_rows', 'عدد صفوف الورقة أكبر من المسموح.');
       nextRow = ri + 1;
       var row = rows[ri] || (rows[ri] = []);
       var nextCol = 0;
@@ -427,6 +459,7 @@
         var ref = attr(c, 'r');
         var ci = ref ? colIndex(ref) : nextCol;
         if (ci < 0) ci = nextCol;
+        if (ci >= lim.maxCols) throw XlsxError('too_wide', 'عدد أعمدة الورقة أكبر من المسموح.');
         nextCol = ci + 1;
         var t = attr(c, 't') || 'n';
         var vNode = kid(c, 'v');
@@ -457,13 +490,16 @@
   /* ------------------------------------------------------------------
      read(arrayBuffer)
      ------------------------------------------------------------------ */
-  function read(buf) {
+  function read(buf, limits) {
+    var lim = {};
+    Object.keys(DEFAULT_LIMITS).forEach(function (k) { var v = limits && +limits[k]; lim[k] = v > 0 && v < DEFAULT_LIMITS[k] ? Math.floor(v) : DEFAULT_LIMITS[k]; });
+    var budget = { left: lim.maxInflateBytes };
     return Promise.resolve().then(function () {
       if (buf && buf.buffer && !(buf instanceof ArrayBuffer)) buf = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
       var kind = sniff(buf);
       if (kind === 'xls') throw XlsxError('xls', 'صيغة ‎.xls‎ القديمة غير مدعومة. افتح الملف في Excel واختر «حفظ باسم» بصيغة ‎.xlsx‎ أو CSV ثم ارفعه مرة أخرى.');
       if (kind !== 'xlsx') throw XlsxError('notzip', 'الملف ليس بصيغة Excel ‎(.xlsx)‎ صالحة.');
-      var zip = makeZip(buf);
+      var zip = makeZip(buf, budget);
       return zip.text('_rels/.rels').then(function (rootRels) {
         var wbPath = 'xl/workbook.xml';
         parseRels(rootRels, '').forEach(function (r) { if (/officeDocument$/.test(r.type)) wbPath = r.target; });
@@ -492,10 +528,14 @@
             var shared = [];
             if (r2[0]) findAll(parseXml(r2[0]), 'si').forEach(function (si) { shared.push(runText(si)); });
             var styleKinds = parseStyles(r2[1]);
-            return Promise.all(sheetDefs.map(function (sd) {
-              return zip.has(sd.path) ? zip.text(sd.path).then(function (x) { return { name: sd.name, hidden: sd.hidden, rows: parseSheet(x, shared, styleKinds, date1904) }; })
-                : Promise.resolve({ name: sd.name, hidden: sd.hidden, rows: [] });
-            }));
+            // one sheet after another (each inflated + parsed before the next), all under the same budget
+            var out = [];
+            return sheetDefs.reduce(function (p, sd) {
+              return p.then(function () {
+                if (!zip.has(sd.path)) { out.push({ name: sd.name, hidden: sd.hidden, rows: [] }); return; }
+                return zip.text(sd.path).then(function (x) { out.push({ name: sd.name, hidden: sd.hidden, rows: parseSheet(x, shared, styleKinds, date1904, lim) }); });
+              });
+            }, Promise.resolve()).then(function () { return out; });
           });
         });
       }).then(function (sheets) { return { sheets: sheets }; });

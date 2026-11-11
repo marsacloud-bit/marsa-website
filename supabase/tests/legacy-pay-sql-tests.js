@@ -271,7 +271,7 @@ async function secFile() {
       && !/review_status = 'approved'[^;]*INSERT/.test(c) && /v_review NOT IN \('draft','pending'\)/.test(c)) || 'decisions';
   });
   // later phases may follow this file (20261123000100 legacy_daftra: re-creates the conversion lists)
-  const LATER_PHASES = ['20261123000100_legacy_daftra.sql'];
+  const LATER_PHASES = ['20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');

@@ -154,6 +154,7 @@
       AUTH_EXISTS: 'هذا البريد الإلكتروني مسجّل من قبل.',
       AUTH_WEAK: 'كلمة المرور ضعيفة. استخدم 8 أحرف على الأقل تجمع حروفًا وأرقامًا.',
       AUTH_RATE: 'محاولات كثيرة. انتظر قليلًا ثم حاول مرة أخرى.',
+      AUTH_OTP_INVALID: 'الرمز غير صحيح أو انتهت صلاحيته.',
       // MFA (docs/online/MFA_SPEC.md §6)
       MRS_MFA_REQUIRED: 'هذا الإجراء يتطلب التحقق بخطوتين. أكمل التحقق ثم حاول مرة أخرى.',
       MFA_INVALID_CODE: 'الرمز غير صحيح أو انتهت صلاحيته. أدخل الرمز الحالي من التطبيق.',
@@ -344,6 +345,20 @@
     },
     // G6b: messages for a detail word under one code only ('CODE:detail'); checked before details / the code text
     codeDetails: {
+      // legacy step 8 (20261124000100): reports, attention, aging rules, Fasah reconciliation, audit trail
+      'MRS_INVALID:aging_rule': 'قاعدة التأخير غير صحيحة: الساعات أعداد صحيحة من 1 إلى 2160، وساعات التنبيه أقل من ساعات التأخير الحرج.',
+      'MRS_INVALID:attention': 'فلتر المتابعة غير صحيح (الكل أو متابعة أو متأخرة).',
+      'MRS_INVALID:daftra_state': 'حالة دفترة غير صحيحة في الفلتر.',
+      'MRS_INVALID:port_code': 'رمز المنفذ غير معروف.',
+      'MRS_INVALID:containers_range': 'نطاق عدد الوحدات غير صحيح (الحد الأدنى أكبر من الأعلى).',
+      'MRS_INVALID:value_range': 'نطاق قيمة النقل غير صحيح.',
+      'MRS_INVALID:revenue_range': 'نطاق عائد المؤسسة غير صحيح.',
+      'MRS_INVALID:return_scope': 'نطاق إعادة الفارغ غير صحيح (متأخرة، لم تُعد، أُعيدت).',
+      'MRS_INVALID:movement_status': 'حالة الحركة غير صحيحة.',
+      'MRS_INVALID:party_type': 'نوع جهة النقل غير صحيح.',
+      'MRS_INVALID:scopes': 'نطاق المطابقة غير صحيح: منفذ معتمد وشهر بصيغة YYYY-MM، وبحد أقصى 100 نطاق.',
+      'MRS_TOO_LONG:nos': 'أرقام البيانات المرسلة للمطابقة كثيرة جدًا (الحد 20000 رقم، 40 حرفًا لكل رقم).',
+      'MRS_FORBIDDEN:role': 'سجل العمليات لمدير النظام والمشرف فقط.',
       // legacy step 6 (20261122000100): the funding source × method matrix (app.fin_funding_check rules)
       'MRS_PAY_FUNDING:fasah_wallet_source': 'طريقة السداد «محفظة فسح» تتطلب أن يكون مصدر التمويل «محفظة فسح».',
       'MRS_PAY_FUNDING:fasah_wallet_method': 'عند اختيار «محفظة فسح» مصدرًا للتمويل يجب أن تكون طريقة السداد «محفظة فسح».',
@@ -1079,6 +1094,57 @@
   function signIn(email, password) {
     return online(function (c) { ctxCache = null; return c.auth.signInWithPassword({ email: String(email || '').trim(), password: password }); });
   }
+  // legacy step 8: optional e-mail code login (docs/online/LEGACY_REPORTS_AR.md «الدخول برمز عبر البريد»). Never creates a user
+  // (shouldCreateUser: false); the page shows ONE message whatever the answer (no user enumeration) and calls
+  // otpSessionCheck() after verifyEmailOtp — the org switch and the staff rule are checked there, MFA (aal2) is unchanged.
+  function requestEmailOtp(email) {
+    return online(function (c) {
+      ctxCache = null;
+      return c.auth.signInWithOtp({ email: String(email || '').trim(), options: { shouldCreateUser: false } });
+    });
+  }
+  function verifyEmailOtp(email, code) {
+    var token = String(code == null ? '' : code).replace(/[٠-٩]/g, function (d) { return String(d.charCodeAt(0) - 1632); }).replace(/\D/g, '');
+    if (!/^\d{6,10}$/.test(token)) return Promise.resolve(fail('AUTH_OTP_INVALID'));
+    return online(function (c) {
+      ctxCache = null;
+      return c.auth.verifyOtp({ email: String(email || '').trim(), token: token, type: 'email' }).then(function (r) {
+        // mark THIS session as opened by the code form of this site (otpGate checks only marked sessions, see there)
+        if (r && !r.error && r.data && r.data.session) markOtpSession(r.data.session);
+        return r;
+      });
+    });
+  }
+  // the code-login marker: the JWT session_id (or sub + the amr time) of a session that verifyEmailOtp opened. It tells a code
+  // login apart from an e-mail LINK session (password reset, sign-up / invite confirmation), which GoTrue's implicit flow also
+  // stamps amr 'otp' — those must keep working (review 2026-11-11).
+  var OTP_MARK_KEY = 'marsa_otp_login';
+  function jwtClaims(session) {
+    try {
+      var part = String(session && session.access_token || '').split('.')[1];
+      if (!part) return null;
+      part = part.replace(/-/g, '+').replace(/_/g, '/');
+      while (part.length % 4) part += '=';
+      var json = decodeURIComponent(Array.prototype.map.call(atob(part), function (ch) { return '%' + ('00' + ch.charCodeAt(0).toString(16)).slice(-2); }).join(''));
+      var c = JSON.parse(json);
+      return c && typeof c === 'object' ? c : null;
+    } catch (e) { return null; }
+  }
+  function otpMarkOf(session) {
+    var c = jwtClaims(session);
+    if (!c) return '';
+    if (c.session_id) return 'sid:' + c.session_id;
+    var t = (Array.isArray(c.amr) ? c.amr : []).map(function (x) { return x && x.timestamp; }).filter(Boolean).join(',');
+    return c.sub ? 'sub:' + c.sub + ':' + t : '';
+  }
+  function markOtpSession(session) {
+    var m = otpMarkOf(session);
+    try { if (m) localStorage.setItem(OTP_MARK_KEY, m); } catch (e) { /* storage blocked: the gate cannot tell; see otpGate */ }
+  }
+  function sessionFromOtpForm(session) {
+    var m = otpMarkOf(session);
+    try { return !!m && localStorage.getItem(OTP_MARK_KEY) === m; } catch (e) { return false; }
+  }
   function signUp(email, password, meta) {
     meta = meta || {};
     return online(function (c) {
@@ -1095,6 +1161,7 @@
     ctxCache = null; applyPlatformChrome(false);
     try { localStorage.removeItem('marsa_active_org'); } catch (e) { /* storage blocked */ }
     try { sessionStorage.removeItem('marsa_invite'); sessionStorage.removeItem('marsa_invite_signup'); } catch (e) { /* storage blocked */ }
+    try { localStorage.removeItem(OTP_MARK_KEY); } catch (e) { /* storage blocked */ }
   }
   function signOut() { return online(function (c) { clearUserState(); return c.auth.signOut(); }); }
   // revokes every refresh token of this user (all browsers / devices), then clears this one.
@@ -3704,7 +3771,8 @@
   function listReportExports(f) { return rptRpc('list_report_exports', f, 200); }
   // p = { report, format, filters, row_count } — only these keys travel (never rows or totals); the filters are the
   // report's own filter object without limit / offset / empty values (G6a-9: the server stores who / what / how many)
-  var EXPORT_REPORTS = ['search', 'transactions', 'containers', 'trips', 'margins', 'costs', 'fasah_sheet'], EXPORT_FORMATS = ['xlsx', 'csv', 'print'];
+  var EXPORT_REPORTS = ['search', 'transactions', 'containers', 'trips', 'margins', 'costs', 'fasah_sheet',
+    'movements', 'payments', 'tx_followup', 'fasah_recon'], EXPORT_FORMATS = ['xlsx', 'csv', 'print'];
   function logReportExport(p) {
     p = p || {};
     if (!configured) return demoOnly();
@@ -3733,6 +3801,94 @@
     if (!configured) return demoOnly();
     if (txId != null && txId !== '' && !isUuid(txId)) return Promise.resolve(fail('MRS_INVALID', 'transaction'));
     return rpc('portal_invoices', { p_tx: txId ? String(txId) : null });
+  }
+
+  /* ------------------------------------------------------------------
+     Legacy step 8 — reports, dashboards, alerts (docs/online/LEGACY_REPORTS_AR.md, 20261124000100).
+     Readers take the active org (or f.orgId) as p_org and the remaining keys as p_filters (empty values dropped, limit /
+     offset clamped); the server scopes by org, branch and role. Nothing here writes business data.
+     ------------------------------------------------------------------ */
+  // KPI tiles: {total, open, cancelled, by_status, declaration_stages, by_declaration_status, no_declaration, drafts, appointments_today,
+  // transported_containers, attention, daftra | null, today, branch_id, generated_at}; f = {branch_id}
+  function dashTxCounts(f) { return rptRpc('dash_tx_counts', f, 0); }
+  // attention of the SAME filtered set as reportTransactions(f) (banner, «المتأخرة فقط», follow-up export); limit / offset ignored
+  function txAttention(f) { return rptRpc('tx_attention', f, 0); }
+  // appointments & transport (one row per movement); amounts only with trip finance at the row's branch
+  function reportMovements(f) { return rptRpc('report_movements', f, 500); }
+  // payments register report (finance readers only)
+  function reportPayments(f) { return rptRpc('report_payments', f, 500); }
+  // monthly Fasah reconciliation, system side: nos = declaration numbers read from the files (≤ 20000), scopes = [{port_code,
+  // month 'YYYY-MM'}] (≤ 100); o = {orgId}
+  function reportFasahScope(nos, scopes, o) {
+    o = o || {};
+    if (!configured) return demoOnly();
+    var list = (Array.isArray(nos) ? nos : []).map(function (x) { return x == null ? '' : String(x).trim(); }).filter(function (x) { return x !== ''; });
+    if (list.length > 20000) return Promise.resolve(fail('MRS_TOO_LONG', 'nos'));
+    var sc = (Array.isArray(scopes) ? scopes : []).filter(function (x) { return x && x.port_code && x.month; })
+      .map(function (x) { return { port_code: String(x.port_code).trim().toUpperCase(), month: String(x.month).trim() }; });
+    if (sc.length > 100) return Promise.resolve(fail('MRS_INVALID', 'scopes'));
+    return inActiveOrg(o.orgId, function (oid) { return rpc('report_fasah_scope', { p_org: oid, p_nos: list, p_scopes: sc }); });
+  }
+  // aging rules: {rules, defaults, overrides, email_otp_login, can_edit}
+  function getStatusAgingRules(o) {
+    o = o || {};
+    return inActiveOrg(o.orgId, function (oid) { return rpc('get_status_aging_rules', { p_org: oid }); });
+  }
+  // owner only (org-wide admin, aal2): rules = {status | 'appointment_not_updated': {warning_hours, critical_hours} | null}, reason required
+  function setStatusAgingRules(rules, reason, o) {
+    o = o || {};
+    if (!configured) return demoOnly();
+    if (!reason || !String(reason).trim()) return Promise.resolve(fail('MRS_NOTE_REQUIRED', 'reason'));
+    var r = rules && typeof rules === 'object' && !Array.isArray(rules) ? rules : {};
+    return inActiveOrg(o.orgId, function (oid) { return rpc('set_status_aging_rules', { p_org: oid, p_rules: r, p_reason: String(reason).trim() }); });
+  }
+  // owner only: allow / forbid the e-mail code login for the org (OFF by default)
+  function setEmailOtpLogin(enabled, reason, o) {
+    o = o || {};
+    if (!configured) return demoOnly();
+    if (!reason || !String(reason).trim()) return Promise.resolve(fail('MRS_NOTE_REQUIRED', 'reason'));
+    return inActiveOrg(o.orgId, function (oid) { return rpc('set_email_otp_login', { p_org: oid, p_enabled: !!enabled, p_reason: String(reason).trim() }); });
+  }
+  // about THIS session: {otp_session, allowed, reason, aal, mfa_pending} — after an e-mail code login, sign out when !allowed
+  function otpSessionCheck() {
+    if (!configured) return demoOnly();
+    return rpc('otp_session_check', {});
+  }
+  // the sign-in method of a session from its access token's amr claim: true for an e-mail proof session — a code, a magic
+  // link, and (GoTrue implicit flow) a password-reset / sign-up / invite confirmation link alike
+  function sessionUsedOtp(session) {
+    var c = jwtClaims(session), amr = c && c.amr;
+    return Array.isArray(amr) && amr.some(function (x) { var m = x && typeof x === 'object' ? x.method : x; return m === 'otp' || m === 'magiclink' || m === 'email'; });
+  }
+  // every app page (app-shell.js) and the login page: a session opened by the CODE FORM of this site (verifyEmailOtp marker)
+  // must be allowed by BOTH the platform switch (MARSA_CONFIG.emailOtpLogin === true) and otp_session_check() (staff membership
+  // + every org enabled). Fails closed: an error of the check blocks it too.
+  // An e-mail LINK session (reset / confirmation) carries the same amr 'otp' and is NOT gated: the server cannot tell the two
+  // apart, and an e-mail proof is what a password reset already accepts, so the switches are a policy of this site's login
+  // form, not a server boundary — the boundary is MFA (aal2 for the gated roles, enforced by RLS), unchanged by any e-mail session.
+  // → {data: {allowed, reason, otp_session, mfa_pending}, error: null}
+  function otpGate() {
+    if (!configured) return Promise.resolve(ok({ allowed: true, reason: 'demo', otp_session: false }));
+    return getSession().then(function (s) {
+      if (s.error || !s.data || !sessionUsedOtp(s.data)) return ok({ allowed: true, reason: 'password', otp_session: false });
+      if (!sessionFromOtpForm(s.data)) return ok({ allowed: true, reason: 'email_link', otp_session: false });
+      if (cfg.emailOtpLogin !== true) return ok({ allowed: false, reason: 'platform_disabled', otp_session: true });
+      return otpSessionCheck().then(function (r) {
+        if (r.error || !r.data) return ok({ allowed: false, reason: 'check_failed', otp_session: true });
+        return ok(r.data);
+      });
+    });
+  }
+  // operations log with business labels and the field diff (admin / supervisor): f = {transaction_id, table_name, row_id, actor, from,
+  // to, limit ≤ 200, before_id}
+  function auditTrail(f) {
+    f = Object.assign({}, f || {});
+    var before = f.before_id; delete f.before_id;
+    return inActiveOrg(f.orgId, function (oid) {
+      var pf = rptFilters(f, 200);
+      if (before != null && before !== '') pf.before_id = String(before);
+      return rpc('audit_trail', { p_org: oid, p_filters: pf });
+    });
   }
 
   /* ------------------------------------------------------------------
@@ -4064,6 +4220,7 @@
     errorMessage: function (err) { return normalizeError(err).message; },
     // auth
     signIn: signIn, signUp: signUp, signOut: signOut, signOutEverywhere: signOutEverywhere,
+    requestEmailOtp: requestEmailOtp, verifyEmailOtp: verifyEmailOtp,
     resetPassword: resetPassword, updatePassword: updatePassword,
     onAuth: onAuth, currentUser: currentUser, getSession: getSession,
     mfaFactors: mfaFactors, mfaAal: mfaAal, mfaEnroll: mfaEnroll, mfaVerify: mfaVerify, mfaUnenroll: mfaUnenroll, mfaState: mfaState,
@@ -4199,6 +4356,11 @@
     reportTransactions: reportTransactions, reportContainers: reportContainers, reportTrips: reportTrips,
     logReportExport: logReportExport, listReportExports: listReportExports,
     listMyContainers: listMyContainers, portalInvoices: portalInvoices,
+    // legacy step 8: reports, dashboards, alerts, audit trail, e-mail code login (docs/online/LEGACY_REPORTS_AR.md)
+    dashTxCounts: dashTxCounts, txAttention: txAttention, reportMovements: reportMovements, reportPayments: reportPayments,
+    reportFasahScope: reportFasahScope, getStatusAgingRules: getStatusAgingRules, setStatusAgingRules: setStatusAgingRules,
+    setEmailOtpLogin: setEmailOtpLogin, otpSessionCheck: otpSessionCheck, auditTrail: auditTrail, otpGate: otpGate, sessionUsedOtp: sessionUsedOtp, sessionFromOtpForm: sessionFromOtpForm,
+    emailOtpEnabled: function () { return configured && cfg.emailOtpLogin === true; },
     // G6b channels, unified inbox, approved replies (docs/online/G6B_SPEC.md) — staff RPCs only, never the msg_* service RPCs
     getMsgSettings: getMsgSettings, saveMsgSettings: saveMsgSettings, listMsgChannels: listMsgChannels, saveMsgChannel: saveMsgChannel,
     requestMsgChannelProbe: requestMsgChannelProbe, listMsgJobs: listMsgJobs, retryMsgJob: retryMsgJob,

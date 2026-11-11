@@ -418,6 +418,20 @@
       cdetail_MRS_DAFTRA_IMPORT_empty: 'الملف لا يحتوي صفوفًا.',
       cdetail_MRS_DAFTRA_IMPORT_too_many_rows: 'الحد الأقصى 2000 صف في الاستيراد الواحد.',
       cdetail_MRS_DAFTRA_ACCOUNT_NOT_KSA_not_checked: 'لم يُفحص حساب دفترة بعد. شغّل «فحص الاتصال» أولًا.',
+      // legacy step 8 (20261124000100): reports, attention, aging rules, Fasah reconciliation, audit trail
+      cdetail_MRS_INVALID_aging_rule: 'قاعدة التأخير غير صحيحة: الساعات أعداد صحيحة من 1 إلى 2160، وساعات التنبيه أقل من ساعات التأخير الحرج.',
+      cdetail_MRS_INVALID_attention: 'فلتر المتابعة غير صحيح (الكل أو متابعة أو متأخرة).',
+      cdetail_MRS_INVALID_daftra_state: 'حالة دفترة غير صحيحة في الفلتر.',
+      cdetail_MRS_INVALID_port_code: 'رمز المنفذ غير معروف.',
+      cdetail_MRS_INVALID_containers_range: 'نطاق عدد الوحدات غير صحيح (الحد الأدنى أكبر من الأعلى).',
+      cdetail_MRS_INVALID_value_range: 'نطاق قيمة النقل غير صحيح.',
+      cdetail_MRS_INVALID_revenue_range: 'نطاق عائد المؤسسة غير صحيح.',
+      cdetail_MRS_INVALID_return_scope: 'نطاق إعادة الفارغ غير صحيح (متأخرة، لم تُعد، أُعيدت).',
+      cdetail_MRS_INVALID_movement_status: 'حالة الحركة غير صحيحة.',
+      cdetail_MRS_INVALID_party_type: 'نوع جهة النقل غير صحيح.',
+      cdetail_MRS_INVALID_scopes: 'نطاق المطابقة غير صحيح: منفذ معتمد وشهر بصيغة YYYY-MM، وبحد أقصى 100 نطاق.',
+      cdetail_MRS_TOO_LONG_nos: 'أرقام البيانات المرسلة للمطابقة كثيرة جدًا (الحد 20000 رقم، 40 حرفًا لكل رقم).',
+      cdetail_MRS_FORBIDDEN_role: 'سجل العمليات لمدير النظام والمشرف فقط.',
       cdetail_MRS_PAY_FUNDING_fasah_wallet_source: 'طريقة السداد «محفظة فسح» تتطلب أن يكون مصدر التمويل «محفظة فسح».',
       cdetail_MRS_PAY_FUNDING_fasah_wallet_method: 'عند اختيار «محفظة فسح» مصدرًا للتمويل يجب أن تكون طريقة السداد «محفظة فسح».',
       cdetail_MRS_PAY_FUNDING_cash_box_method: 'عند اختيار «الصندوق / النقدية» مصدرًا للتمويل يجب أن تكون طريقة السداد «نقدي».',
@@ -484,6 +498,7 @@
       AUTH_EXISTS: 'هذا البريد الإلكتروني مسجّل من قبل.',
       AUTH_WEAK: 'كلمة المرور ضعيفة. استخدم 8 أحرف على الأقل تجمع حروفًا وأرقامًا.',
       AUTH_RATE: 'محاولات كثيرة. انتظر قليلًا ثم حاول مرة أخرى.',
+      AUTH_OTP_INVALID: 'الرمز غير صحيح أو انتهت صلاحيته.',
       UNKNOWN: 'حدث خطأ غير متوقع. حاول مرة أخرى.'
     },
     en: {
@@ -614,6 +629,20 @@
       cdetail_MRS_DAFTRA_IMPORT_empty: 'The file has no rows.',
       cdetail_MRS_DAFTRA_IMPORT_too_many_rows: 'At most 2000 rows per import.',
       cdetail_MRS_DAFTRA_ACCOUNT_NOT_KSA_not_checked: 'The Daftra account was not checked yet. Run the connection probe first.',
+      // legacy step 8 (20261124000100): reports, attention, aging rules, Fasah reconciliation, audit trail
+      cdetail_MRS_INVALID_aging_rule: 'The aging rule is not valid: hours are whole numbers from 1 to 2160 and the warning comes before the critical threshold.',
+      cdetail_MRS_INVALID_attention: 'The attention filter is not valid (any, warning or critical).',
+      cdetail_MRS_INVALID_daftra_state: 'The Daftra state in the filter is not valid.',
+      cdetail_MRS_INVALID_port_code: 'Unknown port code.',
+      cdetail_MRS_INVALID_containers_range: 'The unit-count range is not valid (minimum above maximum).',
+      cdetail_MRS_INVALID_value_range: 'The transport value range is not valid.',
+      cdetail_MRS_INVALID_revenue_range: 'The revenue range is not valid.',
+      cdetail_MRS_INVALID_return_scope: 'The empty-return scope is not valid (overdue, pending, returned).',
+      cdetail_MRS_INVALID_movement_status: 'The movement status is not valid.',
+      cdetail_MRS_INVALID_party_type: 'The transport party type is not valid.',
+      cdetail_MRS_INVALID_scopes: 'The reconciliation scope is not valid: an approved port and a YYYY-MM month, at most 100 scopes.',
+      cdetail_MRS_TOO_LONG_nos: 'Too many declaration numbers for the reconciliation (at most 20000, 40 characters each).',
+      cdetail_MRS_FORBIDDEN_role: 'The operations log is for the admin and the supervisor only.',
       cdetail_MRS_PAY_FUNDING_fasah_wallet_source: 'The «Fasah wallet» method needs the «Fasah wallet» funding source.',
       cdetail_MRS_PAY_FUNDING_fasah_wallet_method: 'With the «Fasah wallet» funding source the method must be «Fasah wallet».',
       cdetail_MRS_PAY_FUNDING_cash_box_method: 'With the «Cash box» funding source the method must be «Cash».',
@@ -680,6 +709,7 @@
       AUTH_EXISTS: 'This e-mail address is already registered.',
       AUTH_WEAK: 'Weak password. Use at least 8 characters mixing letters and digits.',
       AUTH_RATE: 'Too many attempts. Wait a little and try again.',
+      AUTH_OTP_INVALID: 'The code is wrong or has expired.',
       UNKNOWN: 'An unexpected error occurred. Please try again.'
     }
   });

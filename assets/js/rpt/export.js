@@ -259,7 +259,8 @@
     function row(tag, obj, bold) {
       return el('tr', { class: bold ? 'rpt-print-total' : null }, cols.map(function (c) {
         var ltr = LTR_TYPES[c.type] || c.ltr;
-        return el(tag, { class: (LTR_TYPES[c.type] ? 'num' : '') + (ltr ? ' is-ltr' : '') || null, dir: ltr ? 'ltr' : null }, show(c, obj[c.key]));
+        var tn = obj[c.key + '__tone'];
+        return el(tag, { class: (LTR_TYPES[c.type] ? 'num' : '') + (ltr ? ' is-ltr' : '') + (tn ? ' is-tone-' + tn : '') || null, dir: ltr ? 'ltr' : null }, show(c, obj[c.key]));
       }));
     }
     var node = el('section', { class: 'rpt-print', dir: dir, lang: isEn() ? 'en' : 'ar' }, [
@@ -320,13 +321,25 @@
     return attempt().then(function (res) { return res.changed ? attempt() : res; }).then(function (res) {
       if (res.error) return { ok: false, error: res.error, why: res.why };
       if (res.total > cap) return { ok: false, error: exportErr('too_many_rows') };
-      var columns = def.columns(ctx), rows = res.items.map(function (x) { return toRow(columns, x, ctx); });
-      var totals = def.totalsRows ? def.totalsRows(res.first, ctx) : [];
+      // legacy step 8: the column filters of the screen (rpt/colfilter.js) keep the same rows in the file; then the
+      // server totals no longer describe the file, so a plain count row replaces them
+      var items = res.items, narrowed = false;
+      if (typeof o.rowFilter === 'function') { var kept = o.rowFilter(items.slice()); narrowed = kept.length !== items.length; items = kept; }
+      if (!items.length) return { ok: false, error: exportErr('no_rows') };
+      if (def.seq) items = items.map(function (x, i) { var y = Object.assign({}, x); y.__seq = i + 1; return y; });
+      var columns = def.columns(ctx);
+      // a numbered file («م») whose screen table has no sequence column (payments): the file gets one in front
+      if (def.seq && !columns.some(function (c) { return c.key === 'seq'; })) {
+        columns = [{ key: 'seq', label: lt('c_seq'), type: 'int', width: 5, value: function (x) { return x.__seq == null ? null : x.__seq; } }].concat(columns);
+      }
+      var rows = items.map(function (x) { return toRow(columns, x, ctx); });
+      var totals = narrowed ? [(function () { var r0 = {}; r0[columns[def.seq && columns[1] ? 1 : 0].key] = totalLabel(rows.length); return r0; })()]
+        : def.totalsRows ? def.totalsRows(res.first, ctx) : [];
       var payload = { report: def.report, format: format, filters: filters, row_count: rows.length };
       return call(api, 'logReportExport', payload).then(function (a) {
         if (a.error) return { ok: false, error: exportErr('audit_failed'), cause: a.error };
         var when = new Date(), title = def.title(ctx);
-        var criteria = [[t('crit_report'), title], [t('crit_org'), orgLabel(api)]].concat(def.criteria ? def.criteria(filters, ctx) : [])
+        var criteria = [[t('crit_report'), title], [t('crit_org'), orgLabel(api)]].concat(def.criteria ? def.criteria(filters, ctx) : [], o.extraCriteria || [])
           .concat([[t('crit_generated_at'), riyadhDateTime(when) + ' (' + t('riyadh_tz') + ')'], [t('crit_generated_by'), userLabel(api)], [t('crit_rows'), String(rows.length)]]);
         var fcols = columns.map(function (c) { return { key: c.key, label: c.label, type: c.type || 'text', width: c.width, ltr: c.ltr }; });
         try {
@@ -354,7 +367,11 @@
   }
   function toRow(columns, item, ctx) {
     var o = {};
-    columns.forEach(function (c) { o[c.key] = c.value ? c.value(item, ctx) : item[c.key]; });
+    columns.forEach(function (c) {
+      o[c.key] = c.value ? c.value(item, ctx) : item[c.key];
+      // legacy step 8: a cell tone ('warning' | 'danger') for the file / print (the attention colours)
+      if (c.tone) { var tn = c.tone(item, ctx); if (tn === 'warning' || tn === 'danger') o[c.key + '__tone'] = tn; }
+    });
     return o;
   }
 
@@ -383,15 +400,17 @@
   // org switch (admin.js re-renders the same hash for the new org): drop the previous org's #search / #reports query
   // and the views' remembered filters, so no request carries the old org's branch / client / carrier ids.
   // This listener runs before admin.js' (load order). The boot-time event for the org already shown is ignored.
+  var ORG_VIEWS = ['search', 'reports', 'register', 'fasah_recon', 'changes'];
   function onOrgSwitch(e) {
     var id = e && e.detail && e.detail.orgId;
     if (!ctxApi || !id || id === ctxApi.orgId) return;
     PENDING = {};
     var V = (Ops && Ops.views) || {};
-    ['search', 'reports'].forEach(function (k) { if (V[k] && typeof V[k]._reset === 'function') { try { V[k]._reset(); } catch (err) { /* ignore */ } } });
+    // + the step-8 views (register filters / column filters, the Fasah reconciliation result, the operations-log filters)
+    ORG_VIEWS.forEach(function (k) { if (V[k] && typeof V[k]._reset === 'function') { try { V[k]._reset(); } catch (err) { /* ignore */ } } });
     try {
       var h = String(location.hash || ''), qi = h.indexOf('?'), name = h.replace(/^#/, '').split(/[/?]/)[0];
-      if (qi !== -1 && (name === 'search' || name === 'reports')) history.replaceState(history.state, '', h.slice(0, qi));
+      if (qi !== -1 && ORG_VIEWS.indexOf(name) !== -1) history.replaceState(history.state, '', h.slice(0, qi));
     } catch (err) { /* ignore */ }
   }
   try { window.addEventListener('marsa:orgchange', onOrgSwitch); } catch (e) { /* no window */ }
@@ -443,7 +462,11 @@
     codes: function (v) { return String(v || '').split(',').filter(function (x) { return CODE_RE.test(x); }).slice(0, 20); },
     text: function (v) { return String(v || '').slice(0, 80); },
     bool: function (v) { return v === 'true' || v === '1'; },
-    int: function (v) { var n = parseInt(v, 10); return isFinite(n) && n >= 0 ? Math.min(n, 1000000) : 0; }
+    int: function (v) { var n = parseInt(v, 10); return isFinite(n) && n >= 0 ? Math.min(n, 1000000) : 0; },
+    // legacy step 8: a non-negative amount / count bound ('' when absent or not a number)
+    num: function (v) { var s = String(v == null ? '' : v).trim(); if (!/^\d{1,12}(\.\d{1,2})?$/.test(s)) return ''; return s; },
+    // a customs_ports code (SAJED, SADMM-AIR …)
+    pcode: function (v) { var s = String(v == null ? '' : v).trim().toUpperCase(); return /^[A-Z]{5}(-AIR)?$/.test(s) ? s : ''; }
   };
 
   // ---- table with totals ------------------------------------------------------
@@ -457,7 +480,7 @@
   function reportTable(columns, items, totals, ctx, o) {
     var u = U(); o = o || {};
     var tr = items.map(function (x) {
-      return el('tr', { 'data-id': o.rowId ? o.rowId(x) : (x.id || null) }, columns.map(function (c) {
+      return el('tr', { 'data-id': o.rowId ? o.rowId(x) : (x.id || null), class: o.rowClass ? o.rowClass(x) || null : null }, columns.map(function (c) {
         var kid = c.cell ? c.cell(x, ctx) : defaultCell(c, c.value ? c.value(x, ctx) : x[c.key]);
         var td = el('td', { class: (LTR_TYPES[c.type] && c.type !== 'date' && c.type !== 'datetime' ? 'num' : '') + (c.cls ? ' ' + c.cls : '') || null }, kid == null || kid === '' ? NONE : kid);
         return td;
@@ -472,7 +495,12 @@
     });
     return el('div', { class: 'table-wrap adm-table-wrap ops-table-wrap rpt-table-wrap' }, el('table', { class: 'table table-striped adm-table ops-table rpt-table' }, [
       o.caption ? el('caption', { class: 'ops-sr', text: o.caption }) : null,
-      el('thead', null, el('tr', null, columns.map(function (c) { return el('th', { scope: 'col', class: NUM_TYPES[c.type] ? 'num' : null, text: c.label }); }))),
+      el('thead', null, el('tr', null, columns.map(function (c) {
+        // legacy step 8: an optional header control (the column filter button of rpt/colfilter.js)
+        var extra = o.thExtra ? o.thExtra(c) : null;
+        return extra ? el('th', { scope: 'col', class: (NUM_TYPES[c.type] ? 'num ' : '') + 'has-cf' }, [el('span', { class: 'rpt-th-label', text: c.label }), extra])
+          : el('th', { scope: 'col', class: NUM_TYPES[c.type] ? 'num' : null, text: c.label });
+      }))),
       el('tbody', null, tr),
       tf.length ? el('tfoot', null, tf) : null
     ]));
@@ -510,7 +538,12 @@
       btns.forEach(function (b) { b.disabled = true; });
       msg.textContent = t('exp_running');
       msg.className = 'rpt-export-msg';
-      return run({ api: api, def: def, format: format, filters: deepCopy(o.getFilters()), ctx: o.ctx }).then(function (r) {
+      var job = run({ api: api, def: def, format: format, filters: deepCopy(o.getFilters()), ctx: o.ctx,
+        rowFilter: o.getRowFilter ? o.getRowFilter() : null, extraCriteria: o.getCriteria ? o.getCriteria() : null });
+      // legacy step 8: the shell's progress overlay with a learned ETA (not cancellable: the export is audited before the file)
+      var P = window.MarsaShell && window.MarsaShell.progress;
+      if (P && typeof P.track === 'function') job = P.track('export:' + def.report + ':' + format, job, { label: t('exp_running'), cancellable: false });
+      return job.then(function (r) {
         btns.forEach(function (b) { b.disabled = false; });
         var u = U();
         if (r.ok) {
@@ -899,6 +932,260 @@
       }
     }
   };
+  /* ------------------------------------------------------------------
+     legacy step 8 definitions (docs/online/LEGACY_REPORTS_AR.md): movements, payments, transactions follow-up.
+     Strings: 'lrpt.<k>' (assets/i18n/lrpt.js, window.MarsaLrptDict without i18n.js).
+     ------------------------------------------------------------------ */
+  function lt(k, vars) {
+    var I = I18N(), key = 'lrpt.' + k;
+    if (I && typeof I.t === 'function') { var s = I.t(key, vars); if (s != null && s !== key) return s; }
+    var D = window.MarsaLrptDict || {}, d = (D[lang()] || {})[k];
+    if (d == null) d = (D.ar || {})[k];
+    return interp(d == null ? k : d, vars);
+  }
+  // a code of another dictionary: the admin label first, then '<ns>.<family>_<code>', then lrpt.<domain>_<code>
+  function famLab(domain, ns, family, code) {
+    if (code == null || code === '') return NONE;
+    var s = lab(domain, code, ctxApi);
+    if (s && s !== String(code)) return s;
+    var I = I18N(), key = ns + '.' + family + '_' + code;
+    if (I && typeof I.t === 'function') { var x = I.t(key); if (x && x !== key) return x; }
+    var own = lt(domain + '_' + code);
+    return own !== domain + '_' + code ? own : String(code);
+  }
+  function joinList(v) { return (Array.isArray(v) ? v : v == null ? [] : [v]).filter(function (x) { return x != null && x !== ''; }).join(isEn() ? ', ' : '، '); }
+  function portName(x) { return (isEn() && x.port_name_en) || x.port_name || x.port_code || ''; }
+  function money2(items, amountKey, curKey) { return sumMinorBy(items.filter(function (x) { return x[amountKey] != null && x[amountKey] !== ''; }), amountKey, curKey); }
+  // attention badge text (level · hours) — the register, the follow-up file and the banner share it
+  function attentionText(a) {
+    if (!a || !a.level) return '';
+    var h = numOrNull(a.hours);
+    return lt('att_badge', { level: famLab('attention_level', 'lrpt', 'att_level', a.level), h: h == null ? NONE : fmtNum(Math.floor(h), 0) });
+  }
+  function attentionTone(a) { return a && a.level === 'critical' ? 'danger' : a && a.level === 'warning' ? 'warning' : null; }
+  function daftraText(x) {
+    var d = x && x.daftra;
+    if (!d || !d.state) return '';
+    var st = famLab('tx_daftra_state', 'lrpt', 'dft_state', d.state);
+    return d.number ? st + ' · ' + d.number : st;
+  }
+  // report_transactions sends `containers` as container-number strings (≤50); objects are accepted too.
+  function ctrNo(c) { return typeof c === 'string' ? c : (c && (c.container_no || c.chassis_no)) || ''; }
+  // legacy transactionCargoUnitDisplayR12124_: container numbers one per line; Ro-Ro + «شاسيه: …» + «لوحة: …».
+  function unitText(x) {
+    if (x.cargo_unit_type === 'roro') {
+      var parts = ['Ro-Ro'];
+      if (x.chassis_no) parts.push(lt('unit_chassis', { v: x.chassis_no }));
+      if (x.vehicle_plate_no) parts.push(lt('unit_plate', { v: x.vehicle_plate_no }));
+      return parts.join('\n');
+    }
+    var list = (x.containers || []).map(ctrNo).filter(Boolean);
+    if (list.length) return list.join('\n');
+    return lab('cargo_unit_type', x.cargo_unit_type || 'container', ctxApi);
+  }
+  var MV_FILTERS = {
+    branch_id: { label: function () { return t('f_branch'); }, fmt: function (v) { return branchName(ctxApi, v) || v; } },
+    client_id: { label: function () { return t('f_client'); }, fmt: function (v, c) { return nameFrom(c && c.clients, v); } },
+    client_q: { label: function () { return t('f_client_q'); } },
+    driver_q: { label: function () { return lt('f_driver_q'); } }, truck_q: { label: function () { return lt('f_truck_q'); } },
+    carrier_id: { label: function () { return t('f_carrier'); }, fmt: function (v, c) { return nameFrom(c && c.carriers, v); } },
+    party_type: { label: function () { return lt('f_party_type'); }, fmt: function (v) { return lt('party_type_' + v); } },
+    party_q: { label: function () { return lt('f_party_q'); } },
+    movement_status: { label: function () { return lt('f_movement_status'); }, fmt: function (v) { return [].concat(v).map(function (c) { return lab('movement_status', c, ctxApi); }).join('، '); } },
+    bl_number: { label: function () { return t('f_bl_number'); } }, declaration_no: { label: function () { return t('f_declaration_no'); } },
+    container_no: { label: function () { return t('f_container_no'); } },
+    port_code: { label: function () { return lt('f_port_code'); }, fmt: function (v) { return [].concat(v).map(function (c) { return lt('port_' + c.replace('-', '_')); }).join('، '); } },
+    return_scope: { label: function () { return lt('f_return_scope'); }, fmt: function (v) { return famLab('return_scope', 'lrpt', 'return_scope', v); } },
+    destination_q: { label: function () { return lt('f_destination_q'); } }, booking_q: { label: function () { return lt('f_booking_q'); } },
+    operator_q: { label: function () { return lt('f_operator_q'); } },
+    employee_id: { label: function () { return lt('f_employee'); }, fmt: function (v, c) { var m = ((c && c.members) || []).filter(function (r) { return r.id === v; })[0]; return m ? m.name : v; } },
+    return_status: { label: function () { return t('f_return_status'); }, fmt: function (v) { return [].concat(v).map(function (c) { return lab('container_return_status', c, ctxApi); }).join('، '); } },
+    date_field: { label: function () { return t('f_date_field'); }, fmt: function (v) { return famLab('movement_date_field', 'lrpt', 'movement_date_field', v); } },
+    from: { label: function () { return t('f_from'); } }, to: { label: function () { return t('f_to'); } }, q: { label: function () { return t('f_q'); } },
+    value_min: { label: function () { return lt('f_value_min'); } }, value_max: { label: function () { return lt('f_value_max'); } },
+    revenue_min: { label: function () { return lt('f_revenue_min'); } }, revenue_max: { label: function () { return lt('f_revenue_max'); } },
+    sort: { label: function () { return t('f_sort'); }, fmt: function (v) { return lt('sort_' + v); } }
+  };
+  DEFS.movements = {
+    report: 'movements', method: 'reportMovements', pageSize: 500, paged: true, rowId: function (x) { return x.id; },
+    title: function () { return lt('r_movements'); },
+    items: function (d) { return d && Array.isArray(d.items) ? d.items : []; },
+    // the legacy 19 columns (buildMovementsExportSheet_); value / revenue only for trip finance (owner decision 2026-11-11 (5))
+    columns: function (ctx) {
+      var fin = !!(ctx && ctx.finance);
+      var cols = [
+        { key: 'client_name', label: lt('c_client'), type: 'text', width: 24, value: function (x) { return x.client_name; } },
+        { key: 'port_name', label: lt('c_port'), type: 'text', width: 20, value: portName },
+        { key: 'driver_name', label: lt('c_driver'), type: 'text', width: 18, value: function (x) { return x.driver_name; } },
+        { key: 'driver_phone', label: lt('c_driver_phone'), type: 'text', ltr: true, width: 14, value: function (x) { return x.driver_phone; } },
+        { key: 'truck_plate', label: lt('c_truck'), type: 'text', ltr: true, width: 12, value: function (x) { return x.truck_plate; } },
+        { key: 'container_no', label: lt('c_container_no'), type: 'text', ltr: true, width: 15, value: function (x) { return x.container_no; },
+          cell: function (x) { return x.transaction_id ? el('span', { class: 'lrpt-two' }, [x.container_no ? el('bdi', { dir: 'ltr', class: 'cell-main', text: x.container_no }) : NONE, txLinkCell(x.transaction_id, x.transaction_ref)]) : (x.container_no ? el('bdi', { dir: 'ltr', text: x.container_no }) : NONE); } },
+        { key: 'declaration_no', label: lt('c_declaration_no'), type: 'text', ltr: true, width: 16, value: function (x) { return x.declaration_no; } },
+        { key: 'bl_number', label: lt('c_bl_number'), type: 'text', ltr: true, width: 18, value: function (x) { return x.bl_number; } },
+        { key: 'appointment_at', label: lt('c_appointment_at'), type: 'datetime', value: function (x) { return x.appointment_at || null; } },
+        { key: 'destination', label: lt('c_destination'), type: 'text', width: 18, value: function (x) { return x.destination; } }
+      ];
+      if (fin) cols.push(
+        { key: 'cost_amount', label: lt('c_transport_value'), type: 'money', value: function (x) { return x.cost_amount == null ? null : +x.cost_amount; } },
+        { key: 'sell_amount', label: lt('c_revenue'), type: 'money', value: function (x) { return x.sell_amount == null ? null : +x.sell_amount; } });
+      cols.push(
+        { key: 'return_location', label: lt('c_return_location'), type: 'text', width: 18, value: function (x) { return x.return_location; } },
+        { key: 'return_deadline', label: lt('c_return_deadline'), type: 'date', value: function (x) { return x.return_deadline || null; } },
+        { key: 'returned_at', label: lt('c_returned_at'), type: 'datetime', value: function (x) { return x.returned_at || null; } },
+        { key: 'return_status', label: lt('c_return_status'), type: 'text', width: 16, value: function (x) { return x.return_status ? lab('container_return_status', x.return_status, ctxApi) : ''; },
+          cell: function (x) { return x.return_status ? el('span', null, [badge('container_return_status', x.return_status, ctxApi), x.overdue ? el('span', { class: 'badge badge-danger lrpt-late', text: t('days_late', { n: fmtNum(x.days_overdue || 0, 0) }) }) : null]) : NONE; } },
+        { key: 'movement_status', label: lt('c_movement_status'), type: 'text', width: 14, value: function (x) { return x.movement_status ? lab('movement_status', x.movement_status, ctxApi) : ''; },
+          cell: function (x) { var u = U(); var tone = { delivered: 'success', cancelled: 'neutral', incomplete: 'warning', registered: 'info' }[x.movement_status] || 'neutral'; return x.movement_status ? (u ? u.pill(tone, lab('movement_status', x.movement_status, ctxApi)) : lab('movement_status', x.movement_status, ctxApi)) : NONE; } },
+        { key: 'appointment_no', label: lt('c_appointment_no'), type: 'text', ltr: true, width: 14, value: function (x) { return x.appointment_no; } },
+        { key: 'notes', label: lt('c_notes'), type: 'text', width: 30, value: function (x) { return x.notes; } });
+      return cols;
+    },
+    totalsRows: function (d, ctx) {
+      var tt = (d && d.totals) || {};
+      var out = [{ client_name: totalLabel(tt.count != null ? tt.count : d && d.total) }];
+      if (ctx && ctx.finance) {
+        var tv = tt.transport_value || {}, rv = tt.revenue || {}, curs = {};
+        curKeys(tv).concat(curKeys(rv)).forEach(function (c) { curs[c] = 1; });
+        Object.keys(curs).sort().forEach(function (c) {
+          out.push({ client_name: t('total_cur', { cur: c }), cost_amount: tv[c] != null ? +tv[c] : null, sell_amount: rv[c] != null ? +rv[c] : null });
+        });
+      }
+      return out;
+    },
+    verify: function (items, d, ctx) {
+      var tt = d.totals || {};
+      if (tt.count != null && +tt.count !== items.length) return 'count';
+      if (!sameCounts(tt.by_movement_status, items, 'movement_status')) return 'by_movement_status';
+      if (ctx && ctx.finance) {
+        // the server leaves cancelled movements out of the money totals (report_movements contract)
+        var live = items.filter(function (x) { return x.movement_status !== 'cancelled'; });
+        if (!sameMinorMap(tt.transport_value, money2(live, 'cost_amount', 'cost_currency'))) return 'transport_value';
+        if (!sameMinorMap(tt.revenue, money2(live, 'sell_amount', 'sell_currency'))) return 'revenue';
+      }
+      return null;
+    },
+    criteria: function (f, ctx) { return criteriaFrom(f, MV_FILTERS, ctx); }
+  };
+  var PAY_FILTERS = {
+    branch_id: MV_FILTERS.branch_id, client_id: MV_FILTERS.client_id, client_q: MV_FILTERS.client_q,
+    service_code: { label: function () { return lt('f_service'); } },
+    funding_source: { label: function () { return lt('f_funding_source'); }, fmt: function (v) { return [].concat(v).map(function (c) { return famLab('pay_funding_source', 'pay', 'source', c); }).join('، '); } },
+    method: { label: function () { return lt('f_method'); }, fmt: function (v) { return [].concat(v).map(function (c) { return famLab('pay_method', 'pay', 'method', c); }).join('، '); } },
+    review_status: { label: function () { return lt('f_review_status'); }, fmt: function (v) { return [].concat(v).map(function (c) { return famLab('pay_review_status', 'pay', 'review', c); }).join('، '); } },
+    movement_type: { label: function () { return lt('f_movement_type'); }, fmt: function (v) { return [].concat(v).map(function (c) { return famLab('pay_movement_type', 'pay', 'mt', c); }).join('، '); } },
+    status: { label: function () { return lt('f_pay_status'); }, fmt: function (v) { return v === 'all' ? t('all') : famLab('pay_status', 'pay', 'status', v); } },
+    date_field: { label: function () { return t('f_date_field'); }, fmt: function (v) { return famLab('payment_date_field', 'lrpt', 'payment_date_field', v); } },
+    from: MV_FILTERS.from, to: MV_FILTERS.to, q: MV_FILTERS.q,
+    sort: { label: function () { return t('f_sort'); }, fmt: function (v) { return lt('sort_' + v); } }
+  };
+  DEFS.payments = {
+    report: 'payments', method: 'reportPayments', pageSize: 500, paged: true, seq: true, rowId: function (x) { return x.id; },
+    title: function () { return lt('r_payments'); },
+    items: function (d) { return d && Array.isArray(d.items) ? d.items : []; },
+    columns: function () {
+      return [
+        { key: 'ref', label: lt('c_pay_ref'), type: 'text', ltr: true, width: 16, value: function (x) { return x.ref; },
+          cell: function (x) { return x.id && UUID_RE.test(x.id) ? el('a', { class: 'ops-ref', href: '#payments/' + x.id }, el('bdi', { dir: 'ltr', text: x.ref || String(x.id).slice(0, 8) })) : (x.ref || NONE); } },
+        { key: 'paid_at', label: lt('c_paid_at'), type: 'date', value: function (x) { return x.paid_at || null; } },
+        { key: 'client_names', label: lt('c_client'), type: 'text', width: 24, value: function (x) { return joinList(x.client_names); } },
+        { key: 'transactions', label: lt('c_tx_refs'), type: 'text', ltr: true, width: 18, value: function (x) { return joinList((x.transactions || []).map(function (r) { return r && r.ref; })); },
+          cell: function (x) { var l = (x.transactions || []).filter(function (r) { return r && r.id; }); return l.length ? el('span', { class: 'lrpt-refs' }, l.slice(0, 5).map(function (r) { return txLinkCell(r.id, r.ref); })) : NONE; } },
+        { key: 'declaration_nos', label: lt('c_declaration_no'), type: 'text', ltr: true, width: 16, value: function (x) { return joinList(x.declaration_nos); } },
+        { key: 'bl_numbers', label: lt('c_bl_number'), type: 'text', ltr: true, width: 16, value: function (x) { return joinList(x.bl_numbers); } },
+        { key: 'service', label: lt('c_service'), type: 'text', width: 22, value: function (x) { return (isEn() && x.service_name_en) || x.service_name_ar || x.service_code || ''; } },
+        { key: 'movement_type', label: lt('c_movement_type'), type: 'text', width: 18, value: function (x) { return x.movement_type ? famLab('pay_movement_type', 'pay', 'mt', x.movement_type) : ''; } },
+        { key: 'funding_source', label: lt('c_funding_source'), type: 'text', width: 18, value: function (x) { return x.funding_source ? famLab('pay_funding_source', 'pay', 'source', x.funding_source) : ''; } },
+        { key: 'method', label: lt('c_method'), type: 'text', width: 14, value: function (x) { return x.method ? famLab('pay_method', 'pay', 'method', x.method) : ''; } },
+        { key: 'beneficiary_name', label: lt('c_beneficiary'), type: 'text', width: 20, value: function (x) { return x.beneficiary_name; } },
+        // legacy «كشف السدادات»: رقم السداد · المرجع البنكي · رقم الإيصال / العملية are three separate columns
+        { key: 'sadad_number', label: lt('c_sadad_no'), type: 'text', ltr: true, width: 16, value: function (x) { return x.sadad_number || ''; } },
+        { key: 'bank_reference', label: lt('c_bank_reference'), type: 'text', ltr: true, width: 16, value: function (x) { return x.bank_reference || ''; } },
+        { key: 'receipt_no', label: lt('c_receipt_no'), type: 'text', ltr: true, width: 16, value: function (x) { return joinList([x.receipt_no, x.claim_no].filter(function (v, i, a) { return v && a.indexOf(v) === i; })); } },
+        { key: 'expected_amount', label: lt('c_expected'), type: 'money', value: function (x) { return x.expected_amount == null ? null : +x.expected_amount; } },
+        { key: 'paid_amount', label: lt('c_paid'), type: 'money', value: function (x) { return x.paid_amount == null ? null : +x.paid_amount; } },
+        { key: 'difference', label: lt('c_difference'), type: 'money', value: function (x) { return x.difference == null ? null : +x.difference; } },
+        { key: 'currency', label: t('c_currency'), type: 'text', ltr: true, width: 8, value: function (x) { return x.currency || ''; } },
+        { key: 'review_status', label: lt('c_review_status'), type: 'text', width: 14, value: function (x) { return x.review_status ? famLab('pay_review_status', 'pay', 'review', x.review_status) : ''; },
+          cell: function (x) { var u = U(), tone = { approved: 'success', pending: 'warning', rejected: 'danger', draft: 'neutral' }[x.review_status] || 'neutral'; var tx = x.review_status ? famLab('pay_review_status', 'pay', 'review', x.review_status) : NONE; return u && x.review_status ? u.pill(tone, tx) : tx; } },
+        { key: 'status', label: lt('c_pay_status'), type: 'text', width: 10, value: function (x) { return x.status ? famLab('pay_status', 'pay', 'status', x.status) : ''; } },
+        { key: 'created_by_name', label: lt('c_created_by'), type: 'text', width: 16, value: function (x) { return x.created_by_name; } }
+      ];
+    },
+    totalsRows: function (d) {
+      var tt = (d && d.totals) || {}, paid = tt.paid || {}, exp = tt.expected || {}, dif = tt.difference || {}, curs = {};
+      curKeys(paid).concat(curKeys(exp)).forEach(function (c) { curs[c] = 1; });
+      var out = [{ ref: totalLabel(tt.count != null ? tt.count : d && d.total) }];
+      Object.keys(curs).sort().forEach(function (c) {
+        out.push({ ref: t('total_cur', { cur: c }), currency: c, paid_amount: paid[c] != null ? +paid[c] : null, expected_amount: exp[c] != null ? +exp[c] : null, difference: dif[c] != null ? +dif[c] : null });
+      });
+      return out;
+    },
+    verify: function (items, d) {
+      var tt = d.totals || {};
+      if (tt.count != null && +tt.count !== items.length) return 'count';
+      if (!sameCounts(tt.by_review_status, items, 'review_status')) return 'by_review_status';
+      if (!sameMinorMap(tt.paid, money2(items, 'paid_amount', 'currency'))) return 'paid';
+      return null;
+    },
+    criteria: function (f, ctx) { return criteriaFrom(f, PAY_FILTERS, ctx); }
+  };
+  // transactions follow-up (legacy buildTransactionsExportSheet_): the 14 columns, the attention tone on the status cell,
+  // exactly the filtered rows (server filters + the screen's column filters); Daftra only for finance readers
+  DEFS.tx_followup = {
+    report: 'tx_followup', method: 'reportTransactions', pageSize: 500, paged: true, seq: true, rowId: function (x) { return x.id; },
+    title: function () { return lt('r_tx_followup'); },
+    items: function (d) { return d && Array.isArray(d.items) ? d.items : []; },
+    columns: function (ctx) {
+      var cols = [
+        { key: 'seq', label: lt('c_seq'), type: 'int', width: 5, value: function (x) { return x.__seq == null ? null : x.__seq; } },
+        { key: 'ref', label: lt('c_ref'), type: 'text', ltr: true, width: 12, value: function (x) { return x.ref; } },
+        { key: 'client', label: lt('c_importer'), type: 'text', width: 28, value: clientName },
+        { key: 'declaration_no', label: lt('c_declaration_no'), type: 'text', ltr: true, width: 14, value: function (x) { return x.declaration_no; } },
+        { key: 'declaration_date', label: lt('c_declaration_date'), type: 'date', value: function (x) { return x.declaration_date || null; } },
+        { key: 'bl_number', label: lt('c_bl_number'), type: 'text', ltr: true, width: 20, value: function (x) { return x.bl_number; } },
+        { key: 'unit_count', label: lt('c_unit_count'), type: 'int', value: function (x) { var n = x.unit_count != null ? x.unit_count : x.container_count; return n == null ? null : +n; } },
+        { key: 'unit', label: lt('c_unit'), type: 'text', width: 18, value: unitText },
+        { key: 'port', label: lt('c_port'), type: 'text', width: 18, value: function (x) { return portName(x) || x.port_of_discharge || ''; } },
+        { key: 'operator_name', label: lt('c_operator'), type: 'text', width: 14, value: function (x) { return x.operator_name; } },
+        { key: 'agent_name', label: lt('c_agent'), type: 'text', width: 16, value: function (x) { return x.agent_name || x.shipping_line; } },
+        { key: 'vessel', label: lt('c_vessel'), type: 'text', width: 16, value: function (x) { return x.vessel; } },
+        { key: 'status', label: lt('c_tx_status'), type: 'text', width: 22,
+          value: function (x) {
+            var parts = [x.cancelled_at ? lab('transaction_state', 'cancelled', ctxApi) : lab('operational_status', x.operational_status, ctxApi)];
+            if (x.transaction_type === 're_export') parts.push(lab('transaction_type', 're_export', ctxApi));
+            var a = attentionText(x.attention); if (a) parts.push(a);
+            return parts.join(' — ');
+          },
+          tone: function (x) { return attentionTone(x.attention); } }
+      ];
+      if (ctx && ctx.finRead) cols.push({ key: 'daftra', label: lt('c_daftra'), type: 'text', width: 18, value: daftraText });
+      return cols;
+    },
+    totalsRows: function (d) {
+      var tt = (d && d.totals) || {}, a = tt.attention || {};
+      return [{ ref: totalLabel(tt.count != null ? tt.count : d && d.total), status: lt('att_totals', { c: fmtNum(a.critical || 0, 0), w: fmtNum(a.warning || 0, 0) }) }];
+    },
+    verify: function (items, d) {
+      var tt = d.totals || {}, a = tt.attention || null;
+      if (tt.count != null && +tt.count !== items.length) return 'count';
+      if (a && a.critical != null && +a.critical !== items.filter(function (x) { return x.attention && x.attention.level === 'critical'; }).length) return 'attention';
+      return null;
+    },
+    criteria: function (f, ctx) { return criteriaFrom(f, Object.assign(txFilterLabels(), {
+      attention: { label: function () { return lt('f_attention'); }, fmt: function (v) { return lt('att_filter_' + v); } },
+      daftra_state: { label: function () { return lt('f_daftra_state'); }, fmt: function (v) { return [].concat(v).map(function (c) { return lt('dft_state_' + c); }).join('، '); } },
+      declaration_status: { label: function () { return lt('f_declaration_status'); }, fmt: function (v) { return [].concat(v).map(function (c) { return lab('declaration_status', c, ctxApi); }).join('، '); } },
+      vessel: { label: function () { return lt('f_vessel'); } }, operator_q: { label: function () { return lt('f_operator_q'); } }, agent_q: { label: function () { return lt('f_agent_q'); } },
+      client_code: { label: function () { return lt('f_client_code'); } },
+      client_category: { label: function () { return lt('f_client_category'); }, fmt: function (v) { return lt('cat_' + v); } },
+      port_code: MV_FILTERS.port_code,
+      containers_min: { label: function () { return lt('f_containers_min'); } }, containers_max: { label: function () { return lt('f_containers_max'); } },
+      cargo_unit_type: { label: function () { return lt('f_unit'); }, fmt: function (v) { return lab('cargo_unit_type', v, ctxApi); } },
+      transaction_type: { label: function () { return lt('f_tx_type'); }, fmt: function (v) { return lab('transaction_type', v, ctxApi); } },
+      employee_id: { label: function () { return lt('f_employee'); }, fmt: function (v) { return ctxApi && typeof ctxApi.who === 'function' ? ctxApi.who(v) : v; } }
+    }), ctx); }
+  };
   function objMap(tb, k) { var o = {}; Object.keys(tb || {}).forEach(function (c) { o[c] = tb[c] ? tb[c][k] : 0; }); return o; }
   function costKeyLabel(g, x) {
     var own = isEn() ? (x.label_en || x.label_ar) : (x.label_ar || x.label_en);
@@ -917,7 +1204,10 @@
       reportTable: reportTable, pager: pager, exportBar: exportBar, field: field, input: input, select: selectEl, checks: checks, checkedValues: checkedValues,
       branchOptions: branchOptions, branchName: branchName, clientName: clientName, badge: badge, txLinkCell: txLinkCell,
       defs: DEFS, STAGES: STAGES, RETURN_STATUSES: RETURN_STATUSES, OPEN_RETURNS: OPEN_RETURNS, CONTAINER_STATES: CONTAINER_STATES,
-      TRIP_STATUSES: TRIP_STATUSES, LEVELS: LEVELS, GROUPS: GROUPS, CURRENCIES: CURRENCIES, UUID_RE: UUID_RE, CAP_FILE: CAP_FILE, CAP_PRINT: CAP_PRINT
+      TRIP_STATUSES: TRIP_STATUSES, LEVELS: LEVELS, GROUPS: GROUPS, CURRENCIES: CURRENCIES, UUID_RE: UUID_RE, CAP_FILE: CAP_FILE, CAP_PRINT: CAP_PRINT,
+      // legacy step 8
+      lt: lt, famLab: famLab, attentionText: attentionText, attentionTone: attentionTone, daftraText: daftraText, unitText: unitText, ctrNo: ctrNo, portName: portName,
+      joinList: joinList, criteriaFrom: criteriaFrom, txFilterLabels: txFilterLabels
     };
   }
 

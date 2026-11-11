@@ -342,7 +342,8 @@ async function platformSweep(tables) {
   }
   await check(`platform admin: SELECT on every tenant table (${tables.length}) → 0 rows / permission denied`, () => seen.length === 0 || seen.join(', '));
   const fns = (await listRpcs()).filter(f => !PUBLIC_BY_DESIGN[f.proname] && !/^platform_/.test(f.proname));
-  const OWN_CONTEXT = ['my_context'];
+  // legacy reports (20261124000100): otp_session_check describes only the caller's own session (amr / aal / memberships), no tenant row
+  const OWN_CONTEXT = ['my_context', 'otp_session_check'];
   const bad = [];
   let n = 0;
   for (const f of fns) {

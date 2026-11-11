@@ -161,7 +161,10 @@
     // G6a reports & advanced search (assets/js/rpt/*.js views, allow 'staff')
     { id: 'insight', key: 'rpt.nav_group', items: [
       { id: 'search', key: 'rpt.nav_search', href: 'admin.html#search', icon: 'search', allow: R.staff },
-      { id: 'reports', key: 'rpt.nav_reports', href: 'admin.html#reports', icon: 'report', allow: R.staff }
+      { id: 'reports', key: 'rpt.nav_reports', href: 'admin.html#reports', icon: 'report', allow: R.staff },
+      // legacy step 8 (assets/js/rpt/register.js, fasah-recon.js)
+      { id: 'register', key: 'lrpt.nav_register', href: 'admin.html#register', icon: 'layers', allow: R.staff },
+      { id: 'fasah_recon', key: 'lrpt.nav_fasah_recon', href: 'admin.html#fasah_recon', icon: 'listCheck', allow: R.staff }
     ] },
     // G6b messaging (assets/js/msg/*.js views, allow 'msgRead'). The G2 contact-form inbox ('messages') stays in 'work'.
     // badge 'inbox' = unassigned + link-review threads (one listMsgThreads count read; hidden when it fails)
@@ -189,7 +192,11 @@
       { id: 'branches', href: 'admin.html#branches', icon: 'branch', allow: R.orgAdmin },
       { id: 'members', href: 'admin.html#members', icon: 'userPlus', allow: R.membersRead },
       { id: 'requirements', key: 'ops.nav_requirements', href: 'admin.html#requirements', icon: 'listCheck', allow: R.orgAdmin },
+      // legacy step 8: aging rules + e-mail code switch (rpt/rules.js, read for staff, edited by the owner) and the
+      // operations log with the field diff (rpt/audit-diff.js, admin + supervisor)
+      { id: 'attention_rules', key: 'lrpt.nav_rules', href: 'admin.html#attention_rules', icon: 'clock', allow: R.staff },
       { id: 'audit', href: 'admin.html#audit', icon: 'shield', allow: R.auditRead },
+      { id: 'changes', key: 'lrpt.nav_changes', href: 'admin.html#changes', icon: 'history', allow: R.auditRead },
       { id: 'errors', href: 'admin.html#errors', icon: 'alert', allow: R.orgAdmin }
     ] },
     { id: 'platform', label: 'grp_platform', items: [
@@ -219,6 +226,7 @@
       'bill.nav_billing': 'الفوترة ودفترة', 'bill.nav_daftra': 'إعداد دفترة',
       'rpt.nav_group': 'التقارير والبحث', 'rpt.nav_search': 'البحث المتقدم', 'rpt.nav_reports': 'التقارير',
       'rpt.cmdk_advanced': 'بحث متقدم عن «{q}»…',
+      'lrpt.nav_register': 'سجل المعاملات والمتابعة', 'lrpt.nav_fasah_recon': 'المطابقة الشهرية مع فسح', 'lrpt.nav_rules': 'قواعد المتابعة', 'lrpt.nav_changes': 'سجل العمليات',
       'msg.nav_group': 'المراسلات', 'msg.nav_inbox': 'صندوق المراسلات', 'msg.nav_contacts': 'جهات الاتصال',
       'msg.nav_templates': 'القوالب والتعليمات', 'msg.nav_channels': 'القنوات', 'msg.nav_inbox_badge': 'محادثات غير مسندة أو تحتاج مراجعة ربط: {n}',
       'app.grp_support': 'المساعدة', 'app.nav_help': 'دليل الاستخدام' },
@@ -230,6 +238,7 @@
       'bill.nav_billing': 'Billing & Daftra', 'bill.nav_daftra': 'Daftra settings',
       'rpt.nav_group': 'Reports & search', 'rpt.nav_search': 'Advanced search', 'rpt.nav_reports': 'Reports',
       'rpt.cmdk_advanced': 'Advanced search for "{q}"…',
+      'lrpt.nav_register': 'Transactions register', 'lrpt.nav_fasah_recon': 'Monthly Fasah reconciliation', 'lrpt.nav_rules': 'Follow-up rules', 'lrpt.nav_changes': 'Operations log',
       'msg.nav_group': 'Communications', 'msg.nav_inbox': 'Inbox', 'msg.nav_contacts': 'Contacts',
       'msg.nav_templates': 'Templates & instructions', 'msg.nav_channels': 'Channels', 'msg.nav_inbox_badge': 'Unassigned or link-review conversations: {n}',
       'app.grp_support': 'Help', 'app.nav_help': 'User guide' }
@@ -518,6 +527,21 @@
     return call(function () { return api.getSession(); }).then(function (s) {
       if (s.error || !s.data) { S.status = s.error ? 'error' : 'signedout'; S.ctx = null; S.session = null; S.roles = []; return null; }
       S.session = s.data;
+      // legacy step 8: an e-mail code session is allowed only when the platform switch and every org of the user allow it
+      // (supa.js otpGate → otp_session_check, fails closed); otherwise it is signed out here, on every app page
+      var gateP = typeof api.otpGate === 'function' && PAGE !== 'login' ? call(function () { return api.otpGate(); }) : Promise.resolve(null);
+      return gateP.then(function (g) {
+        var gd = g && g.data;
+        if (gd && gd.allowed === false) {
+          S.status = 'signedout'; S.ctx = null; S.session = null; S.roles = [];
+          return call(function () { return api.signOut(); }).then(function () {
+            try { location.replace('login.html?otp=' + encodeURIComponent(String(gd.reason || 'blocked')).slice(0, 40) + '#staff'); } catch (e) { /* the page gates stay */ }
+            return null;
+          });
+        }
+        return loadCtx();
+      });
+      function loadCtx() {
       return call(function () { return api.myContext(force); }).then(function (c) {
         if (c.error || !c.data) {
           S.status = c.error && c.error.code === 'MRS_AUTH_REQUIRED' ? 'signedout' : 'error';
@@ -547,6 +571,7 @@
           return S.ctx;
         });
       });
+      }
     });
   }
 
@@ -1245,6 +1270,123 @@
     }, function () { S.status = 'error'; afterContext(null); return null; });
   }
 
+  /* ------------------------------------------------------------------
+     Legacy step 8 — progress overlay with a learned ETA, optional response-time badge, technical errors in Arabic
+     (legacy Index.html OPERATION_PROGRESS / storeOperationDuration / recordResponseTime / translateTechnicalMessage).
+       MarsaShell.progress.track(op, promise, {label, cancellable = true, delay = 700}) → Promise
+           resolves with the promise's value; the overlay appears only when the work takes longer than `delay`;
+           «إلغاء» rejects with {cancelled: true, code: 'MRS_CANCELLED'} (the page stops waiting — used for READ-ONLY work
+           only: a report, a reconciliation; the server may still finish the request). The duration (when not cancelled)
+           is learned per op (moving average in localStorage 'marsa_op_times', try/catch; nothing personal is stored).
+       MarsaShell.progress.eta(op) → ms | null · .record(op, ms) · .active() → the open overlay or null
+       MarsaShell.responseBadge(on?) → on/off of the per-device badge (localStorage 'marsa_rt_badge' = '1'; OFF by default)
+       MarsaShell.techText(err | text) → an Arabic / English sentence for network, timeout, auth-expiry and server errors
+     ------------------------------------------------------------------ */
+  var PROG_KEY = 'marsa_op_times', RT_KEY = 'marsa_rt_badge';
+  var PROG_DICT = {
+    ar: { p_working: 'جارٍ التنفيذ…', p_eta: 'المدة المتوقعة نحو {s} ث', p_elapsed: 'مضى {s} ث', p_cancel: 'إلغاء', p_cancelled: 'أُلغي الانتظار. قد يُكمل الخادم الطلب.',
+      p_first: 'أول مرة لهذه العملية — لا توجد مدة متوقعة بعد.', rt_label: 'زمن الاستجابة', rt_value: '{s} ث', rt_title: 'آخر عملية «{op}»: {s} ثانية',
+      tech_network: 'تعذّر الاتصال بالخادم. تحقق من الإنترنت ثم أعد المحاولة.', tech_timeout: 'انتهت مهلة الطلب دون رد. أعد المحاولة بعد قليل.',
+      tech_auth: 'انتهت الجلسة. سجّل الدخول مرة أخرى.', tech_server: 'الخادم غير متاح مؤقتًا. أعد المحاولة بعد قليل.', tech_rate: 'طلبات كثيرة خلال وقت قصير. انتظر قليلًا ثم أعد المحاولة.',
+      tech_cancelled: 'أُلغيت العملية.', tech_unknown: 'حدث خطأ غير متوقع. أعد المحاولة، وإن تكرر فأبلغ مدير النظام.' },
+    en: { p_working: 'Working…', p_eta: 'Expected about {s} s', p_elapsed: '{s} s elapsed', p_cancel: 'Cancel', p_cancelled: 'Stopped waiting. The server may still finish the request.',
+      p_first: 'First run of this operation — no expected time yet.', rt_label: 'Response time', rt_value: '{s} s', rt_title: 'Last operation «{op}»: {s} seconds',
+      tech_network: 'The server could not be reached. Check the connection and try again.', tech_timeout: 'The request timed out. Try again shortly.',
+      tech_auth: 'The session ended. Please sign in again.', tech_server: 'The server is temporarily unavailable. Try again shortly.', tech_rate: 'Too many requests in a short time. Wait a moment and try again.',
+      tech_cancelled: 'The operation was cancelled.', tech_unknown: 'Something went wrong. Try again; if it repeats, tell the administrator.' }
+  };
+  function pt(k, vars) {
+    var key = 'lrpt.' + k;
+    if (I18N && typeof I18N.t === 'function') { var s0 = I18N.t(key, vars); if (s0 != null && s0 !== key) return s0; }
+    var d = (PROG_DICT[lang()] || {})[k]; if (d == null) d = PROG_DICT.ar[k];
+    return interp(d == null ? k : d, vars);
+  }
+  function opKey(op) { return String(op || 'op').replace(/[^a-z0-9_:.-]/gi, '').slice(0, 60) || 'op'; }
+  function readTimes() { try { var o = JSON.parse(localStorage.getItem(PROG_KEY) || '{}'); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; } }
+  function progEta(op) { var x = readTimes()[opKey(op)]; return x && isFinite(+x.avg) && +x.avg > 0 ? Math.round(+x.avg) : null; }
+  function progRecord(op, ms) {
+    ms = +ms; if (!isFinite(ms) || ms < 0) return;
+    ms = Math.max(1, ms);   // a job that finished within the same millisecond still teaches an ETA (avg 0 = unknown)
+    try {
+      var all = readTimes(), k = opKey(op), x = all[k] || { avg: 0, n: 0 }, n = Math.min((+x.n || 0) + 1, 20);
+      all[k] = { avg: Math.round(((+x.avg || 0) * (n - 1) + ms) / n), n: n };
+      var keys = Object.keys(all); if (keys.length > 60) delete all[keys[0]];
+      localStorage.setItem(PROG_KEY, JSON.stringify(all));
+    } catch (e) { /* storage blocked: nothing learned */ }
+  }
+  var progOpen = null, rtNode = null;
+  function rtOn() { try { return localStorage.getItem(RT_KEY) === '1'; } catch (e) { return false; } }
+  function responseBadge(on) {
+    if (on != null) { try { if (on) localStorage.setItem(RT_KEY, '1'); else localStorage.removeItem(RT_KEY); } catch (e) { /* this view only */ } }
+    var now = on != null ? !!on : rtOn();
+    if (!now && rtNode && rtNode.parentNode) { rtNode.parentNode.removeChild(rtNode); rtNode = null; }
+    return now;
+  }
+  function paintRt(op, ms) {
+    if (!rtOn() || !body) return;
+    if (!rtNode) { rtNode = el('div', { class: 'app-rt-badge', role: 'status', 'aria-live': 'polite' }); body.appendChild(rtNode); }
+    var sec = (Math.round(ms / 100) / 10).toFixed(1);
+    rtNode.textContent = pt('rt_label') + ': ' + pt('rt_value', { s: sec });
+    rtNode.title = pt('rt_title', { op: opKey(op), s: sec });
+    rtNode.className = 'app-rt-badge' + (ms > 5000 ? ' is-slow' : ms > 2000 ? ' is-mid' : '');
+  }
+  function progTrack(op, promise, o) {
+    o = o || {};
+    var start = Date.now(), done = false, overlay = null, timer = null, tick = null, eta = progEta(op);
+    var cancellable = o.cancellable !== false, delay = o.delay != null ? +o.delay : 700;
+    return new Promise(function (resolve, reject) {
+      function finish() { done = true; clearTimeout(timer); clearInterval(tick); if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); if (progOpen && progOpen.node === overlay) progOpen = null; }
+      function show() {
+        if (done || !body) return;
+        var bar = el('div', { class: 'app-progress-bar', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': o.label || pt('p_working') }, [el('span', { class: 'app-progress-fill' })]);
+        var info = el('p', { class: 'app-progress-info text-xs', 'aria-live': 'polite' });
+        var kids = [el('p', { class: 'app-progress-label', text: o.label || pt('p_working') }), bar, info];
+        var cancelBtn = null;
+        if (cancellable) {
+          cancelBtn = el('button', { type: 'button', class: 'btn btn-sm btn-secondary app-progress-cancel', text: pt('p_cancel') });
+          cancelBtn.addEventListener('click', function () { if (done) return; finish(); reject({ cancelled: true, code: 'MRS_CANCELLED', message: pt('p_cancelled') }); });
+          kids.push(cancelBtn);
+        }
+        overlay = el('div', { class: 'app-progress', role: 'dialog', 'aria-modal': 'false', 'aria-label': o.label || pt('p_working') }, [el('div', { class: 'app-progress-box' }, kids)]);
+        body.appendChild(overlay);
+        progOpen = { node: overlay, op: op, cancel: cancelBtn ? function () { cancelBtn.click(); } : null };
+        // keyboard / screen-reader users land on the only action; Escape cancels too
+        if (cancelBtn) { try { cancelBtn.focus(); } catch (e) { /* ignore */ } }
+        overlay.addEventListener('keydown', function (e) { if (cancelBtn && e && (e.key === 'Escape' || e.key === 'Esc')) cancelBtn.click(); });
+        function paint() {
+          var ms = Date.now() - start, fill = overlay.querySelector ? overlay.querySelector('.app-progress-fill') : null;
+          var pct = eta ? Math.min(95, Math.round(ms / eta * 100)) : null;
+          if (pct != null) { bar.setAttribute('aria-valuenow', String(pct)); if (fill && fill.style) fill.style.width = pct + '%'; }
+          else { bar.removeAttribute('aria-valuenow'); bar.classList.add('is-indeterminate'); }
+          info.textContent = pt('p_elapsed', { s: Math.round(ms / 1000) }) + ' · ' + (eta ? pt('p_eta', { s: Math.max(1, Math.round(eta / 1000)) }) : pt('p_first'));
+        }
+        paint();
+        tick = setInterval(paint, 1000);
+      }
+      timer = setTimeout(show, delay);
+      Promise.resolve(promise).then(function (v) {
+        if (done) return;
+        var ms = Date.now() - start;
+        finish(); progRecord(op, ms); paintRt(op, ms); resolve(v);
+      }, function (e) {
+        if (done) return;
+        finish(); reject(e);
+      });
+    });
+  }
+  function techText(e) {
+    var code = e && typeof e === 'object' ? String(e.code || '') : '';
+    var m = String(e && typeof e === 'object' ? (e.message || e.error_description || '') : e || '');
+    var st = e && typeof e === 'object' ? +(e.status || (e.raw && e.raw.status) || 0) : 0;
+    if (code === 'MRS_CANCELLED' || (e && e.cancelled)) return pt('tech_cancelled');
+    if (code === 'MRS_NETWORK' || /failed to fetch|networkerror|network request failed|load failed|err_internet|offline/i.test(m)) return pt('tech_network');
+    if (code === 'MRS_TIMEOUT' || /timeout|timed out|aborterror|the operation was aborted/i.test(m)) return pt('tech_timeout');
+    if (code === 'AUTH_RATE' || st === 429 || /rate limit|too many requests/i.test(m)) return pt('tech_rate');
+    if (st === 401 || /jwt expired|invalid jwt|not authenticated|refresh token/i.test(m)) return pt('tech_auth');
+    if (st >= 500 || /bad gateway|service unavailable|gateway timeout|internal server error/i.test(m)) return pt('tech_server');
+    return null;
+  }
+
   var Shell = {
     ready: ready,
     status: function () { return S.status; },
@@ -1256,6 +1398,8 @@
     orgs: function () { return orgs().map(function (o) { return { org_id: o.org_id, slug: o.slug, name_ar: o.name_ar, name_en: o.name_en, name: orgName(o) }; }); },
     switchOrg: switchOrg, user: user, signOut: signOut, signOutAll: signOutAll,
     refresh: refresh, refreshAlertBadge: function () { return refreshBadge(); },
+    progress: { track: progTrack, eta: progEta, record: progRecord, active: function () { return progOpen; } },
+    responseBadge: responseBadge, techText: function (e) { return techText(e) || pt('tech_unknown'); }, techKnown: techText,
     NAV: NAV, R: R, t: t
   };
   window.MarsaShell = Shell;
