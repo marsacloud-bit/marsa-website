@@ -299,7 +299,7 @@ async function secFile() {
     (!/set_transaction_status\s*\(/i.test(src.replace(/--.*$/gm, '').replace(/'under_billing'/g, '')) && /'bypasses_empty_return', false/.test(src)
       && /SELECT true\n\$\$/.test(src) && !/CREATE OR REPLACE FUNCTION public\.set_transaction_status/.test(src)) || 'decisions');
   // later phases may follow this file (20261122000100 legacy_pay: re-creates the conversion lists)
-  const LATER_PHASES = ['20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql'];
+  const LATER_PHASES = ['20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -1019,7 +1019,7 @@ async function secRls() {
     const all = (await q(`SELECT 'public.' || relname n FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r'`)).map(x => x.n);
     const un = all.filter(x => !t.includes(x) && !keep.includes(x) && !['public.status_labels', 'public.schema_versions', 'public.organizations',
       'public.profiles', 'public.platform_admins', 'public.plans', 'public.customs_ports', 'public.daftra_mock_accounts'].includes(x));
-    return (T.every(x => t.includes('public.' + x) && g.includes('public.' + x + ':trg_no_delete')) && g.length === 44 && t.length === 83 && un.length === 0
+    return (T.every(x => t.includes('public.' + x) && g.includes('public.' + x + ':trg_no_delete')) && g.length === 44 && t.length === 83 + 2 /* + legacy_import_rows, legacy_import_runs (20261125000100) */ && un.length === 0
       && t.indexOf('public.appointment_drafts') > t.indexOf('public.port_appointments')) || J({ g: g.length, t: t.length, un });
   });
   await check('the trail: drafts / cards / proofs are audited without the document content (reading, review, result, depot, notes)', async () => {

@@ -746,7 +746,8 @@
   }
   function opsViewList() {
     var builtIn = VIEWS.map(function (v) { return v.id; }).concat(Object.keys(DETAIL));
-    return Object.keys(OPS.views || {}).filter(function (id) { return builtIn.indexOf(id) === -1 && opsView(id); })
+    // legacy step 9: owner: true = the org OWNER only (an admin membership without a branch, as the server's app.li_is_owner)
+    return Object.keys(OPS.views || {}).filter(function (id) { return builtIn.indexOf(id) === -1 && opsView(id) && (OPS.views[id].owner !== true || isOrgAdmin()); })
       .map(function (id) { return { id: id, allow: opsRoleSet(OPS.views[id].allow), ops: OPS.views[id] }; });
   }
   function allowedViews() { return VIEWS.concat(opsViewList()).filter(function (v) { return canAny(v.allow); }); }
@@ -909,7 +910,7 @@
     'search', 'reports', 'fasah_recon',
     'inbox', 'contacts', 'templates', 'channels',
     'costs', 'payables', 'payments', 'custody', 'margins', 'demurrage', 'billing', 'daftra',
-    'org', 'branches', 'members', 'requirements', 'attention_rules', 'audit', 'changes', 'errors'];
+    'org', 'branches', 'members', 'requirements', 'attention_rules', 'audit', 'changes', 'errors', 'legacy_import'];
   function buildNav() {
     if (!nav) return;
     nav.textContent = '';

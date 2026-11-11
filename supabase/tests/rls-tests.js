@@ -306,6 +306,17 @@ async function daftraFixtures() {
   }
 }
 
+// legacy import (20261125000100): one run + one staged row per org (the owner reads them; written only by the legacy_import_* RPCs)
+async function importFixtures() {
+  for (const [org, tag] of [[A, 'a'], [B, 'b']]) {
+    const by = (await q(`SELECT user_id FROM public.memberships WHERE org_id = $1 ORDER BY created_at LIMIT 1`, [org]))[0].user_id;
+    const run = (await q(`INSERT INTO public.legacy_import_runs (org_id, ref, entities, reason, created_by) VALUES ($1, $2, ARRAY['drivers'], 'rls fixture', $3) RETURNING id`,
+      [org, 'LIR-99999' + (tag === 'a' ? '1' : '2'), by]))[0].id;
+    await q(`INSERT INTO public.legacy_import_rows (org_id, run_id, entity, row_no, raw, row_hash) VALUES ($1, $2, 'drivers', 2, '{"name":"سائق"}', $3)`,
+      [org, run, (tag === 'a' ? 'a' : 'b').repeat(64)]);
+  }
+}
+
 async function payFixtures() {
   const rpcAs = async (who, sql, params) => (await as(who, sql, params))[0].r;
   for (const [who, org, br, tx, cl, tag] of [['adminA', A, JED, TX1, CL101, 'A'], ['finB', B, B_BR, B_TX, B_CL, 'B']]) {
@@ -602,6 +613,9 @@ const TENANT_TABLES = [
   ['daftra_invoice_candidates', `SELECT id::text id FROM public.daftra_invoice_candidates WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
   ['daftra_supplier_links', `SELECT id::text id FROM public.daftra_supplier_links WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
   ['daftra_purchase_drafts', `SELECT id::text id FROM public.daftra_purchase_drafts WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
+  // legacy import (20261125000100): the owner of the org only (org-wide admin, aal2); written only by the legacy_import_* RPCs
+  ['legacy_import_runs', `SELECT id::text id FROM public.legacy_import_runs WHERE org_id = $1 LIMIT 1`, 'id::text', 'reason = reason'],
+  ['legacy_import_rows', `SELECT id::text id FROM public.legacy_import_rows WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
   ['invitations',        `SELECT id::text id FROM public.invitations WHERE org_id = $1 LIMIT 1`,        'id::text',  'email = email'],
   // G3 registry (20261103000100)
   ['parties',            `SELECT id::text id FROM public.parties WHERE org_id = $1 LIMIT 1`,            'id::text',  'name_ar = name_ar'],
@@ -699,6 +713,8 @@ async function main() {
   catch (e) { fail('legacy pay fixtures', errText(e)); return finish(); }
   try { await daftraFixtures(); pass('legacy daftra fixtures: one row per org in each step-7 table'); }
   catch (e) { fail('legacy daftra fixtures', errText(e)); return finish(); }
+  try { await importFixtures(); pass('legacy import fixtures: one run + one staged row per org'); }
+  catch (e) { fail('legacy import fixtures', errText(e)); return finish(); }
 
   /* ---------------------------------------------------------------- catalog */
   section('catalog: RLS, grants, function privileges');
@@ -820,9 +836,14 @@ async function main() {
       // legacy reports (20261124000100): KPI counts, attention, movements / payments / Fasah scope readers, aging rules (owner write),
       // the e-mail code login switch (owner) + own-session check, the audit trail (admin / supervisor)
       'dash_tx_counts', 'tx_attention', 'report_movements', 'report_payments', 'report_fasah_scope', 'get_status_aging_rules',
-      'set_status_aging_rules', 'set_email_otp_login', 'otp_session_check', 'audit_trail'];
+      'set_status_aging_rules', 'set_email_otp_login', 'otp_session_check', 'audit_trail',
+      // legacy import (20261125000100): the owner-run staged import of the legacy sheets (dictionary, run, stage, validate, commit,
+      // void, readers, the RHK- Daftra step)
+      'legacy_import_dictionary', 'legacy_import_create_run', 'legacy_import_set_options', 'legacy_import_stage', 'legacy_import_validate',
+      'legacy_import_commit', 'legacy_import_void', 'legacy_import_get_run', 'legacy_import_list_runs', 'legacy_import_list_rows',
+      'legacy_import_skip_rows', 'legacy_import_queue_daftra', 'legacy_import_daftra_candidates'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 284) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 297) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');

@@ -137,6 +137,12 @@
       MRS_DAFTRA_PURCHASE_DISABLED: 'مسودات فواتير المشتريات للنقلات غير مفعّلة لهذه المؤسسة.',
       MRS_DAFTRA_CONFIRM_MISMATCH: 'رقم الفاتورة المُدخل للتأكيد لا يطابق رقم فاتورة دفترة المعروضة. تحقق من الرقم ثم أعد الإدخال.',
       MRS_DAFTRA_IMPORT: 'بيانات الاستيراد غير مقبولة ({f}).',
+      // legacy step 9 (20261125000100): the legacy data import
+      MRS_LI_STATE: 'لا يمكن تنفيذ هذا الإجراء في حالة دفعة الاستيراد الحالية ({f}).',
+      MRS_LI_LIMIT: 'تجاوز حدود الاستيراد ({f}): حتى 20 ملفًا بحجم 10 م.ب لكل ملف، و500 صف في كل إرسال، و50000 صف في الدفعة.',
+      MRS_LI_BUSY: 'عملية أخرى على دفعة الاستيراد هذه قيد التنفيذ. انتظر قليلًا ثم أعد المحاولة؛ لا يتكرر شيء.',
+      MRS_LI_VOID_BLOCKED: 'لا يمكن إلغاء دفعة الاستيراد: بعض ما أنشأته عُدِّل أو استُخدم بعدها. راجع القائمة المعروضة.',
+      MRS_LI_PARENT: 'الصف الأب لم يُرحَّل ({f}).',
       // G4 (docs/online/G4_SPEC.md)
       MRS_OVER_ALLOCATED: 'مجموع التوزيع يتجاوز صافي البند؛ التوزيع لا يضاعف الفاتورة (المتبقي القابل للتوزيع: {f}).',
       MRS_OVERPAID: 'المبلغ يتجاوز المتبقي من الإجمالي (المتبقي: {f}).',
@@ -345,6 +351,28 @@
     },
     // G6b: messages for a detail word under one code only ('CODE:detail'); checked before details / the code text
     codeDetails: {
+      // legacy step 9 (20261125000100): the legacy data import
+      'MRS_LI_STATE:open_run': 'توجد دفعة استيراد مفتوحة لهذه المؤسسة. أكمل ترحيلها أو ألغِها قبل فتح دفعة جديدة.',
+      'MRS_LI_STATE:draft': 'ارفع صفوف الملفات أولًا.',
+      'MRS_LI_STATE:staged': 'افحص الصفوف أولًا (لم يكتمل الفحص بعد آخر تغيير).',
+      'MRS_LI_STATE:validated': 'رحّل الدفعة أولًا.',
+      'MRS_LI_STATE:committing': 'الترحيل جارٍ؛ أكمله أولًا، ثم ألغِ الدفعة إن لزم.',
+      'MRS_LI_STATE:committed': 'الدفعة مُرحّلة ولا تُعدَّل؛ يمكن إلغاؤها فقط.',
+      'MRS_LI_STATE:voiding': 'إلغاء الدفعة جارٍ؛ أكمله بـ«تابع الإلغاء» أولًا.',
+      'MRS_LI_STATE:voided': 'دفعة الاستيراد ملغاة.',
+      'MRS_LI_LIMIT:files': 'الحد الأقصى 20 ملفًا في دفعة الاستيراد.',
+      'MRS_LI_LIMIT:file_bytes': 'حجم الملف أكبر من 10 م.ب.',
+      'MRS_LI_LIMIT:rows_per_call': 'الحد الأقصى 500 صف في كل إرسال.',
+      'MRS_LI_LIMIT:rows_per_run': 'الحد الأقصى 50000 صف في دفعة الاستيراد.',
+      'MRS_LI_LIMIT:row_bytes': 'الصف أكبر من 16 ك.ب.',
+      'MRS_LI_LIMIT:call_bytes': 'الإرسال أكبر من 2 م.ب؛ أرسل صفوفًا أقل في المرة.',
+      'MRS_INVALID:mapping_port': 'منفذ غير معتمد في الربط اليدوي ({x}).',
+      'MRS_INVALID:mapping_service_item': 'بند خدمة غير موجود في الربط اليدوي ({x}).',
+      'MRS_INVALID:mapping_client': 'العميل المختار في الربط اليدوي ليس من عملاء المؤسسة ({x}).',
+      'MRS_INVALID:mapping_branch': 'الفرع المختار في الربط اليدوي ليس من فروع المؤسسة ({x}).',
+      'MRS_INVALID:default_funding_source': 'مصدر التمويل الافتراضي غير صحيح.',
+      'MRS_INVALID:daftra_invoice_prefix': 'بادئة فواتير دفترة القديمة غير صحيحة (حروف وأرقام، مثل RHK-).',
+      'MRS_REQUIRED:confirm': 'أكّد الترحيل أولًا.',
       // legacy step 8 (20261124000100): reports, attention, aging rules, Fasah reconciliation, audit trail
       'MRS_INVALID:aging_rule': 'قاعدة التأخير غير صحيحة: الساعات أعداد صحيحة من 1 إلى 2160، وساعات التنبيه أقل من ساعات التأخير الحرج.',
       'MRS_INVALID:attention': 'فلتر المتابعة غير صحيح (الكل أو متابعة أو متأخرة).',
@@ -3891,6 +3919,121 @@
     });
   }
 
+
+  /* ------------------------------------------------------------------
+     Legacy step 9 — legacy data migration (docs/online/LEGACY_IMPORT_AR.md, 20261125000100). A one-off import of the tenant's own
+     legacy Google Sheets export (read in the browser with xlsx-lite / CSV, mapped to the field keys of legacyImportDictionary()).
+     OWNER ONLY (org-wide admin, aal2): every call is refused for anyone else. The server validates, commits in chunks (resumable,
+     idempotent), never approves or verifies anything, and voids a run only when nothing it created changed afterwards.
+     ------------------------------------------------------------------ */
+  var LI_ENTITIES = ['customers', 'aliases', 'drivers', 'transactions', 'containers', 'movements', 'payments', 'custody'];
+  function liRun(runId) { return String(runId == null ? '' : runId); }
+  // {version, entities [{entity, order, sheets[], fields [{key, required, headers[]}]}], limits, labels {li_entity, li_run_status,
+  // li_row_status, li_message: {code: {ar, en}}}, defaults}
+  function legacyImportDictionary() {
+    if (!configured) return demoOnly();
+    return rpc('legacy_import_dictionary', {});
+  }
+  // p = {branch_id?, entities[], files [{name, sha256 (hex), size, sheets[]}] ≤ 20, mapping?, options?, reason}; o = {orgId, idemKey}
+  function legacyImportCreateRun(p, o) {
+    o = o || {};
+    var x = Object.assign({}, p || {}); var org = x.orgId || o.orgId; delete x.orgId;
+    if (!x.reason || !String(x.reason).trim()) return Promise.resolve(fail('MRS_NOTE_REQUIRED', 'reason'));
+    if (Array.isArray(x.files) && x.files.length > 20) return Promise.resolve(fail('MRS_LI_LIMIT', 'files'));
+    x.reason = String(x.reason).trim();
+    return inActiveOrg(org, function (oid) {
+      return idemRpc('legacy_import_create_run', o.idemKey, function (k) { return { p_org: oid, p_payload: x, p_idem_key: k }; });
+    });
+  }
+  // p = {branch_id?, mapping? {ports|service_items|clients|branches: {legacy text: code / id}}, options? {default_funding_source,
+  // default_paying_account, default_movement_type, daftra_invoice_prefix}} — every row goes back to pending (validate again)
+  function legacyImportSetOptions(runId, p) {
+    if (!configured) return demoOnly();
+    return rpc('legacy_import_set_options', { p_run: liRun(runId), p_payload: p || {} });
+  }
+  // one chunk of one sheet: rows = [{row_no, data {field key: value}}] (≤ 500; values string / number / boolean / null);
+  // o.replace = true on the first chunk of a sheet: the rows staged before under that sheet label are removed first (a corrected file)
+  function legacyImportStage(runId, entity, sheet, rows, o) {
+    if (!configured) return demoOnly();
+    if (LI_ENTITIES.indexOf(entity) < 0) return Promise.resolve(fail('MRS_INVALID', 'entity'));
+    var list = Array.isArray(rows) ? rows : [];
+    if (list.length > 500) return Promise.resolve(fail('MRS_LI_LIMIT', 'rows_per_call'));
+    var p = { entity: entity, sheet: String(sheet || '').slice(0, 120), rows: list };
+    if (o && o.replace) p.replace = true;
+    return rpc('legacy_import_stage', { p_run: liRun(runId), p_payload: p });
+  }
+  // one validation chunk → {done, processed, run}; call again while !done
+  function legacyImportValidate(runId, o) {
+    if (!configured) return demoOnly();
+    o = o || {};
+    return rpc('legacy_import_validate', { p_run: liRun(runId), p_payload: o.limit ? { limit: Math.min(500, Math.max(1, +o.limit || 500)) } : {} });
+  }
+  // one commit chunk → {done, committed, failed, run}; the first call needs o.confirm = true; call again while !done (a retry after
+  // a timeout is safe: committed rows are never written twice)
+  function legacyImportCommit(runId, o) {
+    if (!configured) return demoOnly();
+    o = o || {};
+    var p = {};
+    if (o.limit) p.limit = Math.min(200, Math.max(1, +o.limit || 200));
+    if (o.confirm) p.confirm = true;
+    return rpc('legacy_import_commit', { p_run: liRun(runId), p_payload: p });
+  }
+  // void (reason required); o.dryRun → {blockers {total, items [{table, id, reason, label}]}} without changing anything; otherwise one
+  // chunk (o.limit ≤ 500 rows) → {done, rows, voided {table: n}, kept_containers, run}: call again while !done (status voiding)
+  function legacyImportVoid(runId, reason, o) {
+    if (!configured) return demoOnly();
+    o = o || {};
+    if (!reason || String(reason).trim().length < 3) return Promise.resolve(fail('MRS_NOTE_REQUIRED', 'reason'));
+    var p = o.dryRun ? { dry_run: true } : {};
+    if (!o.dryRun && o.limit) p.limit = Math.min(500, Math.max(1, +o.limit || 200));
+    return rpc('legacy_import_void', { p_run: liRun(runId), p_reason: String(reason).trim(), p_payload: p });
+  }
+  function legacyImportGetRun(runId) {
+    if (!configured) return demoOnly();
+    return rpc('legacy_import_get_run', { p_run: liRun(runId) });
+  }
+  // f = {orgId, limit ≤ 100, offset}
+  function legacyImportListRuns(f) {
+    f = Object.assign({}, f || {});
+    var org = f.orgId; delete f.orgId;
+    return inActiveOrg(org, function (oid) {
+      var p = {};
+      if (f.limit != null) p.limit = Math.min(100, Math.max(1, +f.limit || 50));
+      if (f.offset != null) p.offset = Math.max(0, +f.offset || 0);
+      return rpc('legacy_import_list_runs', { p_org: oid, p_filters: p });
+    });
+  }
+  // f = {entity, status (one or array), q, limit ≤ 500, offset}
+  function legacyImportListRows(runId, f) {
+    if (!configured) return demoOnly();
+    f = f || {};
+    var p = {};
+    ['entity', 'status', 'q'].forEach(function (k) { if (f[k] != null && f[k] !== '' && !(Array.isArray(f[k]) && !f[k].length)) p[k] = f[k]; });
+    if (f.limit != null) p.limit = Math.min(500, Math.max(1, +f.limit || 100));
+    if (f.offset != null) p.offset = Math.max(0, +f.offset || 0);
+    return rpc('legacy_import_list_rows', { p_run: liRun(runId), p_filters: p });
+  }
+  // the owner leaves rows out (skip = true) or takes them back (false); ≤ 500 ids; the run goes back to staged
+  function legacyImportSkipRows(runId, rowIds, skip) {
+    if (!configured) return demoOnly();
+    var ids = (Array.isArray(rowIds) ? rowIds : []).map(String);
+    if (!ids.length) return Promise.resolve(fail('MRS_REQUIRED', 'row_ids'));
+    if (ids.length > 500) return Promise.resolve(fail('MRS_LI_LIMIT', 'rows_per_call'));
+    return rpc('legacy_import_skip_rows', { p_run: liRun(runId), p_payload: { row_ids: ids, skip: !!skip } });
+  }
+  // after the commit: queue the step-7 read-only invoice lookups (RHK- numbers) + the legacy scan → {lookups_queued,
+  // lookups_deduplicated, scan, run}; o = {idemKey}
+  function legacyImportQueueDaftra(runId, o) {
+    o = o || {};
+    return idemRpc('legacy_import_queue_daftra', o.idemKey, function (k) { return { p_run: liRun(runId), p_idem_key: k }; });
+  }
+  // the Daftra invoice candidates of the run's transactions (confirm with confirmInvoiceLink / reject with rejectInvoiceCandidate)
+  function legacyImportDaftraCandidates(runId, f) {
+    if (!configured) return demoOnly();
+    f = f || {};
+    return rpc('legacy_import_daftra_candidates', { p_run: liRun(runId), p_filters: f.state ? { state: f.state } : {} });
+  }
+
   /* ------------------------------------------------------------------
      G6b — official channels, unified inbox, matching & approved replies
      (docs/online/G6B_SPEC.md "Front end → MarsaApi"). Staff RPCs only: the
@@ -4361,6 +4504,12 @@
     reportFasahScope: reportFasahScope, getStatusAgingRules: getStatusAgingRules, setStatusAgingRules: setStatusAgingRules,
     setEmailOtpLogin: setEmailOtpLogin, otpSessionCheck: otpSessionCheck, auditTrail: auditTrail, otpGate: otpGate, sessionUsedOtp: sessionUsedOtp, sessionFromOtpForm: sessionFromOtpForm,
     emailOtpEnabled: function () { return configured && cfg.emailOtpLogin === true; },
+    // legacy step 9: legacy data import (docs/online/LEGACY_IMPORT_AR.md) — owner only
+    legacyImportDictionary: legacyImportDictionary, legacyImportCreateRun: legacyImportCreateRun, legacyImportSetOptions: legacyImportSetOptions,
+    legacyImportStage: legacyImportStage, legacyImportValidate: legacyImportValidate, legacyImportCommit: legacyImportCommit,
+    legacyImportVoid: legacyImportVoid, legacyImportGetRun: legacyImportGetRun, legacyImportListRuns: legacyImportListRuns,
+    legacyImportListRows: legacyImportListRows, legacyImportSkipRows: legacyImportSkipRows, legacyImportQueueDaftra: legacyImportQueueDaftra,
+    legacyImportDaftraCandidates: legacyImportDaftraCandidates,
     // G6b channels, unified inbox, approved replies (docs/online/G6B_SPEC.md) — staff RPCs only, never the msg_* service RPCs
     getMsgSettings: getMsgSettings, saveMsgSettings: saveMsgSettings, listMsgChannels: listMsgChannels, saveMsgChannel: saveMsgChannel,
     requestMsgChannelProbe: requestMsgChannelProbe, listMsgJobs: listMsgJobs, retryMsgJob: retryMsgJob,

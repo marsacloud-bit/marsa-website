@@ -197,7 +197,9 @@
       { id: 'attention_rules', key: 'lrpt.nav_rules', href: 'admin.html#attention_rules', icon: 'clock', allow: R.staff },
       { id: 'audit', href: 'admin.html#audit', icon: 'shield', allow: R.auditRead },
       { id: 'changes', key: 'lrpt.nav_changes', href: 'admin.html#changes', icon: 'history', allow: R.auditRead },
-      { id: 'errors', href: 'admin.html#errors', icon: 'alert', allow: R.orgAdmin }
+      { id: 'errors', href: 'admin.html#errors', icon: 'alert', allow: R.orgAdmin },
+      // legacy step 9: the one-off legacy data import (assets/js/imp/legacy-import.js) — the org OWNER only (owner: admin without a branch)
+      { id: 'legacy_import', key: 'limp.nav_legacy_import', href: 'admin.html#legacy_import', icon: 'upload', allow: R.orgAdmin, owner: true }
     ] },
     { id: 'platform', label: 'grp_platform', items: [
       { id: 'platform', href: 'platform.html', icon: 'globe', platform: true }
@@ -227,6 +229,7 @@
       'rpt.nav_group': 'التقارير والبحث', 'rpt.nav_search': 'البحث المتقدم', 'rpt.nav_reports': 'التقارير',
       'rpt.cmdk_advanced': 'بحث متقدم عن «{q}»…',
       'lrpt.nav_register': 'سجل المعاملات والمتابعة', 'lrpt.nav_fasah_recon': 'المطابقة الشهرية مع فسح', 'lrpt.nav_rules': 'قواعد المتابعة', 'lrpt.nav_changes': 'سجل العمليات',
+      'limp.nav_legacy_import': 'استيراد النظام القديم',
       'msg.nav_group': 'المراسلات', 'msg.nav_inbox': 'صندوق المراسلات', 'msg.nav_contacts': 'جهات الاتصال',
       'msg.nav_templates': 'القوالب والتعليمات', 'msg.nav_channels': 'القنوات', 'msg.nav_inbox_badge': 'محادثات غير مسندة أو تحتاج مراجعة ربط: {n}',
       'app.grp_support': 'المساعدة', 'app.nav_help': 'دليل الاستخدام' },
@@ -239,6 +242,7 @@
       'rpt.nav_group': 'Reports & search', 'rpt.nav_search': 'Advanced search', 'rpt.nav_reports': 'Reports',
       'rpt.cmdk_advanced': 'Advanced search for "{q}"…',
       'lrpt.nav_register': 'Transactions register', 'lrpt.nav_fasah_recon': 'Monthly Fasah reconciliation', 'lrpt.nav_rules': 'Follow-up rules', 'lrpt.nav_changes': 'Operations log',
+      'limp.nav_legacy_import': 'Legacy import',
       'msg.nav_group': 'Communications', 'msg.nav_inbox': 'Inbox', 'msg.nav_contacts': 'Contacts',
       'msg.nav_templates': 'Templates & instructions', 'msg.nav_channels': 'Channels', 'msg.nav_inbox_badge': 'Unassigned or link-review conversations: {n}',
       'app.grp_support': 'Help', 'app.nav_help': 'User guide' }
@@ -442,8 +446,11 @@
     if (it.audiences) return !!audienceOf(it);
     if (it.platform) return isPlatform();
     if (it.client) return isClient();
+    if (it.owner && !isOwner()) return false;
     return it.allow ? canAny(it.allow) : true;
   }
+  // legacy step 9: the org owner = an admin membership of the active org without a branch (admin.js isOrgAdmin, app.li_is_owner)
+  function isOwner() { return (S.memberships || []).some(function (m) { return m && m.role === 'admin' && !m.branch_id; }); }
   function visibleNav() {
     return NAV.map(function (g) { return { id: g.id, label: g.label, key: g.key, items: g.items.filter(itemVisible) }; })
       .filter(function (g) { return g.items.length; });

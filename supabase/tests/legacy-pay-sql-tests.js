@@ -271,7 +271,7 @@ async function secFile() {
       && !/review_status = 'approved'[^;]*INSERT/.test(c) && /v_review NOT IN \('draft','pending'\)/.test(c)) || 'decisions';
   });
   // later phases may follow this file (20261123000100 legacy_daftra: re-creates the conversion lists)
-  const LATER_PHASES = ['20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql'];
+  const LATER_PHASES = ['20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -792,7 +792,8 @@ async function secLifecycle() {
     const z = await correct('acc', y.payment.id, base(t.id, { sadad_number: x.sadad_number, remove_document_ids: [y.payment.documents.find(d => d.role === 'extra').id] }), 'drop extra');
     const w = await correct('acc', z.payment.id, base(t.id, { sadad_number: x.sadad_number, keep_documents: false }), 'drop all');
     return (ev.length === 1 && ev[0].payload.before === O.id && ev[0].payload.after === C.id && ev[0].from_status === O.ref && ev[0].to_status === C.ref
-      && !JSON.stringify(ev[0].payload).includes('"90') && r === 'MRS_BAD_TRANSITION void' && y.payment.documents.length === 2 && z.payment.documents.length === 1
+      // no amount in the payload: no value equal to 90 (number or string) — a bare '"90' substring also matched random UUIDs (flaky)
+      && !/:\s*"?90(\.0+)?"?\s*[,}\]]/.test(JSON.stringify(ev[0].payload)) && r === 'MRS_BAD_TRANSITION void' && y.payment.documents.length === 2 && z.payment.documents.length === 1
       && z.payment.documents[0].role === 'payment_proof' && w.payment.documents.length === 0) || J({ ev, r });
   });
   await check('correct_payment of a shared entry: an entity invoice follows its allocation (transaction + invoice); a removed allocation with its invoice file → MRS_PAY_DOCUMENT allocation', async () => {
@@ -1031,7 +1032,7 @@ async function secRls() {
     const all = (await q(`SELECT 'public.' || relname n FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r'`)).map(x => x.n);
     const un = all.filter(x => !t.includes(x) && !keep.includes(x) && !['public.status_labels', 'public.schema_versions', 'public.organizations',
       'public.profiles', 'public.platform_admins', 'public.plans', 'public.customs_ports', 'public.daftra_mock_accounts'].includes(x));
-    return (T.every(x => t.includes('public.' + x) && g.includes('public.' + x + ':trg_no_delete')) && g.length === 44 && t.length === 83 && un.length === 0) || J({ g: g.length, t: t.length, un });
+    return (T.every(x => t.includes('public.' + x) && g.includes('public.' + x + ':trg_no_delete')) && g.length === 44 && t.length === 83 + 2 /* + legacy_import_rows, legacy_import_runs (20261125000100) */ && un.length === 0) || J({ g: g.length, t: t.length, un });
   });
   await check('the trail: the 4 tables are audited (insert / update)', async () => {
     const r = await q(`SELECT DISTINCT table_name FROM public.audit_log WHERE table_name = ANY ($1)`, [T]);

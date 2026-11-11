@@ -319,7 +319,12 @@ async function secFile() {
     const bad = (src.match(/CREATE OR REPLACE FUNCTION[\s\S]*?\$\$/g) || []).filter(f => /SECURITY DEFINER/.test(f) && !/SET search_path = ''/.test(f));
     return bad.length === 0 || bad.map(b => b.slice(0, 80)).join(' | ');
   });
-  await check('this file is the latest migration', () => migFiles()[migFiles().length - 1] === MIG || 'latest: ' + migFiles().pop());
+  // later phases may follow this file (20261125000100 legacy_import: re-creates att_reasons / alert_causes / rpt_tx_match / audit_label_of)
+  const LATER_PHASES = ['20261125000100_legacy_import.sql'];
+  await check('this file is the latest migration (or only listed later phases follow it)', () => {
+    const later = migFiles().filter(f => f > MIG);
+    return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
+  });
   await check('all_migrations.sql holds this file verbatim (appended last, in order) + a header line', () => {
     const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
     const marker = '-- ===== migrations/' + MIG + ' =====\n';
@@ -327,8 +332,9 @@ async function secFile() {
     const next = all.indexOf('\n-- ===== migrations/', i + marker.length);
     const body = all.slice(i + marker.length, next < 0 ? undefined : next);
     const order = (all.match(/^-- ===== migrations\/(\S+) =====$/gm) || []).map(l => l.split('/')[1].split(' ')[0]);
-    return (i > 0 && next < 0 && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
-      && all.slice(0, 20000).includes(MIG) && J(order) === J(migFiles())) || 'not appended verbatim / no header line / order';
+    const after = order.slice(order.indexOf(MIG) + 1);
+    return (i > 0 && after.every(f => LATER_PHASES.includes(f)) && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
+      && all.slice(0, 24000).includes(MIG) && J(order) === J(migFiles())) || 'not appended verbatim / no header line / order';
   });
   await check('docs/online/LEGACY_REPORTS_AR.md names the migration, every RPC, the error details and the decisions', () => {
     const p = path.join(ROOT, 'docs', 'online', 'LEGACY_REPORTS_AR.md');
@@ -357,10 +363,13 @@ async function secPreflight() {
       return (/LEGACY REPORTS preflight/.test(e) && v.length === 0) || e;
     } finally { await d.close(); }
   });
-  const before = await withDb(db, catalog);
+  // the catalog of a database that ends with this file (later phases re-create some of its readers)
+  const later = migFiles().filter(f => f > MIG);
+  const own = later.length ? await freshDb(later[0]) : db;
+  const before = await withDb(own, catalog);
   await check('re-run on itself: identical catalog (functions, ACLs, constraints, labels, grants)', async () => {
-    await db.exec(src);
-    const after = await catalog();
+    await withDb(own, () => db.exec(src));
+    const after = await withDb(own, catalog);
     const keys = Object.keys(before).filter(k => J(before[k]) !== J(after[k]));
     return keys.length === 0 || 'changed: ' + keys.join(', ');
   });
@@ -386,11 +395,13 @@ async function secPreflight() {
       && ['search', 'fasah_sheet', 'movements', 'payments', 'tx_followup', 'fasah_recon'].every(x => r.e.includes(x))) || J(r);
   });
   await check('dictionaries: new labels, internal only (client_visible false), Arabic + English filled', async () => {
+    // (the two audit labels of the legacy import, 20261125000100, are left out: counted by its own suite)
     const r = await one(`SELECT count(*)::int n, count(*) FILTER (WHERE client_visible)::int v, count(*) FILTER (WHERE label_ar = '' OR label_en IS NULL)::int e
-                           FROM public.status_labels WHERE domain IN ('attention_level','attention_reason','tx_daftra_state','movement_date_field',
+                           FROM public.status_labels WHERE NOT (domain = 'audit_label' AND code LIKE 'legacy_import.%') AND (domain IN ('attention_level',
+                             'attention_reason','tx_daftra_state','movement_date_field',
                              'return_scope','payment_date_field','fasah_match_status','audit_label','audit_event')
                               OR (domain = 'alert_kind' AND code IN ('status_stale','appointment_not_updated'))
-                              OR (domain = 'report_kind' AND code IN ('movements','payments','tx_followup','fasah_recon'))`);
+                              OR (domain = 'report_kind' AND code IN ('movements','payments','tx_followup','fasah_recon')))`);
     return (r.n === 2 + 3 + 4 + 6 + 3 + 2 + 7 + 31 + 18 + 2 + 4 && r.v === 0 && r.e === 0) || J(r);
   });
 }

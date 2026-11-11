@@ -343,7 +343,8 @@ async function platformSweep(tables) {
   await check(`platform admin: SELECT on every tenant table (${tables.length}) → 0 rows / permission denied`, () => seen.length === 0 || seen.join(', '));
   const fns = (await listRpcs()).filter(f => !PUBLIC_BY_DESIGN[f.proname] && !/^platform_/.test(f.proname));
   // legacy reports (20261124000100): otp_session_check describes only the caller's own session (amr / aal / memberships), no tenant row
-  const OWN_CONTEXT = ['my_context', 'otp_session_check'];
+  // legacy import (20261125000100): legacy_import_dictionary returns the static header dictionary + labels (no tenant row)
+  const OWN_CONTEXT = ['my_context', 'otp_session_check', 'legacy_import_dictionary'];
   const bad = [];
   let n = 0;
   for (const f of fns) {
@@ -686,7 +687,13 @@ const NOT_EXERCISED = ['accept_invitation', 'ack_alert', 'import_commit', 'porta
   // roles, client, anon) is asserted by legacy-daftra-sql-tests.js and rls-tests.js
   'apply_daftra_client_import', 'apply_daftra_client_import[min]', 'confirm_invoice_link', 'confirm_invoice_link[min]', 'get_daftra_run',
   'list_daftra_client_import', 'list_daftra_client_import[min]', 'reject_invoice_candidate', 'request_daftra_purchase_draft', 'resolve_daftra_review',
-  'unlink_daftra_supplier'];
+  'unlink_daftra_supplier',
+  // legacy import (20261125000100): they take a run id (the builder sends another id) and are for the owner only; isolation of the
+  // runs and staged rows (org, other roles, client, anon, aal1) is asserted by legacy-import-sql-tests.js and rls-tests.js
+  'legacy_import_commit', 'legacy_import_commit[min]', 'legacy_import_daftra_candidates', 'legacy_import_daftra_candidates[min]',
+  'legacy_import_get_run', 'legacy_import_list_rows', 'legacy_import_list_rows[min]', 'legacy_import_queue_daftra', 'legacy_import_set_options',
+  'legacy_import_set_options[min]', 'legacy_import_skip_rows', 'legacy_import_skip_rows[min]', 'legacy_import_stage', 'legacy_import_stage[min]',
+  'legacy_import_validate', 'legacy_import_validate[min]', 'legacy_import_void', 'legacy_import_void[min]'];
 async function positiveControl() {
   section('8. positive control: the §1 argument builder with B\'s own staff');
   const fns = (await listRpcs()).filter(f => !PUBLIC_BY_DESIGN[f.proname] && !/^platform_/.test(f.proname));

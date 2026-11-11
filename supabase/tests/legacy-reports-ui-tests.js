@@ -224,8 +224,8 @@ check('admin.html: lrpt.css after rpt.css / dash.css; i18n/lrpt.js after i18n.js
     && order(ADMIN_HTML, ['assets/js/i18n.js', 'assets/i18n/rpt.js', 'assets/i18n/lrpt.js', 'assets/js/app-shell.js', 'assets/js/xlsx-lite.js', 'assets/js/ops/alerts.js', 'assets/js/rpt/xlsx.js',
       'assets/js/rpt/export.js', 'assets/js/rpt/reports.js', 'assets/js/rpt/dashboards.js', 'assets/js/rpt/colfilter.js', 'assets/js/rpt/register.js', 'assets/js/rpt/fasah-recon.js',
       'assets/js/rpt/audit-diff.js', 'assets/js/rpt/rules.js', 'assets/js/admin.js'])) || 'admin.html order');
-check('sw.js: VERSION bumped past step 7 and every new file precached', () =>
-  (!/var VERSION = '2026-11-23\.2'/.test(SW) && /var VERSION = '2026-11-24\.\d+'/.test(SW)
+check('sw.js: VERSION bumped past step 7 (2026-11-24.1 or a later release) and every new file precached', () =>
+  (!/var VERSION = '2026-11-23\.2'/.test(SW) && ((/var VERSION = '(\d{4}-\d{2}-\d{2}\.\d+)'/.exec(SW) || [])[1] || '').localeCompare('2026-11-24.1', 'en', { numeric: true }) >= 0
     && ['assets/css/pages/lrpt.css', 'assets/i18n/lrpt.js', 'assets/js/rpt/colfilter.js', 'assets/js/rpt/register.js', 'assets/js/rpt/fasah-recon.js', 'assets/js/rpt/audit-diff.js', 'assets/js/rpt/rules.js']
       .every(f => SW.indexOf("'" + f + "'") !== -1)) || 'sw.js');
 check('app-shell NAV: register / fasah_recon (staff), attention_rules (staff), changes (auditRead) + their fallback labels; admin.js NAV_ORDER has them', () =>

@@ -438,7 +438,7 @@
       if (o.warn) form.appendChild(alertBox('warning', o.warn));
       form.appendChild(formErr);
       form.appendChild(grid);
-      var cancelB = el('button', { class: 'btn btn-secondary', type: 'button', text: t('cancel') });
+      var cancelB = el('button', { class: 'btn btn-secondary', type: 'button', text: o.cancelText || t('cancel') });
       var okText = o.submitText || t('save');
       var okB = el('button', { class: 'btn ' + (o.danger ? 'btn-danger' : 'btn-primary'), type: 'submit', form: form.id, text: okText });
       // the original admin dialog close button (.adm-dialog-x: 38px white circle, teal on hover)

@@ -605,7 +605,7 @@ async function secFile() {
       && /'updateDraftInvoice' = ANY \(v_ops\) AND NOT app\.daftra_allow_update/.test(body) && /app\.rpt_today\(\)/.test(body)
       && !/review_status = 'approved'/.test(body)) || 'decisions');
   // later phases may follow this file (20261124000100 legacy_reports: re-creates readers of G6a / G3, never a step-7 function)
-  const LATER_PHASES = ['20261124000100_legacy_reports.sql'];
+  const LATER_PHASES = ['20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -1456,7 +1456,7 @@ async function secRls() {
     const all = (await q(`SELECT 'public.' || relname n FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r'`)).map(x => x.n);
     const un = all.filter(x => !t.includes(x) && !keep.includes(x) && !['public.status_labels', 'public.schema_versions', 'public.organizations',
       'public.profiles', 'public.platform_admins', 'public.plans', 'public.customs_ports', 'public.daftra_mock_accounts'].includes(x));
-    return (NEW_TABLE_NAMES.every(x => t.includes('public.' + x) && g.includes('public.' + x + ':trg_no_delete')) && g.length === 44 && t.length === 83 && un.length === 0) || J({ g: g.length, t: t.length, un });
+    return (NEW_TABLE_NAMES.every(x => t.includes('public.' + x) && g.includes('public.' + x + ':trg_no_delete')) && g.length === 44 && t.length === 83 + 2 /* + legacy_import_rows, legacy_import_runs (20261125000100) */ && un.length === 0) || J({ g: g.length, t: t.length, un });
   });
   await check('no DELETE even for the owner (trg_no_delete); the trail: runs / candidates / supplier links / purchases audited, import rows not', async () => {
     const r = await code(() => q(`DELETE FROM public.daftra_runs WHERE org_id = $1`, [A]));
