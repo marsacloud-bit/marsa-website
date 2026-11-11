@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="assets/css/style.css">
   <link rel="stylesheet" href="assets/css/app.css">
   <link rel="stylesheet" href="assets/css/pages/ocr.css">
+  <link rel="stylesheet" href="assets/css/pages/decl.css">
 </head>
 <body data-page="ocr">
   <a class="skip-link" href="#main">تخطَّ إلى المحتوى</a>
@@ -609,6 +610,24 @@
       </div>
     </section>
 
+    <!-- ===== Customs declaration reading + review + approval (legacy step 4): built by decl-review.js, shown only for
+         a deep link (#decl-tx=<transaction> / #decl=<reading>&tx=<transaction>) to signed-in staff ===== -->
+    <section class="section section-sm decl-section" id="decl-section" aria-labelledby="decl-title" hidden>
+      <div class="container">
+        <div class="card shadow-lg ocr-card decl-card">
+          <div class="ocr-block-head">
+            <span class="icon-box icon-box-soft"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></span>
+            <div>
+              <h2 id="decl-title" tabindex="-1" data-i18n="decl.h_title">قراءة البيان الجمركي واعتماده</h2>
+              <p data-i18n="decl.h_lead">ارفع ملف البيان الجمركي لمعاملة محفوظة، يقرؤه Claude، ثم تراجع القيم وتصححها وتعتمدها بنفسك. لا يُعتمد شيء آليًا.</p>
+            </div>
+          </div>
+          <p class="sr-only" id="decl-live" role="status" aria-live="polite" aria-atomic="true"></p>
+          <div class="decl-root" id="decl-root"></div>
+        </div>
+      </div>
+    </section>
+
     <section class="section section-sm" aria-labelledby="tips-title">
       <div class="container">
         <div class="section-head text-center">
@@ -706,16 +725,20 @@
   <script src="assets/js/i18n.js" defer></script>
   <script src="assets/i18n/ocr.js" defer></script>
   <script src="assets/i18n/docb.js" defer></script>
+  <script src="assets/i18n/decl.js" defer></script>
   <script src="assets/i18n/app.js" defer></script>
   <script src="assets/js/main.js" defer></script>
   <script src="assets/js/supa.js" defer></script>
   <script src="assets/js/app-shell.js" defer></script>
   <script src="assets/js/pwa.js" defer></script>
   <script src="assets/js/xlsx-lite.js" defer></script>
+  <script src="assets/js/legacy-norm.js" defer></script>
   <script src="assets/js/ocr-parse.js" defer></script>
   <script src="assets/js/ocr.js" defer></script>
   <script src="assets/js/doc-match.js" defer></script>
   <script src="assets/js/ocr-match.js" defer></script>
+  <script src="assets/js/hs-picker.js" defer></script>
   <script src="assets/js/doc-batch.js" defer></script>
+  <script src="assets/js/decl-review.js" defer></script>
 </body>
 </html>

@@ -8,7 +8,9 @@
      normalizeDigits(s)               → "٠-٩" / "۰-۹" → "0-9"
      parseAmount(s)                   → number | null  ("١٬٢٥٠٫٥٠" "1.250,50" "SAR 1,250.50" "(150)")
      formatAmount(n)                  → "1250.50" ('' when not a number)
-     normalizeDate(s)                 → "YYYY-MM-DD" | ''  (Gregorian only; Hijri → '')
+     normalizeDate(s)                 → "YYYY-MM-DD" | ''  (a Hijri date — هـ / AH, or a year 1300–1600 — is converted
+                                        from Umm al-Qura through MarsaNorm.hijriToGregorian (legacy-norm.js, step 4,
+                                        20261120000100); '' when MarsaNorm / the calendar is missing or the day does not exist)
      isValidSaudiVat(s)               → 15 digits, starts and ends with 3
      isValidContainer(s)              → ISO 6346 owner code + category + serial + check digit
      isValidIban(s)                   → ISO 13616 mod-97
@@ -110,12 +112,27 @@
     if (b > 12 && a <= 12) return ymd(y, a, b);
     return ymd(y, b, a);
   }
+  // MarsaNorm (assets/js/legacy-norm.js): window.MarsaNorm in the browser, require() in Node; null when absent
+  var NORM = null;
+  function norm() {
+    if (NORM) return NORM;
+    if (typeof window !== 'undefined' && window.MarsaNorm) NORM = window.MarsaNorm;
+    else if (typeof module === 'object' && module.exports && typeof require === 'function') {
+      try { NORM = require('./legacy-norm.js'); } catch (e) { NORM = null; }
+    }
+    return NORM;
+  }
   function normalizeDate(v) {
     var s = normalizeDigits(v).replace(/[\u200e\u200f\u061c]/g, '').trim();
     if (!s) return '';
     var m;
-    // explicit Hijri (هـ / AH) or a Hijri-range year: not converted (needs the Umm al-Qura table)
-    if (/(\d\s*ه(?![\u0600-\u06ff])|هـ|\bAH\b)/i.test(s) && /(?:^|\D)1[3-5]\d\d(?!\d)/.test(s)) return '';
+    // Hijri (هـ / AH, or a year 1300–1600 in a numeric date): Umm al-Qura → Gregorian (legacy convertHijriField)
+    var marked = /(\d\s*ه(?![\u0600-\u06ff])|هـ|\bAH\b)/i.test(s);
+    var hm = /(?:^|\D)(1[3-6]\d\d)[\/\-.](\d{1,2})[\/\-.](\d{1,2})(?!\d)/.exec(s) || /(?:^|\D)(\d{1,2})[\/\-.](\d{1,2})[\/\-.](1[3-6]\d\d)(?!\d)/.exec(s);
+    if (hm || (marked && /(?:^|\D)1[3-6]\d\d(?!\d)/.test(s))) {
+      var N = norm();
+      return hm && N && typeof N.hijriToGregorian === 'function' ? (N.hijriToGregorian(hm[1] + '/' + hm[2] + '/' + hm[3]) || '') : '';
+    }
     if ((m = /(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/.exec(s))) return ymd(m[1], m[2], m[3]);
     if ((m = /(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/.exec(s))) return dmy(m[1], m[2], m[3]);
     if ((m = /(?:^|[^\d])(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2})(?!\d)/.exec(s))) return dmy(m[1], m[2], 2000 + (+m[3]));
@@ -282,7 +299,7 @@
     }
     return '';
   }
-  // "15/04/1448هـ الموافق 31/10/2026م": try every date-shaped match, the Hijri one gives ''
+  // "15/04/1448هـ الموافق 31/10/2026م": try every date-shaped match (the Hijri one is converted, Umm al-Qura)
   function exDate(seg) {
     var re = /(\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2}|\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})(\s*(?:هـ|ه(?![\u0600-\u06ff])|AH\b))?/gi, m, any = false;
     seg = String(seg || '');

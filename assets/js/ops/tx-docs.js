@@ -136,14 +136,26 @@
       var inv = Array.isArray(d.invoice_items) ? d.invoice_items : [];
       if (inv.length || sd) {
         body.appendChild(el('h4', { class: 'docb-tx-h', text: T('inv_items_title') + ' (' + inv.length + ')' }));
+        // legacy step 4: HS reference suggestions per item (read-only; the supplier HS stays reference only)
+        var HP = window.MarsaHsPicker, hsHost = HP ? el('div', { class: 'docb-hs-host' }) : null, hsPanel = null;
+        var openHs = function (x) {
+          if (hsPanel) hsPanel.close();
+          hsPanel = HP.panel({ api: api, orgId: api.orgId, query: HP.pure.queryOf(x), onClose: function () { hsPanel = null; } });
+          hsHost.textContent = '';
+          hsHost.appendChild(hsPanel.el);
+          hsPanel.search();
+        };
         body.appendChild(table(['#', T('c_invoice_number'), T('c_description'), T('c_scientific_name'), T('c_supplier_hs_code'), T('c_quantity'), T('c_unit'),
-          T('c_unit_price'), T('c_total'), T('c_origin_country'), T('c_net_weight'), T('c_gross_weight')],
-          inv.map(function (x) {
+          T('c_unit_price'), T('c_total'), T('c_origin_country'), T('c_net_weight'), T('c_gross_weight')].concat(HP ? [T('hs_ref')] : []),
+          inv.map(function (x, i) {
             return el('tr', null, [el('td', { class: 'num', text: String(x.line_no || '') }), cell(x.invoice_number, 1), cell(x.description), cell(x.scientific_name),
               cell(x.supplier_hs_code, 1), el('td', { class: 'num', text: num(api, x.quantity) }), cell(x.unit), el('td', { class: 'num', text: num(api, x.unit_price) }),
               el('td', { class: 'num', text: num(api, x.total) }), cell(x.origin_country), el('td', { class: 'num', text: num(api, x.net_weight_kg) }),
-              el('td', { class: 'num', text: num(api, x.gross_weight_kg) })]);
+              el('td', { class: 'num', text: num(api, x.gross_weight_kg) }),
+              HP ? el('td', null, el('button', { class: 'btn btn-sm btn-ghost docb-hs-btn', type: 'button', text: T('hs_ref'), 'aria-label': T('hs_ref_aria', { n: x.line_no || i + 1 }),
+                onclick: function (e) { if (e && e.preventDefault) e.preventDefault(); openHs(x); } })) : null]);
           }), T('rows_empty')));
+        if (hsHost) body.appendChild(hsHost);
         body.appendChild(el('p', { class: 'form-hint', text: T('hs_ref_hint') }));
       }
       var pk = Array.isArray(d.packing_items) ? d.packing_items : [];

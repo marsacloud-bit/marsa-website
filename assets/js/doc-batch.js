@@ -437,6 +437,8 @@
       return true;
     });
   }
+  // legacy step 4: the review / approval of the declaration in the slot (assets/js/decl-review.js)
+  function declReviewLink(extId, txId) { return 'ocr.html#decl=' + encodeURIComponent(String(extId || '')) + '&tx=' + encodeURIComponent(String(txId || '')); }
   // the deep link of ocr.html → { batch: id } | { tx: id } | {}
   function parseHash(h) {
     var s = String(h || '').replace(/^#/, ''), m;
@@ -491,7 +493,7 @@
     slotCount: slotCount, slotRoom: slotRoom, extractionRow: extractionRow, batchActions: batchActions, approvePayload: approvePayload,
     approveKey: approveKey, matchView: matchView, consigneeName: consigneeName, queueDup: queueDup, queuedBytes: queuedBytes, errorText: errorText,
     BATCH_MAX_BYTES: BATCH_MAX_BYTES, detectedDocs: detectedDocs, filterBatches: filterBatches, parseHash: parseHash,
-    approveSummary: approveSummary, pool: pool, isUuid: isUuid
+    approveSummary: approveSummary, pool: pool, isUuid: isUuid, declReviewLink: declReviewLink
   };
   window.MarsaDocBatch = { VERSION: 'docb-ui-1', pure: PURE };
 
@@ -1130,6 +1132,14 @@
           sub.textContent = bits.join(' · ');
           main.appendChild(sub);
           if (d.extraction_voided) main.appendChild(el('span', 'badge badge-sm badge-danger', T('voided_reading')));
+          // legacy step 4: the declaration of the slot is reviewed and approved on its own (decl-review.js), for the batch's transaction
+          if (slot === 'customs_declaration' && d.extraction_id && !d.extraction_voided) {
+            if (b.transaction_id) {
+              var dl = el('a', 'docb-decl-link', T('decl_review'));
+              dl.href = declReviewLink(d.extraction_id, b.transaction_id);
+              main.appendChild(dl);
+            } else main.appendChild(el('span', 'docb-doc-sub', T('decl_review_need_tx')));
+          }
           li.appendChild(main);
           if (canAttach) li.appendChild(btn(T('detach'), 'btn-ghost', function () { detachDoc(d); }));
           ul.appendChild(li);
@@ -1406,6 +1416,18 @@
       var th = el('thead'), tr = el('tr');
       tr.appendChild(el('th', 'num', '#'));
       cols.forEach(function (c) { var x = el('th', null, T('c_' + c)); x.scope = 'col'; tr.appendChild(x); });
+      // legacy step 4: HS reference suggestions per invoice item (read-only: the supplier HS stays reference only)
+      var hsRef = path === 'invoice.items' && !!(window.MarsaHsPicker && API && typeof API.searchHsReference === 'function');
+      var hsHost = hsRef ? el('div', 'docb-hs-host') : null, hsPanel = null;
+      function openHs(i) {
+        if (hsPanel) hsPanel.close();
+        var r = (getPath(S.draft, path) || [])[i] || {};
+        hsPanel = window.MarsaHsPicker.panel({ api: API, orgId: S.orgId, query: window.MarsaHsPicker.pure.queryOf(r), onClose: function () { hsPanel = null; } });
+        hsHost.textContent = '';
+        hsHost.appendChild(hsPanel.el);
+        hsPanel.search();
+      }
+      if (hsRef) tr.appendChild(el('th', null, T('hs_ref')));
       if (editable) tr.appendChild(el('th', null, ''));
       th.appendChild(tr); tbl.appendChild(th);
       var tb = el('tbody');
@@ -1414,7 +1436,7 @@
         rows = getPath(S.draft, path);
         if (!Array.isArray(rows)) rows = [];
         if (!rows.length) {
-          var e = el('tr'); var td = el('td', 'text-muted', T('rows_empty')); td.colSpan = cols.length + 2; e.appendChild(td); tb.appendChild(e);
+          var e = el('tr'); var td = el('td', 'text-muted', T('rows_empty')); td.colSpan = cols.length + 2 + (hsRef ? 1 : 0); e.appendChild(td); tb.appendChild(e);
         }
         rows.forEach(function (r, i) {
           var row = el('tr');
@@ -1428,6 +1450,13 @@
             td.appendChild(inp);
             row.appendChild(td);
           });
+          if (hsRef) {
+            var tdh = el('td');
+            var hb = btn(T('hs_ref'), 'btn-ghost docb-hs-btn', function () { openHs(i); });
+            hb.setAttribute('aria-label', T('hs_ref_aria', { n: i + 1 }));
+            tdh.appendChild(hb);
+            row.appendChild(tdh);
+          }
           if (editable) {
             var tdx = el('td');
             tdx.appendChild(btn(T('row_remove'), 'btn-ghost docb-danger', function () {
@@ -1443,6 +1472,7 @@
       }
       paint();
       tbl.appendChild(tb); wrap.appendChild(tbl); box.appendChild(wrap);
+      if (hsHost) box.appendChild(hsHost);
       if (editable) {
         var add = btn(T('row_add'), 'btn-ghost', function () {
           var list = getPath(S.draft, path);

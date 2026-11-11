@@ -955,6 +955,30 @@
       documents: present.slice(), generated_at: opts.now ? String(opts.now) : null };
   }
 
+  /* ------------------------------------------------------------------
+     B/L equivalence (legacy billReferenceEquivalent_, = SQL app.bl_tokens / app.bl_equivalent of 20261120000100):
+     equal search keys (lower case, أإآ→ا ة→ه ى→ي, no spaces / - _ / \ .), or the same letter runs and digit runs
+     (western digits, upper case) in any order — an Arabic right-to-left layout may reorder the parts of a printed
+     B/L number. An empty token list never matches (Marsa; the legacy treated two token-less texts as equal).
+     ------------------------------------------------------------------ */
+  function blSearchKey(v) {
+    return String(v == null ? '' : v).replace(/[\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]/g, ' ')
+      .toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/[\s\-_\/\\.]+/g, '');
+  }
+  function blTokens(v) {
+    var t = digitsLatin(String(v == null ? '' : v)).toUpperCase().match(/[A-Z]+|[0-9]+/g) || [];
+    return t.sort();
+  }
+  function blEquivalent(a, b) {
+    var ka = blSearchKey(a), kb = blSearchKey(b);
+    if (!ka || !kb) return false;
+    if (ka === kb) return true;
+    var ta = blTokens(a), tb = blTokens(b);
+    if (!ta.length || ta.length !== tb.length) return false;
+    for (var i = 0; i < ta.length; i++) if (ta[i] !== tb[i]) return false;
+    return true;
+  }
+
   return {
     VERSION: VERSION, DOCS: DOCS.slice(), ROW_KEYS: ROW_KEYS.slice(), LABELS: LABELS,
     FIELDS: F.map(function (d) { return { key: d.key, label_ar: d.ar, label_en: d.en, keys: d.keys, exp: d.exp.slice(), opt: d.opt.slice(), critical: d.crit }; }),
@@ -963,6 +987,8 @@
     normName: normName, cmpName: cmpName, normPort: normPort, cmpPort: cmpPort, normCountry: normCountry, normCurrency: normCurrency,
     containerSet: containerSet, iso6346Valid: iso6346Valid, hs6Set: hs6Set, numClose: numClose, parseNum: parseNum, parseWeight: parseWeight,
     normPackageType: normPackageType, incotermCode: incotermCode, normDate: normDate, normId: normId, cmpId: cmpId, normVessel: normVessel,
-    descTokens: descTokens, cmpDesc: cmpDesc, fold: fold, fmtNum: fmtNum
+    descTokens: descTokens, cmpDesc: cmpDesc, fold: fold, fmtNum: fmtNum,
+    // legacy step 4 (20261120000100)
+    blTokens: blTokens, blEquivalent: blEquivalent
   };
 });

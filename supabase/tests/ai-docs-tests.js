@@ -197,7 +197,7 @@ async function secFile() {
     (!/sk-ant|ANTHROPIC_API_KEY\s*=|api\.anthropic\.com|x-api-key/i.test(src)) || 'secret-like text found');
   // later phases may follow this file (20261115000100 convert_in_place, 20261116000100 doc_match); none may sort before it unnoticed
   const LATER_PHASES = ['20261115000100_convert_in_place.sql', '20261116000100_doc_match.sql', '20261117000100_legacy_core.sql',
-    '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql'];
+    '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql'];
   await check('this file is present; only the listed later phases follow it', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -1161,7 +1161,7 @@ async function secV3() {
   section('7e. prompt ai-doc-v3: packing_list, extended keys, containers, compatibility, dedupe-before-call (mocked Claude)');
   await check('v3 exports; the default stays ai-doc-v2 (v2 callers unchanged): DOC_TYPES / ALL_KEYS / SYSTEM untouched', () =>
     (X.PROMPT_VERSION === 'ai-doc-v2' && X.PROMPT_VERSION_V3 === 'ai-doc-v3' && J(X.PROMPT_VERSIONS) === J(['ai-doc-v2', 'ai-doc-v3'])
-      && !X.DOC_TYPES.includes('packing_list') && X.DOC_TYPES_V3.includes('packing_list') && X.ALL_KEYS.length === 28 && X.ALL_KEYS_V3.length === 42
+      && !X.DOC_TYPES.includes('packing_list') && X.DOC_TYPES_V3.includes('packing_list') && X.ALL_KEYS.length === 28 && X.ALL_KEYS_V3.length === 50 /* 42 + the 8 declaration keys (20261120000100) */
       && J(X.ALL_KEYS_V3.slice(0, 28)) === J(X.ALL_KEYS) && X.KIND_OF.packing_list === 'packing_list' && X.SYSTEM_V3.startsWith(X.SYSTEM)) || 'exports');
   await check('validateRequest: packing_list only with prompt_version ai-doc-v3; an unknown version → bad_request; no version → ai-doc-v2', () => {
     const t = b => { try { return X.validateRequest(b).prompt_version + ':' + X.validateRequest(b).doc_type; } catch (e) { return e.code; } };
@@ -1361,6 +1361,123 @@ async function secV3() {
   });
   await check('handler sha256Hex = node crypto SHA-256 of the decoded bytes (the source_sha256 the browser saves)', async () =>
     (await H.sha256Hex(PDF3)) === SHA3);
+
+  await secDeclV3(v3Deps, body3, stored);
+}
+
+/* ai-doc-v3 customs declaration reading (20261120000100 legacy_decl): legacy DocumentAI analyzeDeclarationDocument /
+   getDeclarationSchema_ / normalizeDeclarationDraft_ + R11Automation detectDeclarationTypeFromBlobR11_ (mocked Claude) */
+const DC1 = 'MSCU3054389', DC2 = 'MSKU9070323';
+const declOut = o => Object.assign({ doc_type: 'customs_declaration', detected_documents: ['customs_declaration'], fields: [
+  { name: 'declaration_number', value: '3012345', confidence: 0.95, page: 1 }, { name: 'declaration_type', value: 'استيراد', confidence: 0.9, page: 1 },
+  { name: 'declaration_status', value: 'تم الفسح', confidence: 0.9, page: 1 }, { name: 'declaration_date_hijri', value: '١٥/٣/١٤٤٧', confidence: 0.9, page: 1 },
+  { name: 'declaration_date', value: '2025-09-08', confidence: 0.8, page: 1 }, { name: 'bl_number', value: '123456 MEDU', confidence: 0.7, page: 1 },
+  { name: 'importer_name_ar', value: 'شركة   الاختبار الأولى', confidence: 0.9, page: 1 }, { name: 'broker_name', value: 'مكتب التخليص التجريبي', confidence: 0.9, page: 1 },
+  { name: 'vessel', value: 'MSC TEST', confidence: 0.9, page: 1 }, { name: 'country_of_origin', value: 'الصين', confidence: 0.9, page: 1 },
+  { name: 'total', value: '5,000.00', confidence: 0.9, page: 1 }, { name: 'currency', value: 'usd', confidence: 0.9, page: 1 },
+  { name: 'local_value', value: '18,750.00', confidence: 0.9, page: 1 }],
+  line_items: [{ description: 'فحمات فرامل', hs_code: '870830', quantity: 40, unit_price: null, amount: 5000, unit: 'كرتون', scientific_name: null,
+    origin_country: 'الصين', net_weight: 1000, gross_weight: 1200, packages: null, container_number: null, seal_number: null, notes: null }],
+  containers: [{ container_number: DC1, seal_number: 'SL1', size_type: '40HC', packages_count: 40, net_weight: 1000, gross_weight: 1200 },
+    { container_number: DC2, seal_number: null, size_type: '20GP', packages_count: null, net_weight: null, gross_weight: null }],
+  warnings: [], declaration: { declaration_type_evidence: 'بيان استيراد', bl_candidates: ['MEDU 123456', '123456 MEDU', 'MEDU 123456'], bl_rtl_affected: true } }, o || {});
+const setF = (out, name, value) => Object.assign({}, out, { fields: out.fields.filter(f => f.name !== name).concat(value == null ? [] : [{ name, value, confidence: 0.9, page: 1 }]) });
+async function secDeclV3(v3Deps, body3, stored) {
+  section('7f. prompt ai-doc-v3 customs declaration: type from the title, Fasah stage, Hijri → Gregorian (Umm al-Qura), B/L candidates + RTL, items (mocked Claude)');
+  const V2_DECL_KEYS = ['declaration_number', 'bl_number', 'container_numbers', 'hs_codes', 'country_of_origin', 'invoice_number', 'invoice_date', 'currency',
+    'total', 'vat_amount', 'vessel', 'port_of_loading', 'port_of_discharge', 'consignee', 'shipper', 'gross_weight', 'net_weight', 'packages_count'];
+  await check('keys: DECL_KEYS (8) are the tail of ALL_KEYS_V3; v3 customs_declaration asks them; the v2 customs_declaration key list is unchanged', () =>
+    (J(X.DECL_KEYS) === J(['declaration_type', 'declaration_status', 'declaration_date', 'declaration_date_hijri', 'importer_name_ar', 'broker_name', 'local_value', 'payment_method'])
+      && J(X.ALL_KEYS_V3.slice(42)) === J(X.DECL_KEYS) && X.DECL_KEYS.every(k => X.KEYS_FOR_V3.customs_declaration.includes(k) && X.KEYS_FOR_V3.auto.includes(k))
+      && J(X.KEYS_FOR.customs_declaration) === J(V2_DECL_KEYS) && !X.DECL_KEYS.some(k => X.KEYS_FOR_V3.packing_list.includes(k) || X.KEYS_FOR_V3.bill_of_lading.includes(k))) || J(X.KEYS_FOR_V3.customs_declaration));
+  await check('buildRequest v2 customs_declaration is unchanged by step 4 (no declaration object in the schema, no RTL / candidates hint, same keys)', () => {
+    const p = X.buildRequest(X.validateRequest(goodBody({ doc_type: 'customs_declaration' })));
+    const sc = p.output_config.format.schema, t = p.messages[0].content[1].text;
+    return (!('declaration' in sc.properties) && J(sc.required) === J(['doc_type', 'fields', 'line_items', 'warnings']) && J(sc.properties.fields.items.properties.name.enum) === J(V2_DECL_KEYS)
+      && !/bl_candidates|بيان استيراد|EXACTLY as printed/.test(t) && p.system === X.SYSTEM) || t;
+  });
+  await check('buildRequest v3 customs_declaration: the same SDK call shape; schema + declaration {declaration_type_evidence, bl_candidates, bl_rtl_affected} (required, strict); the title / RTL / all-containers rules in the prompt', () => {
+    const p = X.buildRequest(X.validateRequest(goodBody({ doc_type: 'customs_declaration', prompt_version: 'ai-doc-v3' })));
+    const sc = p.output_config.format.schema, t = p.messages[0].content[1].text, dd = sc.properties.declaration;
+    const auto = X.outputSchema('auto', 'ai-doc-v3'), pl = X.outputSchema('packing_list', 'ai-doc-v3');
+    return (p.model === 'claude-opus-5-5' && p.output_config.effort === 'medium' && p.fallbacks === 'default' && J(p.betas) === J(['server-side-fallback-2026-07-01'])
+      && p.output_config.format.type === 'json_schema' && !('thinking' in p) && sc.required.includes('declaration') && dd.additionalProperties === false
+      && J(dd.required) === J(['declaration_type_evidence', 'bl_candidates', 'bl_rtl_affected']) && dd.properties.bl_rtl_affected.type === 'boolean'
+      && /«بيان استيراد» is\nimport|«بيان استيراد» is/.test(t) && /Never infer the type/.test(t) && /never only the first/.test(t) && /bl_rtl_affected true/.test(t)
+      && /- bl_number: bill of lading number EXACTLY as printed/.test(t) && /- declaration_date_hijri: /.test(t) && 'declaration' in auto.properties && !('declaration' in pl.properties)) || t;
+  });
+  let R;
+  await check('postProcess: type kept (title evidence agrees) as a code; تم الفسح → released; Hijri ١٥/٣/١٤٤٧ → 1447/03/15; the Gregorian date RECOMPUTED (2025-09-08 → 2025-09-07, decl_date_corrected)', () => {
+    R = X.postProcess(declOut(), 'customs_declaration', 'ai-doc-v3');
+    const e = R.extracted_fields;
+    return (e.declaration_type === 'import' && e.declaration_status === 'released' && e.declaration_date_hijri === '1447/03/15' && e.declaration_date === '2025-09-07'
+      && R.warnings.some(w => w.code === 'decl_date_corrected' && /2025-09-08/.test(w.text)) && R.declaration.date_printed === '2025-09-08'
+      && R.declaration.date_from_hijri === '2025-09-07' && R.declaration.status_raw === 'تم الفسح' && R.declaration.type_read === 'استيراد') || J({ e, d: R.declaration });
+  });
+  await check('postProcess: the B/L stays EXACTLY as printed; candidates (printed first, each once); RTL flag → bl_rtl warning; importer / broker / local value cleaned; all containers kept', () => {
+    const e = R.extracted_fields, d = R.declaration;
+    return (e.bl_number === '123456 MEDU' && J(d.bl_candidates) === J(['123456 MEDU', 'MEDU 123456']) && d.bl_raw === '123456 MEDU' && d.bl_rtl_affected === true
+      && R.warnings.some(w => w.code === 'bl_rtl') && e.importer_name_ar === 'شركة الاختبار الأولى' && e.local_value === '18750' && e.currency === 'USD'
+      && R.containers.length === 2 && e.container_numbers === DC1 + ', ' + DC2 && R.line_items[0].hs_code === '870830' && R.line_items[0].amount === 5000
+      && R.line_items[0].description === 'فحمات فرامل' && !R.warnings.some(w => w.code === 'decl_no_containers')) || J({ e, d, w: R.warnings });
+  });
+  await check('postProcess: the type is dropped (decl_type_unverified) when the title evidence is missing or names another type; evidence alone gives the type', () => {
+    const a = X.postProcess(declOut({ declaration: { declaration_type_evidence: null, bl_candidates: [], bl_rtl_affected: false } }), 'customs_declaration', 'ai-doc-v3');
+    const b = X.postProcess(declOut({ declaration: { declaration_type_evidence: 'بيان تصدير', bl_candidates: [], bl_rtl_affected: false } }), 'customs_declaration', 'ai-doc-v3');
+    const c = X.postProcess(setF(declOut({ declaration: { declaration_type_evidence: 'بيان تصفية', bl_candidates: [], bl_rtl_affected: false } }), 'declaration_type', null), 'customs_declaration', 'ai-doc-v3');
+    return (!('declaration_type' in a.extracted_fields) && a.warnings.some(w => w.code === 'decl_type_unverified') && !('declaration_type' in b.extracted_fields)
+      && b.warnings.some(w => w.code === 'decl_type_unverified') && c.extracted_fields.declaration_type === 'clearance') || J({ a: a.extracted_fields, b: b.extracted_fields, c: c.extracted_fields });
+  });
+  await check('postProcess: an unknown status is dropped (decl_status_unknown, the raw text kept in declaration.status_raw); a bad Hijri date → hijri_format, the printed Gregorian kept', () => {
+    const a = X.postProcess(setF(declOut(), 'declaration_status', 'قيد المعالجة الخاصة'), 'customs_declaration', 'ai-doc-v3');
+    const b = X.postProcess(setF(declOut(), 'declaration_date_hijri', '1447/13/40'), 'customs_declaration', 'ai-doc-v3');
+    return (!('declaration_status' in a.extracted_fields) && a.warnings.some(w => w.code === 'decl_status_unknown') && a.declaration.status_raw === 'قيد المعالجة الخاصة'
+      && !('declaration_date_hijri' in b.extracted_fields) && b.warnings.some(w => w.code === 'hijri_format') && b.extracted_fields.declaration_date === '2025-09-08'
+      && b.declaration.date_from_hijri === null) || J({ a: a.extracted_fields, b: b.extracted_fields });
+  });
+  await check('postProcess: a Hijri date the Umm al-Qura month does not have (30 Safar 1447) → hijri_unverified, the printed date kept; no container → decl_no_containers', () => {
+    const a = X.postProcess(setF(declOut({ containers: [] }), 'declaration_date_hijri', '1447/02/30'), 'customs_declaration', 'ai-doc-v3');
+    return (a.extracted_fields.declaration_date_hijri === '1447/02/30' && a.extracted_fields.declaration_date === '2025-09-08' && a.warnings.some(w => w.code === 'hijri_unverified')
+      && a.warnings.some(w => w.code === 'decl_no_containers')) || J({ e: a.extracted_fields, w: a.warnings.map(w => w.code) });
+  });
+  await check('ai_detail carries declaration {type_evidence, type_read, status_raw, bl_raw, bl_candidates, bl_rtl_affected, date_printed, date_from_hijri, hijri_supported} (no field values); raw_text has a declaration block', () =>
+    (J(Object.keys(R.ai_detail)) === J(['prompt_version', 'detected_type', 'doc_type', 'detected_documents', 'containers', 'fields', 'warnings', 'declaration'])
+      && J(Object.keys(R.ai_detail.declaration)) === J(['type_evidence', 'type_read', 'status_raw', 'bl_raw', 'bl_candidates', 'bl_rtl_affected', 'date_printed', 'date_from_hijri', 'hijri_supported'])
+      && R.ai_detail.fields.every(f => !('value' in f)) && /\ndeclaration:\n/.test(R.raw_text) && /B\/L candidates: 123456 MEDU \| MEDU 123456  \(RTL\)/.test(R.raw_text)) || J(Object.keys(R.ai_detail)));
+  await check('the saved reading passes the database checks (extraction_field_keys + extraction_detail_ok of 20261120000100)', async () => {
+    const r = await one(`SELECT app.extraction_fields_ok($1) f, app.extraction_detail_ok($2) d`, [J(R.extracted_fields), J(R.ai_detail)]);
+    return (r.f === true && r.d === true) || J(r);
+  });
+  await check('v3 non-declaration readings: the declaration keys are dropped (auto read as an invoice); a combined file that contains a declaration keeps them; v2 never has a declaration object', () => {
+    const inv = X.postProcess(declOut({ doc_type: 'commercial_invoice', detected_documents: ['commercial_invoice'] }), 'auto', 'ai-doc-v3');
+    const comb = X.postProcess(declOut({ doc_type: 'commercial_invoice', detected_documents: ['commercial_invoice', 'customs_declaration'] }), 'auto', 'ai-doc-v3');
+    const v2 = X.postProcess(declOut(), 'customs_declaration');
+    return (!X.DECL_KEYS.some(k => k in inv.extracted_fields) && !inv.declaration && !('declaration' in inv.ai_detail)
+      && comb.extracted_fields.declaration_status === 'released' && comb.declaration && !v2.declaration && !('ai_detail' in v2) && !('declaration_status' in v2.extracted_fields)) || J({ inv: inv.extracted_fields, comb: comb.extracted_fields });
+  });
+  await check('parseMessage v3: a declaration object of the wrong shape → bad_output; the good one parses', () => {
+    const ok = X.parseMessage(msgOf(declOut()), 'ai-doc-v3');
+    const bad = [{ bl_candidates: 'x', bl_rtl_affected: false, declaration_type_evidence: null }, { bl_candidates: [], bl_rtl_affected: 'yes', declaration_type_evidence: null },
+      { bl_candidates: [], bl_rtl_affected: false, declaration_type_evidence: 7 }, ['x']].map(dd => X.parseMessage(msgOf(declOut({ declaration: dd })), 'ai-doc-v3').code);
+    return (ok.ok && bad.every(c => c === 'bad_output')) || J({ ok: ok.code, bad });
+  });
+  await check('handler v3 customs_declaration (mocked Claude, real ai_reserve / ai_bind_source / ai_settle): the response adds declaration + ai_detail.declaration; same quota / bind order as step 3', async () => {
+    const d = v3Deps([], { msg: msgOf(declOut()) });
+    const r = await H.handleRequest(hReq(body3({ doc_type: 'customs_declaration' })), d);
+    const b = JSON.parse(r.body);
+    const order = d.calls.filter(c => !/^log:/.test(c));
+    return (r.status === 200 && J(order) === J(['user:ai_access', 'ai_reserve', 'ai_bind_source', 'claude', 'ai_settle']) && b.kind === 'customs_declaration'
+      && b.declaration && J(b.declaration.bl_candidates) === J(['123456 MEDU', 'MEDU 123456']) && b.ai_detail.declaration.bl_rtl_affected === true
+      && b.extracted_fields.declaration_date === '2025-09-07' && 'declaration' in d.params.output_config.format.schema.properties && d.params.model === 'claude-opus-5-5') || J({ s: r.status, order, b: Object.keys(b) });
+  });
+  await check('handler v3 customs_declaration reused: the stored reading\'s declaration detail comes back (no charge); a packing-list reading → declaration null', async () => {
+    const det = Object.assign({}, R.ai_detail);
+    const d = v3Deps([stored({ doc_type: 'customs_declaration', ai_detail: det, extracted_fields: R.extracted_fields })]);
+    const b = JSON.parse((await H.handleRequest(hReq(body3({ doc_type: 'customs_declaration' })), d)).body);
+    const d2 = v3Deps([]);
+    const b2 = JSON.parse((await H.handleRequest(hReq(body3()), d2)).body);
+    return (b.reused === true && !d.calls.includes('claude') && b.declaration && b.declaration.status_raw === 'تم الفسح' && b2.declaration === null) || J({ b: b.declaration, b2: b2.declaration });
+  });
 }
 
 /* inbox-sync worker + the Claude provider, with the shared ledger bound to the real ai_reserve / ai_settle (review B-11 / B-14 / B-15) */

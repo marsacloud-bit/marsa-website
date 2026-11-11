@@ -159,7 +159,10 @@
       tx_none: 'لم تُعتمد بيانات شحنة من المستندات لهذه المعاملة بعد.', tx_approved_at: 'آخر اعتماد: {d}',
       tx_batches: 'حزم المستندات', tx_no_batches: 'لا توجد حزم مستندات لهذه المعاملة.',
       tx_hint: 'هذه البيانات تُكتب فقط عند اعتماد حزمة مستندات. الاعتماد اللاحق يضيف قيمه فوق السابقة (القيمة غير الفارغة تحل محل القديمة)، ولا تُستبدل البنود إلا إذا كان في الحزمة الجديدة بنود من النوع نفسه (إلغاء لا حذف).',
-      hs_ref_hint: 'رمز HS في الفاتورة هو رمز المورّد كما طُبع، للمرجع فقط، وليس قرار تصنيف جمركي سعودي.'
+      hs_ref_hint: 'رمز HS في الفاتورة هو رمز المورّد كما طُبع، للمرجع فقط، وليس قرار تصنيف جمركي سعودي.',
+      // legacy step 4: the declaration slot → its own review / approval; HS reference suggestions per invoice item
+      decl_review: 'مراجعة البيان واعتماده', decl_review_need_tx: 'لمراجعة البيان واعتماده اربط الحزمة بمعاملة أولًا (اعتمدها في معاملة).',
+      hs_ref: 'مرجع HS', hs_ref_aria: 'اقتراحات مرجع البنود للصف {n}'
     },
     en: {
       h_title: 'Shipment document batch', pending_title: 'Drafts awaiting review',
@@ -303,7 +306,9 @@
       tx_none: 'No shipment data has been approved from documents for this transaction yet.', tx_approved_at: 'Last approval: {d}',
       tx_batches: 'Document batches', tx_no_batches: 'This transaction has no document batches.',
       tx_hint: 'This data is written only when a document batch is approved. A later approval lays its values over the earlier ones (a non-empty value replaces the old one); items are replaced only when the new batch has items of the same kind (a void, not a delete).',
-      hs_ref_hint: 'The HS code on the invoice is the supplier’s code as printed, for reference only — not a Saudi customs classification.'
+      hs_ref_hint: 'The HS code on the invoice is the supplier’s code as printed, for reference only — not a Saudi customs classification.',
+      decl_review: 'Review and approve the declaration', decl_review_need_tx: 'To review and approve the declaration, link the batch to a transaction first (approve it into one).',
+      hs_ref: 'HS reference', hs_ref_aria: 'HS reference suggestions for row {n}'
     }
   });
 })();

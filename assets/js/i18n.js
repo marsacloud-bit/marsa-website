@@ -351,6 +351,11 @@
       MRS_DOC_BATCH_STATE: 'حالة حزمة المستندات لا تسمح بهذا الإجراء ({f}). المعتمدة لا تُعدَّل ولا تُحذف، والمتجاهلة أو المؤرشفة لا تُعتمد.',
       MRS_DOC_BATCH_STALE: 'عدّل شخص آخر هذه المسودة بعد فتحك لها. أعد تحميلها ثم راجع التغييرات قبل الحفظ أو الاعتماد.',
       MRS_CLIENT_ALIAS_CONFLICT: 'هذا الاسم معتمد مسبقًا كاسم بديل لعميل آخر. اختر ذلك العميل، أو راجع الأسماء البديلة في دليل العملاء.',
+      // legacy step 4 (20261120000100): customs declaration approval
+      MRS_DECL_STALE: 'تغيّرت المعاملة أو قراءة البيان بعد فتحك للمراجعة. أعد تحميل المراجعة ثم تحقق من القيم قبل الاعتماد.',
+      MRS_DECL_BL_MISMATCH: 'رقم البوليصة في البيان لا يطابق بوليصة المعاملة. راجع الرقم، أو أكد صراحةً أن البيان يخص هذه المعاملة (يبقى رقم البوليصة الأصلي دون تغيير).',
+      MRS_DECL_NUMBER_CONFLICT: 'للمعاملة بيان جمركي نشط برقم آخر. ألغِ البيان الحالي أو استبدله أولًا ثم اعتمد القراءة.',
+      MRS_DECL_ALREADY_APPROVED: 'اعتُمدت قراءة البيان هذه من قبل. لتعديل البيان استخدم «تصحيح البيان» في المعاملة.',
       cdetail_MRS_NOT_FOUND_doc_batch: 'حزمة المستندات غير موجودة أو لا تملك صلاحية عرضها (المسودات مفصولة حسب الفرع).',
       cdetail_MRS_INVALID_slot_full: 'الخانة ممتلئة: بوليصة واحدة وبيان جمركي واحد، وحتى 10 فواتير و10 بيانات تعبئة.',
       cdetail_MRS_INVALID_duplicate_file: 'الملف نفسه مضاف إلى هذه الحزمة من قبل.',
@@ -436,6 +441,11 @@
       MRS_DOC_BATCH_STATE: 'The document batch status does not allow this action ({f}). An approved batch cannot be changed or deleted; a discarded or archived one cannot be approved.',
       MRS_DOC_BATCH_STALE: 'Someone else changed this draft after you opened it. Reload it and review the changes before saving or approving.',
       MRS_CLIENT_ALIAS_CONFLICT: 'This name is already an approved alias of another client. Choose that client, or review the aliases in the client directory.',
+      // legacy step 4 (20261120000100): customs declaration approval
+      MRS_DECL_STALE: 'The transaction or the declaration reading changed after you opened the review. Reload the review and check the values before approving.',
+      MRS_DECL_BL_MISMATCH: 'The B/L number on the declaration does not match the transaction B/L. Check it, or confirm explicitly that the declaration belongs to this transaction (the original B/L stays unchanged).',
+      MRS_DECL_NUMBER_CONFLICT: 'The transaction already has an active customs declaration with another number. Cancel or replace it first, then approve the reading.',
+      MRS_DECL_ALREADY_APPROVED: 'This declaration reading was approved before. To change the declaration use “Correct declaration” on the transaction.',
       cdetail_MRS_NOT_FOUND_doc_batch: 'The document batch does not exist or you may not view it (drafts are separated by branch).',
       cdetail_MRS_INVALID_slot_full: 'The slot is full: one B/L and one customs declaration, up to 10 invoices and 10 packing lists.',
       cdetail_MRS_INVALID_duplicate_file: 'The same file is already in this batch.',

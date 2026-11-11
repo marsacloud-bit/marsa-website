@@ -94,6 +94,11 @@
       MRS_DOC_BATCH_STATE: 'حالة حزمة المستندات لا تسمح بهذا الإجراء ({f}). المعتمدة لا تُعدَّل ولا تُحذف، والمتجاهلة أو المؤرشفة لا تُعتمد.',
       MRS_DOC_BATCH_STALE: 'عدّل شخص آخر هذه المسودة بعد فتحك لها. أعد تحميلها ثم راجع التغييرات قبل الحفظ أو الاعتماد.',
       MRS_CLIENT_ALIAS_CONFLICT: 'هذا الاسم معتمد مسبقًا كاسم بديل لعميل آخر. اختر ذلك العميل، أو راجع الأسماء البديلة في دليل العملاء.',
+      // legacy step 4 (20261120000100): customs declaration approval
+      MRS_DECL_STALE: 'تغيّرت المعاملة أو قراءة البيان بعد فتحك للمراجعة. أعد تحميل المراجعة ثم تحقق من القيم قبل الاعتماد.',
+      MRS_DECL_BL_MISMATCH: 'رقم البوليصة في البيان لا يطابق بوليصة المعاملة. راجع الرقم، أو أكد صراحةً أن البيان يخص هذه المعاملة (يبقى رقم البوليصة الأصلي دون تغيير).',
+      MRS_DECL_NUMBER_CONFLICT: 'للمعاملة بيان جمركي نشط برقم آخر. ألغِ البيان الحالي أو استبدله أولًا ثم اعتمد القراءة.',
+      MRS_DECL_ALREADY_APPROVED: 'اعتُمدت قراءة البيان هذه من قبل. لتعديل البيان استخدم «تصحيح البيان» في المعاملة.',
       // G4 (docs/online/G4_SPEC.md)
       MRS_OVER_ALLOCATED: 'مجموع التوزيع يتجاوز صافي البند؛ التوزيع لا يضاعف الفاتورة (المتبقي القابل للتوزيع: {f}).',
       MRS_OVERPAID: 'المبلغ يتجاوز المتبقي من الإجمالي (المتبقي: {f}).',
@@ -1634,6 +1639,60 @@
   }
   // → { transaction_id, shipment_data | null, invoice_items [..], packing_items [..], batches [batch summary] }
   function getTransactionShipment(txId) { return rpc('get_transaction_shipment', { p_tx: txId }); }
+  /* legacy step 4 (20261120000100, docs/online/LEGACY_DECL_AR.md): customs declaration reading → staff approval, HS reference.
+     Every AI value stays a DRAFT until a staff member approves (approveDeclarationExtraction); nothing is approved
+     automatically; the transaction's B/L is never replaced. */
+  // → { extraction_id, transaction_id, ref, cargo_unit_type, batch_id | null, review_status, prompt_version, approval | null,
+  //     draft {declaration_no, declaration_type, type_evidence, status, status_raw, declaration_date, declaration_date_hijri,
+  //       date_printed, date_from_hijri, hijri_supported, importer_name_ar, broker_name, consignee_name, bl_number, bl_candidates,
+  //       bl_rtl_affected, vessel, voyage, country_of_origin, port_of_loading, port_of_discharge, invoice_number, invoice_value,
+  //       currency, local_value, payment_method, packages_count, package_type, gross_weight, net_weight, goods_description,
+  //       containers [{container_number, seal_number?, size_type?, gross_weight?}], items [{hs_code?, description?, quantity?,
+  //       unit?, value?, origin_country?, net_weight?, gross_weight?, notes?}]},
+  //     comparison {bl {status, transaction_bls, candidates, matched_with, rtl_affected}, containers {matched, new,
+  //       not_on_declaration}, declaration {action, existing}, status {read, current, direction}, missing, conflicts, can_approve},
+  //     version }
+  function getDeclarationReview(extractionId, txId) {
+    if (!isUuid(extractionId)) return Promise.resolve(fail('MRS_REQUIRED', 'extraction_id'));
+    if (!isUuid(txId)) return Promise.resolve(fail('MRS_REQUIRED', 'transaction_id'));
+    return rpc('get_declaration_review', { p_extraction: extractionId, p_tx: txId });
+  }
+  // o = { version (required: getDeclarationReview().version), declarationNo?, declarationType? (import|export|clearance or
+  //       Arabic), declarationDate? 'YYYY-MM-DD', declarationDateHijri? 'yyyy/mm/dd', status? (a Fasah stage code or text),
+  //       containers? [{container_number, seal_number?, size_type?, gross_weight?}], items? [{hs_code?, description?,
+  //       invoice_description?, scientific_name?, quantity?, unit?, value?, origin_country?, net_weight?, gross_weight?,
+  //       invoice_number?, notes?}], vessel?, notes?, confirmBlMismatch?, idemKey? } (a key left out keeps the reading's value)
+  //   → { approval_id, extraction_id, transaction_id, ref, batch_id, declaration (row), declaration_action added | corrected |
+  //       unchanged, status_action initial | forward | same | kept_backward, bl {status match | mismatch_confirmed |
+  //       no_transaction_bl | not_read, transaction_bls, matched_with, rtl_affected}, containers {added, updated, unchanged},
+  //       items, hs_reference {saved, ids}, tx_filled, tx_kept, warnings, daftra_hook: 'deferred' }
+  function approveDeclarationExtraction(extractionId, txId, o) {
+    o = o || {};
+    if (!isUuid(extractionId)) return Promise.resolve(fail('MRS_REQUIRED', 'extraction_id'));
+    if (!isUuid(txId)) return Promise.resolve(fail('MRS_REQUIRED', 'transaction_id'));
+    if (typeof o.version !== 'string' || !o.version) return Promise.resolve(fail('MRS_REQUIRED', 'version'));
+    var p = { version: o.version };
+    var MAP = { declarationNo: 'declaration_no', declarationType: 'declaration_type', declarationDate: 'declaration_date',
+      declarationDateHijri: 'declaration_date_hijri', status: 'status', containers: 'containers', items: 'items', vessel: 'vessel',
+      notes: 'notes' };
+    Object.keys(MAP).forEach(function (k) { if (o[k] !== undefined) p[MAP[k]] = o[k]; });
+    if (o.confirmBlMismatch) p.confirm_bl_mismatch = true;
+    return idemRpc('approve_declaration_extraction', o.idemKey, function (k) {
+      return { p_extraction: extractionId, p_tx: txId, p_payload: withKey(p, k) };
+    });
+  }
+  // → { transaction_id, active (declaration | null), declarations [..], items [live lines of the active declaration:
+  //     {id, line_no, hs_code, description_ar, invoice_description, scientific_name, quantity, unit, value, origin_country,
+  //     net_weight_kg, gross_weight_kg, invoice_number, notes, declaration_id, approval_id, extraction_id, …}], approvals [..] }
+  function getTransactionDeclaration(txId) { return rpc('get_transaction_declaration', { p_tx: txId }); }
+  // o = { orgId?, limit? (1–30, default 10) } → { q, items [{id, hs_code, description_ar, invoice_description, scientific_name,
+  //   origin_country, last_declaration_no, last_declaration_date, last_importer, usage_count, last_used_at, score}], count }
+  //   (a suggestion only: learned from approved declarations; a supplier HS code stays reference only)
+  function searchHsReference(q, o) {
+    o = o || {};
+    var lim = o.limit == null ? 10 : Math.max(1, Math.min(30, parseInt(o.limit, 10) || 10));
+    return inActiveOrg(o.orgId, function (oid) { return rpc('search_hs_reference', { p_org: oid, p_q: String(q == null ? '' : q), p_limit: lim }); });
+  }
   // o = { orgId?, name (consignee block or name), vatNumber?, crNumber?, limit? } → { source_name, latin_key, candidates
   //   [{client_id, name_ar, name_en, confidence 0..100, method, review, reasons}], best {client_id, confidence, method} | null,
   //   suggested, conflict, confirmed:false, thresholds {suggest:90, review:70} }   (never links: confirm with confirmClientMatch)
@@ -3171,7 +3230,7 @@
   function listReportExports(f) { return rptRpc('list_report_exports', f, 200); }
   // p = { report, format, filters, row_count } — only these keys travel (never rows or totals); the filters are the
   // report's own filter object without limit / offset / empty values (G6a-9: the server stores who / what / how many)
-  var EXPORT_REPORTS = ['search', 'transactions', 'containers', 'trips', 'margins', 'costs'], EXPORT_FORMATS = ['xlsx', 'csv', 'print'];
+  var EXPORT_REPORTS = ['search', 'transactions', 'containers', 'trips', 'margins', 'costs', 'fasah_sheet'], EXPORT_FORMATS = ['xlsx', 'csv', 'print'];
   function logReportExport(p) {
     p = p || {};
     if (!configured) return demoOnly();
@@ -3577,6 +3636,9 @@
     approveDocBatch: approveDocBatch, getTransactionShipment: getTransactionShipment, matchClientV2: matchClientV2,
     confirmClientMatch: confirmClientMatch, rejectClientAlias: rejectClientAlias, seedShippingAgents: seedShippingAgents,
     matchShippingAgent: matchShippingAgent,
+    // legacy step 4 (20261120000100)
+    getDeclarationReview: getDeclarationReview, approveDeclarationExtraction: approveDeclarationExtraction,
+    getTransactionDeclaration: getTransactionDeclaration, searchHsReference: searchHsReference,
     listContainers: listContainers, addContainer: addContainer, updateContainer: updateContainer,
     // documents
     listDocuments: listDocuments, uploadDocument: uploadDocument, documentUrl: documentUrl,

@@ -39,7 +39,21 @@
   A combined PDF (legacy detectedDocuments) lists every document type found in detected_documents (main type first,
   kept in ai_detail): the server accepts it in the slot of any of them and fills each of their draft sections from the
   one reading (within the key list of the slot it was read for).
-  Every value is a DRAFT: nothing here is saved or approved (approve_doc_batch, staff only).
+  Declaration reading (ai-doc-v3, migration 20261120000100_legacy_decl.sql — legacy DocumentAI analyzeDeclarationDocument /
+  getDeclarationSchema_ / normalizeDeclarationDraft_ + R11Automation detectDeclarationTypeFromBlobR11_): for doc_type
+  customs_declaration (and auto) v3 adds the keys DECL_KEYS (declaration_type, declaration_status, declaration_date,
+  declaration_date_hijri, importer_name_ar, broker_name, local_value, payment_method) and a `declaration` object in the
+  schema {declaration_type_evidence, bl_candidates, bl_rtl_affected}, in the same Claude call. Server rules: the type is kept
+  only when the title evidence names the same type (else dropped with a warning: the reviewer chooses); the status is mapped
+  to a Fasah stage code (legacy normalizeDeclarationStatus_, 'تم الفسح' → released; unknown → dropped, raw text kept); the
+  Hijri date is normalised (yyyy/mm/dd) and the Gregorian date is RECOMPUTED from it (Umm al-Qura, Intl
+  islamic-umalqura; a differing printed date is reported, a missing calendar leaves the printed one with a warning); the
+  B/L number stays exactly as printed — the readings Claude considers plausible go to bl_candidates, and the RTL flag only
+  warns (the transaction's B/L is never replaced: approve_declaration_extraction compares token-equivalent numbers).
+  The response (and ai_detail) then carries declaration {type_evidence, type_read, status_raw, bl_raw, bl_candidates,
+  bl_rtl_affected, date_printed, date_from_hijri, hijri_supported}. A v2 request, and every other v3 doc type, is read
+  exactly as before (on a non-declaration v3 reading the declaration keys are dropped).
+  Every value is a DRAFT: nothing here is saved or approved (approve_doc_batch / approve_declaration_extraction, staff only).
   The document is untrusted data: the system prompt tells the model to ignore instructions inside it.
 */
 (function () {
@@ -95,7 +109,10 @@
   const V3_KEYS = Object.freeze(['seal_numbers', 'consignee_name', 'notify_party', 'booking_number', 'place_of_receipt',
     'place_of_delivery', 'freight_terms', 'measurement_cbm', 'temperature_c', 'shipping_line', 'export_country', 'payment_terms',
     'packing_list_number', 'packing_list_date']);
-  const ALL_KEYS_V3 = Object.freeze(ALL_KEYS.concat(V3_KEYS));
+  // declaration reading (20261120000100): the legacy declaration draft fields that are not B/L / invoice keys
+  const DECL_KEYS = Object.freeze(['declaration_type', 'declaration_status', 'declaration_date', 'declaration_date_hijri',
+    'importer_name_ar', 'broker_name', 'local_value', 'payment_method']);
+  const ALL_KEYS_V3 = Object.freeze(ALL_KEYS.concat(V3_KEYS, DECL_KEYS));
   const KEYS_FOR_V3 = Object.freeze({
     bill_of_lading: KEYS_FOR.bill_of_lading.concat(['seal_numbers', 'consignee_name', 'notify_party', 'booking_number',
       'place_of_receipt', 'place_of_delivery', 'freight_terms', 'measurement_cbm', 'temperature_c', 'shipping_line']),
@@ -105,7 +122,7 @@
       'consignee_name', 'buyer_name', 'packages_count', 'package_type', 'net_weight', 'gross_weight', 'measurement_cbm',
       'goods_description', 'country_of_origin', 'hs_codes'],
     supplier_invoice: KEYS_FOR.supplier_invoice,
-    customs_declaration: KEYS_FOR.customs_declaration.concat(['consignee_name', 'seal_numbers']),
+    customs_declaration: KEYS_FOR.customs_declaration.concat(['consignee_name', 'seal_numbers'], DECL_KEYS, ['package_type', 'goods_description']),
     auto: ALL_KEYS_V3
   });
   // v3 line items (legacy invoice items + packing items) and per-container rows
@@ -149,7 +166,18 @@
     temperature_c: 'reefer set temperature in degrees Celsius, plain decimal (may be negative); leave out when not printed',
     shipping_line: 'shipping line / ocean carrier as printed (not a local shipping agent unless printed as one)',
     export_country: 'country of export (shipped from)', payment_terms: 'payment terms as printed, e.g. T/T 30 DAYS, L/C AT SIGHT',
-    packing_list_number: 'packing list number as printed', packing_list_date: 'packing list date, YYYY-MM-DD'
+    packing_list_number: 'packing list number as printed', packing_list_date: 'packing list date, YYYY-MM-DD',
+    // declaration (20261120000100)
+    declaration_type: 'import, export or clearance, taken ONLY from the title of the declaration form (بيان استيراد = import, ' +
+      'بيان تصدير = export, بيان تصفية = clearance); copy the title words into declaration.declaration_type_evidence; leave it out ' +
+      'when the title does not say (never infer it from the client, the port or the number)',
+    declaration_status: 'the declaration status / Fasah stage exactly as printed (e.g. قبول البيان, فسح كلي)',
+    declaration_date: 'Gregorian declaration date as printed, YYYY-MM-DD',
+    declaration_date_hijri: 'Hijri (Umm al-Qura) declaration date as printed, yyyy/mm/dd',
+    importer_name_ar: 'the importer / exporter name in Arabic, as printed',
+    broker_name: 'the customs broker (المخلص الجمركي) name as printed',
+    local_value: 'declared value in Saudi riyals (local value) when printed, plain decimal',
+    payment_method: 'duty payment method as printed'
   });
   // per-document overrides of FIELD_HINTS: on a customs declaration the "total" the match compares with the invoice is
   // the DECLARED (customs / invoice) value of the goods — not the duties + VAT payable printed on the same form
@@ -161,9 +189,17 @@
       currency: 'ISO 4217 code of the declared goods value (the invoice currency), e.g. USD, CNY, SAR'
     })
   });
-  function hintFor(docType, k) {
+  // v3 only (20261120000100): the declaration reading's B/L / container hints (a v2 prompt is unchanged)
+  const HINTS_FOR_V3 = Object.freeze({
+    customs_declaration: Object.freeze({
+      bl_number: 'bill of lading number EXACTLY as printed (never re-ordered or corrected); other plausible readings go to declaration.bl_candidates',
+      container_numbers: 'EVERY container on the declaration, ONE per entry, ISO 6346, no limit'
+    })
+  });
+  function hintFor(docType, k, v3) {
+    const o3 = v3 ? HINTS_FOR_V3[docType] : null;
     const o = HINTS_FOR[docType];
-    return (o && o[k]) || FIELD_HINTS[k];
+    return (o3 && o3[k]) || (o && o[k]) || FIELD_HINTS[k];
   }
 
   const SYSTEM = [
@@ -194,6 +230,21 @@
     'the scientific / Latin name in scientific_name, not in the description. Weights in kg, numbers without thousands separators.',
     'A shipping line name is not a local shipping agent. consignee_name is the name only, without the address block.'
   ].join('\n');
+  // v3 customs declaration (20261120000100): legacy buildDeclarationPrompt_ + detectDeclarationTypeFromBlobR11_ in the same call
+  const DECL_RULES = [
+    'This is read as a Saudi customs declaration (Fasah). declaration_type comes from the title of the form only: «بيان استيراد» is',
+    'import, «بيان تصدير» is export, «بيان تصفية» is clearance; copy the title words you used into declaration.declaration_type_evidence',
+    '(null when the title does not name the type, and then leave declaration_type out). Never infer the type from the client, the port',
+    'or the declaration number. declaration_status is the status / stage text as printed.',
+    'Give both dates when printed: declaration_date_hijri (Hijri, yyyy/mm/dd) and declaration_date (Gregorian, YYYY-MM-DD).',
+    'The declaration may list one container or many: list every container in containers and in container_numbers, never only the first.',
+    'Arabic right-to-left layout can reverse the order of the parts of the bill of lading number. Give bl_number exactly as printed, list',
+    'every plausible reading (the printed one first) in declaration.bl_candidates, and set declaration.bl_rtl_affected true when you',
+    'suspect the order was affected. Never replace or correct the printed number.',
+    'line_items are the declared items: hs_code = the tariff code printed on the declaration, description = the Arabic item description',
+    'as printed, quantity, unit, amount = the item value, origin_country, net / gross weight in kg.'
+  ].join('\n');
+  function isDeclType(docType) { return docType === 'customs_declaration' || docType === 'auto'; }
 
   /* ------------------------------------------------------------------ schema */
   function nullable(t) { return { anyOf: [{ type: t }, { type: 'null' }] }; }
@@ -245,7 +296,7 @@
     const keys = (KEYS_FOR_V3[docType] || ALL_KEYS_V3).slice();
     const itemProps = { description: { type: 'string' } };
     ITEM_KEYS_V3.slice(1).forEach(k => { itemProps[k] = nullable(ITEM_NUM_V3.indexOf(k) !== -1 ? 'number' : 'string'); });
-    return {
+    const sc = {
       type: 'object',
       additionalProperties: false,
       required: ['doc_type', 'detected_documents', 'fields', 'line_items', 'containers', 'warnings'],
@@ -285,6 +336,21 @@
         warnings: { type: 'array', items: { type: 'string' } }
       }
     };
+    // 20261120000100: the declaration-only parts of the legacy declaration schema (the values themselves are fields)
+    if (isDeclType(docType)) {
+      sc.properties.declaration = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['declaration_type_evidence', 'bl_candidates', 'bl_rtl_affected'],
+        properties: {
+          declaration_type_evidence: nullable('string'),
+          bl_candidates: { type: 'array', items: { type: 'string' } },
+          bl_rtl_affected: { type: 'boolean' }
+        }
+      };
+      sc.required.push('declaration');
+    }
+    return sc;
   }
 
   /* ------------------------------------------------------------------ request */
@@ -378,8 +444,9 @@
     const text = [
       typeLine,
       'Fields to extract when present:',
-      keys.map(k => '- ' + k + ': ' + hintFor(v.doc_type, k)).join('\n'),
+      keys.map(k => '- ' + k + ': ' + hintFor(v.doc_type, k, v3)).join('\n'),
       v3 ? 'Also fill containers (one row per container) and line_items (the goods / packing table) when printed.' : null,
+      v3 && isDeclType(v.doc_type) ? DECL_RULES : null,
       'Write warnings in ' + (v.lang === 'en' ? 'English' : 'Arabic') + '.'
     ].filter(x => x !== null).join('\n');
     return {
@@ -452,6 +519,13 @@
     if (!Array.isArray(d.fields) || !Array.isArray(d.line_items) || !Array.isArray(d.warnings)) return false;
     if (isV3(version) && d.containers != null && !(Array.isArray(d.containers) && d.containers.every(c => c && typeof c === 'object' && !Array.isArray(c)))) return false;
     if (isV3(version) && d.detected_documents != null && !(Array.isArray(d.detected_documents) && d.detected_documents.every(t => typeof t === 'string'))) return false;
+    if (isV3(version) && d.declaration != null) {
+      const x = d.declaration;
+      if (typeof x !== 'object' || Array.isArray(x)) return false;
+      if (x.bl_candidates != null && !(Array.isArray(x.bl_candidates) && x.bl_candidates.every(t => typeof t === 'string'))) return false;
+      if (x.bl_rtl_affected != null && typeof x.bl_rtl_affected !== 'boolean') return false;
+      if (x.declaration_type_evidence != null && typeof x.declaration_type_evidence !== 'string') return false;
+    }
     if (!d.fields.every(f => f && typeof f === 'object' && typeof f.name === 'string' && typeof f.value === 'string')) return false;
     if (!d.line_items.every(it => it && typeof it === 'object' && !Array.isArray(it))) return false;
     return d.warnings.every(w => typeof w === 'string');
@@ -543,6 +617,167 @@
   function normSeal(s) { return String(s || '').toUpperCase().replace(/[\s]/g, ''); }
   function isSeal(s) { return /^[A-Z0-9][A-Z0-9\-\/]{2,29}$/.test(String(s || '')); }
   function num3(n) { return Number.isFinite(n) ? Math.round(n * 1000) / 1000 : null; }
+
+  /* --------------------------------------------- declaration normalisers (= assets/js/legacy-norm.js MarsaNorm, parity tested;
+     SQL app.norm_declaration_status / app.norm_declaration_type / app.norm_hijri_date of 20261117000100) */
+  function western(v) {
+    return String(v == null ? '' : v).replace(/[٠-٩]/g, c => String(c.charCodeAt(0) - 0x0660)).replace(/[۰-۹]/g, c => String(c.charCodeAt(0) - 0x06F0));
+  }
+  // legacy normalizeSearch_
+  function searchKey(v) {
+    return String(v == null ? '' : v).trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/[\s\-_\/\\.]+/g, '');
+  }
+  const DECL_STATUS_CODES = Object.freeze(['draft', 'submitted', 'accepted', 'under_inspection', 'cco_review_done', 'awaiting_duty_payment',
+    'release_ready', 'released', 'cancelled', 'replaced']);
+  const DECL_STATUS_PATTERNS = [
+    ['accepted', ['قبول البيان', 'تفتيش ومعاينة', 'مرحلة تفتيش ومعاينة البضاعة']],
+    ['cco_review_done', ['انتهاء مراجعة مركز العمليات الجمركية', 'انتهت مراجعة مركز العمليات الجمركية']],
+    ['awaiting_duty_payment', ['انتظار تحصيل الرسوم الجمركية', 'بانتظار السداد', 'انتظار السداد', 'الرسوم الجمركية غير مسددة']],
+    ['release_ready', ['جاهز لطباعة اشعار الفسح الالكتروني', 'طباعة اشعار الفسح']],
+    ['released', ['فسح كلي', 'تم الفسح', 'مفسوح', 'تم الفسح كليا']]
+  ].map(([code, pats]) => ({ code, keys: pats.map(searchKey) }));
+  function normDeclarationStatus(v) {
+    const c = String(v == null ? '' : v).trim();
+    if (!c) return '';
+    if (DECL_STATUS_CODES.indexOf(c.toLowerCase()) !== -1) return c.toLowerCase();
+    const key = searchKey(c);
+    if (!key) return '';
+    for (const g of DECL_STATUS_PATTERNS) if (g.keys.some(k => key === k || key.indexOf(k) !== -1)) return g.code;
+    return '';
+  }
+  function normDeclarationType(v) {
+    const key = searchKey(v);
+    if (!key) return '';
+    if (key.indexOf('استيراد') !== -1 || key === 'import') return 'import';
+    if (key.indexOf('تصدير') !== -1 || key.indexOf('تصدر') !== -1 || key === 'export') return 'export';
+    if (key.indexOf('تصفيه') !== -1 || key === 'clearance') return 'clearance';
+    return '';
+  }
+  const pad = (n, w) => String(n).padStart(w, '0');
+  function hijriOk(y, m, d) { return y >= 1300 && y <= 1700 && m >= 1 && m <= 12 && d >= 1 && d <= 30; }
+  // 'yyyy/mm/dd' | '' — Arabic / Persian digits, '.' '-' separators, a trailing هـ / AH, d/m/yyyy accepted
+  function normalizeHijri(v) {
+    let t = western(String(v == null ? '' : v).trim());
+    if (!t) return '';
+    t = t.replace(/\s*(?:هـ|ه|ھ|AH|A\.H\.?)\s*\.?$/i, '').replace(/[.\-]/g, '/').replace(/\s+/g, '');
+    const p = t.split('/');
+    if (p.length !== 3) return '';
+    let [y, m, d] = p;
+    if (p[2].length === 4) { d = p[0]; m = p[1]; y = p[2]; }
+    if (!/^\d{4}$/.test(y) || !/^\d{1,2}$/.test(m) || !/^\d{1,2}$/.test(d)) return '';
+    return hijriOk(+y, +m, +d) ? pad(+y, 4) + '/' + pad(+m, 2) + '/' + pad(+d, 2) : '';
+  }
+  let UQ = null, UQ_TRIED = false;
+  function umalqura() {
+    if (UQ_TRIED) return UQ;
+    UQ_TRIED = true;
+    try {
+      const f = new Intl.DateTimeFormat('en-u-ca-islamic-umalqura-nu-latn', { year: 'numeric', month: 'numeric', day: 'numeric', timeZone: 'UTC' });
+      if (f.resolvedOptions().calendar === 'islamic-umalqura' && typeof f.formatToParts === 'function') UQ = f;
+    } catch (e) { UQ = null; }
+    return UQ;
+  }
+  const DAY = 86400000;
+  function hijriOfDay(dn) {
+    const o = {};
+    umalqura().formatToParts(new Date(dn * DAY + 12 * 3600000)).forEach(x => {
+      if (x.type === 'year' || x.type === 'month' || x.type === 'day') o[x.type] = parseInt(western(x.value), 10);
+    });
+    return o;
+  }
+  function hijriCmp(a, b) { return a.year !== b.year ? a.year - b.year : (a.month !== b.month ? a.month - b.month : a.day - b.day); }
+  // Umm al-Qura Hijri → 'YYYY-MM-DD' | '' (binary search over the day number, the hit verified; '' without the calendar)
+  function hijriToGregorian(v) {
+    const h = normalizeHijri(v);
+    if (!h || !umalqura()) return '';
+    const t = { year: +h.slice(0, 4), month: +h.slice(5, 7), day: +h.slice(8, 10) };
+    let lo = Math.floor(Date.UTC(1882, 0, 1) / DAY), hi = Math.floor(Date.UTC(2280, 0, 1) / DAY);
+    while (lo < hi) { const mid = Math.floor((lo + hi) / 2); if (hijriCmp(hijriOfDay(mid), t) < 0) lo = mid + 1; else hi = mid; }
+    if (hijriCmp(hijriOfDay(lo), t) !== 0) return '';
+    const d = new Date(lo * DAY);
+    return pad(d.getUTCFullYear(), 4) + '-' + pad(d.getUTCMonth() + 1, 2) + '-' + pad(d.getUTCDate(), 2);
+  }
+  function hijriSupported() { return !!umalqura(); }
+
+  // v3 customs declaration (legacy normalizeDeclarationDraft_ + detectDeclarationTypeFromBlobR11_): the declaration fields
+  // of `fields` / `extracted` normalised in place, warnings added → the ai_detail.declaration object
+  function declPost(x, fields, extracted, items, containers, W) {
+    const d = x && typeof x === 'object' && !Array.isArray(x) ? x : {};
+    const get = n => fields.find(f => f.name === n) || null;
+    const drop = n => { const i = fields.findIndex(f => f.name === n); if (i !== -1) fields.splice(i, 1); delete extracted[n]; };
+    const put = (n, value, like) => {
+      let f = get(n);
+      if (f) f.value = value;
+      else { f = { name: n, value, confidence: like ? like.confidence : 1, page: like ? like.page : null, valid: true }; fields.push(f); }
+      extracted[n] = value;
+      return f;
+    };
+    // type: from the title only — kept when the title evidence names the same type, else left to the reviewer
+    const evidence = clean(d.declaration_type_evidence, 300) || null;
+    const tf = get('declaration_type');
+    const typeRead = tf ? clean(tf.value, 300) : null;
+    const tRead = normDeclarationType(typeRead), tEv = normDeclarationType(evidence);
+    if (tEv && (!tf || tRead === tEv)) put('declaration_type', tEv, tf);
+    else if (tf || evidence) {
+      drop('declaration_type');
+      W('server', 'decl_type_unverified', 'The declaration type is not confirmed by the title of the form; choose import, export or clearance in the review.', 'declaration_type');
+    }
+    // status → a Fasah stage code ('تم الفسح' → released); an unknown text is dropped (kept as status_raw)
+    const sf = get('declaration_status');
+    const statusRaw = sf ? clean(sf.value, 300) : null;
+    if (sf) {
+      const code = normDeclarationStatus(sf.value);
+      if (code) put('declaration_status', code);
+      else { drop('declaration_status'); W('server', 'decl_status_unknown', 'The declaration status is not a known Fasah stage: ' + clean(statusRaw, 120), 'declaration_status'); }
+    }
+    // Hijri yyyy/mm/dd; the Gregorian date is recomputed from it (Umm al-Qura)
+    const hf = get('declaration_date_hijri');
+    let hijri = '';
+    if (hf) {
+      hijri = normalizeHijri(hf.value);
+      if (hijri) put('declaration_date_hijri', hijri);
+      else { drop('declaration_date_hijri'); W('server', 'hijri_format', 'The Hijri date is not a valid yyyy/mm/dd date (year 1300-1700).', 'declaration_date_hijri'); }
+    }
+    const gf = get('declaration_date');
+    const printed = gf ? gf.value : '';
+    if (gf && !isIsoDate(printed)) { gf.valid = false; W('server', 'date_format', 'Date is not a valid YYYY-MM-DD date.', 'declaration_date'); }
+    const fromHijri = hijri ? hijriToGregorian(hijri) : '';
+    if (fromHijri) {
+      if (printed && printed !== fromHijri) {
+        W('server', 'decl_date_corrected', 'The Gregorian date was corrected from ' + clean(printed, 20) + ' to ' + fromHijri + ' from the Hijri date ' + hijri + '.', 'declaration_date');
+      }
+      put('declaration_date', fromHijri, gf || hf).valid = true;
+    } else if (hijri) {
+      W('server', 'hijri_unverified', hijriSupported()
+        ? 'The Hijri date does not exist in the Umm al-Qura calendar; check it before approval.'
+        : 'The Hijri date could not be converted automatically; check the Gregorian date before approval.', 'declaration_date_hijri');
+    }
+    // the B/L number stays exactly as printed; the other plausible readings are kept apart; the RTL flag only warns
+    const bf = get('bl_number');
+    const blRaw = bf ? clean(bf.value, 80) : null;
+    const cands = [];
+    [blRaw].concat(Array.isArray(d.bl_candidates) ? d.bl_candidates : []).forEach(c => {
+      const t = clean(c, 80);
+      if (t && cands.indexOf(t) === -1 && cands.length < 10) cands.push(t);
+    });
+    const rtl = d.bl_rtl_affected === true;
+    if (rtl) W('server', 'bl_rtl', 'The B/L number may be affected by right-to-left ordering; the transaction B/L is never replaced.', 'bl_number');
+    [['importer_name_ar', 160], ['broker_name', 160], ['payment_method', 120]].forEach(([k, n]) => {
+      const f = get(k);
+      if (f) put(k, cleanLine(f.value).slice(0, n));
+    });
+    const lv = get('local_value');
+    if (lv) {
+      const n = amount(lv.value);
+      if (n == null) { lv.valid = false; W('server', 'amount_format', 'Amount is not a plain number.', 'local_value'); } else put('local_value', String(n));
+    }
+    items.forEach(it => { if (it.hs_code && !isHs(it.hs_code)) W('server', 'hs_format', 'HS code has an unexpected format: ' + it.hs_code, 'line_items'); });
+    if (!containers.length && !extracted.container_numbers) W('server', 'decl_no_containers', 'No container was read; add the containers before approval.', 'container_numbers');
+    return {
+      type_evidence: evidence, type_read: typeRead || null, status_raw: statusRaw || null, bl_raw: blRaw || null, bl_candidates: cands,
+      bl_rtl_affected: rtl, date_printed: printed ? clean(printed, 20) : null, date_from_hijri: fromHijri || null, hijri_supported: hijriSupported()
+    };
+  }
 
   // model output → the response of ai-extract (and the extraction row): validated, normalized, warnings added.
   // version 'ai-doc-v3' → the v3 keys, packing_list, the wider line items and containers (+ result.containers).
@@ -762,6 +997,11 @@
     if (requestedType !== 'auto' && detected !== requestedType && detected !== 'other' && !inFile) {
       W('server', 'doc_type_mismatch', 'The document looks like a ' + detected + ', not a ' + requestedType + '.', null);
     }
+    // v3 customs declaration (20261120000100): type from the title, Fasah stage, Hijri → Gregorian, B/L candidates
+    // (a combined file with a declaration too); on any other document the declaration keys are not kept
+    const isDecl = v3 && (docType === 'customs_declaration' || detectedDocs.indexOf('customs_declaration') !== -1);
+    const decl = isDecl ? declPost(data.declaration, fields, extracted, items, containers, W) : null;
+    if (v3 && !isDecl) DECL_KEYS.forEach(k => { const i = fields.findIndex(f => f.name === k); if (i !== -1) fields.splice(i, 1); delete extracted[k]; });
     const mean = fields.length ? Math.round(fields.reduce((s, f) => s + f.confidence, 0) / fields.length * 1000) / 10 : null;
     const result = {
       doc_type: docType, detected_type: detected, kind: KIND_OF[docType] || 'other', fields, extracted_fields: extracted,
@@ -771,6 +1011,7 @@
       result.prompt_version = PROMPT_VERSION_V3;
       result.containers = containers;
       result.detected_documents = detectedDocs;
+      if (decl) result.declaration = decl;
       // document_extractions.ai_detail (20261119000100): the machine detail a later read of the same file restores
       result.ai_detail = aiDetail(result);
     }
@@ -780,13 +1021,16 @@
   // {prompt_version, detected_type, doc_type, containers, fields: [{name, confidence, page, valid}], warnings} — the values
   // themselves stay in extracted_fields / line_items (app.extraction_detail_ok checks this shape)
   function aiDetail(r) {
-    return {
+    const o = {
       prompt_version: PROMPT_VERSION_V3, detected_type: r.detected_type, doc_type: r.doc_type,
       detected_documents: (r.detected_documents || [r.detected_type]).slice(0, 6),
       containers: r.containers.slice(0, 300),
       fields: r.fields.map(f => ({ name: f.name, confidence: f.confidence, page: f.page, valid: f.valid })),
       warnings: r.warnings.map(w => ({ source: w.source, code: w.code, text: w.text, field: w.field }))
     };
+    // + the declaration detail (app.extraction_decl_detail_ok of 20261120000100)
+    if (r.declaration) o.declaration = r.declaration;
+    return o;
   }
 
   // the machine output as readable text (document_extractions.raw_text of an AI reading)
@@ -797,6 +1041,12 @@
     if (v3 && r.containers && r.containers.length) {
       lines.push('', 'containers:');
       r.containers.forEach((c, i) => lines.push((i + 1) + '. ' + CONTAINER_KEYS.map(k => c[k] == null ? '' : String(c[k])).join(' | ')));
+    }
+    if (v3 && r.declaration) {
+      const d = r.declaration;
+      lines.push('', 'declaration:', 'type evidence: ' + (d.type_evidence || '-'), 'status as printed: ' + (d.status_raw || '-'),
+        'B/L candidates: ' + (d.bl_candidates.join(' | ') || '-') + (d.bl_rtl_affected ? '  (RTL)' : ''),
+        'date printed: ' + (d.date_printed || '-') + ', from Hijri: ' + (d.date_from_hijri || '-'));
     }
     if (r.line_items.length) {
       lines.push('', 'line_items:');
@@ -845,7 +1095,9 @@
     CONTAINER_KEYS, SYSTEM_V3, identityName, keysFor, isSeal,
     AiError, outputSchema, validateRequest, buildRequest, callClaude, parseMessage, usageOf, postProcess, renderText,
     estimateHoldUsd, classifyCallError, pdfPageCount, isValidContainer, iso6346CheckDigit, isSaudiVat, isHs, isIsoDate,
-    measure, incotermCode
+    measure, incotermCode,
+    // declaration reading (20261120000100)
+    DECL_KEYS, normDeclarationStatus, normDeclarationType, normalizeHijri, hijriToGregorian, hijriSupported
   };
   (typeof module === 'object' && module.exports) ? (module.exports = API) : (globalThis.MarsaAiExtract = Object.assign(globalThis.MarsaAiExtract || {}, API));
 })();

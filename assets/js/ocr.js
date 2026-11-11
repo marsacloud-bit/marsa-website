@@ -917,7 +917,7 @@
           break;
         case 'date':
           var d = P.normalizeDate(v);
-          if (d) out.value = d; else out.error = 'تاريخ غير مفهوم. اكتبه بالصيغة YYYY-MM-DD (التاريخ الهجري غير مدعوم).';
+          if (d) out.value = d; else out.error = 'تاريخ غير مفهوم. اكتبه بالصيغة YYYY-MM-DD، أو بالهجري (أم القرى) مثل 1447/03/15 هـ ويُحوَّل إلى الميلادي.';
           break;
         case 'amount':
           var n = P.parseAmount(v);

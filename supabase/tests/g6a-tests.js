@@ -328,13 +328,13 @@ async function secCatalog() {
     const r = await q(`SELECT column_name c FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'report_exports' ORDER BY ordinal_position`);
     return r.map(x => x.c).join(',') === 'id,org_id,actor,report,format,filters,row_count,created_at' || JSON.stringify(r);
   });
-  await check('dictionaries: report_kind 6, export_format 3, search_date_field 4 (internal); portal_payment_status 4 (client-visible)', async () => {
+  await check('dictionaries: report_kind 7 (+ fasah_sheet, 20261120000100), export_format 3, search_date_field 4 (internal); portal_payment_status 4 (client-visible)', async () => {
     const r = await q(`SELECT domain, count(*)::int n, bool_and(client_visible) v, bool_or(client_visible) anyv,
                               bool_and(label_ar <> '' AND label_en <> '') l
                          FROM public.status_labels WHERE domain IN ('report_kind','export_format','search_date_field','portal_payment_status')
                         GROUP BY 1 ORDER BY 1`);
     const m = Object.fromEntries(r.map(x => [x.domain, x]));
-    return (m.report_kind.n === 6 && !m.report_kind.anyv && m.export_format.n === 3 && !m.export_format.anyv
+    return (m.report_kind.n === 7 && !m.report_kind.anyv && m.export_format.n === 3 && !m.export_format.anyv
             && m.search_date_field.n === 4 && !m.search_date_field.anyv && m.portal_payment_status.n === 4 && m.portal_payment_status.v
             && r.every(x => x.l)) || JSON.stringify(r);
   });

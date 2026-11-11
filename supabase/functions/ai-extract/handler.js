@@ -127,6 +127,7 @@
       containers: Array.isArray(det.containers) ? det.containers : [], warnings: Array.isArray(det.warnings) ? det.warnings : [],
       detected_documents: Array.isArray(det.detected_documents) ? det.detected_documents : [det.detected_type || row.doc_type],
       mean_confidence: row.mean_confidence == null ? null : Number(row.mean_confidence), raw_text: row.raw_text || '',
+      declaration: isV3 && det.declaration && typeof det.declaration === 'object' ? det.declaration : null,
       ai_detail: det, source_sha256: row.source_sha256, reused: true, extraction_id: row.id, review_status: row.review_status,
       usage: { input_tokens: 0, output_tokens: 0, cost_usd: 0 }
     };
@@ -289,6 +290,7 @@
     if (v3) {
       body.containers = out.containers; body.ai_detail = out.ai_detail; body.source_sha256 = sha;
       body.detected_documents = out.detected_documents;
+      body.declaration = out.declaration || null;     // v3 customs declaration (20261120000100), else null
       body.reused = false; body.extraction_id = null;
     }
     return json(body, 200, origin);

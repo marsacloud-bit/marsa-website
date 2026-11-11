@@ -254,6 +254,21 @@ async function docBatchFixtures() {
   }
 }
 
+// legacy decl (20261120000100): per org, a customs declaration reading approved by the org's own staff through the RPCs
+// (org A: TX1 with its seed declaration number and its two seed containers — TX3 must keep 0 containers, no new transaction;
+// org B: B_TX with its declaration RLS-B-DEC-1 and container) → a row in declaration_approvals, declaration_items and hs_reference
+async function declFixtures() {
+  const rpcAs = async (who, sql, params) => (await as(who, sql, params))[0].r;
+  for (const [who, org, tx, no, ctr, bl, tag] of [['staffA', A, TX1, 'TEST-DEC-0001', 'TSTU0000001, TSTU0000002', 'TESTBL0000001', 'A'], ['staffB', B, B_TX, 'RLS-B-DEC-1', 'BBBU0000001', 'BBL0001', 'B']]) {
+    const ext = (await q(`INSERT INTO public.document_extractions (org_id, transaction_id, doc_type, source_name, source_sha256, engine, languages, raw_text,
+                            extracted_fields, line_items, created_by) VALUES ($1, $2, 'customs_declaration', 'decl.pdf', $3, 'tesseract.js@5.1.1', 'ara', 'DECL', $4, $5, $6) RETURNING id`,
+      [org, tx, hex(tag === 'A' ? '9' : 'a'), JSON.stringify({ declaration_number: no, declaration_type: 'import', declaration_status: 'submitted',
+        declaration_date: '2026-11-01', bl_number: bl, container_numbers: ctr }), JSON.stringify([{ description: 'بند بيان ' + tag, hs_code: '870830', amount: 10 }]), U[who]]))[0].id;
+    const rv = await rpcAs(who, `SELECT public.get_declaration_review($1, $2) r`, [ext, tx]);
+    await rpcAs(who, `SELECT public.approve_declaration_extraction($1, $2, $3) r`, [ext, tx, { version: rv.version }]);
+  }
+}
+
 // G3 (20261103000100 / 0200): one row per org in every new tenant table, written through the real
 // RLS-guarded inserts / RPCs by each org's own staff. Org A uses TX3 (air, no containers) so the
 // G1/G2 status tests below are unaffected; document requirements are export-only so nothing is gated.
@@ -517,6 +532,10 @@ const TENANT_TABLES = [
   ['transaction_shipment_data', `SELECT transaction_id::text id FROM public.transaction_shipment_data WHERE org_id = $1 LIMIT 1`, 'transaction_id::text', 'org_id = org_id'],
   ['shipment_invoice_items', `SELECT id::text id FROM public.shipment_invoice_items WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
   ['shipment_packing_items', `SELECT id::text id FROM public.shipment_packing_items WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
+  // legacy decl (20261120000100): staff SELECT only (branch-scoped approvals / items; the HS library org-wide), written only by approve_declaration_extraction
+  ['declaration_approvals', `SELECT id::text id FROM public.declaration_approvals WHERE org_id = $1 LIMIT 1`, 'id::text', 'daftra_hook = daftra_hook'],
+  ['declaration_items',  `SELECT id::text id FROM public.declaration_items WHERE org_id = $1 LIMIT 1`,  'id::text',  'org_id = org_id'],
+  ['hs_reference',       `SELECT id::text id FROM public.hs_reference WHERE org_id = $1 LIMIT 1`,       'id::text',  'org_id = org_id'],
   ['invitations',        `SELECT id::text id FROM public.invitations WHERE org_id = $1 LIMIT 1`,        'id::text',  'email = email'],
   // G3 registry (20261103000100)
   ['parties',            `SELECT id::text id FROM public.parties WHERE org_id = $1 LIMIT 1`,            'id::text',  'name_ar = name_ar'],
@@ -603,6 +622,8 @@ async function main() {
   catch (e) { fail('doc-match fixtures', errText(e)); return finish(); }
   try { await docBatchFixtures(); pass('legacy docs fixtures: an approved document batch per org (batch, slot, shipment data, invoice / packing items)'); }
   catch (e) { fail('legacy docs fixtures', errText(e)); return finish(); }
+  try { await declFixtures(); pass('legacy decl fixtures: an approved customs declaration reading per org (approval, items, HS reference)'); }
+  catch (e) { fail('legacy decl fixtures', errText(e)); return finish(); }
 
   /* ---------------------------------------------------------------- catalog */
   section('catalog: RLS, grants, function privileges');
@@ -700,9 +721,11 @@ async function main() {
       // legacy docs (20261119000100): document batches, approval into the transaction, shipment data, client matching v2, shipping agents
       'create_doc_batch', 'attach_doc_batch_document', 'detach_doc_batch_document', 'merge_doc_batch', 'save_doc_batch_draft', 'get_doc_batch',
       'list_pending_doc_batches', 'discard_doc_batch', 'archive_doc_batch', 'approve_doc_batch', 'get_transaction_shipment', 'match_client_v2',
-      'confirm_client_match', 'reject_client_alias', 'seed_shipping_agents', 'match_shipping_agent'];
+      'confirm_client_match', 'reject_client_alias', 'seed_shipping_agents', 'match_shipping_agent',
+      // legacy decl (20261120000100): declaration review / approval, the transaction declaration, the HS reference search
+      'get_declaration_review', 'approve_declaration_extraction', 'get_transaction_declaration', 'search_hs_reference'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 217) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 221) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');
@@ -1793,7 +1816,7 @@ async function main() {
     const r = await q(`SELECT domain, count(*)::int n, count(*) FILTER (WHERE client_visible)::int v FROM public.status_labels
                         WHERE domain IN ('report_kind','export_format','search_date_field','portal_payment_status') GROUP BY 1 ORDER BY 1`);
     const m = Object.fromEntries(r.map(x => [x.domain, x]));
-    const ok = m.report_kind && m.report_kind.n === 6 && m.report_kind.v === 0 && m.export_format && m.export_format.n === 3 && m.export_format.v === 0
+    const ok = m.report_kind && m.report_kind.n === 7 /* + fasah_sheet (20261120000100) */ && m.report_kind.v === 0 && m.export_format && m.export_format.n === 3 && m.export_format.v === 0
       && m.search_date_field && m.search_date_field.n === 4 && m.search_date_field.v === 0
       && m.portal_payment_status && m.portal_payment_status.n === 4 && m.portal_payment_status.v === 4;
     return ok || JSON.stringify(r);
