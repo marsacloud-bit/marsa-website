@@ -205,6 +205,13 @@
       var mt = mediaType(file);
       if (!mt) { slotError(k, T('ai_unsupported')); return; }
       if (file.size > (mt === 'application/pdf' ? AI_MAX_FILE : AI_MAX_IMAGE)) { slotError(k, T('ai_too_large')); return; }
+      // the same file in two slots would be one reading for two documents (and two charges): refused here
+      var dupOf = null;
+      SLOTS.forEach(function (o) {
+        var f2 = o !== k && S.slots[o] && S.slots[o].file;
+        if (f2 && f2.name === file.name && f2.size === file.size && f2.lastModified === file.lastModified) dupOf = o;
+      });
+      if (dupOf) { slotError(k, T('mx_dup_file', { doc: docName(dupOf) })); return; }
       if (S.result) clearResult();
       s.file = file; s.mime = mt; s.status = 'ready'; s.res = null; s.fields = null; s.orig = null; s.items = []; s.error = ''; s.sha256 = '';
       delete S.saved.extractions[k];

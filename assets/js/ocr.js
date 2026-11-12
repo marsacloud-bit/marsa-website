@@ -322,6 +322,9 @@
       var added = 0;
       files.forEach(function (f) {
         if (jobs.length >= MAX_FILES) { toast('الحد الأقصى ' + MAX_FILES + ' مستندًا في المرة الواحدة.', 'warning'); return; }
+        // the same file twice in the queue = two readings (and two AI charges) of one document: skipped
+        var dup = jobs.some(function (o) { return o.file && o.file.name === f.name && o.file.size === f.size && o.file.lastModified === f.lastModified; });
+        if (dup) { toast(T('fx_dup_file', { name: f.name || '' }), 'info'); return; }
         var j = { id: uid(), file: f, name: f.name || 'camera.jpg', size: f.size, mime: f.type || '', rotation: 0, status: 'queued',
           progress: 0, statusText: 'بانتظار القراءة', error: '', thumbUrl: '', saved: null };
         if (f.size > MAX_FILE) { j.status = 'error'; j.error = 'حجم الملف أكبر من 25 ميغابايت.'; }

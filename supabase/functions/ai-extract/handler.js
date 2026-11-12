@@ -256,17 +256,38 @@
     try {
       const params = X.buildRequest(v);
       v.data_b64 = '';
-      try {
-        msg = await X.callClaude(d.claudeClient(), params);
-      } catch (e) {
+      // the HTTP status, the API error type (a fixed enum) and the API's own short reason (printable ASCII only, any
+      // key-like token removed, ≤ 240 chars — the API's validation text, never document content) say why a call failed
+      const why = e => {
+        const st = e && Number.isInteger(e.status) ? e.status : 0;
+        const ty = e && typeof e.type === 'string' && /^[a-z_]{1,40}$/.test(e.type) ? e.type : '-';
+        const body = e && e.error && typeof e.error === 'object' ? e.error : null;
+        const raw = body && body.error && typeof body.error.message === 'string' ? body.error.message : '';
+        const reason = raw.replace(/sk-ant-[A-Za-z0-9_-]+/g, '[key]').replace(/[^\x20-\x7E]/g, '?').slice(0, 240);
+        return 'http ' + st + ', ' + ty + (reason ? ', ' + reason : '');
+      };
+      const fail1 = e => {
         const c = X.classifyCallError(e, d.sdk);
         errCode = c.code; errStatus = c.status;
         settle = { status: c.settle, model: X.MODEL, input: 0, output: 0, attempts: null };
-        // the HTTP status and the API error type (a fixed enum such as authentication_error / billing_error /
-        // invalid_request_error) say why without any message text, key or document content
+        log('ai-extract: claude call failed (' + c.code + ', ' + c.settle + ', ' + why(e) + ')');
+      };
+      try {
+        msg = await X.callClaude(d.claudeClient(), params);
+      } catch (e) {
         const st = e && Number.isInteger(e.status) ? e.status : 0;
-        const ty = e && typeof e.type === 'string' && /^[a-z_]{1,40}$/.test(e.type) ? e.type : '-';
-        log('ai-extract: claude call failed (' + c.code + ', ' + c.settle + ', http ' + st + ', ' + ty + ')');
+        // a 400 is rejected before the model runs (nothing billed). When the request carried the server-side
+        // fallback beta, try once more without it (betas + fallbacks): an account without that beta rejects the
+        // whole request
+        if (st === 400 && Array.isArray(params.betas) && params.betas.length) {
+          log('ai-extract: claude call rejected (' + why(e) + '); retrying without the fallback beta');
+          const p2 = Object.assign({}, params);
+          delete p2.betas; delete p2.fallbacks;
+          try { msg = await X.callClaude(d.claudeClient(), p2); }
+          catch (e2) { fail1(e2); }
+        } else {
+          fail1(e);
+        }
       }
       if (msg) {
         const parsed = X.parseMessage(msg, v.prompt_version, v.doc_type);
