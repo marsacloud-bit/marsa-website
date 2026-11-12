@@ -333,7 +333,8 @@
     'packing list): list the type of every complete document found in detected_documents, set doc_type to the main one, and fill the',
     'fields of all of them. List a type only for a whole document of that kind, not for a number merely quoted on another document.',
     'containers: one row per container printed, with its seal number, size / type (e.g. 40HC, 20GP), packages and net / gross weight in kg',
-    'when printed for that container (null otherwise). seal_numbers lists every seal number, one per entry.',
+    'when printed for that container (otherwise an empty string for text, null for numbers). seal_numbers lists every seal number,',
+    'one per entry. In line_items too, a text column that is not printed is an empty string and a number column is null.',
     'line_items: the goods table. hs_code there is the supplier\'s code as printed (reference only, not a Saudi tariff decision). Keep',
     'the scientific / Latin name in scientific_name, not in the description. Weights in kg, numbers without thousands separators.',
     'A shipping line name is not a local shipping agent. consignee_name is the name only, without the address block.'
@@ -412,6 +413,14 @@
 
   /* ------------------------------------------------------------------ schema */
   function nullable(t) { return { anyOf: [{ type: t }, { type: 'null' }] }; }
+  // v3 shipping schema: '' in a text column of line_items / containers means «not printed» → null (what the rest expects)
+  function blankToNull(data) {
+    if (!data || typeof data !== 'object') return data;
+    const fix = rows => { if (Array.isArray(rows)) rows.forEach(r => { if (r && typeof r === 'object') Object.keys(r).forEach(k => {
+      if (typeof r[k] === 'string' && !r[k].trim() && k !== 'description' && k !== 'container_number') r[k] = null; }); }); };
+    fix(data.line_items); fix(data.containers);
+    return data;
+  }
   function isV3(version) { return version === PROMPT_VERSION_V3; }
   function keysFor(docType, version) {
     return isV3(version) ? (KEYS_FOR_V3[docType] || ALL_KEYS_V3) : (KEYS_FOR[docType] || ALL_KEYS);
@@ -531,7 +540,10 @@
     if (isPay(docType)) return outputSchemaPay(docType);
     const keys = (KEYS_FOR_V3[docType] || ALL_KEYS_V3).slice();
     const itemProps = { description: { type: 'string' } };
-    ITEM_KEYS_V3.slice(1).forEach(k => { itemProps[k] = nullable(ITEM_NUM_V3.indexOf(k) !== -1 ? 'number' : 'string'); });
+    // the API compiles at most 16 union-typed (nullable) parameters per schema: the text columns of line_items and
+    // containers are plain strings ('' = not printed, turned back into null by blankToNull before the shape check);
+    // only the numeric columns stay nullable
+    ITEM_KEYS_V3.slice(1).forEach(k => { itemProps[k] = ITEM_NUM_V3.indexOf(k) !== -1 ? nullable('number') : { type: 'string' }; });
     const sc = {
       type: 'object',
       additionalProperties: false,
@@ -564,7 +576,7 @@
             additionalProperties: false,
             required: CONTAINER_KEYS.slice(),
             properties: {
-              container_number: { type: 'string' }, seal_number: nullable('string'), size_type: nullable('string'),
+              container_number: { type: 'string' }, seal_number: { type: 'string' }, size_type: { type: 'string' },
               packages_count: nullable('number'), net_weight: nullable('number'), gross_weight: nullable('number')
             }
           }
@@ -780,6 +792,7 @@
     const text = content.slice(start).filter(b => b && b.type === 'text' && typeof b.text === 'string').map(b => b.text).join('');
     let data;
     try { data = JSON.parse(text); } catch (e) { return { ok: false, code: 'bad_output', usage, model }; }
+    if (isV3(version) && !isOps(docType) && !isPay(docType)) blankToNull(data);
     const okShape = isV3(version) && isOps(docType) ? shapeOkOps(data, docType)
       : (isV3(version) && isPay(docType) ? shapeOkPay(data, docType) : shapeOk(data, version));
     if (!okShape) return { ok: false, code: 'bad_output', usage, model };
