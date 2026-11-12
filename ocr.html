@@ -268,6 +268,17 @@
               </div>
             </div>
             <div class="ocr-result-meta" id="ocr-result-meta"></div>
+            <!-- readings of this run (or the documents of one combined file) that can be compared: ocr-match.js report, no new AI call -->
+            <div class="ocr-compare-box" id="ocr-compare-box" role="region" aria-labelledby="ocr-compare-title" hidden>
+              <div class="ocr-compare-text">
+                <strong id="ocr-compare-title" data-i18n="ocr.cmp_title">يمكن مطابقة هذه المستندات</strong>
+                <span class="text-sm" id="ocr-compare-desc"></span>
+              </div>
+              <div class="ocr-compare-actions">
+                <button type="button" class="btn btn-primary btn-sm" id="ocr-compare-btn" data-i18n="ocr.cmp_btn">قارن هذه المستندات</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="ocr-compare-file-btn" hidden></button>
+              </div>
+            </div>
 
             <div class="alert alert-warning mb-2" id="ocr-low-conf" role="note" hidden>
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18h.01"/></svg>
@@ -613,6 +624,7 @@
                 <label class="check"><input type="checkbox" id="ocr-match-attach" checked> <span data-i18n="ocr.m_attach">إرفاق الملفات الأصلية بمستندات المعاملة</span></label>
               </div>
               <div class="alert mt-2" id="ocr-match-save-msg" role="status" tabindex="-1" hidden><span id="ocr-match-save-msg-text"></span></div>
+              <div class="alert alert-warning mt-2" id="ocr-match-save-block" role="note" hidden><span id="ocr-match-save-block-text"></span></div>
               <div class="ocr-match-export" role="group" aria-label="حفظ وتصدير المطابقة" data-i18n-attr="aria-label:ocr.m_export_group">
                 <button type="button" class="btn btn-primary" id="ocr-match-save-btn">
                   <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>

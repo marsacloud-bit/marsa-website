@@ -1443,6 +1443,101 @@ async function secV3() {
       && !r.warnings.some(w => w.code === 'doc_type_mismatch') && lone.warnings.some(w => w.code === 'doc_type_mismatch')
       && J(lone.detected_documents) === J(['bill_of_lading'])) || J({ r: r.detected_documents, w: r.warnings.map(w => w.code) });
   });
+  // 2026-11-12 (live): a «ورقة معلومات الإدخال في منصة فسح» PDF = a B/L + an invoice + a packing list of one shipment, where the
+  // B/L gross weight is 25000 kg and the packing list 27500 kg. fields[].document keeps both values (by_document).
+  const combinedOut = o => Object.assign({ doc_type: 'bill_of_lading', detected_documents: ['bill_of_lading', 'commercial_invoice', 'packing_list'], fields: [
+    { name: 'bl_number', value: 'MEDU7710023', confidence: 0.95, page: 1, document: 'bill_of_lading' },
+    { name: 'container_numbers', value: 'CSQU3054383', confidence: 0.9, page: 1, document: 'bill_of_lading' },
+    { name: 'gross_weight', value: '25,000 KGS', confidence: 0.85, page: 1, document: 'bill_of_lading' },
+    { name: 'net_weight', value: '24000', confidence: 0.85, page: 1, document: 'bill_of_lading' },
+    { name: 'consignee', value: 'CONSIGNEE: TEST TRADING CO. ONE\nP.O. BOX 1 JEDDAH', confidence: 0.9, page: 1, document: 'bill_of_lading' },
+    { name: 'invoice_number', value: 'INV-5501', confidence: 0.95, page: 2, document: 'commercial_invoice' },
+    { name: 'total', value: '12,345.50', confidence: 0.9, page: 2, document: 'commercial_invoice' },
+    { name: 'supplier_vat', value: '123', confidence: 0.7, page: 2, document: 'commercial_invoice' },
+    { name: 'gross_weight', value: '27500', confidence: 0.95, page: 3, document: 'packing_list' },
+    { name: 'net_weight', value: 'n/a', confidence: 0.4, page: 3, document: 'packing_list' },
+    { name: 'container_numbers', value: 'CSQU3054383', confidence: 0.9, page: 3, document: 'packing_list' },
+    { name: 'packing_list_number', value: 'PL-88', confidence: 0.9, page: 3, document: 'packing_list' }],
+    line_items: [], containers: [{ container_number: 'CSQU3054383', seal_number: 'SL1001', size_type: '40HC', packages_count: null, net_weight: null, gross_weight: null }],
+    warnings: [] }, o || {});
+  await check('v3 schema: fields[].document is a required plain string enum of DETECTED_TYPES_V3 (no new union) on the shipping readings only; the prompt asks for one value PER document', () => {
+    const sh = ['auto', 'bill_of_lading', 'commercial_invoice', 'packing_list', 'customs_declaration', 'supplier_invoice'].map(t => X.outputSchema(t, 'ai-doc-v3').properties.fields.items);
+    const others = ['appointment_ticket', 'empty_return_receipt', 'appointment_invoice', 'payment_proof'].map(t => X.outputSchema(t, 'ai-doc-v3').properties.fields.items);
+    const v2 = X.outputSchema('auto', 'ai-doc-v2').properties.fields.items;
+    return (sh.every(it => J(it.required) === J(['name', 'value', 'confidence', 'page', 'document']) && J(it.properties.document) === J({ type: 'string', enum: X.DETECTED_TYPES_V3 }))
+      && others.every(it => !('document' in it.properties) && !it.required.includes('document')) && !('document' in v2.properties)
+      && /field once PER document/.test(X.SYSTEM_V3) && /document is the same as doc_type/.test(X.SYSTEM_V3) && !/PER document/.test(X.SYSTEM)) || 'schema';
+  });
+  await check('v3 combined file (B/L 25000 kg vs packing list 27500 kg): fields[] keeps one value per key (the main document\'s, even when less confident) + conflicting_values; by_document holds every document\'s values in the order of detected_documents', () => {
+    const r = X.postProcess(combinedOut(), 'auto', 'ai-doc-v3');
+    const f = k => (r.fields.find(x => x.name === k) || {}).value;
+    const bd = r.by_document || {};
+    const g = (kind, k) => ((bd[kind] || []).find(x => x.name === k) || null);
+    return (r.doc_type === 'bill_of_lading' && f('gross_weight') === '25000' && f('net_weight') === '24000' && f('invoice_number') === 'INV-5501' && f('packing_list_number') === 'PL-88'
+      && r.warnings.some(w => w.code === 'conflicting_values' && w.field === 'gross_weight')
+      && J(Object.keys(bd)) === J(['bill_of_lading', 'commercial_invoice', 'packing_list'])
+      && J(g('bill_of_lading', 'gross_weight')) === J({ name: 'gross_weight', value: '25000', confidence: 0.85, page: 1, valid: true })
+      && J(g('packing_list', 'gross_weight')) === J({ name: 'gross_weight', value: '27500', confidence: 0.95, page: 3, valid: true })
+      && g('commercial_invoice', 'gross_weight') === null && g('commercial_invoice', 'total').value === '12345.5' && g('bill_of_lading', 'bl_number').value === 'MEDU7710023'
+      && g('bill_of_lading', 'consignee_name').value === 'TEST TRADING CO. ONE' && g('packing_list', 'consignee_name') === null
+      && g('packing_list', 'container_numbers').value === 'CSQU3054383' && g('bill_of_lading', 'container_numbers').value === 'CSQU3054383'
+      && Object.keys(bd).every(k => bd[k].every(x => J(Object.keys(x)) === J(['name', 'value', 'confidence', 'page', 'valid'])))) || J({ f: r.fields, bd, w: r.warnings });
+  });
+  await check('v3 combined file: the per-value checks run inside by_document too (an invalid packing-list weight is flagged there + one warning; a warning already raised is not repeated)', () => {
+    const r = X.postProcess(combinedOut(), 'auto', 'ai-doc-v3');
+    const bd = r.by_document;
+    const g = (kind, k) => bd[kind].find(x => x.name === k);
+    const n = code => r.warnings.filter(w => w.code === code).length;
+    return (g('packing_list', 'net_weight').valid === false && g('packing_list', 'net_weight').value === 'n/a' && g('bill_of_lading', 'net_weight').valid === true
+      && g('commercial_invoice', 'supplier_vat').valid === false && n('vat_format') === 1 && n('weight_format') === 1
+      && r.fields.find(x => x.name === 'net_weight').valid === true) || J({ bd, w: r.warnings });
+  });
+  await check('v3 combined file: by_document is response-only — ai_detail keeps its keys (app.extraction_detail_ok accepts it; the same detail WITH by_document is rejected)', async () => {
+    const r = X.postProcess(combinedOut(), 'auto', 'ai-doc-v3');
+    const ok = (await one(`SELECT app.extraction_detail_ok($1::jsonb) ok`, [J(r.ai_detail)])).ok;
+    const bad = (await one(`SELECT app.extraction_detail_ok($1::jsonb) ok`, [J(Object.assign({ by_document: r.by_document }, r.ai_detail))])).ok;
+    return (J(Object.keys(r.ai_detail)) === J(['prompt_version', 'detected_type', 'doc_type', 'detected_documents', 'containers', 'fields', 'warnings'])
+      && !('by_document' in r.ai_detail) && ok === true && bad === false && !/by_document/.test(r.raw_text)) || J({ ok, bad, keys: Object.keys(r.ai_detail) });
+  });
+  await check('v3 combined file read for a slot: fields[] prefers the slot\'s document when the file prints it (packing_list slot → 27500), else the main one', () => {
+    const pl = X.postProcess(combinedOut(), 'packing_list', 'ai-doc-v3');
+    const ci = X.postProcess(combinedOut(), 'commercial_invoice', 'ai-doc-v3');
+    const fv = (r, k) => (r.fields.find(x => x.name === k) || {}).value;
+    return (fv(pl, 'gross_weight') === '27500' && fv(pl, 'net_weight') === 'n/a' && fv(ci, 'gross_weight') === '25000'
+      && fv(ci, 'invoice_number') === 'INV-5501') || J({ pl: pl.fields, ci: ci.fields, bd: pl.by_document });
+  });
+  await check('v3: a value said to be on a document the file does not hold (not in detected_documents) counts for the main document — no by_document', () => {
+    const one = X.postProcess(combinedOut({ detected_documents: ['bill_of_lading'], fields: combinedOut().fields.filter(f => f.document === 'bill_of_lading')
+      .concat([{ name: 'invoice_number', value: 'INV-5501', confidence: 0.9, page: 1, document: 'commercial_invoice' }]) }), 'auto', 'ai-doc-v3');
+    const both = X.postProcess(combinedOut({ detected_documents: ['bill_of_lading', 'packing_list'] }), 'auto', 'ai-doc-v3');
+    return (!('by_document' in one) && one.fields.find(x => x.name === 'invoice_number').value === 'INV-5501'
+      && J(Object.keys(both.by_document || {})) === J(['bill_of_lading', 'packing_list'])
+      && both.by_document.bill_of_lading.some(x => x.name === 'invoice_number')) || J({ one: one.by_document, both: both.by_document && Object.keys(both.by_document) });
+  });
+  await check('v3 single document: the answer is byte-identical with or without fields[].document = doc_type (and with an unknown document); no by_document', () => {
+    const tag = d => v3Out({ fields: v3Out().fields.map(f => Object.assign({ document: d }, f)) });
+    const base = X.postProcess(v3Out(), 'packing_list', 'ai-doc-v3');
+    const same = X.postProcess(tag('packing_list'), 'packing_list', 'ai-doc-v3');
+    const odd = X.postProcess(tag('passport'), 'packing_list', 'ai-doc-v3');
+    const auto = X.postProcess(tag('packing_list'), 'auto', 'ai-doc-v3');
+    const bl = X.postProcess(combinedOut({ fields: combinedOut().fields.map(f => Object.assign({}, f, { document: 'bill_of_lading' })) }), 'auto', 'ai-doc-v3');
+    return (J(base) === J(same) && J(base) === J(odd) && !('by_document' in base) && !('by_document' in auto) && !('by_document' in bl)
+      && bl.fields.find(x => x.name === 'gross_weight').value === '27500' /* one document: the old rule (most confident) */) || 'differs';
+  });
+  await check('v2 readings never carry by_document (the document property is ignored)', () => {
+    const r = X.postProcess({ doc_type: 'bill_of_lading', fields: [{ name: 'gross_weight', value: '25000', confidence: 0.9, page: 1, document: 'bill_of_lading' },
+      { name: 'gross_weight', value: '27500', confidence: 0.95, page: 2, document: 'packing_list' }], line_items: [], warnings: [] }, 'auto', 'ai-doc-v2');
+    return (!('by_document' in r) && r.fields.find(x => x.name === 'gross_weight').value === '27500') || J(r);
+  });
+  await check('handler v3: a combined file → the response carries by_document (not saved: ai_detail without it); a single document → no by_document key', async () => {
+    const d = v3Deps([], { msg: msgOf(combinedOut()) });
+    const b = JSON.parse((await H.handleRequest(hReq(body3({ doc_type: 'auto' })), d)).body);
+    const d1 = v3Deps([]);
+    const b1 = JSON.parse((await H.handleRequest(hReq(body3()), d1)).body);
+    return (b.by_document && J(Object.keys(b.by_document)) === J(['bill_of_lading', 'commercial_invoice', 'packing_list'])
+      && b.by_document.packing_list.find(x => x.name === 'gross_weight').value === '27500' && !('by_document' in b.ai_detail)
+      && b.fields.find(x => x.name === 'gross_weight').value === '25000' && b1.prompt_version === 'ai-doc-v3' && !('by_document' in b1)) || J({ b: Object.keys(b), err: b.error, b1: Object.keys(b1) });
+  });
   await check('handler sha256Hex = node crypto SHA-256 of the decoded bytes (the source_sha256 the browser saves)', async () =>
     (await H.sha256Hex(PDF3)) === SHA3);
 
@@ -2253,6 +2348,134 @@ async function secFrontEnd() {
   });
   await check('ocr-match.js: every slot is read with ai-doc-v3', () =>
     /var PROMPT = \{ invoice: 'ai-doc-v3', bl: 'ai-doc-v3', declaration: 'ai-doc-v3', packing: 'ai-doc-v3' \};/.test(rd('assets/js/ocr-match.js')) || 'PROMPT');
+  // 2026-11-12 (owner): files read together in the single reader are compared (ocr.js → MarsaOcrMatch.compareReadings, no new AI call)
+  const mx = rd('assets/js/ocr-match.js');
+  const mkPlanCtx = () => {
+    const i = ocr.indexOf('    var MATCH_SLOT = '), j = ocr.indexOf('    function openCompare(');
+    if (i < 0 || j < i) return null;
+    const c = { T: (k, v) => k + (v ? J(v) : ''), I18N: null, currentId: null, window: {}, typeSel: {}, renderMeta() {}, renderSaveState() {} };
+    vm.createContext(c);
+    vm.runInContext(ocr.slice(i, j) + ';this.comparePlan = comparePlan; this.partsOf = partsOf;', c);
+    return c;
+  };
+  const F3 = (name, value, confidence, page) => ({ name, value, confidence: confidence == null ? 0.9 : confidence, page: page || 1, valid: true });
+  const aiJob = (id, name, docType, fields, extra) => Object.assign({ id, name, docType, status: 'done', mode: 'ai', ai: { usageId: 'u-' + id },
+    sha256: 'a'.repeat(64), file: { name }, fields: Object.fromEntries(fields.map(f => [f.name, { value: f.value, score: f.confidence, source: 'ai' }])),
+    items: [], machineItems: [], aiRes: { usage_id: 'u-' + id, detected_type: docType, fields, warnings: [], containers: [] }, byDocument: null }, extra || {});
+  const sheetBy = { bill_of_lading: [F3('bl_number', 'BLB1'), F3('gross_weight', '25000')], commercial_invoice: [F3('invoice_number', 'INV-B')],
+    packing_list: [F3('packing_list_number', 'PL-B'), F3('gross_weight', '27500', 0.95, 3), Object.assign(F3('net_weight', 'n/a'), { valid: false })] };
+  const sheetJob = () => aiJob('s', 'sheet.pdf', 'bill_of_lading', [F3('bl_number', 'BLB1'), F3('gross_weight', '25000')], { byDocument: sheetBy,
+    machineItems: [{ description: 'X', amount: 1 }],
+    aiRes: { usage_id: 'u-s', detected_type: 'bill_of_lading', fields: [F3('bl_number', 'BLB1'), F3('gross_weight', '25000')],
+      warnings: [{ source: 'server', code: 'conflicting_values', text: 'c', field: 'gross_weight' }, { source: 'server', code: 'weight_format', text: 'w', field: 'net_weight' }],
+      containers: [{ container_number: 'MSKU1234565' }], by_document: sheetBy } });
+  await check('ocr.js (vm): comparePlan — a B/L + its invoice + a combined sheet: whole files first, only the free slot of the sheet (packing) joins, with a note; nothing else read', () => {
+    const c = mkPlanCtx(); if (!c) return 'markers';
+    const plan = c.comparePlan([aiJob('b', 'bl.pdf', 'bill_of_lading', [F3('bl_number', 'BLA1')]), aiJob('i', 'inv.pdf', 'commercial_invoice', [F3('invoice_number', 'INV-A')]), sheetJob()]);
+    if (!plan) return 'no plan';
+    const e = plan.entries.map(x => [x.slot, x.label, !!x.part]);
+    const pk = plan.entries.find(x => x.slot === 'packing');
+    return (J(e) === J([['bl', 'bl.pdf', false], ['invoice', 'inv.pdf', false], ['packing', 'sheet.pdf — cmp_kind_packing_list', true]])
+      && pk.fields.gross_weight.value === '27500' && pk.res.part === true && pk.res.fields.some(f => f.name === 'net_weight' && f.valid === false)
+      && J(pk.res.warnings.map(w => w.code)) === J(['weight_format']) && pk.res.containers.length === 0 && pk.items.length === 0 && !pk.saved
+      && plan.notes.length === 1 && /^cmp_note_combined/.test(plan.notes[0]) && typeof plan.entries[0].saved === 'function' && plan.entries[0].saved() === null
+      && plan.entries[0].sha256.length === 64) || J({ e, notes: plan.notes, pk });
+  });
+  await check('ocr.js (vm): comparePlan — the combined sheet alone gives one entry per document (B/L 25000 vs packing list 27500); two invoices → the first, with a note; one reading → no plan', () => {
+    const c = mkPlanCtx(); if (!c) return 'markers';
+    const a = c.comparePlan([sheetJob()]);
+    const ok1 = a && J(a.entries.map(x => x.slot)) === J(['bl', 'invoice', 'packing']) && a.entries.every(x => x.part && /^sheet\.pdf — /.test(x.label))
+      && a.entries[0].fields.gross_weight.value === '25000' && a.entries[2].fields.gross_weight.value === '27500'
+      && a.entries[0].res.containers.length === 1 && a.entries[1].items.length === 1 && a.notes.length === 0;
+    const b = c.comparePlan([aiJob('i1', 'inv1.pdf', 'commercial_invoice', [F3('invoice_number', '1')]), aiJob('i2', 'inv2.pdf', 'operator_invoice', [F3('invoice_number', '2')]),
+      aiJob('b', 'bl.pdf', 'bill_of_lading', [F3('bl_number', 'B')])]);
+    const ok2 = b && J(b.entries.map(x => x.label)) === J(['inv1.pdf', 'bl.pdf']) && b.notes.length === 1 && /^cmp_note_dup/.test(b.notes[0]) && /inv2\.pdf/.test(b.notes[0]);
+    const one = c.comparePlan([aiJob('b', 'bl.pdf', 'bill_of_lading', [F3('bl_number', 'B')])]);
+    const tess = c.comparePlan([aiJob('b', 'bl.pdf', 'bill_of_lading', [F3('bl_number', 'B')]), Object.assign(aiJob('i', 'inv.pdf', 'commercial_invoice', []), { mode: 'tesseract' })]);
+    return (ok1 && ok2 && one === null && tess === null) || J({ a: a && a.entries.map(x => x.label), b: b && b.notes, one, tess });
+  });
+  await check('ocr.js: finishAiJob keeps by_document (not on a reused reading) and the answer; a finished run calls autoCompare (guarded), never after a cancel', () => {
+    const i = ocr.indexOf('    function aiLevel('), j = ocr.indexOf('\n', ocr.indexOf('    function aiLevel('));
+    const k = ocr.indexOf('    function finishAiJob('), l = ocr.indexOf('\n    }\n', k);
+    const c2 = { MAX_TEXT: 200000, ENGINE_AI: 'claude-opus-5-5', DOC_TYPES: [['bill_of_lading', ''], ['other', '']], SAVE_KEYS: [],
+      P: { plainFields: f => Object.fromEntries(Object.entries(f).map(([a, b]) => [a, b.value])), DB_FIELD_KEYS: [] } };
+    vm.createContext(c2);
+    vm.runInContext(ocr.slice(i, j) + '\n' + ocr.slice(k, l + 7) + ';this.finishAiJob = finishAiJob;', c2);
+    const j1 = { docType: 'other' }, j2 = { docType: 'other' };
+    const r1 = { kind: 'bill_of_lading', fields: [], by_document: sheetBy };
+    c2.finishAiJob(j1, r1);
+    c2.finishAiJob(j2, { kind: 'bill_of_lading', fields: [], by_document: sheetBy, reused: true, extraction_id: 'x' });
+    return (j1.byDocument === sheetBy && j1.aiRes === r1 && j2.byDocument === null
+      && /var stopped = cancelRequested;/.test(ocr) && /if \(!stopped && typeof autoCompare === 'function'\) autoCompare\(todo\);/.test(ocr)
+      && /renderCompareBox\(j\);/.test(ocr) && /id="ocr-compare-box"[^>]*hidden/.test(html) && /id="ocr-compare-btn"/.test(html)) || J({ j1: !!j1.byDocument, j2: j2.byDocument });
+  });
+  await check('ocr-match.js: window.MarsaOcrMatch.compareReadings (no AI call: no aiExtract / quota in it), only with AI access, 2+ slots; save blocked for parts of a combined file, reuses rows the reader saved', () => {
+    const a = mx.indexOf('    function compareReadings('), b = mx.indexOf('    function canCompare(');
+    const body = a > 0 && b > a ? mx.slice(a, b) : '';
+    return (!!body && !/aiExtract|AI\.remaining/.test(body) && /if \(!\(ONLINE && STAFF && AI\.enabled\) \|\| S\.running \|\| S\.saving\) return false;/.test(body)
+      && /if \(n < 2\) return false;/.test(body) && /window\.MarsaOcrMatch = \{ version: E\.VERSION, compareReadings: compareReadings, available: canCompare \};/.test(mx)
+      && /if \(parts\.length\) return T\('mx_save_block_part'/.test(mx) && /\$\('ocr-match-save-btn'\)\.disabled = done \|\| S\.saving \|\| !!block;/.test(mx)
+      && /var ref = savedOf\(k\);\n      if \(ref\) \{/.test(mx) && /S\.slots\[k\]\.onSaved\(r\.data\)/.test(mx) && /id="ocr-match-save-block"/.test(html)
+      && !/innerHTML/.test(body)) || 'ocr-match.js';
+  });
+  await check('ocr-match.js (vm): shipmentCheck — different B/L + no shared container → flagged; a consignee spelling variant (MANARA / MANARAH) is not; another consignee sharing nothing → flagged', () => {
+    const a = mx.indexOf('    function fval('), b = mx.indexOf('    function shipmentBanner(');
+    if (a < 0 || b < a) return 'markers';
+    const E = require(path.join(ROOT, 'assets', 'js', 'doc-match.js'));
+    const mk = docs => {
+      const slots = {}, res = { documents: Object.keys(docs) };
+      Object.keys(docs).forEach(k => { slots[k] = { res: {}, fields: Object.fromEntries(Object.entries(docs[k]).map(([x, v]) => [x, { value: v }])) }; });
+      const c = { E, S: { result: res, slots }, hasVal: v => v != null && v !== '' };
+      vm.createContext(c);
+      vm.runInContext(mx.slice(a, b) + ';this.shipmentCheck = shipmentCheck;', c);
+      return c.shipmentCheck();
+    };
+    const owner = mk({ bl: { bl_number: 'SYNBL2611777', container_numbers: 'TSTU7710023', consignee: 'AL NOOR FOODSTUFF TRADING CO' },
+      invoice: { invoice_number: 'INV-A', consignee: 'AL NOOR FOODSTUFF TRADING CO' },
+      packing: { bl_number: 'SYNBL2611999', container_numbers: 'MSKU1234565, MSKU7654328', consignee: 'GULF HORIZON GENERAL TRADING LLC' } });
+    const sameShip = mk({ bl: { bl_number: 'SYNBL2611001', container_numbers: 'TSTU7710023', consignee: 'AL MANARA TRADING EST, JEDDAH' },
+      invoice: { invoice_number: 'SYN-INV-2026-0042', consignee: 'AL MANARAH TRADING COMPANY' },
+      declaration: { bl_number: 'SYNBL2611001', container_numbers: 'TSTU7710023', consignee: 'مؤسسة المنارة للتجارة' } });
+    const sameBlOtherCt = mk({ bl: { bl_number: 'BL-1', container_numbers: 'TSTU7710023' }, packing: { bl_number: 'BL 1', container_numbers: 'MSKU1234565' } });
+    const party = mk({ invoice: { invoice_number: 'A1', buyer_name: 'AL NOOR FOODSTUFF TRADING CO' }, packing: { invoice_number: 'B2', consignee: 'GULF HORIZON GENERAL TRADING LLC' } });
+    const partyShared = mk({ invoice: { invoice_number: 'A1', buyer_name: 'AL NOOR FOODSTUFF TRADING CO' }, packing: { invoice_number: 'A1', consignee: 'GULF HORIZON GENERAL TRADING LLC' } });
+    return (Array.isArray(owner) && owner.length === 3 && owner.find(x => x.k === 'packing').containers.length === 2 && sameShip === null && sameBlOtherCt === null
+      && Array.isArray(party) && partyShared === null) || J({ owner, sameShip, sameBlOtherCt, party, partyShared });
+  });
+  await check('ocr-match.js (vm): shipmentCheck — the same shipment with no B/L number on the invoice and a B/L consigned "to order" (the buyer is the notify party) is NOT flagged', () => {
+    const a = mx.indexOf('    function fval('), b = mx.indexOf('    function shipmentBanner(');
+    if (a < 0 || b < a) return 'markers';
+    const E = require(path.join(ROOT, 'assets', 'js', 'doc-match.js'));
+    const mk = docs => {
+      const slots = {}, res = { documents: Object.keys(docs) };
+      Object.keys(docs).forEach(k => { slots[k] = { res: {}, fields: Object.fromEntries(Object.entries(docs[k]).map(([x, v]) => [x, { value: v }])) }; });
+      const c = { E, S: { result: res, slots }, hasVal: v => v != null && v !== '' };
+      vm.createContext(c);
+      vm.runInContext(mx.slice(a, b) + ';this.shipmentCheck = shipmentCheck;', c);
+      return c.shipmentCheck();
+    };
+    const toOrder = mk({ bl: { bl_number: 'MEDU7710023', container_numbers: 'TSTU7710023', consignee: 'TO THE ORDER OF SYNTH BANK', notify_party: 'AL NOOR FOODSTUFF TRADING CO' },
+      invoice: { invoice_number: 'INV-1', buyer_name: 'AL NOOR FOODSTUFF TRADING CO' } });
+    const noBl = mk({ bl: { bl_number: 'MEDU7710023', container_numbers: 'TSTU7710023', consignee: 'AL NOOR FOODSTUFF TRADING CO\nP.O. BOX 1 JEDDAH' },
+      invoice: { invoice_number: 'INV-1', buyer_name: 'Al Noor Foodstuff Trading Co.' } });
+    const arOrder = mk({ bl: { bl_number: 'X1', consignee: 'لأمر بنك الاختبار' }, invoice: { invoice_number: 'INV-1', buyer_name: 'مؤسسة النور للتجارة' } });
+    return (toOrder === null && noBl === null && arOrder === null) || J({ toOrder, noBl, arOrder });
+  });
+  await check('ocr-match.js: save is blocked (not broken) when a reused reading is of another kind or one saved reading fills two slots (save_document_match needs distinct ids)', () => {
+    const i18n = rd('assets/i18n/ocr.js');
+    return (/if \(sk && sk !== DOC_TYPE\[k\]\) return T\('mx_save_block_kind'/.test(mx) && /if \(ids\[id\]\) return T\('mx_save_block_same'/.test(mx)
+      && (i18n.match(/mx_save_block_same:/g) || []).length === 2) || 'saveBlock';
+  });
+  await check('i18n: the compare / different-shipments / save-block keys exist in Arabic AND English; the banner says «يبدو أن هذه المستندات لشحنات مختلفة»', () => {
+    const dicts = {};
+    const reg = { register: (ns, d) => { dicts[ns] = d; } };
+    const c3 = { window: { MarsaI18n: reg } }; vm.createContext(c3); vm.runInContext(rd('assets/i18n/ocr.js'), c3);
+    const ar = dicts.ocr.ar, en = dicts.ocr.en;
+    const keys = Object.keys(ar).filter(k => /^(cmp_|mx_ship_|mx_save_block_|mx_bridge_)/.test(k));
+    const miss = keys.filter(k => !en[k]).concat(Object.keys(en).filter(k => /^(cmp_|mx_ship_|mx_save_block_|mx_bridge_)/.test(k) && !ar[k]));
+    return (miss.length === 0 && keys.length >= 25 && ar.mx_ship_title === 'يبدو أن هذه المستندات لشحنات مختلفة' && ar.cmp_btn === 'قارن هذه المستندات'
+      && ar.cmp_kind_packing_list === 'بيان التعبئة') || J({ miss, n: keys.length });
+  });
   await check('admin.js: AI card in the org view (admin), consent checkbox only when switching on, consent_ack sent only off → on', () =>
     (/return aiSettingsCard\(\)\.then/.test(adm) && /call\('aiGetSettings', S\.orgId\)/.test(adm) && /call\('aiSaveSettings', S\.orgId, payload\)/.test(adm)
       && /if \(on && !a\.enabled\) payload\.consent_ack = true;/.test(adm) && /consent\.hidden = !!a\.enabled \|\| !form\.elements\.ai_enabled\.checked;/.test(adm)

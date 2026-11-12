@@ -30,6 +30,14 @@ const TYPES = ['auto', 'bill_of_lading', 'commercial_invoice', 'customs_declarat
     if (n > 16) throw new Error(n + ' unions');
   });
 }));
+check('v3 shipping: fields[].document is a plain required string enum (adds no union-typed parameter)', () => {
+  ['auto', 'bill_of_lading', 'commercial_invoice', 'customs_declaration', 'supplier_invoice', 'packing_list'].forEach(t => {
+    const it = X.outputSchema(t, 'ai-doc-v3').properties.fields.items;
+    const d = it.properties.document;
+    if (!d || d.type !== 'string' || !Array.isArray(d.enum) || d.anyOf || it.required.indexOf('document') === -1) throw new Error(t + ': document');
+    if (unions(d) !== 0) throw new Error(t + ': document is a union');
+  });
+});
 check('v3: blank text columns of line_items / containers come back as null', () => {
   const data = { doc_type: 'bill_of_lading', detected_documents: [], fields: [], warnings: [],
     line_items: [{ description: 'Pallets', hs_code: '', quantity: null, unit_price: null, amount: null, unit: ' ', scientific_name: '',

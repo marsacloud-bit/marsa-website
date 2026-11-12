@@ -19,6 +19,12 @@
      were saved are never saved twice (a retry continues where it stopped).
    - Exports: PNG drawn on a <canvas> here (no library), print (print CSS keeps only
      the report), Excel (XlsxLite), JSON.
+   - compareReadings (window.MarsaOcrMatch, 2026-11-12): readings already made by the single reader (ocr.js) are
+     loaded into this report with NO new AI call — 2+ of the 4 slots, the parts of a combined file (by_document) as
+     entries of their own. Same engine and renderers; readings the reader saved are reused by id, unsaved ones are saved
+     the usual way; a part of a combined file cannot be saved (one AI reading = one extraction): save is disabled with
+     a note. shipmentCheck (UI only) shows «يبدو أن هذه المستندات لشحنات مختلفة» when the documents clearly belong
+     to different shipments (the comparison is still shown).
    - Untrusted values (readings, file names, server rows) only ever via textContent /
      value. The backend functions (saveDocumentMatch …) are feature-detected.
    ========================================================================== */
@@ -84,10 +90,12 @@
     var S = null;
     function fresh() {
       var s = { slots: {}, result: null, reviewed: {}, approved: false, orgId: null, saving: false, running: false,
-        saved: { extractions: {}, match: null }, readAt: null };
-      SLOTS.forEach(function (k) { s.slots[k] = { file: null, sha256: '', status: 'empty', res: null, fields: null, orig: null, items: [], error: '' }; });
+        saved: { extractions: {}, match: null }, readAt: null, bridge: null };
+      SLOTS.forEach(function (k) { s.slots[k] = { file: null, sha256: '', status: 'empty', res: null, fields: null, orig: null, items: [], error: '' }; unbridge(s.slots[k]); });
       return s;
     }
+    // a slot filled by compareReadings (readings of the single reader): label, part of a combined file, saved-row getter
+    function unbridge(s) { s.label = ''; s.part = false; s.savedRef = null; s.onSaved = null; s.bridged = false; }
     S = fresh();
 
     /* ---------------------------------------------------------------
@@ -141,6 +149,8 @@
       }).catch(function () { return ''; });
     }
     function docName(k) { return T('m_doc_' + k); }
+    // the name shown for a slot's document: the file name, or «<file> — <part>» for a part of a combined file
+    function slotLabel(k) { var s = S.slots[k]; return s.label || (s.file ? s.file.name : ''); }
     function activeOrg() {
       if (!ONLINE || !API || !API.activeOrgId) return Promise.resolve(null);
       return API.activeOrgId().then(function (r) { return r && !r.error ? r.data || null : null; }, function () { return null; });
@@ -214,6 +224,7 @@
       if (dupOf) { slotError(k, T('mx_dup_file', { doc: docName(dupOf) })); return; }
       if (S.result) clearResult();
       s.file = file; s.mime = mt; s.status = 'ready'; s.res = null; s.fields = null; s.orig = null; s.items = []; s.error = ''; s.sha256 = '';
+      unbridge(s);
       delete S.saved.extractions[k];
       sha256(file).then(function (h) { if (s.file === file) s.sha256 = h; });
       renderSlot(k);
@@ -229,7 +240,7 @@
       var s = S.slots[k];
       var fn = qsa('[data-fname="' + k + '"]')[0], stEl = qsa('[data-status="' + k + '"]')[0], pr = qsa('[data-progress="' + k + '"]')[0];
       var clr = qsa('[data-clear="' + k + '"]')[0], drop = qsa('[data-drop="' + k + '"]')[0];
-      fn.textContent = s.file ? s.file.name + ' · ' + fmtSize(s.file.size) : T('m_formats');
+      fn.textContent = s.label ? s.label : s.file ? s.file.name + ' · ' + fmtSize(s.file.size) : T('m_formats');
       stEl.textContent = '';
       stEl.className = 'ocr-match-slot-status';
       var msg = s.error || (s.status === 'reading' ? T('ai_reading') : s.status === 'sending' ? T('ai_sending') : s.status === 'done' ? T('m_read_done') : '');
@@ -292,8 +303,11 @@
         if (S.running) return;
         var s = S.slots[k];
         s.file = null; s.status = 'empty'; s.res = null; s.fields = null; s.orig = null; s.items = []; s.error = ''; s.sha256 = '';
+        unbridge(s);
         delete S.saved.extractions[k];
-        if (S.result) { if (S.slots.invoice.res && S.slots.bl.res) recompute(); else clearResult(); }
+        // a report loaded from the single reader keeps comparing what is left (2+ documents)
+        var left = SLOTS.filter(function (o) { return S.slots[o].res; }).length;
+        if (S.result) { if ((S.slots.invoice.res && S.slots.bl.res) || (S.bridge && left >= 2)) recompute(); else clearResult(); }
         renderSlot(k); syncRun();
         inp.focus();
       });
@@ -434,7 +448,7 @@
       }
       mrow(T('m_meta_date'), fmtDate(S.readAt || new Date().toISOString()));
       mrow(T('m_meta_org'), orgName(S.orgId));
-      cols().forEach(function (k) { mrow(docName(k), S.slots[k].file ? S.slots[k].file.name : ''); });
+      cols().forEach(function (k) { mrow(docName(k), slotLabel(k)); });
       mrow(T('m_meta_mode'), modeText(R));
       // banner
       var ov = $('ocr-match-overall');
@@ -456,6 +470,13 @@
           a.setAttribute('role', 'note'); al.appendChild(a);
         }
       });
+      // readings loaded from the single reader: what was used / left out (notes from the caller)
+      ((S.bridge && S.bridge.notes) || []).forEach(function (t) {
+        var a = el('div', 'alert alert-info ocr-mx-bridge-note', t);
+        a.setAttribute('role', 'note'); al.appendChild(a);
+      });
+      var ship = shipmentCheck();
+      if (ship) al.appendChild(shipmentBanner(ship));
       if (!(patch && patchTable())) renderTable();
       renderExceptions();
       renderSheets();
@@ -914,7 +935,7 @@
       var h = el('h5', 'ocr-mx-sheet-title', T('mx_sheet_num', { n: n, title: T('mx_sheet_' + k) })); h.id = hid;
       head.appendChild(h);
       var sub = el('div', 'ocr-mx-sheet-sub');
-      if (s.file) sub.appendChild(valNode(s.file.name, 'ocr-mx-fname'));
+      if (slotLabel(k)) sub.appendChild(valNode(slotLabel(k), 'ocr-mx-fname'));
       if (res.mean_confidence != null) sub.appendChild(el('span', null, T('ai_conf', { n: Math.round(Number(res.mean_confidence)) })));
       sub.appendChild(el('span', null, T('mx_sheet_fields', { n: Object.keys(fields).filter(function (x) { return fields[x] && hasVal(fields[x].value); }).length })));
       if (nBad) sub.appendChild(el('span', 'ocr-mx-count is-bad', T('mx_sheet_n_bad', { n: nBad })));
@@ -1187,10 +1208,44 @@
       $('ocr-match-save-msg-text').textContent = text || '';
       box.hidden = !text;
     }
+    // the saved row of a reading the single reader already saved ({id, doc_type, transaction_id, document_id}) or null
+    function savedOf(k) {
+      var r = S.slots[k].savedRef;
+      if (typeof r === 'function') { try { r = r(); } catch (e) { r = null; } }
+      return r && typeof r === 'object' && UUID_RE.test(String(r.id || '')) ? r : null;
+    }
+    // why this report cannot be saved as a match (null = it can): a part of a combined file is not a reading of its own
+    // (one AI reading = one saved extraction, ai_usage_id is unique), the match needs the invoice and the B/L, a reading
+    // saved as another kind of document cannot fill this slot, and an unsaved reading needs its file + hash + usage id
+    function saveBlock() {
+      var R = S.result;
+      if (!R) return null;
+      var docs = R.documents.filter(function (k) { return S.slots[k].res; });
+      var parts = docs.filter(function (k) { return S.slots[k].part; });
+      if (parts.length) return T('mx_save_block_part', { docs: docsList(parts) });
+      if (docs.indexOf('invoice') === -1 || docs.indexOf('bl') === -1) return T('mx_save_block_need');
+      var ids = {};
+      for (var i = 0; i < docs.length; i++) {
+        var k = docs[i], s = S.slots[k], ref = savedOf(k);
+        if (!s.bridged) continue;
+        if (ref && ref.doc_type && ref.doc_type !== DOC_TYPE[k]) return T('mx_save_block_kind', { doc: docName(k), kind: kindName(ref.doc_type) });
+        var stored = !ref && s.res && s.res.reused && UUID_RE.test(String(s.res.extraction_id || ''));
+        var sk = stored ? s.res.kind || s.res.doc_type : null;
+        if (sk && sk !== DOC_TYPE[k]) return T('mx_save_block_kind', { doc: docName(k), kind: kindName(sk) });
+        if (!ref && !stored && (!s.file || !/^[0-9a-f]{64}$/.test(s.sha256 || '') || !(s.res && s.res.usage_id))) return T('mx_save_block_unsaved', { doc: docName(k) });
+        // one saved reading cannot fill two slots of a match (save_document_match needs distinct extractions)
+        var id = ref ? String(ref.id) : stored ? String(s.res.extraction_id) : '';
+        if (id) { id = id.toLowerCase(); if (ids[id]) return T('mx_save_block_same', { a: docName(ids[id]), b: docName(k) }); ids[id] = k; }
+      }
+      return null;
+    }
     function renderSaveState() {
       var done = !!(S.saved.match && S.saved.match.id);
+      var block = done ? null : saveBlock();
+      var bn = $('ocr-match-save-block');
+      if (bn) { $('ocr-match-save-block-text').textContent = block || ''; bn.hidden = !block; }
       $('ocr-match-save-label').textContent = done ? T('m_saved_label') : T('m_save');
-      $('ocr-match-save-btn').disabled = done || S.saving;
+      $('ocr-match-save-btn').disabled = done || S.saving || !!block;
       var anyExt = Object.keys(S.saved.extractions).length > 0;
       $('ocr-match-tx').disabled = $('ocr-match-tx-q').disabled = $('ocr-match-tx-search').disabled = done || anyExt;
       $('ocr-match-attach').disabled = done || anyExt;
@@ -1238,6 +1293,12 @@
         }
         return { data: hit, error: null, reused: true };
       };
+      // a reading the single reader already saved (compareReadings): that row is used, never saved a second time
+      var ref = savedOf(k);
+      if (ref) {
+        return Promise.resolve(reuse({ id: ref.id, doc_type: ref.doc_type || DOC_TYPE[k], transaction_id: ref.transaction_id || null,
+          document_id: ref.document_id || null, stored: true }));
+      }
       // a v3 answer that is a reading already saved (reused:true): that extraction is used, never saved a second time
       var res = S.slots[k].res || {};
       if (res.reused && UUID_RE.test(String(res.extraction_id || ''))) {
@@ -1288,8 +1349,10 @@
       if (!(ONLINE && STAFF)) { setSaveMsg('error', T('m_err_access')); return; }
       if (!has('saveExtraction') || !has('saveDocumentMatch')) { setSaveMsg('error', T('m_save_unavailable')); return; }
       var docs = S.result.documents.filter(function (k) { return S.slots[k].res; });
+      var block = saveBlock();
+      if (block) { renderSaveState(); return; }
       if (docs.indexOf('invoice') === -1 || docs.indexOf('bl') === -1) { setSaveMsg('error', T('m_err_need_two')); return; }
-      if (docs.some(function (k) { return !/^[0-9a-f]{64}$/.test(S.slots[k].sha256 || ''); })) { setSaveMsg('error', T('m_err_hash')); return; }
+      if (docs.some(function (k) { return !savedOf(k) && !/^[0-9a-f]{64}$/.test(S.slots[k].sha256 || ''); })) { setSaveMsg('error', T('m_err_hash')); return; }
       S.saving = true; renderSaveState();
       setSaveMsg('info', T('m_saving'));
       var txId = $('ocr-match-tx').value || '';
@@ -1313,6 +1376,8 @@
             var reused = !!r.reused;
             S.saved.extractions[k] = { id: r.data.id, row: r.data, reused: reused, snap: slotCorrected(k) ? null : fieldsSnap(k) };
             if (reused) notes.push(T('m_note_reused', { doc: docName(k) }));
+            // a reading of the single reader saved here: that reader knows it now (its own save becomes a review)
+            else if (S.slots[k].onSaved) { try { S.slots[k].onSaved(r.data); } catch (x) { /* noop */ } }
             renderSaveState();
             var tasks = Promise.resolve();
             if (slotCorrected(k) && has('reviewExtraction')) {
@@ -1498,7 +1563,7 @@
       var docs = {};
       R.documents.forEach(function (k) {
         var s = S.slots[k];
-        docs[k] = { file_name: s.file ? s.file.name : null, doc_type: DOC_TYPE[k], usage_id: s.res ? s.res.usage_id || null : null,
+        docs[k] = { file_name: slotLabel(k) || null, doc_type: DOC_TYPE[k], usage_id: s.res ? s.res.usage_id || null : null,
           mean_confidence: s.res && s.res.mean_confidence != null ? Number(s.res.mean_confidence) : null,
           extraction_id: S.saved.extractions[k] ? S.saved.extractions[k].id : null, fields: plainFields(s) };
       });
@@ -1529,7 +1594,7 @@
           [T('m_meta_mode'), modeText(R)],
           [T('m_meta_date'), fmtDate(S.readAt || new Date().toISOString())],
           [T('m_meta_org'), orgName(S.orgId)]];
-        C.forEach(function (k) { sum.push([docName(k), S.slots[k].file ? S.slots[k].file.name : '']); });
+        C.forEach(function (k) { sum.push([docName(k), slotLabel(k)]); });
         ['match', 'partial', 'missing', 'mismatch'].forEach(function (st) { sum.push([T('m_st_' + st), R.counts[st]]); });
         sum.push([T('m_reviewer'), reviewerName()]);
         sum.push([T('m_review_state'), S.approved ? T('m_review_approved') : T('m_review_pending')]);
@@ -1650,7 +1715,7 @@
       var metaLines = [];
       metaLines.push(T('m_meta_date') + ': ' + fmtDate(S.readAt || new Date().toISOString()));
       if (orgName(S.orgId)) metaLines.push(T('m_meta_org') + ': ' + orgName(S.orgId));
-      C.forEach(function (k) { if (S.slots[k].file) metaLines.push(docName(k) + ': ' + S.slots[k].file.name); });
+      C.forEach(function (k) { if (slotLabel(k)) metaLines.push(docName(k) + ': ' + slotLabel(k)); });
       metaLines.push(T('m_meta_mode') + ': ' + modeText(R));
       var revLines = [T('m_reviewer') + ': ' + (reviewerName() || '—') + '   ·   ' + T('m_review_state') + ': '
         + (S.approved || (S.saved.match && S.saved.match.status === 'reviewed') ? T('m_review_approved') : T('m_review_pending'))
@@ -1756,6 +1821,173 @@
     }
 
     /* ---------------------------------------------------------------
+       Different shipments (UI only; the engine compares whatever it is given)
+       A pair of documents clearly belongs to two shipments when
+         - both carry a B/L number, the numbers differ (MarsaDocMatch.blEquivalent) and no container is on both, or
+         - the consignee / buyer clearly differs (same script, cmpName mismatch, no close word: clearlyOther) and they
+           share no B/L, container or invoice number.
+       The comparison is still shown: the reviewer decides.
+       --------------------------------------------------------------- */
+    function fval(k, keys) {
+      var fs = S.slots[k].fields || {};
+      for (var i = 0; i < keys.length; i++) { var f = fs[keys[i]]; if (f && hasVal(f.value)) return String(f.value); }
+      return '';
+    }
+    // a B/L consigned "to order" (of a bank / the shipper) names no importer: it says nothing about the shipment
+    var TO_ORDER_RE = /\bto\s+(?:the\s+)?order\b|\border\s+of\b|لأمر|لامر|تحت\s+الطلب/i;
+    // every name of the importer a document prints (consignee, its identity name, buyer, notify party), "to order" left out
+    function partiesOf(k) {
+      var fs = S.slots[k].fields || {}, out = [];
+      ['consignee_name', 'consignee', 'buyer_name', 'notify_party'].forEach(function (key) {
+        var f = fs[key], v = f && hasVal(f.value) ? String(f.value) : '';
+        if (v && !TO_ORDER_RE.test(v) && out.indexOf(v) === -1) out.push(v);
+      });
+      return out;
+    }
+    function shipInfo(k) {
+      var ct = fval(k, ['container_numbers']), parties = partiesOf(k);
+      return { k: k, bl: fval(k, ['bl_number']), containers: ct ? E.containerSet(ct) : [], party: parties[0] || '', parties: parties,
+        invoice: fval(k, ['invoice_number']) };
+    }
+    // clearly other importers: every name one document gives is clearly another party than every name of the other
+    function partiesOther(a, b) {
+      if (!a.parties.length || !b.parties.length) return false;
+      return a.parties.every(function (x) { return b.parties.every(function (y) { return clearlyOther(x, y); }); });
+    }
+    function sameScript(a, b) { var ra = /[؀-ۿ]/.test(a), rb = /[؀-ۿ]/.test(b); return ra === rb; }
+    // clearly another party: the names differ (cmpName) and no word of one is close to a word of the other
+    // (equal, or one a prefix of the other: MANARA / MANARAH) — a spelling variant is not "another shipment"
+    function clearlyOther(a, b) {
+      if (!sameScript(a, b)) return false;
+      var r; try { r = E.cmpName(a, b); } catch (e) { return false; }
+      if (!r || r.s !== 'mismatch') return false;
+      var words = function (v) { return String(E.normName(v) || '').split(' ').filter(function (w) { return w.length >= 3 && w !== 'al' && w !== 'ال'; }); };
+      var wa = words(a), wb = words(b);
+      if (!wa.length || !wb.length) return false;
+      return !wa.some(function (x) {
+        return wb.some(function (y) { return x === y || (Math.min(x.length, y.length) >= 4 && (x.indexOf(y) === 0 || y.indexOf(x) === 0)); });
+      });
+    }
+    function shareAny(a, b) {
+      if (a.bl && b.bl && E.blEquivalent(a.bl, b.bl)) return true;
+      if (a.containers.some(function (c) { return b.containers.indexOf(c) !== -1; })) return true;
+      if (a.invoice && b.invoice) { try { if (E.cmpId(a.invoice, b.invoice).s === 'match') return true; } catch (e) { /* noop */ } }
+      return false;
+    }
+    function shipmentCheck() {
+      var R = S.result;
+      if (!R) return null;
+      var info = R.documents.filter(function (k) { return S.slots[k].res; }).map(shipInfo);
+      var hit = false;
+      for (var i = 0; i < info.length && !hit; i++) {
+        for (var j = i + 1; j < info.length && !hit; j++) {
+          var a = info[i], b = info[j];
+          var disjoint = !a.containers.some(function (c) { return b.containers.indexOf(c) !== -1; });
+          if (a.bl && b.bl && !E.blEquivalent(a.bl, b.bl) && disjoint) hit = true;
+          else if (!shareAny(a, b) && partiesOther(a, b)) hit = true;
+        }
+      }
+      return hit ? info : null;
+    }
+    function shipmentBanner(info) {
+      var box = el('div', 'alert alert-warning ocr-mx-ship');
+      box.setAttribute('role', 'note');
+      var body = el('div', 'ocr-mx-ship-body');
+      body.appendChild(el('strong', 'ocr-mx-ship-title', T('mx_ship_title')));
+      body.appendChild(el('p', 'ocr-mx-ship-text', T('mx_ship_text')));
+      var ul = el('ul', 'ocr-mx-ship-list');
+      SHEET_ORDER.forEach(function (k) {
+        var x = info.filter(function (y) { return y.k === k; })[0];
+        if (!x) return;
+        var li = el('li');
+        var head = el('span', 'ocr-mx-ship-head');
+        head.appendChild(el('span', 'ocr-mx-ship-doc', docName(k)));
+        if (slotLabel(k)) { head.appendChild(document.createTextNode(' — ')); head.appendChild(valNode(slotLabel(k), 'ocr-mx-ship-file')); }
+        li.appendChild(head);
+        var facts = el('span', 'ocr-mx-ship-facts');
+        function fact(label, v) {
+          var f = el('span', 'ocr-mx-ship-fact');
+          f.appendChild(el('span', 'ocr-mx-ship-lbl', label + ' '));
+          f.appendChild(v ? valNode(v, 'ocr-mx-ship-val') : el('span', 'ocr-mx-none', T('mx_not_read')));
+          facts.appendChild(f);
+        }
+        fact(T('mx_ship_bl'), x.bl);
+        fact(T('mx_ship_ct'), x.containers.join(', '));
+        if (x.party) fact(T('mx_ship_party'), x.party);
+        li.appendChild(facts);
+        ul.appendChild(li);
+      });
+      body.appendChild(ul);
+      box.appendChild(body);
+      return box;
+    }
+
+    /* ---------------------------------------------------------------
+       compareReadings: readings already made by the single reader (ocr.js) → this report, with NO new AI call
+       list = [{ slot, label, fields {key: {value, score}}, items, res (the AI answer, or a part of a combined one),
+                 fileName, file?, sha256?, part?, saved? (row or getter: a reading the reader saved), onSaved? (row) }]
+       The first entry of a slot wins. Needs 2+ slots and the AI section's access (it stays hidden otherwise).
+       --------------------------------------------------------------- */
+    function compareReadings(list, opts) {
+      opts = opts && typeof opts === 'object' ? opts : {};
+      if (!(ONLINE && STAFF && AI.enabled) || S.running || S.saving) return false;
+      var picked = {}, n = 0;
+      (Array.isArray(list) ? list : []).forEach(function (x) {
+        if (!x || typeof x !== 'object' || SLOTS.indexOf(x.slot) === -1 || picked[x.slot] || !x.fields || typeof x.fields !== 'object') return;
+        picked[x.slot] = x; n++;
+      });
+      if (n < 2) return false;
+      S = fresh();
+      clearResult();
+      showError('');
+      $('ocr-match-note-text').value = '';
+      $('ocr-match-tx-q').value = '';
+      resetTx();
+      SLOTS.forEach(function (k) {
+        var x = picked[k];
+        if (!x) return;
+        var s = S.slots[k];
+        var res = x.res && typeof x.res === 'object' ? x.res : { fields: [] };
+        var file = x.file && typeof x.file === 'object' && typeof x.file.name === 'string' ? x.file : null;
+        var orig = {}, fields = {};
+        (Array.isArray(res.fields) ? res.fields : []).forEach(function (f) {
+          if (f && typeof f.name === 'string' && typeof f.value === 'string' && /^[a-z_]{2,40}$/.test(f.name) && !(f.name in orig)) orig[f.name] = f.value;
+        });
+        Object.keys(x.fields).forEach(function (key) {
+          var f = x.fields[key];
+          if (!/^[a-z_]{2,40}$/.test(key) || !f || typeof f.value !== 'string' || !f.value) return;
+          var c = f.score == null ? null : Number(f.score);
+          if (c != null && !isFinite(c)) c = null;
+          var v = f.value.slice(0, 2000);
+          // a value the reviewer changed in the single reader counts as a correction here too
+          fields[key] = Object.prototype.hasOwnProperty.call(orig, key) && orig[key] === v ? { value: v, score: c }
+            : { value: v, score: 1, corrected: true, origScore: c };
+        });
+        s.file = file; s.mime = file ? mediaType(file) : null;
+        s.sha256 = /^[0-9a-f]{64}$/.test(String(x.sha256 || '')) ? String(x.sha256) : '';
+        s.status = 'done'; s.res = res; s.fields = fields; s.orig = orig;
+        s.items = Array.isArray(x.items) ? x.items.slice(0, 500) : [];
+        s.label = String(x.label || x.fileName || (file && file.name) || docName(k)).slice(0, 300);
+        s.part = !!x.part; s.savedRef = x.saved || null; s.onSaved = typeof x.onSaved === 'function' ? x.onSaved : null; s.bridged = true;
+      });
+      S.bridge = { notes: (Array.isArray(opts.notes) ? opts.notes : []).filter(function (t) { return typeof t === 'string' && t; }).slice(0, 10)
+        .map(function (t) { return t.slice(0, 600); }) };
+      S.readAt = typeof opts.readAt === 'string' ? opts.readAt : new Date().toISOString();
+      var mine = S;
+      S.orgId = typeof opts.orgId === 'string' && opts.orgId ? opts.orgId : shellOrg();
+      if (!S.orgId) activeOrg().then(function (o) { if (S === mine && !S.orgId) S.orgId = o || null; });
+      SLOTS.forEach(renderSlot);
+      syncRun();
+      recompute(false);
+      announce(T('mx_bridge_loaded', { n: n }));
+      var b = $('ocr-match-banner');
+      try { $('ocr-match-result').scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' }); } catch (e) { /* noop */ }
+      try { b.focus({ preventScroll: true }); } catch (e) { b.focus(); }
+      return true;
+    }
+    function canCompare() { return !!(ONLINE && STAFF && AI.enabled); }
+
+    /* ---------------------------------------------------------------
        Reset
        --------------------------------------------------------------- */
     $('ocr-match-reset').addEventListener('click', function () {
@@ -1793,6 +2025,8 @@
     }
     window.addEventListener('marsa:langchange', function () { SLOTS.forEach(renderSlot); if (S.result) render(); });
     // test hook (no state is exposed beyond the pure engine)
-    window.MarsaOcrMatch = { version: E.VERSION };
+    // compareReadings: the single reader (ocr.js) opens its readings here (no new AI call)
+    window.MarsaOcrMatch = { version: E.VERSION, compareReadings: compareReadings, available: canCompare };
+    try { window.dispatchEvent(new CustomEvent('marsa:ocrmatchready')); } catch (e) { /* noop */ }
   });
 })();

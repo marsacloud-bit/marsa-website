@@ -24,6 +24,9 @@
      returned field is shown (unknown keys under «حقول أخرى»), line items with their
      extra columns and the per-container rows; only the keys of
      app.extraction_field_keys() (MarsaOcrParse.DB_FIELD_KEYS) are saved.
+   - Compare (2026-11-12): after a run, 2+ AI readings for different documents (invoice / B/L / declaration /
+     packing list), or one file holding several documents (by_document), open the matching report of ocr-match.js
+     (MarsaOcrMatch.compareReadings: no new AI call); «قارن هذه المستندات» re-opens it.
    - Save: signed-in staff (online) → MarsaApi.saveExtraction (+ optional
      transaction link and original upload); otherwise the local history
      "marsa_extractions" (MarsaApi.localExtractions).
@@ -887,6 +890,11 @@
         typeFrom: j.docType !== before ? before : null, reused: !!res.reused,
         detail: res.ai_detail && typeof res.ai_detail === 'object' && !res.reused ? res.ai_detail : null };
       if (res.savedRow) j.saved = { id: res.savedRow.id, where: 'server', row: res.savedRow };
+      // ai-doc-v3: a file holding several documents also answers each document's own values (by_document; never on a
+      // reused reading) — they are compared with each other in the matching report (ocr-match.js), not saved
+      var bd = res.by_document;
+      j.byDocument = !res.reused && bd && typeof bd === 'object' && !Array.isArray(bd) ? bd : null;
+      j.aiRes = res;
       j.status = 'done'; j.progress = 100;
     }
     function showAiRemaining() {
@@ -986,10 +994,13 @@
         finished = true;
         running = false;
         progressBox.hidden = true;
+        var stopped = cancelRequested;
         if (cancelRequested) announce('أُوقفت القراءة. اضغط «بدء القراءة» للمتابعة.');
         cancelRequested = false; cancelGate = null;
         renderQueue();
         if (firstDone) showResult(firstDone.id, true);
+        // 2+ AI readings of this run for different documents (or one combined file): the matching report, no new AI call
+        if (!stopped && typeof autoCompare === 'function') autoCompare(todo);
       }
       pump();
     }
@@ -1023,8 +1034,150 @@
       renderFields(j);
       renderItems(j);
       renderSaveState(j);
+      renderCompareBox(j);
       if (focus) { $('ocr-result-title').focus(); }
     }
+
+    /* ---------------------------------------------------------------
+       Compare the readings (ocr-match.js: window.MarsaOcrMatch.compareReadings — the matching report, no new AI call)
+       kind → match slot: commercial / supplier invoice → invoice, B/L → bl, customs declaration → declaration,
+       packing list → packing; other kinds are not compared. Whole files first (queue order; a second file for the same
+       slot is left out, with a note), then the parts of a combined file (by_document) where their slot is still free.
+       --------------------------------------------------------------- */
+    var MATCH_SLOT = { commercial_invoice: 'invoice', supplier_invoice: 'invoice', operator_invoice: 'invoice', bill_of_lading: 'bl',
+      customs_declaration: 'declaration', packing_list: 'packing' };
+    var lastRunIds = [];
+    function matchApi() { var m = window.MarsaOcrMatch; return m && typeof m.compareReadings === 'function' ? m : null; }
+    function cmpKind(kind) { return T('cmp_kind_' + (MATCH_SLOT[kind] ? kind : 'other')); }
+    function cmpSlot(slot) { return T('cmp_slot_' + slot); }
+    function listText(a) { return a.join(I18N && I18N.lang && I18N.lang() === 'en' ? ', ' : '، '); }
+    function aiDone(j) { return !!(j && j.status === 'done' && j.mode === 'ai' && j.ai && j.aiRes && j.fields); }
+    // the document kinds of a combined file (2+), main kind first
+    function partsOf(j) {
+      var bd = j && j.byDocument;
+      if (!bd) return null;
+      var kinds = Object.keys(bd).filter(function (k) { return /^[a-z_]{2,40}$/.test(k) && Array.isArray(bd[k]) && bd[k].length; });
+      return kinds.length >= 2 ? kinds : null;
+    }
+    function savedGetter(j) {
+      return function () {
+        var r = j.saved && j.saved.where === 'server' && j.saved.row ? j.saved.row : null;
+        return r && r.id ? { id: r.id, doc_type: r.doc_type || null, transaction_id: r.transaction_id || null, document_id: r.document_id || null } : null;
+      };
+    }
+    function wholeEntry(j, slot) {
+      var fields = {};
+      Object.keys(j.fields || {}).forEach(function (k) {
+        var f = j.fields[k];
+        if (f && typeof f.value === 'string' && f.value) fields[k] = { value: f.value, score: f.score != null ? f.score : null };
+      });
+      return { slot: slot, label: j.name, fileName: j.name, fields: fields, items: (j.items || []).map(function (x) { return Object.assign({}, x); }),
+        res: j.aiRes, file: j.file || null, sha256: j.sha256 || '', saved: savedGetter(j),
+        onSaved: function (row) {
+          if (!row || !row.id || j.saved) return;
+          j.saved = { id: row.id, where: 'server', row: row };
+          if (row.doc_type && row.doc_type !== j.docType) j.docType = row.doc_type;
+          if (currentId === j.id) { typeSel.value = j.docType || 'other'; renderMeta(j); renderSaveState(j); }
+        } };
+    }
+    // one document of a combined file: its own values (by_document) as a reading of its own (shown and compared, not saved)
+    function partEntry(j, kind, slot) {
+      var res = j.aiRes || {}, list = j.byDocument[kind], fields = {}, rows = [], sum = 0, n = 0;
+      list.slice(0, 200).forEach(function (f) {
+        if (!f || typeof f.name !== 'string' || typeof f.value !== 'string' || !/^[a-z][a-z0-9_]{0,59}$/.test(f.name)) return;
+        var c = Number(f.confidence); if (!isFinite(c)) c = null;
+        rows.push({ name: f.name, value: f.value, confidence: c, page: f.page || null, valid: f.valid !== false });
+        if (f.value && !fields[f.name]) { fields[f.name] = { value: f.value, score: c }; if (c != null) { sum += c; n++; } }
+      });
+      var kinds = partsOf(j) || [];
+      var main = typeof res.detected_type === 'string' && kinds.indexOf(res.detected_type) !== -1 ? res.detected_type : kinds[0];
+      var itemsKind = kinds.indexOf('commercial_invoice') !== -1 ? 'commercial_invoice' : kinds.indexOf('supplier_invoice') !== -1 ? 'supplier_invoice' : main;
+      // a remark about a field this document carries: the model's notes, and the server's on a value it marks invalid here
+      var warnings = (res.warnings || []).filter(function (w) {
+        if (!w || typeof w.text !== 'string' || !w.field || w.code === 'conflicting_values' || w.code === 'doc_type_mismatch') return false;
+        var key = w.field === 'containers' ? 'container_numbers' : w.field;
+        if (w.code === 'container_check_digit') return kind === main;
+        if (!fields[key]) return false;
+        return w.source === 'model' || rows.some(function (r) { return r.name === key && r.valid === false; });
+      });
+      return { slot: slot, label: j.name + ' — ' + cmpKind(kind), fileName: j.name, part: true, fields: fields,
+        items: kind === itemsKind ? (j.machineItems || []).map(function (x) { return Object.assign({}, x); }) : [],
+        res: { fields: rows, warnings: warnings, mean_confidence: n ? Math.round(sum / n * 1000) / 10 : null, line_items: [],
+          containers: kind === main && Array.isArray(res.containers) ? res.containers : [], usage_id: res.usage_id || null,
+          doc_type: kind, detected_type: kind, kind: kind, part: true },
+        file: j.file || null, sha256: j.sha256 || '' };
+    }
+    // the comparison of a set of jobs: { entries, notes, used: [{slot, label}] } or null (fewer than 2 slots)
+    function comparePlan(list) {
+      var ai = list.filter(aiDone), used = {}, entries = [], notes = [];
+      var whole = ai.filter(function (j) { return !partsOf(j); }), combined = ai.filter(function (j) { return !!partsOf(j); });
+      whole.forEach(function (j) {
+        var slot = MATCH_SLOT[j.docType];
+        if (!slot) return;
+        if (used[slot]) { notes.push(T('cmp_note_dup', { slot: cmpSlot(slot), used: used[slot], skipped: j.name })); return; }
+        used[slot] = j.name;
+        entries.push(wholeEntry(j, slot));
+      });
+      combined.forEach(function (j) {
+        var took = [], left = [], other = [];
+        partsOf(j).forEach(function (kind) {
+          var slot = MATCH_SLOT[kind];
+          if (!slot) { other.push(cmpKind(kind)); return; }
+          if (used[slot]) { left.push(cmpKind(kind)); return; }
+          used[slot] = j.name + ' — ' + cmpKind(kind);
+          took.push(cmpKind(kind));
+          entries.push(partEntry(j, kind, slot));
+        });
+        if (left.length) notes.push(T('cmp_note_combined', { file: j.name, took: took.length ? listText(took) : '—', left: listText(left) }));
+        if (other.length) notes.push(T('cmp_note_other', { file: j.name, kinds: listText(other) }));
+      });
+      if (entries.length < 2) return null;
+      return { entries: entries, notes: notes };
+    }
+    function openCompare(list) {
+      var m = matchApi(), plan = comparePlan(list);
+      if (!m || !plan) return false;
+      var ok = m.compareReadings(plan.entries, { notes: plan.notes });
+      if (!ok) toast(T('cmp_unavailable'), 'warning');
+      return ok;
+    }
+    function runJobs() { return lastRunIds.map(job).filter(aiDone); }
+    function autoCompare(todo) {
+      lastRunIds = (todo || []).map(function (j) { return j.id; });
+      var cur = current();
+      if (cur) renderCompareBox(cur);
+      if (!matchApi() || !matchApi().available || !matchApi().available()) return;
+      openCompare(runJobs());
+    }
+    function planText(plan) {
+      return listText(plan.entries.map(function (e) { return cmpSlot(e.slot) + ' (' + e.label + ')'; }));
+    }
+    function renderCompareBox(j) {
+      var box = $('ocr-compare-box');
+      if (!box) return;
+      var m = matchApi(), ok = !!(m && (!m.available || m.available()));
+      var runPlan = ok ? comparePlan(runJobs()) : null;
+      var filePlan = ok && j && aiDone(j) && partsOf(j) ? comparePlan([j]) : null;
+      var fb = $('ocr-compare-file-btn');
+      // the run's comparison is the file's own when the run was this combined file alone
+      if (filePlan && runPlan && lastRunIds.length === 1 && lastRunIds[0] === j.id) filePlan = null;
+      box.hidden = !runPlan && !filePlan;
+      if (box.hidden) return;
+      $('ocr-compare-btn').hidden = !runPlan;
+      fb.hidden = !filePlan;
+      fb.textContent = filePlan ? T('cmp_file_btn', { n: filePlan.entries.length }) : '';
+      fb.setAttribute('data-job', filePlan ? j.id : '');
+      var parts = [];
+      if (runPlan) parts.push(T('cmp_desc_run', { docs: planText(runPlan) }));
+      if (filePlan) parts.push(T('cmp_desc_file', { file: j.name, docs: listText(partsOf(j).map(cmpKind)) }));
+      $('ocr-compare-desc').textContent = parts.join(' ');
+    }
+    $('ocr-compare-btn').addEventListener('click', function () { openCompare(runJobs()); });
+    $('ocr-compare-file-btn').addEventListener('click', function () {
+      var j = job(this.getAttribute('data-job') || '');
+      if (j) openCompare([j]);
+    });
+    window.addEventListener('marsa:ocrmatchready', function () { var j = current(); if (j) renderCompareBox(j); });
     function badge(cls, text) { return el('span', 'badge ' + cls, text); }
     function docTypeLabel(t) { return (DOC_TYPES.filter(function (x) { return x[0] === t; })[0] || DOC_TYPES[6])[1]; }
     function renderMeta(j) {

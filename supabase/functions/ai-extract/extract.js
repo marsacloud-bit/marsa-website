@@ -48,6 +48,11 @@
   A combined PDF (legacy detectedDocuments) lists every document type found in detected_documents (main type first,
   kept in ai_detail): the server accepts it in the slot of any of them and fills each of their draft sections from the
   one reading (within the key list of the slot it was read for).
+  Per-document values (2026-11-12): every v3 shipping fields[] item carries document (a plain enum of DETECTED_TYPES_V3,
+  required, not nullable); a combined file gives a field once per document that prints it. fields[] stays one value per
+  key (the slot's document, then the main one, else the most confident; disagreements → conflicting_values) and, only
+  when the values come from 2+ documents, the response adds by_document {<type>: [{name, value, confidence, page, valid}]}
+  (same checks; response only — app.extraction_detail_ok does not allow it in ai_detail).
   Declaration reading (ai-doc-v3, migration 20261120000100_legacy_decl.sql — legacy DocumentAI analyzeDeclarationDocument /
   getDeclarationSchema_ / normalizeDeclarationDraft_ + R11Automation detectDeclarationTypeFromBlobR11_): for doc_type
   customs_declaration (and auto) v3 adds the keys DECL_KEYS (declaration_type, declaration_status, declaration_date,
@@ -342,6 +347,10 @@
     'a packing list / packing slip / weight list. A PDF may hold several documents (for example a bill of lading, an invoice and a',
     'packing list): list the type of every complete document found in detected_documents, set doc_type to the main one, and fill the',
     'fields of all of them. List a type only for a whole document of that kind, not for a number merely quoted on another document.',
+    'Every fields entry names in document the type of the document it is printed on. When the file holds several documents, give a',
+    'field once PER document that prints it, each with that document\'s type (for example the gross weight of the bill of lading AND',
+    'the gross weight of the packing list, even when they differ: never merge, average or choose between them). For a single',
+    'document, document is the same as doc_type.',
     'containers: one row per container printed, with its seal number, size / type (e.g. 40HC, 20GP), packages and net / gross weight in kg',
     'when printed for that container (otherwise an empty string for text, null for numbers). seal_numbers lists every seal number,',
     'one per entry. In line_items too, a text column that is not printed is an empty string and a number column is null.',
@@ -566,12 +575,14 @@
           items: {
             type: 'object',
             additionalProperties: false,
-            required: ['name', 'value', 'confidence', 'page'],
+            required: ['name', 'value', 'confidence', 'page', 'document'],
             properties: {
               name: { type: 'string', enum: keys },
               value: { type: 'string' },
               confidence: { type: 'number' },
-              page: nullable('integer')
+              page: nullable('integer'),
+              // the document of a combined file this value is printed on (a plain enum: no extra union-typed parameter)
+              document: { type: 'string', enum: DETECTED_TYPES_V3.slice() }
             }
           }
         },
@@ -1524,6 +1535,150 @@
     return result;
   }
 
+  // one key of a shipping reading: the values read for it (list: [{value, confidence, page, doc, derived?}]) → the field
+  // {name, value, confidence, page, valid} (null when nothing usable), the format checks reported through W. List keys
+  // (containers / HS codes / seals) are the union of the values; a single-valued key is the most confident value of the
+  // first document of `prefer` that has one (else of all), and disagreeing values are reported (conflicting_values).
+  function finishKey(k, list, W, prefer) {
+    if (!list || !list.length) return null;
+    if (k === 'container_numbers') {
+      const seen = {}, ok = [], bad = [];
+      list.forEach(x => {
+        String(x.value).split(/[,;\n]+/).map(normContainer).filter(Boolean).forEach(c => {
+          if (seen[c]) return;
+          seen[c] = 1;
+          if (isValidContainer(c)) ok.push({ c, x }); else bad.push(c);
+        });
+      });
+      bad.forEach(c => W('server', 'container_check_digit', 'Container number fails the ISO 6346 check digit: ' + c, k));
+      if (!ok.length) return null;
+      const value = ok.map(o => o.c).join(', ').slice(0, 2000);
+      const read = ok.filter(o => !o.x.derived);
+      const confidence = Math.min.apply(null, (read.length ? read : ok).map(o => o.x.confidence));
+      return { name: k, value, confidence, page: ok[0].x.page, valid: true };
+    }
+    if (k === 'hs_codes') {
+      const seen = {}, vals = [];
+      list.forEach(x => String(x.value).split(/[,;\s]+/).filter(Boolean).forEach(c => { if (!seen[c]) { seen[c] = 1; vals.push(c); } }));
+      const bad = vals.filter(c => !isHs(c));
+      bad.forEach(c => W('server', 'hs_format', 'HS code has an unexpected format: ' + c, k));
+      const value = vals.join(', ').slice(0, 2000);
+      return { name: k, value, confidence: Math.min.apply(null, list.map(x => x.confidence)), page: list[0].page, valid: bad.length === 0 };
+    }
+    if (k === 'seal_numbers') {
+      const seen = {}, vals = [];
+      list.forEach(x => String(x.value).split(/[,;\n]+/).map(normSeal).filter(Boolean).forEach(c => { if (!seen[c]) { seen[c] = 1; vals.push(c); } }));
+      if (!vals.length) return null;
+      const bad = vals.filter(c => !isSeal(c));
+      bad.forEach(c => W('server', 'seal_format', 'Seal number has an unexpected format: ' + c, k));
+      const read = list.filter(x => !x.derived);
+      const value = vals.join(', ').slice(0, 2000);
+      return { name: k, value, confidence: Math.min.apply(null, (read.length ? read : list).map(x => x.confidence)), page: (read[0] || list[0]).page, valid: bad.length === 0 };
+    }
+    // single-valued: the most confident reading; disagreeing readings are reported
+    let pool = [];
+    (prefer || []).some(d => (pool = list.filter(x => x.doc === d)).length > 0);
+    const best = (pool.length ? pool : list).slice().sort((a, b) => b.confidence - a.confidence)[0];
+    if (list.some(x => x.value !== best.value)) W('server', 'conflicting_values', 'Several different values were read for this field.', k);
+    let value = best.value, valid = true;
+    if (k === 'supplier_vat' || k === 'buyer_vat') {
+      value = value.replace(/\s/g, '');
+      if (!isSaudiVat(value)) { valid = false; W('server', 'vat_format', 'Not a Saudi VAT number (15 digits starting and ending with 3).', k); }
+    } else if (k === 'invoice_date') {
+      if (!isIsoDate(value)) { valid = false; W('server', 'date_format', 'Date is not a valid YYYY-MM-DD date.', k); }
+    } else if (k === 'subtotal' || k === 'vat_amount' || k === 'total') {
+      const n = amount(value);
+      if (n == null) { valid = false; W('server', 'amount_format', 'Amount is not a plain number.', k); } else value = String(n);
+    } else if (k === 'currency') {
+      value = value.toUpperCase();
+      if (!/^[A-Z]{3}$/.test(value)) { valid = false; W('server', 'currency_format', 'Currency is not an ISO 4217 code.', k); }
+    } else if (k === 'iban') {
+      value = value.replace(/\s/g, '').toUpperCase();
+      if (!/^[A-Z]{2}[0-9]{2}[A-Z0-9]{10,30}$/.test(value)) { valid = false; W('server', 'iban_format', 'IBAN has an unexpected format.', k); }
+    } else if (k === 'gross_weight' || k === 'net_weight') {
+      const n = measure(value);
+      if (n == null) { valid = false; W('server', 'weight_format', 'Weight is not a plain number of kilograms.', k); }
+      else {
+        value = String(n);
+        if (n < 0 || n > MAX_WEIGHT_KG) { valid = false; W('server', 'weight_range', 'Weight is outside the expected range (0 to 500,000,000 kg).', k); }
+      }
+    } else if (k === 'packages_count') {
+      const n = measure(value);
+      if (n == null || !Number.isInteger(n)) { valid = false; W('server', 'packages_format', 'Number of packages is not a whole number.', k); }
+      else {
+        value = String(n);
+        if (n < 0 || n > MAX_PACKAGES) { valid = false; W('server', 'packages_range', 'Number of packages is outside the expected range.', k); }
+      }
+    } else if (k === 'package_type') {
+      value = value.slice(0, 80);
+    } else if (k === 'goods_description') {
+      value = value.slice(0, 500);
+    } else if (k === 'incoterms') {
+      value = value.slice(0, 120);
+      const code = incotermCode(value);
+      if (!code) { valid = false; W('server', 'incoterms_format', 'Delivery term is not a known Incoterms code (FOB, CIF, CFR, EXW …).', k); }
+      else value = code + value.replace(/^\s*[A-Za-z&]{3}/, '');
+    } else if (k === 'consignee_name') {
+      value = (identityName(value) || cleanLine(value)).slice(0, 160);
+    } else if (k === 'packing_list_date') {
+      if (!isIsoDate(value)) { valid = false; W('server', 'date_format', 'Date is not a valid YYYY-MM-DD date.', k); }
+    } else if (k === 'measurement_cbm') {
+      const n = measure(String(value).replace(/\s*(cbm|m3|m³|cubic\s*met(er|re)s?)$/i, ''));
+      if (n == null) { valid = false; W('server', 'cbm_format', 'Volume is not a plain number of cubic metres.', k); }
+      else { value = String(n); if (n < 0 || n > MAX_CBM) { valid = false; W('server', 'cbm_range', 'Volume is outside the expected range.', k); } }
+    } else if (k === 'temperature_c') {
+      const t = String(value).replace(/\s/g, '').replace(/(°|º)?c$/i, '').replace(/^\+/, '');
+      if (!/^-?\d+(\.\d+)?$/.test(t)) { valid = false; W('server', 'temperature_format', 'Temperature is not a plain number of degrees Celsius.', k); }
+      else { const n = Number(t); value = String(n); if (n < -80 || n > 80) { valid = false; W('server', 'temperature_range', 'Temperature is outside the expected range (-80 to 80 °C).', k); } }
+    } else if (k === 'shipping_line' || k === 'notify_party' || k === 'place_of_receipt' || k === 'place_of_delivery') {
+      value = value.slice(0, 160);
+    } else if (k === 'booking_number' || k === 'packing_list_number' || k === 'freight_terms' || k === 'payment_terms' || k === 'export_country') {
+      value = value.slice(0, 120);
+    }
+    return { name: k, value, confidence: best.confidence, page: best.page, valid };
+  }
+
+  // v3 combined file → by_document {<document type>: [{name, value, confidence, page, valid}]} when the values come from 2+
+  // documents (fields[].document), else null. Each document's values get the same normalization / checks as fields[]
+  // (finishKey); their warnings join the reading's warnings once (no duplicate of a warning already there). The container
+  // rows carry no document: their numbers / seals count for the main document when it prints none of its own.
+  function perDocument(by, o) {
+    // a value said to be on a document the file does not hold as a whole (not in detected_documents: a number merely
+    // quoted on another document) counts for the main document — it does not make a document of its own
+    const docOf = x => (x.doc && o.detectedDocs.indexOf(x.doc) !== -1 ? x.doc : o.detected);
+    const kinds = [];
+    Object.keys(by).forEach(k => by[k].forEach(x => { if (!x.derived && kinds.indexOf(docOf(x)) === -1) kinds.push(docOf(x)); }));
+    if (kinds.length < 2) return null;
+    const rank = t => t === o.detected ? -1 : (o.detectedDocs.indexOf(t) === -1 ? 100 + DETECTED_TYPES_V3.indexOf(t) : o.detectedDocs.indexOf(t));
+    kinds.sort((a, b) => rank(a) - rank(b));
+    const have = {};
+    const key = (c, f, t) => c + '|' + (f || '') + '|' + clean(t, 300);
+    o.warnings.forEach(w => { have[key(w.code, w.field, w.text)] = 1; });
+    const W = (source, code, text, field) => { const kk = key(code, field, text); if (have[kk]) return; have[kk] = 1; o.W(source, code, text, field); };
+    const out = {};
+    kinds.forEach(kind => {
+      const sub = {};
+      Object.keys(by).forEach(k => { const l = by[k].filter(x => !x.derived && docOf(x) === kind); if (l.length) sub[k] = l; });
+      if (kind === o.detected) ['container_numbers', 'seal_numbers'].forEach(k => {
+        const d = (by[k] || []).filter(x => x.derived && !x.doc);
+        if (!sub[k] && d.length) sub[k] = d;
+      });
+      if (!sub.consignee_name && sub.consignee && o.allowed.indexOf('consignee_name') !== -1) {
+        const best = sub.consignee.slice().sort((a, b) => b.confidence - a.confidence)[0];
+        const nm = identityName(best.value);
+        if (nm) sub.consignee_name = [{ value: nm, confidence: best.confidence, page: best.page, doc: kind }];
+      }
+      const list = [];
+      o.keys.forEach(k => {
+        if (!o.isDecl && DECL_KEYS.indexOf(k) !== -1) return;
+        const f = finishKey(k, sub[k], W, null);
+        if (f) list.push(f);
+      });
+      if (list.length) out[kind] = list;
+    });
+    return Object.keys(out).length >= 2 ? out : null;
+  }
+
   // model output → the response of ai-extract (and the extraction row): validated, normalized, warnings added.
   // version 'ai-doc-v3' → the v3 keys, packing_list, the wider line items and containers (+ result.containers).
   function postProcess(data, requestedType, version) {
@@ -1536,13 +1691,21 @@
     const W = (source, code, text, field) => warnings.push({ source, code, text: clean(text, 300), field: field || null });
     (data.warnings || []).slice(0, 30).forEach(w => { const t = clean(w, 300); if (t) W('model', 'model_note', t); });
 
+    const DT = v3 ? DETECTED_TYPES_V3 : DETECTED_TYPES;
+    const detected = DT.indexOf(data.doc_type) !== -1 ? data.doc_type : 'other';
+    const docType = requestedType === 'auto' ? detected : requestedType;
+    // v3: the document of a combined file each value is printed on (fields[].document; absent / unknown → the main type)
+    const docOf = f => v3 && typeof f.document === 'string' && DETECTED_TYPES_V3.indexOf(f.document) !== -1 ? f.document : detected;
     const by = {};
     (data.fields || []).slice(0, 400).forEach(f => {
       if (!f || allowed.indexOf(f.name) === -1) return;
       const value = clean(f.value, 2000);
       if (!value) return;
-      (by[f.name] = by[f.name] || []).push({ value, confidence: conf(f.confidence), page: page(f.page) });
+      (by[f.name] = by[f.name] || []).push({ value, confidence: conf(f.confidence), page: page(f.page), doc: docOf(f) });
     });
+    // the documents whose value fields[] shows for a single-valued key, in order: the reading's doc_type (the slot), then the
+    // main detected type, else any (a single document: every value is that document's, so the pick is exactly the old one)
+    const primary = docType === detected ? [detected] : [docType, detected];
 
     // v3: the per-container rows (validated like container_numbers; their numbers / seals join the two list fields)
     const containers = [];
@@ -1573,117 +1736,20 @@
       });
       // the identity name: from the model, else derived from the consignee block (legacy extractCustomerIdentityName_)
       if (!(by.consignee_name && by.consignee_name.length) && by.consignee && by.consignee.length && allowed.indexOf('consignee_name') !== -1) {
-        const best = by.consignee.slice().sort((a, b) => b.confidence - a.confidence)[0];
+        // the consignee of the slot's / main document first (a combined file), else the most confident of all
+        let cpool = [];
+        primary.some(d => (cpool = by.consignee.filter(x => x.doc === d)).length > 0);
+        const best = (cpool.length ? cpool : by.consignee).slice().sort((a, b) => b.confidence - a.confidence)[0];
         const nm = identityName(best.value);
-        if (nm) by.consignee_name = [{ value: nm, confidence: best.confidence, page: best.page }];
+        if (nm) by.consignee_name = [{ value: nm, confidence: best.confidence, page: best.page, doc: best.doc, derived: true }];
       }
     }
 
     const fields = [];
     const extracted = {};
     KEYS.forEach(k => {
-      const list = by[k];
-      if (!list || !list.length) return;
-      if (k === 'container_numbers') {
-        const seen = {}, ok = [], bad = [];
-        list.forEach(x => {
-          String(x.value).split(/[,;\n]+/).map(normContainer).filter(Boolean).forEach(c => {
-            if (seen[c]) return;
-            seen[c] = 1;
-            if (isValidContainer(c)) ok.push({ c, x }); else bad.push(c);
-          });
-        });
-        bad.forEach(c => W('server', 'container_check_digit', 'Container number fails the ISO 6346 check digit: ' + c, k));
-        if (!ok.length) return;
-        const value = ok.map(o => o.c).join(', ').slice(0, 2000);
-        const read = ok.filter(o => !o.x.derived);
-        const confidence = Math.min.apply(null, (read.length ? read : ok).map(o => o.x.confidence));
-        fields.push({ name: k, value, confidence, page: ok[0].x.page, valid: true });
-        extracted[k] = value;
-        return;
-      }
-      if (k === 'hs_codes') {
-        const seen = {}, vals = [];
-        list.forEach(x => String(x.value).split(/[,;\s]+/).filter(Boolean).forEach(c => { if (!seen[c]) { seen[c] = 1; vals.push(c); } }));
-        const bad = vals.filter(c => !isHs(c));
-        bad.forEach(c => W('server', 'hs_format', 'HS code has an unexpected format: ' + c, k));
-        const value = vals.join(', ').slice(0, 2000);
-        fields.push({ name: k, value, confidence: Math.min.apply(null, list.map(x => x.confidence)), page: list[0].page, valid: bad.length === 0 });
-        extracted[k] = value;
-        return;
-      }
-      if (k === 'seal_numbers') {
-        const seen = {}, vals = [];
-        list.forEach(x => String(x.value).split(/[,;\n]+/).map(normSeal).filter(Boolean).forEach(c => { if (!seen[c]) { seen[c] = 1; vals.push(c); } }));
-        if (!vals.length) return;
-        const bad = vals.filter(c => !isSeal(c));
-        bad.forEach(c => W('server', 'seal_format', 'Seal number has an unexpected format: ' + c, k));
-        const read = list.filter(x => !x.derived);
-        const value = vals.join(', ').slice(0, 2000);
-        fields.push({ name: k, value, confidence: Math.min.apply(null, (read.length ? read : list).map(x => x.confidence)), page: (read[0] || list[0]).page, valid: bad.length === 0 });
-        extracted[k] = value;
-        return;
-      }
-      // single-valued: the most confident reading; disagreeing readings are reported
-      const best = list.slice().sort((a, b) => b.confidence - a.confidence)[0];
-      if (list.some(x => x.value !== best.value)) W('server', 'conflicting_values', 'Several different values were read for this field.', k);
-      let value = best.value, valid = true;
-      if (k === 'supplier_vat' || k === 'buyer_vat') {
-        value = value.replace(/\s/g, '');
-        if (!isSaudiVat(value)) { valid = false; W('server', 'vat_format', 'Not a Saudi VAT number (15 digits starting and ending with 3).', k); }
-      } else if (k === 'invoice_date') {
-        if (!isIsoDate(value)) { valid = false; W('server', 'date_format', 'Date is not a valid YYYY-MM-DD date.', k); }
-      } else if (k === 'subtotal' || k === 'vat_amount' || k === 'total') {
-        const n = amount(value);
-        if (n == null) { valid = false; W('server', 'amount_format', 'Amount is not a plain number.', k); } else value = String(n);
-      } else if (k === 'currency') {
-        value = value.toUpperCase();
-        if (!/^[A-Z]{3}$/.test(value)) { valid = false; W('server', 'currency_format', 'Currency is not an ISO 4217 code.', k); }
-      } else if (k === 'iban') {
-        value = value.replace(/\s/g, '').toUpperCase();
-        if (!/^[A-Z]{2}[0-9]{2}[A-Z0-9]{10,30}$/.test(value)) { valid = false; W('server', 'iban_format', 'IBAN has an unexpected format.', k); }
-      } else if (k === 'gross_weight' || k === 'net_weight') {
-        const n = measure(value);
-        if (n == null) { valid = false; W('server', 'weight_format', 'Weight is not a plain number of kilograms.', k); }
-        else {
-          value = String(n);
-          if (n < 0 || n > MAX_WEIGHT_KG) { valid = false; W('server', 'weight_range', 'Weight is outside the expected range (0 to 500,000,000 kg).', k); }
-        }
-      } else if (k === 'packages_count') {
-        const n = measure(value);
-        if (n == null || !Number.isInteger(n)) { valid = false; W('server', 'packages_format', 'Number of packages is not a whole number.', k); }
-        else {
-          value = String(n);
-          if (n < 0 || n > MAX_PACKAGES) { valid = false; W('server', 'packages_range', 'Number of packages is outside the expected range.', k); }
-        }
-      } else if (k === 'package_type') {
-        value = value.slice(0, 80);
-      } else if (k === 'goods_description') {
-        value = value.slice(0, 500);
-      } else if (k === 'incoterms') {
-        value = value.slice(0, 120);
-        const code = incotermCode(value);
-        if (!code) { valid = false; W('server', 'incoterms_format', 'Delivery term is not a known Incoterms code (FOB, CIF, CFR, EXW …).', k); }
-        else value = code + value.replace(/^\s*[A-Za-z&]{3}/, '');
-      } else if (k === 'consignee_name') {
-        value = (identityName(value) || cleanLine(value)).slice(0, 160);
-      } else if (k === 'packing_list_date') {
-        if (!isIsoDate(value)) { valid = false; W('server', 'date_format', 'Date is not a valid YYYY-MM-DD date.', k); }
-      } else if (k === 'measurement_cbm') {
-        const n = measure(String(value).replace(/\s*(cbm|m3|m³|cubic\s*met(er|re)s?)$/i, ''));
-        if (n == null) { valid = false; W('server', 'cbm_format', 'Volume is not a plain number of cubic metres.', k); }
-        else { value = String(n); if (n < 0 || n > MAX_CBM) { valid = false; W('server', 'cbm_range', 'Volume is outside the expected range.', k); } }
-      } else if (k === 'temperature_c') {
-        const t = String(value).replace(/\s/g, '').replace(/(°|º)?c$/i, '').replace(/^\+/, '');
-        if (!/^-?\d+(\.\d+)?$/.test(t)) { valid = false; W('server', 'temperature_format', 'Temperature is not a plain number of degrees Celsius.', k); }
-        else { const n = Number(t); value = String(n); if (n < -80 || n > 80) { valid = false; W('server', 'temperature_range', 'Temperature is outside the expected range (-80 to 80 °C).', k); } }
-      } else if (k === 'shipping_line' || k === 'notify_party' || k === 'place_of_receipt' || k === 'place_of_delivery') {
-        value = value.slice(0, 160);
-      } else if (k === 'booking_number' || k === 'packing_list_number' || k === 'freight_terms' || k === 'payment_terms' || k === 'export_country') {
-        value = value.slice(0, 120);
-      }
-      fields.push({ name: k, value, confidence: best.confidence, page: best.page, valid });
-      extracted[k] = value;
+      const f = finishKey(k, by[k], W, primary);
+      if (f) { fields.push(f); extracted[k] = f.value; }
     });
 
     // totals: subtotal + VAT = total (0.05 tolerance); Saudi VAT 15 %
@@ -1732,9 +1798,6 @@
       if (has('gross_weight') && tg != null && Math.abs(sum('gross_weight') - tg) > Math.max(0.01, tg * 0.0001)) W('server', 'items_total_mismatch', 'The item gross weights do not add up to the total gross weight.', 'gross_weight');
     }
 
-    const DT = v3 ? DETECTED_TYPES_V3 : DETECTED_TYPES;
-    const detected = DT.indexOf(data.doc_type) !== -1 ? data.doc_type : 'other';
-    const docType = requestedType === 'auto' ? detected : requestedType;
     // v3: every document type found in a combined file (legacy detectedDocuments; the main type first)
     const detectedDocs = [detected];
     if (v3) (Array.isArray(data.detected_documents) ? data.detected_documents : []).slice(0, 10).forEach(t => {
@@ -1749,6 +1812,7 @@
     const isDecl = v3 && (docType === 'customs_declaration' || detectedDocs.indexOf('customs_declaration') !== -1);
     const decl = isDecl ? declPost(data.declaration, fields, extracted, items, containers, W) : null;
     if (v3 && !isDecl) DECL_KEYS.forEach(k => { const i = fields.findIndex(f => f.name === k); if (i !== -1) fields.splice(i, 1); delete extracted[k]; });
+    const byDocument = v3 ? perDocument(by, { detected, detectedDocs, allowed, isDecl, keys: KEYS, warnings, W }) : null;
     const mean = fields.length ? Math.round(fields.reduce((s, f) => s + f.confidence, 0) / fields.length * 1000) / 10 : null;
     const result = {
       doc_type: docType, detected_type: detected, kind: KIND_OF[docType] || 'other', fields, extracted_fields: extracted,
@@ -1758,6 +1822,9 @@
       result.prompt_version = PROMPT_VERSION_V3;
       result.containers = containers;
       result.detected_documents = detectedDocs;
+      // a combined file: the values of every document it holds (response only — app.extraction_detail_ok does not allow
+      // the key in ai_detail, so nothing new is saved); omitted for a single document
+      if (byDocument) result.by_document = byDocument;
       if (decl) result.declaration = decl;
       // document_extractions.ai_detail (20261119000100): the machine detail a later read of the same file restores
       result.ai_detail = aiDetail(result);

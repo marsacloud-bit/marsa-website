@@ -349,6 +349,7 @@
     if (v3) {
       body.containers = out.containers; body.ai_detail = out.ai_detail; body.source_sha256 = sha;
       body.detected_documents = out.detected_documents;
+      if (out.by_document) body.by_document = out.by_document;   // a combined file: the values per document (response only, not saved)
       body.declaration = out.declaration || null;     // v3 customs declaration (20261120000100), else null
       body.appointment = out.appointment || null;     // v3 appointment card (20261121000100), else null
       body.empty_return = out.empty_return || null;   // v3 EIR (20261121000100), else null
