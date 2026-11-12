@@ -36,7 +36,7 @@
   var FIELD_KEYS = ['invoice_number', 'invoice_date', 'supplier_name', 'supplier_vat', 'buyer_name', 'buyer_vat',
     'currency', 'subtotal', 'vat_amount', 'total', 'bl_number', 'container_numbers', 'declaration_number',
     'hs_codes', 'country_of_origin', 'iban',
-    // AI reading (Claude, 20261114000100): bill-of-lading voyage / parties — never produced by the text parser below
+    // AI reading (Claude, 20261114000100): bill-of-lading voyage / parties (the text parser fills them too since fields v2: shippingFields)
     'vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'shipper', 'consignee',
     // AI reading v2 (ai-doc-v2, 20261116000100): the fields the invoice ↔ B/L ↔ declaration match compares
     'gross_weight', 'net_weight', 'packages_count', 'package_type', 'goods_description', 'incoterms'];
@@ -675,7 +675,276 @@
     items.forEach(function (it) { if (it.hs_code && hs.indexOf(it.hs_code) === -1) hs.push(it.hs_code); });
     if (hs.length) fields.hs_codes = F(hs.slice(0, 50).join(', '), 'medium');
 
+    /* shipping data (B/L block + column layouts, invoice "Incoterms : EXW"): fills only the keys still empty */
+    shippingFields(t, fields, docType);
+    // B/L: a "Shipper   B/L No" label row made the name label read the next label; the block value is the name
+    if (isBL) {
+      [['supplier_name', 'shipper'], ['buyer_name', 'consignee']].forEach(function (p) {
+        var cur = fields[p[0]], src = fields[p[1]];
+        if (src && (!cur || isLabelOnly(cur.value, labelHits(cur.value)))) fields[p[0]] = F(src.value, 'medium');
+      });
+    }
+
     return { fields: fields, lineItems: items };
+  }
+
+  /* ---------------------------------------------------------------
+     Shipping data (fields v2): typical bill-of-lading layouts read by
+     Tesseract (preserve_interword_spaces keeps the column gaps):
+       - block labels: "Shipper" / "Consignee" / "Notify" on their own line,
+         the value on the next line(s) until the next label;
+       - label rows: several labels on one line, the values on the next line
+         in the same order ("Ocean Vessel / Voyage   Port of loading" →
+         "MV PAPU / PAP0426E   ALIAGA"), split by 2+ spaces;
+       - inline: "Port of loading: JEDDAH", "Incoterms : EXW".
+     Only keys of FIELD_KEYS are produced. A label with key null only ends a block.
+     --------------------------------------------------------------- */
+  var SHIP_LABELS = [
+    { key: 'vessel_voyage', re: /(?:ocean\s+)?vessel\s*(?:name\s*)?(?:\/|&|and)\s*voy(?:age)?(?:\s*no)?\.?|(?:السفينة|اسم\s*السفينة)\s*\/\s*(?:الرحلة|رقم\s*الرحلة)/i },
+    { key: 'shipper', re: /\b(?:shipper|exporter|consignor)\b(?:\s*\/\s*exporter)?(?:\s*\(\s*(?:complete\s+)?name\s*(?:and|&)\s*address\s*\))?|الشاحن|المصدِّر/i, block: true },
+    { key: 'consignee', re: /\bconsignee\b(?:\s*\(\s*(?:complete\s+)?name\s*(?:and|&)\s*address\s*\))?|المرسل\s*[اإ]ليه/i, block: true },
+    { key: null, re: /\bnotify(?:\s+(?:party|address))?\b|\balso\s+notify\b|الطرف\s*المخطر/i, block: true },
+    { key: 'vessel', re: /(?:ocean\s+)?\bvessel(?:\s*name)?\b|\bname\s+of\s+(?:ship|vessel)\b|اسم\s*السفينة|السفينة/i },
+    { key: 'voyage', re: /\bvoy(?:age)?(?:\s*(?:no|number))?\b\.?|رقم\s*الرحلة|الرحلة/i },
+    { key: 'port_of_loading', re: /\bport\s+of\s+(?:loading|lading|shipment)\b|\bloading\s+port\b|\bPOL\b|ميناء\s*(?:الشحن|التحميل)/i },
+    { key: 'port_of_discharge', re: /\bport\s+of\s+(?:discharge|destination)\b|\bdischarge\s+port\b|\bPOD\b|ميناء\s*(?:التفريغ|الوصول)/i },
+    { key: null, re: /\bplace\s+of\s+(?:receipt|delivery|issue)\b|\bfinal\s+destination\b|\bpre-?\s*carriage(?:\s+by)?\b|\bfreight\s+(?:payable|prepaid|collect|charges|and\s+charges)\b|\bnumber\s+of\s+original|\bmarks\s*(?:&|and)?\s*(?:nos?|numbers)?\b\.?|\bcontainer\s*(?:no|number|nos)?\b\.?(?:\s*\/\s*seal(?:\s*no)?\.?)?|\bseal\s*(?:no|number)?\b\.?|\bmeasurement\b|\bvolume\b|\bCBM\b|\bbooking\s*(?:no|number)?\b\.?|\bexport\s+references?\b|\bforwarding\s+agent\b|\bplace\s+and\s+date\s+of\s+issue\b/i },
+    { key: 'bl_number', re: /\b(?:B\s*\/\s*L|bill\s+of\s+lading)\s*(?:no|number|#)\b\.?|رقم\s*البوليصة/i },
+    { key: 'gross_weight', re: /\bgross\s*(?:weight|wt)\b\.?(?:\s*[,(]?\s*(?:in\s+)?kgs?\.?\s*\)?)?|\bG\.\s?W\.?(?=\s|:|$)|الوزن\s*(?:القائم|الإجمالي|الاجمالي)/i },
+    { key: 'net_weight', re: /\bnet\s*(?:weight|wt)\b\.?(?:\s*[,(]?\s*(?:in\s+)?kgs?\.?\s*\)?)?|\bN\.\s?W\.?(?=\s|:|$)|الوزن\s*الصافي/i },
+    { key: 'packages_count', re: /\b(?:no\.?|number|total)\s*(?:of|&)?\s*(?:pkgs|packages|packs|cartons|pallets)\b\.?|\bpackages\b|\bpkgs\b\.?|عدد\s*الطرود/i },
+    { key: 'package_type', re: /\bkind\s+of\s+packages?\b|\btype\s+of\s+packages?\b|\bpackage\s+type\b|نوع\s*(?:الطرود|العبوات)/i },
+    { key: 'goods_description', re: /\bdescription\s+of\s+(?:the\s+)?(?:goods|packages\s+and\s+goods|cargo)\b|\bgoods\s+description\b|\bdescription\b|وصف\s*البضاع[ةه]/i, block: true },
+    { key: 'incoterms', re: /\bincoterms?(?:\s*20[12]0)?\b|\b(?:terms|conditions)\s+of\s+(?:delivery|sale)\b|\bdelivery\s+terms?\b|\btrade\s+terms?\b|شرط\s*التسليم|شروط\s*التسليم/i },
+    { key: 'country_of_origin', re: /\bcountry\s+of\s+origin\b|\borigin\s+country\b|بلد\s*المنش[أا]/i }
+  ];
+  var PKG_RE = /(?:^|[^\w.,])(\d{1,3}(?:[.,]\d{3})+|\d+)\s*(PALLETS?|PLTS?|CARTONS?|CTNS?|PACKAGES?|PKGS?|PACKS?|BAGS?|BOXES|BOX|DRUMS?|ROLLS?|BALES?|CRATES?|CASES?|BUNDLES?|SACKS?|CASKS?|TUBES?|COILS?|UNITS?|IBCS?|SKIDS?|طرود|طرد|كرتون|كراتين|طبالي|طبلية|أكياس|اكياس|كيس|صناديق|صندوق|براميل|برميل|لفات|بالات)(?![A-Za-z])/i;
+  var INCO_RE = /\b(EXW|FCA|FAS|FOB|CFR|CIF|CPT|CIP|DAP|DPU|DAT|DDP|DDU|C\s?&\s?F|CNF)\b/i;
+  var WEIGHT_RE = /(\d[\d.,]*\d|\d)\s*(KGS?|KILOS?|KILOGRAMS?|K\.G\.?|MT|M\.T\.|TONS?|TONNES?|LBS?|كغ|كجم|كيلو(?:غرام|جرام)?|طن)?(?![A-Za-z])/i;
+
+  // every label occurrence on a raw line: [{ def, start, end }] sorted, non-overlapping (longest first)
+  function labelHits(line) {
+    var hits = [];
+    SHIP_LABELS.forEach(function (d) {
+      var g = new RegExp(d.re.source, 'gi'), m;
+      while ((m = g.exec(line))) {
+        if (!m[0]) { g.lastIndex++; continue; }
+        hits.push({ def: d, start: m.index, end: m.index + m[0].length });
+      }
+    });
+    hits.sort(function (a, b) { return a.start - b.start || (b.end - b.start) - (a.end - a.start); });
+    var out = [];
+    hits.forEach(function (h) {
+      var last = out[out.length - 1];
+      if (last && h.start < last.end) return;
+      out.push(h);
+    });
+    return out;
+  }
+  function segmentsOf(line) {   // column segments split by 2+ spaces or a "|" ruling
+    var out = [], re = /[^\s|](?:[^|]*?[^\s|])??(?=\s{2,}|\s*\||\s*$)/g, m;
+    while ((m = re.exec(line))) {
+      if (!m[0]) { re.lastIndex++; continue; }
+      out.push({ text: m[0], start: m.index });
+    }
+    return out;
+  }
+  function isLabelOnly(line, hits) {
+    if (!hits.length) return false;
+    var rest = line, k;
+    for (k = hits.length - 1; k >= 0; k--) rest = rest.slice(0, hits[k].start) + ' ' + rest.slice(hits[k].end);
+    return rest.replace(/[\s:\-–—#.,،|\/\\()&]+/g, '').length <= 2;
+  }
+  // a label inside running text ("…description of the vessel…") is not a label: line start, after a column gap / "|", or after ":"
+  function atBoundary(line, h) {
+    var before = line.slice(0, h.start);
+    return !before.trim() || /(\s{2,}|\||:\s*)$/.test(before);
+  }
+  function cleanVal(s) { return stripEdges(String(s || '').replace(/\s{2,}/g, ' ')).slice(0, 255); }
+
+  function putShip(fields, key, value, conf) {
+    if (!key || !value || fields[key]) return;
+    if (FIELD_KEYS.indexOf(key) === -1) return;
+    fields[key] = F(value, conf || 'medium');
+  }
+  function weightKg(s) {
+    var m = WEIGHT_RE.exec(String(s || ''));
+    if (!m) return '';
+    var n = parseAmount(m[1]);
+    if (n == null || !(n > 0)) return '';
+    var u = String(m[2] || '').toUpperCase();
+    if (/^(MT|M\.T\.|TONS?|TONNES?|طن)$/.test(u)) n = n * 1000;
+    else if (/^LBS?$/.test(u)) n = n * 0.45359237;
+    return trimNum(n);
+  }
+  function setShipValue(fields, key, raw, conf, ctx) {
+    var v = cleanVal(raw);
+    if (!v) return;
+    switch (key) {
+      case 'vessel_voyage': {
+        var slash = v.lastIndexOf('/');
+        var left = slash > 0 ? v.slice(0, slash) : v, right = slash > 0 ? v.slice(slash + 1) : '';
+        if (/^\s*V\.?\s*[A-Z]/i.test(right) && /M\s*$/i.test(left)) { left = v; right = ''; }      // "M/V NAME" without a voyage
+        if (!right) {
+          var mv = /^(.*?)\s+(?:V\.?|VOY\.?)?\s*([A-Z0-9-]*\d[A-Z0-9-]*)$/i.exec(v);
+          if (mv) { left = mv[1]; right = mv[2]; }
+        }
+        left = cleanVal(left); right = (cleanVal(right).toUpperCase().split(/\s+/)[0] || '');   // a voyage is one token
+        if (/[A-Za-z\u0600-\u06ff]{2,}/.test(left)) putShip(fields, 'vessel', left, conf);
+        if (right && /\d/.test(right) && right.length <= 30) putShip(fields, 'voyage', right, conf);
+        return;
+      }
+      case 'vessel':
+        if (/[A-Za-z\u0600-\u06ff]{2,}/.test(v)) {
+          var vv = /^(.*?)\s*\/\s*([A-Z0-9-]*\d[A-Z0-9-]*)$/i.exec(v);
+          if (vv && !/M\s*$/i.test(vv[1])) { putShip(fields, 'vessel', cleanVal(vv[1]), conf); putShip(fields, 'voyage', vv[2].toUpperCase(), conf); }
+          else putShip(fields, 'vessel', v, conf);
+        }
+        return;
+      case 'voyage': {
+        var t = exBl(v) || exId(v);
+        if (t && t.length <= 30) putShip(fields, 'voyage', t, conf);
+        return;
+      }
+      case 'bl_number': { var b = exBl(v); if (b) putShip(fields, 'bl_number', b, conf); return; }
+      case 'gross_weight': case 'net_weight': { var w = weightKg(v); if (w) putShip(fields, key, w, conf); return; }
+      case 'packages_count': {
+        var pm = PKG_RE.exec(' ' + v);
+        if (pm) { putShip(fields, 'packages_count', trimNum(parseAmount(pm[1])), conf); putShip(fields, 'package_type', pm[2].toUpperCase(), conf); return; }
+        var pn = /^(\d{1,3}(?:[.,]\d{3})+|\d+)(?:\s|$)/.exec(v);
+        if (pn) {
+          putShip(fields, 'packages_count', trimNum(parseAmount(pn[1])), conf);
+          var rest = cleanVal(v.slice(pn[0].length));
+          if (rest && /^[A-Za-z\u0600-\u06ff]{3,20}$/.test(rest)) putShip(fields, 'package_type', rest.toUpperCase(), conf);
+        }
+        return;
+      }
+      case 'package_type':
+        if (/^[A-Za-z\u0600-\u06ff .()-]{3,40}$/.test(v)) putShip(fields, 'package_type', v.toUpperCase(), conf);
+        return;
+      case 'incoterms': {
+        var im = INCO_RE.exec(v);
+        if (im) {
+          var code = im[1].toUpperCase().replace(/\s/g, '');
+          if (code === 'C&F' || code === 'CNF') code = 'CFR';
+          var place = cleanVal(v.slice(im.index + im[0].length).replace(/^[\s,\-–]+/, '')).split(/\s{2,}|,|\(/)[0];
+          putShip(fields, 'incoterms', code + (place && /^[A-Za-z][A-Za-z .'-]{2,30}$/.test(place) && !/^(incoterms?|20[12]0)$/i.test(place) ? ' ' + place.trim().toUpperCase() : ''), conf);
+        }
+        return;
+      }
+      case 'country_of_origin': {
+        var c = normalizeCountry(v);
+        if (c && /[A-Za-z\u0600-\u06ff]{2,}/.test(c)) putShip(fields, 'country_of_origin', c, isKnownCountry(c) ? 'high' : conf);
+        return;
+      }
+      case 'goods_description':
+        if (/[A-Za-z\u0600-\u06ff]{3,}/.test(v)) {
+          // "19 PALLETS MEDICAL DRESSINGS" in one cell: the count goes to its own fields
+          var gp = PKG_RE.exec(' ' + v);
+          if (gp && gp.index <= 1) { setShipValue(fields, 'packages_count', gp[0], 'low'); v = cleanVal(v.slice(gp.index + gp[0].length - 1)); }
+          v = cleanVal(v.replace(/^(?:S\.?\s?T\.?\s?C\.?|said\s+to\s+contain)\s*:?\s*/i, ''));
+          if (v.length >= 3) putShip(fields, 'goods_description', v.slice(0, 255), conf);
+        }
+        return;
+      case 'shipper': case 'consignee':
+        if (/[A-Za-z\u0600-\u06ff]{2,}/.test(v) && !/^(?:to\s+order\s+of\s*:?)$/i.test(v)) putShip(fields, key, v.replace(NAME_STOP, '').trim() || v, conf);
+        return;
+      default:
+        if (/[A-Za-z\u0600-\u06ff]{2,}/.test(v)) putShip(fields, key, v, conf);
+    }
+  }
+
+  function shippingFields(t, fields, docType) {
+    var raw = String(t || '').split('\n').map(function (l) { return l.replace(/\s+$/, ''); });
+    var isBL = docType === 'bill_of_lading';
+    var info = raw.map(function (l) { var h = labelHits(l); return { line: l, hits: h, labelOnly: isLabelOnly(l, h) }; });
+    // value lines after line i: skip blank lines (at most 2), stop at a label line
+    function nextValueLine(i) {
+      for (var k = i + 1, blank = 0; k < info.length && k <= i + 4; k++) {
+        if (!info[k].line.trim()) { if (++blank > 2) return -1; continue; }
+        if (info[k].labelOnly) return -1;
+        if (info[k].hits.length && atBoundary(info[k].line, info[k].hits[0]) && info[k].hits[0].start === info[k].line.search(/\S/)) return -1;
+        return k;
+      }
+      return -1;
+    }
+    function blockLines(k, max) {      // a block value: k and the following lines until a blank / label line
+      var out = [info[k].line.trim()];
+      for (var n = k + 1; n < info.length && out.length < max; n++) {
+        var x = info[n];
+        if (!x.line.trim() || x.labelOnly || (x.hits.length && atBoundary(x.line, x.hits[0]))) break;
+        out.push(x.line.trim());
+      }
+      return out;
+    }
+    info.forEach(function (row, i) {
+      if (!row.hits.length) return;
+      var hits = row.labelOnly ? row.hits : row.hits.filter(function (h) { return atBoundary(row.line, h); });
+      if (!hits.length) return;
+      var needing = [];
+      hits.forEach(function (h, n) {
+        var end = n + 1 < hits.length ? hits[n + 1].start : row.line.length;
+        var inline = row.line.slice(h.end, end);
+        if (inline.replace(/[\s:\-–—#.,،|\/\\()]+/g, '').length) {
+          if (!h.def.key) return;
+          var cellVal = /\s{2,}/.test(inline.trim()) && !/^\s*:/.test(inline) ? inline.trim().split(/\s{2,}/)[0] : inline;
+          setShipValue(fields, h.def.key, cellVal, 'medium');
+        } else needing.push(h);
+      });
+      if (!needing.length || !needing.some(function (h) { return h.def.key; })) return;
+      var k = nextValueLine(i);
+      if (k < 0) return;
+      var segs = segmentsOf(info[k].line);
+      if (!segs.length) return;
+      var pick = function (h) {
+        if (needing.length === 1 && hits.length === 1 && segs.length > 1 && h.start <= 2) return segs[0];
+        if (segs.length === needing.length) return segs[needing.indexOf(h)];
+        if (needing.length === 1 && segs.length === 1) return segs[0];
+        // by column: the value cell whose start is nearest the label start
+        var best = null, bd = 1e9;
+        segs.forEach(function (s) { var d = Math.abs(s.start - h.start); if (d < bd) { bd = d; best = s; } });
+        return bd <= 12 ? best : null;
+      };
+      needing.forEach(function (h) {
+        if (!h.def.key) return;
+        var s = pick(h);
+        if (!s) return;
+        if (h.def.key === 'goods_description' && segs.length === 1) {
+          setShipValue(fields, 'goods_description', blockLines(k, 4).join(' '), 'medium');
+          return;
+        }
+        // a block party value is only the first line (the name); the address lines follow
+        setShipValue(fields, h.def.key, s.text, h.def.block || needing.length > 1 ? 'medium' : 'medium');
+      });
+    });
+
+    /* fallbacks on the whole text (low confidence): packages, gross weight, incoterms, "SAID TO CONTAIN" */
+    var joined = raw.join('\n');
+    if (!fields.packages_count) {
+      var best = null;
+      raw.forEach(function (l) {
+        if (best) return;
+        var m = PKG_RE.exec(' ' + l);
+        if (m && !/^(UNITS?)$/i.test(m[2]) && (isBL || /\btotal\b|اجمالي|إجمالي|المجموع/i.test(l) || /PALLET|CARTON|CTN|PKG|PACKAGE/i.test(m[2]))) best = m;
+      });
+      if (best) { putShip(fields, 'packages_count', trimNum(parseAmount(best[1])), 'low'); putShip(fields, 'package_type', best[2].toUpperCase(), 'low'); }
+    }
+    if (!fields.gross_weight) {
+      var gw = /\b(?:gross\s*(?:weight|wt)|G\.\s?W\.?)[^\d\n]{0,20}(\d[\d.,]*\s*(?:KGS?|KILOS?|MT|TONS?|LBS?)?)/i.exec(joined);
+      if (gw) { var g = weightKg(gw[1]); if (g) putShip(fields, 'gross_weight', g, 'low'); }
+    }
+    if (!fields.net_weight) {
+      var nw = /\b(?:net\s*(?:weight|wt)|N\.\s?W\.?)[^\d\n]{0,20}(\d[\d.,]*\s*(?:KGS?|KILOS?|MT|TONS?|LBS?)?)/i.exec(joined);
+      if (nw) { var nn = weightKg(nw[1]); if (nn) putShip(fields, 'net_weight', nn, 'low'); }
+    }
+    if (!fields.incoterms) {
+      var ic = /\b(EXW|FCA|FAS|FOB|CFR|CIF|CPT|CIP|DAP|DPU|DDP)\s+([A-Z][A-Z]{2,}(?:\s[A-Z]{3,})?)\b/.exec(joined);
+      if (ic) putShip(fields, 'incoterms', ic[1] + ' ' + ic[2], 'low');
+    }
+    if (!fields.goods_description) {
+      var stc = /(?:\bS\.\s?T\.\s?C\.?|\bsaid\s+to\s+contain)\s*:?\s*([^\n]{3,200})/i.exec(joined);
+      if (stc) setShipValue(fields, 'goods_description', stc[1], 'low');
+    }
   }
 
   var CURRENCIES = [

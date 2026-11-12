@@ -422,6 +422,8 @@
         }
       });
       if (!(patch && patchTable())) renderTable();
+      renderExceptions();
+      renderSheets();
       renderItems();
       renderWarnings();
       renderReview();
@@ -442,6 +444,10 @@
     function rowEl(row, R, C) {
         var tr = el('tr', 'ocr-match-row ' + STATUS_CLS[row.status]);
         tr.setAttribute('data-key', row.key);
+        // match v2: a mismatch row pulses red, a partial one amber; a reviewed row keeps a static edge only
+        var lvlRow = row.status === 'mismatch' ? 'bad' : row.status === 'partial' ? 'warn' : '';
+        if (lvlRow) tr.classList.add('ocr-mx-r-' + lvlRow);
+        if (lvlRow && S.reviewed[row.key]) tr.classList.add('is-reviewed');
         var th = el('th', 'ocr-match-field'); th.scope = 'row';
         th.appendChild(el('span', null, L(row, 'label')));
         if (row.critical) {
@@ -454,6 +460,8 @@
         C.forEach(function (k) {
           var td = el('td', 'ocr-match-val');
           var v = row.values[k];
+          var cl = cellLevel(row, k);
+          if (cl) td.classList.add('ocr-mx-v-' + cl);
           var editable = row.src && row.src[k] && row.key !== 'items' && row.key !== 'invoice_totals';
           if (v === undefined) {
             td.appendChild(el('span', 'ocr-match-na', '—'));
@@ -532,6 +540,7 @@
         for (var j = 0; j < nc.length && j < oc.length; j++) {
           var keep = oc[j].querySelector('input');
           if (!keep) { tr.replaceChild(nc[j].cloneNode(true), oc[j]); continue; }
+          oc[j].className = nc[j].className;
           // a cell with a control: keep the control, refresh its state and the printed copy
           var ni = nc[j].querySelector('input');
           if (keep.type === 'checkbox') keep.checked = !!(ni && ni.checked);
@@ -559,6 +568,9 @@
         var key = t.getAttribute('data-review');
         if (t.checked) S.reviewed[key] = true; else delete S.reviewed[key];
         var pv = t.parentNode.querySelector('.ocr-match-print-val'); if (pv) pv.textContent = t.checked ? '✓' : '';
+        var rtr = t.closest ? t.closest('tr') : null;
+        if (rtr) rtr.classList.toggle('is-reviewed', t.checked);
+        renderExceptions(); renderSheets();
         if (S.approved) { S.approved = false; }
         renderReview();
         return;
@@ -673,6 +685,417 @@
       $('ocr-match-warn-count').textContent = n ? '(' + n + ')' : '';
       $('ocr-match-warn-box').hidden = !n;
     }
+    /* ---------------------------------------------------------------
+       match v2: per-document sheets + exceptions table + highlight levels
+       bad  = a value that differs from another document, or one the server flagged invalid (red pulse)
+       warn = partial match, low confidence, a server / model remark to review (amber pulse)
+       miss = a field this document normally carries (and that matters) but the reading did not return (dashed)
+       All values via textContent; a value with no Arabic letters is shown left-to-right (<bdi dir="ltr">).
+       --------------------------------------------------------------- */
+    var SHEET_ORDER = ['bl', 'invoice', 'declaration'];
+    var LVL_RANK = { '': 0, miss: 1, warn: 2, bad: 3 };
+    // server checks that mean "this value is not valid" (red); the other server checks are remarks to review (amber)
+    var INVALID_WARN = ['container_check_digit', 'hs_format', 'vat_format', 'date_format', 'amount_format', 'currency_format',
+      'iban_format', 'weight_format', 'packages_format', 'incoterms_format', 'seal_format'];
+    // reading order of a sheet (the reference «ورقة معلومات الإدخال»); other keys follow in the reading's order
+    var SHEET_KEYS = ['bl_number', 'booking_number', 'invoice_number', 'invoice_date', 'declaration_number', 'declaration_type',
+      'declaration_status', 'declaration_date', 'declaration_date_hijri', 'shipper', 'supplier_name', 'supplier_vat', 'consignee',
+      'consignee_name', 'buyer_name', 'buyer_vat', 'importer_name_ar', 'notify_party', 'broker_name', 'vessel', 'voyage', 'shipping_line',
+      'port_of_loading', 'port_of_discharge', 'place_of_receipt', 'place_of_delivery', 'export_country', 'country_of_origin',
+      'freight_terms', 'incoterms', 'payment_terms', 'payment_method', 'goods_description', 'packages_count', 'package_type',
+      'net_weight', 'gross_weight', 'measurement_cbm', 'temperature_c', 'container_numbers', 'seal_numbers', 'hs_codes', 'currency',
+      'subtotal', 'vat_amount', 'total', 'local_value', 'iban', 'packing_list_number', 'packing_list_date'];
+    var WIDE_KEYS = ['goods_description'];          // and any value longer than 40 characters
+    function mxHas(k) { return !!(I18N && typeof I18N.has === 'function' && I18N.has('ocr.' + k)); }
+    function sheetLabel(key) {
+      if (mxHas('mx_f_' + key)) return T('mx_f_' + key);
+      if (mxHas('f_' + key)) return T('f_' + key);
+      if (FIELD_NAMES[key]) return fieldLabel(key);
+      var s = String(key).replace(/_/g, ' ');
+      return s.charAt(0).toUpperCase() + s.slice(1);
+    }
+    function isLtr(v) { return !/[؀-ۿ]/.test(String(v == null ? '' : v)); }
+    function valNode(v, cls) {
+      var b = el('bdi', cls || null, v);
+      b.dir = isLtr(v) ? 'ltr' : 'auto';
+      return b;
+    }
+    function hasVal(v) { return v != null && v !== ''; }
+    function critOf(d, mode) { return d.critical === 'three' ? mode === 'three_way' : !!d.critical; }
+    // the documents k is compared with in this row whose pair has status st
+    function partners(row, k, st) {
+      var out = [];
+      Object.keys(PAIR_DOCS).forEach(function (p) {
+        var d = PAIR_DOCS[p], i = d.indexOf(k);
+        if (i !== -1 && row.pairs && row.pairs[p] === st) out.push(d[1 - i]);
+      });
+      return out;
+    }
+    function anyPair(row) { return !!(row.pairs && Object.keys(row.pairs).some(function (p) { return !!row.pairs[p]; })); }
+    // level of document k's cell in a comparison row
+    function cellLevel(row, k) {
+      var v = row.values ? row.values[k] : undefined;
+      if (v === undefined) return '';
+      if (v == null || v === '') {
+        var d = FIELD_NAMES[row.key];
+        return row.status === 'missing' && d && d.exp.indexOf(k) !== -1 ? 'miss' : '';
+      }
+      if (row.status === 'mismatch') return partners(row, k, 'mismatch').length || !anyPair(row) ? 'bad' : '';
+      if (row.status === 'partial') return partners(row, k, 'partial').length || partners(row, k, 'mismatch').length || !anyPair(row) ? 'warn' : '';
+      return '';
+    }
+    function docsList(list) { return list.map(docName).join(lang() === 'en' ? ', ' : '، '); }
+    // per document: { extraction key: {lvl, reasons[], row?, bad[] (invalid container numbers)} }
+    function issuesOf(k) {
+      var R = S.result, s = S.slots[k], out = {};
+      function put(key, lvl, reason, extra) {
+        // kind: 'row' (a comparison row), 'note' (a remark on the reading itself: stays until corrected)
+        var o = out[key] || (out[key] = { lvl: '', reasons: {}, list: [], bad: [], rows: [], notes: 0 });
+        var kind = extra && extra.row ? 'row' : 'note';
+        if (LVL_RANK[lvl] > LVL_RANK[o.lvl]) o.lvl = lvl;
+        if (reason && !o.reasons[lvl + '|' + reason]) { o.reasons[lvl + '|' + reason] = 1; o.list.push({ lvl: lvl, text: reason, kind: kind }); }
+        if (extra && extra.bad) o.bad.push(extra.bad);
+        if (extra && extra.row) { if (o.rows.indexOf(extra.row) === -1) o.rows.push(extra.row); }
+        else if (lvl !== 'miss') o.notes++;
+        return o;
+      }
+      if (!R || !s.res) return out;
+      var fields = s.fields || {};
+      // comparison rows
+      R.rows.forEach(function (row) {
+        var key = row.src && row.src[k];
+        if (!key || row.key === 'items' || row.key === 'invoice_totals') return;
+        var lvl = cellLevel(row, k);
+        if (!lvl) return;
+        var reason;
+        if (lvl === 'bad') {
+          var pm = partners(row, k, 'mismatch');
+          reason = pm.length ? T('mx_badge_diff', { docs: docsList(pm) }) : T('mx_badge_diff_any');
+        } else if (lvl === 'warn') {
+          var pp = partners(row, k, 'partial');
+          reason = pp.length ? T('mx_badge_partial', { docs: docsList(pp) }) : T('mx_badge_review');
+        } else {
+          reason = T('mx_not_read');
+        }
+        put(key, lvl, reason, { row: row.key });
+      });
+      // server / model remarks about a field (not for a value the reviewer corrected)
+      (s.res.warnings || []).slice(0, 60).forEach(function (w) {
+        if (!w || typeof w.text !== 'string' || !w.field || w.code === 'doc_type_mismatch') return;
+        var key = w.field === 'containers' ? 'container_numbers' : String(w.field);
+        if (!/^[a-z_]{2,40}$/.test(key)) return;
+        if (fields[key] && fields[key].corrected) return;
+        var bad = w.source === 'server' && INVALID_WARN.indexOf(w.code) !== -1;
+        var extra = null;
+        if (w.code === 'container_check_digit') {
+          var i = w.text.indexOf(': ');
+          var c = i !== -1 ? w.text.slice(i + 2).trim().slice(0, 20) : '';
+          extra = c ? { bad: c } : null;
+          put(key, 'bad', T('mx_bad_container'), extra);   // the number itself is shown as a struck chip
+          return;
+        }
+        put(key, bad ? 'bad' : 'warn', warnText(w), extra);
+      });
+      // the reading's own validity flag + low confidence
+      (s.res.fields || []).forEach(function (f) {
+        if (!f || typeof f.name !== 'string' || !fields[f.name] || fields[f.name].corrected) return;
+        if (f.valid === false) {
+          var o = out[f.name];
+          if (!o || !o.list.some(function (x) { return x.kind === 'note' && x.lvl === 'bad'; })) put(f.name, 'bad', T('mx_badge_invalid'));
+        }
+      });
+      Object.keys(fields).forEach(function (key) {
+        var f = fields[key];
+        if (f && !f.corrected && f.score != null && f.score < LOW_CONF && hasVal(f.value)) {
+          put(key, 'warn', T('mx_badge_lowconf', { n: Math.round(f.score * 100) }));
+        }
+      });
+      // a field that matters, normally on this document, that the reading did not return
+      (E.FIELDS || []).forEach(function (d) {
+        var keys = d.keys && d.keys[k];
+        if (!keys || d.exp.indexOf(k) === -1) return;
+        if (keys.some(function (x) { return fields[x] && hasVal(fields[x].value); })) return;
+        var row = R.rows.filter(function (r) { return r.key === d.key; })[0];
+        var rowMissing = row && row.status === 'missing' && row.values[k] == null;
+        if (!critOf(d, R.mode) && !rowMissing) return;
+        put(keys[0], 'miss', T('mx_not_read'), row ? { row: row.key } : null).expected = true;
+      });
+      // every row of the field ticked as reviewed, and no remark on the reading itself: a static edge only
+      Object.keys(out).forEach(function (key) {
+        var o = out[key];
+        o.calm = o.rows.length > 0 && !o.notes && o.rows.every(function (r) { return !!S.reviewed[r]; });
+      });
+      return out;
+    }
+    function lvlCls(base, o) {
+      if (!o || !o.lvl) return base;
+      return base + ' is-' + o.lvl + (o.calm ? ' is-calm' : '');
+    }
+    function topReason(o) { return o.list.filter(function (x) { return x.lvl === o.lvl; })[0] || o.list[0] || null; }
+    function badge(o) {
+      var top = topReason(o);
+      var b = el('span', 'ocr-mx-badge is-' + o.lvl + (o.calm ? ' is-calm' : ''));
+      var dot = el('span', 'ocr-mx-dot'); dot.setAttribute('aria-hidden', 'true');
+      b.appendChild(dot);
+      var t = el('span', null, top ? top.text : ''); t.dir = 'auto';
+      b.appendChild(t);
+      return b;
+    }
+
+    /* the sheets: one card per document read */
+    function renderSheets() {
+      var box = $('ocr-mx-sheets'), blk = $('ocr-mx-sheets-block');
+      if (!box || !blk) return;
+      box.textContent = '';
+      var R = S.result;
+      var docs = SHEET_ORDER.filter(function (k) { return R && R.documents.indexOf(k) !== -1 && S.slots[k].res; });
+      blk.hidden = !docs.length;
+      docs.forEach(function (k, n) { box.appendChild(sheetCard(k, n + 1)); });
+    }
+    function sheetCard(k, n) {
+      var s = S.slots[k], res = s.res || {}, fields = s.fields || {};
+      var iss = issuesOf(k);
+      var meta = {};
+      (res.fields || []).forEach(function (f) { if (f && typeof f.name === 'string') meta[f.name] = f; });
+      // keys: the reading's fields (known order first), then the expected ones it did not return
+      var keys = Object.keys(fields).filter(function (x) { return fields[x] && hasVal(fields[x].value); });
+      var rest = keys.filter(function (x) { return SHEET_KEYS.indexOf(x) === -1; });
+      keys = SHEET_KEYS.filter(function (x) { return keys.indexOf(x) !== -1; }).concat(rest);
+      // the document's own number first
+      var lead = { bl: 'bl_number', invoice: 'invoice_number', declaration: 'declaration_number' }[k];
+      if (keys.indexOf(lead) > 0) { keys.splice(keys.indexOf(lead), 1); keys.unshift(lead); }
+      Object.keys(iss).forEach(function (x) {
+        if (keys.indexOf(x) === -1 && (iss[x].lvl === 'miss' || iss[x].bad.length)) keys.push(x);
+      });
+      var nBad = 0, nWarn = 0, nMiss = 0;
+      keys.forEach(function (x) { var o = iss[x]; if (o) { if (o.lvl === 'bad') nBad++; else if (o.lvl === 'warn') nWarn++; else if (o.lvl === 'miss') nMiss++; } });
+      var card = el('section', 'ocr-mx-sheet' + (nBad ? ' has-bad' : nWarn ? ' has-warn' : ''));
+      card.setAttribute('data-doc', k);
+      var hid = 'ocr-mx-sheet-h-' + k;
+      card.setAttribute('aria-labelledby', hid);
+      var head = el('div', 'ocr-mx-sheet-head');
+      var h = el('h5', 'ocr-mx-sheet-title', T('mx_sheet_num', { n: n, title: T('mx_sheet_' + k) })); h.id = hid;
+      head.appendChild(h);
+      var sub = el('div', 'ocr-mx-sheet-sub');
+      if (s.file) sub.appendChild(valNode(s.file.name, 'ocr-mx-fname'));
+      if (res.mean_confidence != null) sub.appendChild(el('span', null, T('ai_conf', { n: Math.round(Number(res.mean_confidence)) })));
+      sub.appendChild(el('span', null, T('mx_sheet_fields', { n: Object.keys(fields).filter(function (x) { return fields[x] && hasVal(fields[x].value); }).length })));
+      if (nBad) sub.appendChild(el('span', 'ocr-mx-count is-bad', T('mx_sheet_n_bad', { n: nBad })));
+      if (nWarn) sub.appendChild(el('span', 'ocr-mx-count is-warn', T('mx_sheet_n_warn', { n: nWarn })));
+      if (nMiss) sub.appendChild(el('span', 'ocr-mx-count is-miss', T('mx_sheet_n_miss', { n: nMiss })));
+      head.appendChild(sub);
+      card.appendChild(head);
+      if (!keys.length) { card.appendChild(el('p', 'text-sm text-muted', T('mx_sheet_empty'))); return card; }
+      var grid = el('dl', 'ocr-mx-grid');
+      keys.forEach(function (key) {
+        var f = fields[key], o = iss[key], v = f && hasVal(f.value) ? String(f.value) : '';
+        var cell = el('div', lvlCls('ocr-mx-cell', o));
+        cell.id = 'ocr-mx-c-' + k + '-' + key;
+        cell.setAttribute('tabindex', '-1');
+        if (WIDE_KEYS.indexOf(key) !== -1 || v.length > 40 || (iss[key] && iss[key].bad.length > 2)) cell.classList.add('is-wide');
+        var dt = el('dt', 'ocr-mx-label', sheetLabel(key));
+        var crit = FIELD_NAMES[key] && critOf(FIELD_NAMES[key], S.result.mode);
+        if (crit) { var cr = el('span', 'ocr-match-crit', '★'); cr.setAttribute('aria-hidden', 'true'); cr.title = T('m_critical'); dt.appendChild(cr); }
+        cell.appendChild(dt);
+        var dd = el('dd', 'ocr-mx-value');
+        if (key === 'container_numbers') containersInto(dd, v, o, k);
+        else if (v) dd.appendChild(valNode(v));
+        else dd.appendChild(el('span', 'ocr-mx-none', T('mx_not_read')));
+        cell.appendChild(dd);
+        if (o && o.lvl && (o.lvl !== 'miss' || v)) {
+          cell.appendChild(badge(o));
+          // the other remarks, visible (touch screens have no tooltip)
+          var top = topReason(o);
+          o.list.forEach(function (x) {
+            if (x === top || x.lvl === 'miss') return;
+            var w = el('span', 'ocr-mx-why is-' + x.lvl, x.text); w.dir = 'auto'; cell.appendChild(w);
+          });
+        } else if (o && o.lvl === 'miss') {
+          cell.appendChild(el('span', 'ocr-mx-why is-miss', T('mx_expected')));
+        }
+        // page / confidence hint (a corrected value says so)
+        if (f && hasVal(f.value)) {
+          var hint = [];
+          if (f.corrected) hint.push(T('m_corrected'));
+          else {
+            var m = meta[key];
+            if (m && m.page != null && isFinite(Number(m.page))) hint.push(T('mx_hint_page', { p: Number(m.page) }));
+            if (f.score != null) hint.push(T('mx_hint_conf', { n: Math.round(f.score * 100) }));
+          }
+          if (hint.length) cell.appendChild(el('span', 'ocr-mx-hint' + (f.corrected ? ' is-corrected' : ''), hint.join(' · ')));
+        }
+        grid.appendChild(cell);
+      });
+      card.appendChild(grid);
+      // per-container rows when the reading has them (prompt ai-doc-v3)
+      var ct = Array.isArray(res.containers) ? res.containers.filter(function (c) { return c && typeof c.container_number === 'string'; }).slice(0, 100) : [];
+      if (ct.length) card.appendChild(containerTable(ct));
+      return card;
+    }
+    function containersInto(dd, v, o, k) {
+      var list = v ? E.containerSet(v) : [];
+      if (v && !list.length) list = [v];
+      var wrap = el('span', 'ocr-mx-chips');
+      list.forEach(function (c) { var ch = valNode(c, 'ocr-mx-chip'); wrap.appendChild(ch); });
+      (o && o.bad || []).forEach(function (c) {
+        var ch = el('span', 'ocr-mx-chip is-bad');
+        var x = el('span', null, '✗ '); x.setAttribute('aria-hidden', 'true'); ch.appendChild(x);
+        ch.appendChild(valNode(c));
+        ch.appendChild(el('span', 'sr-only', ' — ' + T('mx_bad_container')));
+        ch.title = T('mx_bad_container');
+        wrap.appendChild(ch);
+      });
+      if (wrap.childNodes.length) dd.appendChild(wrap);
+      else dd.appendChild(el('span', 'ocr-mx-none', T('mx_not_read')));
+    }
+    function containerTable(ct) {
+      var w = el('div', 'table-wrap ocr-mx-ct-wrap');
+      var t = el('table', 'table ocr-mx-ct'), th = el('thead'), hr = el('tr'), tb = el('tbody');
+      ['mx_ct_no', 'mx_ct_seal', 'mx_ct_size', 'mx_ct_pkgs', 'mx_ct_gross'].forEach(function (x) { var c = el('th', null, T(x)); c.scope = 'col'; hr.appendChild(c); });
+      th.appendChild(hr); t.appendChild(th);
+      ct.forEach(function (c) {
+        var tr = el('tr');
+        [c.container_number, c.seal_number, c.size_type, c.packages_count, c.gross_weight].forEach(function (x) {
+          var td = el('td', 'num');
+          td.appendChild(x == null || x === '' ? el('span', 'ocr-match-na', '—') : valNode(typeof x === 'number' ? E.fmtNum(x) : String(x)));
+          tr.appendChild(td);
+        });
+        tb.appendChild(tr);
+      });
+      t.appendChild(tb); w.appendChild(t);
+      return w;
+    }
+
+    /* exceptions: mismatch / partial / missing key field rows + invalid values; a row leads to its field */
+    function exceptionRows() {
+      var R = S.result, out = [], more = 0;
+      R.rows.forEach(function (row) {
+        if (row.status === 'mismatch' || row.status === 'partial' || (row.status === 'missing' && row.critical)) {
+          out.push({ st: row.status, label: L(row, 'label'), values: row.values, note: L(row, 'detail') || '', target: 'row', key: row.key,
+            reviewed: !!S.reviewed[row.key], critical: !!row.critical, row: row });
+        } else if (row.status === 'missing') more++;
+      });
+      // key fields with no row at all (no document returned them)
+      (E.FIELDS || []).forEach(function (d) {
+        if (!critOf(d, R.mode) || R.rows.some(function (r) { return r.key === d.key; })) return;
+        var valOf = function (k) {
+          var fs = S.slots[k].fields || {}, hit = (d.keys[k] || []).filter(function (x) { return fs[x] && hasVal(fs[x].value); })[0];
+          return hit ? String(fs[hit].value) : null;
+        };
+        var exp = R.documents.filter(function (k) { return d.keys[k] && d.exp.indexOf(k) !== -1 && valOf(k) == null; });
+        if (!exp.length) return;
+        var vals = {};
+        R.documents.forEach(function (k) { vals[k] = d.keys[k] ? valOf(k) : undefined; });
+        out.push({ st: 'missing', label: lang() === 'en' ? d.label_en : d.label_ar, values: vals, note: T('mx_note_missing', { docs: docsList(exp) }),
+          target: 'cell', doc: exp[0], key: d.keys[exp[0]][0], critical: true });
+      });
+      // values a reading flagged invalid (e.g. a container number failing the ISO 6346 check digit)
+      SHEET_ORDER.forEach(function (k) {
+        if (R.documents.indexOf(k) === -1 || !S.slots[k].res) return;
+        var iss = issuesOf(k);
+        Object.keys(iss).forEach(function (key) {
+          var o = iss[key];
+          var inv = o.list.filter(function (x) { return x.lvl === 'bad' && x.kind === 'note'; });
+          if (!inv.length) return;
+          var vals = {}, f = S.slots[k].fields && S.slots[k].fields[key];
+          R.documents.forEach(function (d) { vals[d] = d === k ? (f && hasVal(f.value) ? f.value : (o.bad.join(', ') || null)) : undefined; });
+          if (key === 'container_numbers' && o.bad.length) vals[k] = o.bad.join(', ');
+          out.push({ st: 'invalid', label: sheetLabel(key), values: vals, note: inv.map(function (x) { return x.text; }).join('؛ '), target: 'cell', doc: k, key: key });
+        });
+      });
+      var rank = { invalid: 0, mismatch: 1, missing: 2, partial: 3 };
+      out.sort(function (a, b) { return (rank[a.st] - rank[b.st]) || ((b.critical ? 1 : 0) - (a.critical ? 1 : 0)); });
+      return { rows: out, more: more };
+    }
+    var EXC_ICON = { mismatch: '✗', partial: '≈', missing: '?', invalid: '!' };
+    var EXC_CLS = { mismatch: 'is-mismatch', partial: 'is-partial', missing: 'is-missing', invalid: 'is-mismatch' };
+    function renderExceptions() {
+      var head = $('ocr-mx-exc-head'), body = $('ocr-mx-exc-body');
+      if (!head || !body || !S.result) return;
+      head.textContent = ''; body.textContent = '';
+      var C = cols(), X2 = exceptionRows(), list = X2.rows;
+      $('ocr-mx-exc-ok').hidden = list.length > 0;
+      $('ocr-mx-exc-wrap').hidden = !list.length;
+      $('ocr-mx-exc-hint').hidden = !list.length;
+      var more = $('ocr-mx-exc-more');
+      more.textContent = X2.more ? T('mx_exc_more', { n: X2.more }) : '';
+      more.hidden = !X2.more;
+      if (!list.length) return;
+      var hr = el('tr');
+      [T('mx_col_state'), T('m_col_field')].concat(C.map(docName)).concat([T('mx_col_note')]).forEach(function (h) {
+        var th = el('th', null, h); th.scope = 'col'; hr.appendChild(th);
+      });
+      head.appendChild(hr);
+      list.forEach(function (x) {
+        var tr = el('tr', 'ocr-mx-exc-row ' + EXC_CLS[x.st] + (x.reviewed ? ' is-reviewed' : ''));
+        tr.tabIndex = 0;
+        tr.setAttribute('data-target', x.target);
+        tr.setAttribute('data-key', x.key);
+        if (x.doc) tr.setAttribute('data-doc', x.doc);
+        var tdS = el('td', 'ocr-mx-exc-st');
+        var chip = el('span', 'ocr-match-chip ' + EXC_CLS[x.st]);
+        var ic = el('span', 'ocr-mx-exc-icon', EXC_ICON[x.st] + ' '); ic.setAttribute('aria-hidden', 'true');
+        chip.appendChild(ic);
+        chip.appendChild(document.createTextNode(T('mx_st_' + x.st)));
+        tdS.appendChild(chip);
+        if (x.reviewed) tdS.appendChild(el('span', 'ocr-mx-exc-rev', '✓ ' + T('mx_reviewed')));
+        tr.appendChild(tdS);
+        var th = el('th', 'ocr-mx-exc-field', x.label); th.scope = 'row';
+        if (x.critical) { var cr = el('span', 'ocr-match-crit', '★'); cr.setAttribute('aria-hidden', 'true'); th.appendChild(cr); }
+        tr.appendChild(th);
+        C.forEach(function (k) {
+          var td = el('td', 'ocr-mx-exc-val'), v = x.values ? x.values[k] : undefined;
+          var lv = x.row ? cellLevel(x.row, k) : (x.st === 'invalid' && x.doc === k ? 'bad' : (x.st === 'missing' && v === null ? 'miss' : ''));
+          if (lv) td.classList.add('ocr-mx-v-' + lv);
+          if (v === undefined) td.appendChild(el('span', 'ocr-match-na', '—'));
+          else if (v == null || v === '') td.appendChild(el('span', 'ocr-mx-none', T('mx_not_read')));
+          else td.appendChild(valNode(String(v)));
+          tr.appendChild(td);
+        });
+        var tdN = el('td', 'ocr-mx-exc-note', x.note || '—'); tdN.dir = 'auto';
+        tr.appendChild(tdN);
+        tr.setAttribute('aria-label', x.label + ' — ' + T('mx_st_' + x.st) + '. ' + T('mx_exc_go'));
+        body.appendChild(tr);
+      });
+    }
+    function reducedMotion() { try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; } }
+    function flash(n) {
+      if (!n) return;
+      try { n.scrollIntoView({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' }); } catch (e) { n.scrollIntoView(); }
+      n.classList.remove('ocr-mx-flash');
+      void n.offsetWidth;                      // restart the animation
+      n.classList.add('ocr-mx-flash');
+      setTimeout(function () { n.classList.remove('ocr-mx-flash'); }, 2600);
+      var f = n.querySelector('input[data-src]') || n;
+      if (f === n && !n.hasAttribute('tabindex')) n.setAttribute('tabindex', '-1');
+      try { f.focus({ preventScroll: true }); } catch (e) { /* noop */ }
+    }
+    function goException(tr) {
+      if (!tr) return;
+      var key = tr.getAttribute('data-key'), n = null;
+      if (tr.getAttribute('data-target') === 'row') {
+        n = qsa('#ocr-match-tbody tr[data-key="' + key + '"]')[0] || null;
+      } else {
+        n = $('ocr-mx-c-' + tr.getAttribute('data-doc') + '-' + key);
+      }
+      flash(n);
+    }
+    (function () {
+      var b = $('ocr-mx-exc-body');
+      if (!b) return;
+      b.addEventListener('click', function (e) {
+        var tr = e.target && e.target.closest ? e.target.closest('tr[data-target]') : null;
+        if (tr) goException(tr);
+      });
+      b.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+        var tr = e.target && e.target.matches && e.target.matches('tr[data-target]') ? e.target : null;
+        if (!tr) return;
+        e.preventDefault();
+        goException(tr);
+      });
+    })();
+
     function reviewedRows() { return S.result ? S.result.rows.filter(function (r) { return S.reviewed[r.key]; }).map(function (r) { return r.key; }) : []; }
     function renderReview() {
       $('ocr-match-reviewer').value = reviewerName();
@@ -685,7 +1108,7 @@
     $('ocr-match-tick-all').addEventListener('click', function () {
       if (!S.result) return;
       S.result.rows.forEach(function (r) { S.reviewed[r.key] = true; });
-      renderTable(); renderReview();
+      renderTable(); renderExceptions(); renderSheets(); renderReview();
       announce(T('m_reviewed_n', { n: S.result.rows.length, total: S.result.rows.length }));
     });
     $('ocr-match-approve').addEventListener('click', function () {

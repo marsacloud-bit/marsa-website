@@ -116,7 +116,7 @@
       { key: 'hs_codes', label: 'رموز HS', kind: 'hs', ltr: true, ph: '8708.30, …' },
       { key: 'country_of_origin', label: 'بلد المنشأ', kind: 'text' },
       { key: 'iban', label: 'رقم الآيبان (IBAN)', kind: 'iban', ltr: true },
-      // AI reading only (shown when the reading has them)
+      // B/L / shipping keys (AI reading, and the text parser since fields v2); FX_LAYOUT decides where they show
       { key: 'vessel', label: T('f_vessel'), kind: 'text', ai: true },
       { key: 'voyage', label: T('f_voyage'), kind: 'id', ltr: true, ai: true },
       { key: 'port_of_loading', label: T('f_port_of_loading'), kind: 'text', ai: true },
@@ -621,14 +621,28 @@
         var y = it.transform[5], x = it.transform[4];
         var row = rows.filter(function (r) { return Math.abs(r.y - y) <= Math.max(2, (it.height || 10) * 0.4); })[0];
         if (!row) { row = { y: y, parts: [] }; rows.push(row); }
-        row.parts.push({ x: x, s: it.str });
+        row.parts.push({ x: x, s: it.str, w: typeof it.width === 'number' ? it.width : 0, h: it.height || 10 });
       });
       rows.sort(function (a, b) { return b.y - a.y; });
+      // fields v2: a wide horizontal gap between two text items is a column gap → kept as two spaces
+      // (the parser splits B/L label rows / value rows on 2+ spaces); other runs of spaces collapse to one
       return rows.map(function (r) {
         var txt = r.parts.map(function (p) { return p.s; }).join(' ');
         var arabic = (txt.match(/[؀-ۿ]/g) || []).length, latin = (txt.match(/[A-Za-z]/g) || []).length;
-        r.parts.sort(function (a, b) { return arabic > latin ? b.x - a.x : a.x - b.x; });
-        return r.parts.map(function (p) { return p.s.trim(); }).join(' ').replace(/\s{2,}/g, ' ');
+        var rtl = arabic > latin;
+        r.parts.sort(function (a, b) { return rtl ? b.x - a.x : a.x - b.x; });
+        var out = '';
+        r.parts.forEach(function (p, i) {
+          var s = p.s.trim().replace(/[ \t\u00a0]{2,}/g, '  ');
+          if (i) {
+            var q = r.parts[i - 1];
+            var gap = rtl ? q.x - (p.x + p.w) : p.x - (q.x + q.w);
+            var cw = Math.max(2, p.h * 0.5);
+            out += q.w && gap > Math.max(8, cw * 2) ? '  ' : ' ';
+          }
+          out += s;
+        });
+        return out.replace(/ {3,}/g, '  ');
       }).join('\n');
     }
     function processPdfJob(j) {
@@ -901,7 +915,8 @@
       if (j.qr) box.appendChild(badge('badge-teal', 'رمز QR للفاتورة الإلكترونية ✓'));
       else if (j.qrOther) box.appendChild(badge('badge-warning', 'رمز QR غير مطابق لصيغة الفاتورة الإلكترونية'));
       if (j.saved) box.appendChild(badge('badge-success', j.saved.where === 'server' ? 'محفوظ على الخادم' : 'محفوظ على هذا الجهاز'));
-      $('ocr-low-conf').hidden = !(j.confidence != null && j.confidence < LOW_CONF);
+      // the weak-reading alert (fields v2) says more and replaces this one
+      $('ocr-low-conf').hidden = !(j.confidence != null && j.confidence < LOW_CONF) || !!(fxWeak && !fxWeak.hidden && j.engine !== ENGINE_AI);
     }
 
     /* fields form */
@@ -962,12 +977,89 @@
       if (f.source === 'manual' || f.confidence === 'manual') return { cls: 'is-manual', text: CONF_LABEL.manual };
       return { cls: 'is-' + f.confidence, text: CONF_LABEL[f.confidence] || '' };
     }
-    function renderFields(j) {
-      var box = $('ocr-fields');
-      box.textContent = '';
-      FIELD_DEFS.forEach(function (def) {
+    /* fields v2: grouped sections per document type + issue highlight (summary, pulse, «لم يُقرأ») */
+    var FX_SECTIONS = {
+      doc: ['invoice_number', 'invoice_date', 'bl_number', 'declaration_number'],
+      parties: ['supplier_name', 'supplier_vat', 'buyer_name', 'buyer_vat', 'shipper', 'consignee'],
+      transport: ['vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'incoterms'],
+      cargo: ['container_numbers', 'packages_count', 'package_type', 'gross_weight', 'net_weight', 'goods_description', 'hs_codes', 'country_of_origin'],
+      money: ['currency', 'subtotal', 'vat_amount', 'total', 'iban']
+    };
+    var FX_INVOICE_SHOW = ['invoice_number', 'invoice_date', 'supplier_name', 'supplier_vat', 'buyer_name', 'buyer_vat', 'currency', 'subtotal',
+      'vat_amount', 'total', 'bl_number', 'container_numbers', 'hs_codes', 'country_of_origin'];
+    // order: section order; show: keys shown even when empty (a filled key is always shown); need: expected → «لم يُقرأ»
+    var FX_LAYOUT = {
+      bill_of_lading: { order: ['doc', 'parties', 'transport', 'cargo', 'money'],
+        parties: ['shipper', 'consignee', 'supplier_name', 'supplier_vat', 'buyer_name', 'buyer_vat'],
+        doc: ['bl_number', 'invoice_number', 'invoice_date', 'declaration_number'],
+        show: ['bl_number', 'shipper', 'consignee', 'vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'container_numbers', 'packages_count',
+          'package_type', 'gross_weight', 'net_weight', 'goods_description', 'hs_codes', 'country_of_origin'],
+        need: ['bl_number', 'shipper', 'consignee', 'vessel', 'port_of_loading', 'port_of_discharge', 'container_numbers', 'packages_count', 'gross_weight', 'goods_description'] },
+      commercial_invoice: { order: ['doc', 'parties', 'money', 'cargo', 'transport'],
+        show: FX_INVOICE_SHOW.concat(['packages_count', 'gross_weight', 'net_weight', 'goods_description']),
+        need: ['invoice_number', 'invoice_date', 'supplier_name', 'buyer_name', 'currency', 'total'] },
+      operator_invoice: { order: ['doc', 'parties', 'money', 'cargo', 'transport'], show: FX_INVOICE_SHOW.concat(['iban']),
+        need: ['invoice_number', 'invoice_date', 'supplier_name', 'supplier_vat', 'total'] },
+      customs_declaration: { order: ['doc', 'parties', 'cargo', 'transport', 'money'],
+        doc: ['declaration_number', 'bl_number', 'invoice_number', 'invoice_date'],
+        parties: ['consignee', 'shipper', 'buyer_name', 'buyer_vat', 'supplier_name', 'supplier_vat'],
+        show: ['declaration_number', 'bl_number', 'invoice_number', 'consignee', 'container_numbers', 'packages_count', 'gross_weight', 'net_weight',
+          'hs_codes', 'country_of_origin', 'vessel', 'port_of_loading', 'port_of_discharge', 'currency', 'total', 'vat_amount'],
+        need: ['declaration_number', 'bl_number', 'container_numbers', 'hs_codes'] },
+      packing_list: { order: ['doc', 'parties', 'cargo', 'transport', 'money'],
+        parties: ['shipper', 'consignee', 'supplier_name', 'buyer_name', 'supplier_vat', 'buyer_vat'],
+        show: ['invoice_number', 'invoice_date', 'bl_number', 'shipper', 'consignee', 'container_numbers', 'packages_count', 'package_type', 'gross_weight',
+          'net_weight', 'goods_description', 'hs_codes', 'country_of_origin'],
+        need: ['packages_count', 'gross_weight', 'net_weight', 'goods_description'] },
+      certificate_of_origin: { order: ['doc', 'parties', 'cargo', 'transport', 'money'],
+        parties: ['shipper', 'consignee', 'supplier_name', 'buyer_name', 'supplier_vat', 'buyer_vat'],
+        show: ['invoice_number', 'invoice_date', 'shipper', 'consignee', 'country_of_origin', 'goods_description', 'hs_codes', 'packages_count',
+          'gross_weight', 'vessel', 'port_of_loading', 'port_of_discharge'],
+        need: ['country_of_origin', 'goods_description'] },
+      other: { order: ['doc', 'parties', 'money', 'cargo', 'transport'],
+        show: FX_INVOICE_SHOW.concat(['declaration_number', 'iban']), need: [] }
+    };
+    var FX_REASON = { vat: 'fx_r_vat', date: 'fx_r_date', amount: 'fx_r_amount', currency: 'fx_r_currency', iban: 'fx_r_iban',
+      containers: 'fx_r_container', hs: 'fx_r_hs', digits: 'fx_r_digits' };
+    function fxLayout(j) { return FX_LAYOUT[j && j.docType] || FX_LAYOUT.other; }
+    function hasVal(j, k) { var f = j.fields[k]; return !!(f && String(f.value == null ? '' : f.value).trim()); }
+    function fxPlan(j) {
+      var L = fxLayout(j);
+      return L.order.map(function (sid) {
+        var keys = (L[sid] || FX_SECTIONS[sid]).filter(function (k) { return defOf(k) && (L.show.indexOf(k) !== -1 || hasVal(j, k)); });
+        return { id: sid, keys: keys };
+      }).filter(function (s) { return s.keys.length; });
+    }
+    function aiWarnFor(j, key) {
+      var aw = j.ai && j.ai.warnings ? j.ai.warnings : [];
+      for (var i = 0; i < aw.length; i++) if (aw[i] && aw[i].field === key && aw[i].text) return String(aw[i].text).slice(0, 140);
+      return '';
+    }
+    // level: 'error' (red pulse) | 'review' (amber) | 'missing' (dashed «لم يُقرأ») | ''
+    function fieldState(def, j, r) {
+      var f = j.fields[def.key];
+      if (!r.value) return fxLayout(j).need.indexOf(def.key) !== -1 ? { level: 'missing', reason: T('fx_r_missing') } : { level: '', reason: '' };
+      if (r.error || r.warn) return { level: 'error', reason: T(FX_REASON[def.kind] || 'fx_r_check') };
+      if (f && f.source === 'ai') {
+        var aw = aiWarnFor(j, def.key);
+        if (f.valid === false) return { level: 'error', reason: T('fx_r_ai_invalid'), why: aw };
+        if (aw) return { level: 'review', reason: T('fx_r_check'), why: aw };
+      }
+      if (f && f.source !== 'manual' && f.confidence === 'low') return { level: 'review', reason: T('fx_r_low') };
+      return { level: '', reason: '' };
+    }
+    function applyState(g, st) {
+      g.classList.remove('is-fx-error', 'is-fx-review', 'is-fx-missing');
+      if (st.level) g.classList.add('is-fx-' + st.level);
+      g.setAttribute('data-fx', st.level || '');
+      g.setAttribute('data-fx-reason', st.reason || '');
+      var b = g.querySelector('.ocr-fx-badge');
+      if (b) { b.textContent = st.reason || ''; b.hidden = !st.level; }
+      var why = g.querySelector('.ocr-fx-why');
+      if (why) why.textContent = st.level && st.level !== 'missing' ? (st.why || (st.level === 'review' ? st.reason : '')) : '';
+    }
+    function fieldEl(j, def) {
         var f = j.fields[def.key];
-        if (def.ai && !f && j.engine !== ENGINE_AI) return;           // AI-only keys: only on an AI reading
         var g = el('div', 'form-group ocr-field');
         g.setAttribute('data-key', def.key);
         var head = el('div', 'ocr-field-head');
@@ -978,24 +1070,47 @@
         src.id = 'of-' + def.key + '-src';
         if (!si) src.hidden = true;
         head.appendChild(src);
+        var fxb = el('span', 'ocr-fx-badge'); fxb.hidden = true; fxb.setAttribute('aria-hidden', 'true');
+        head.appendChild(fxb);
         g.appendChild(head);
         var inp = el('input', 'form-control' + (def.ltr ? ' num' : ''));
         inp.type = 'text'; inp.id = 'of-' + def.key; inp.autocomplete = 'off';
-        if (def.ltr) inp.dir = 'ltr';
+        inp.dir = def.ltr ? 'ltr' : 'auto';   // a Latin name in an Arabic page keeps its punctuation in place
         if (def.ph) inp.placeholder = def.ph;
         inp.maxLength = def.kind === 'containers' || def.kind === 'hs' ? 1200 : 255;
         inp.value = f ? f.value : '';
-        var errId = 'of-' + def.key + '-err', warnId = 'of-' + def.key + '-warn';
-        inp.setAttribute('aria-describedby', src.id + ' ' + errId + ' ' + warnId);
+        var errId = 'of-' + def.key + '-err', warnId = 'of-' + def.key + '-warn', whyId = 'of-' + def.key + '-why';
+        inp.setAttribute('aria-describedby', src.id + ' ' + errId + ' ' + warnId + ' ' + whyId);
         g.appendChild(inp);
         var err = el('span', 'form-error'); err.id = errId;
         var warn = el('span', 'ocr-warn'); warn.id = warnId;
-        g.appendChild(err); g.appendChild(warn);
+        var why = el('span', 'ocr-fx-why'); why.id = whyId;
+        g.appendChild(err); g.appendChild(warn); g.appendChild(why);
         if (f && f.alt) g.appendChild(el('span', 'ocr-alt', 'النص المقروء كان: ' + f.alt));
-        box.appendChild(g);
-        showValidation(def, inp, false);
+        return g;
+    }
+    function renderFields(j) {
+      var box = $('ocr-fields');
+      box.textContent = '';
+      box.classList.add('ocr-fx-on');
+      fxPlan(j).forEach(function (sec) {
+        var card = el('section', 'ocr-fx-sec');
+        card.setAttribute('data-sec', sec.id);
+        card.setAttribute('aria-labelledby', 'ocr-fx-sec-' + sec.id);
+        var head = el('div', 'ocr-fx-sec-head');
+        var h = el('h3', 'ocr-fx-sec-title', T('fx_sec_' + sec.id)); h.id = 'ocr-fx-sec-' + sec.id;
+        head.appendChild(h);
+        head.appendChild(el('span', 'ocr-fx-count'));
+        card.appendChild(head);
+        var grid = el('div', 'ocr-fx-grid');
+        sec.keys.forEach(function (k) { grid.appendChild(fieldEl(j, defOf(k))); });
+        card.appendChild(grid);
+        box.appendChild(card);
       });
+      qsa('.ocr-field', box).forEach(function (g) { showValidation(defOf(g.getAttribute('data-key')), g.querySelector('input'), false); });
       renderChecks(j);
+      renderIssues(j);
+      renderWeak(j);
     }
     function showValidation(def, inp, normalise) {
       var g = inp.closest('.ocr-field');
@@ -1004,9 +1119,177 @@
       g.querySelector('.form-error').textContent = r.error;
       g.querySelector('.ocr-warn').textContent = r.warn;
       if (r.error) inp.setAttribute('aria-invalid', 'true'); else inp.removeAttribute('aria-invalid');
+      var j = current();
+      if (j) applyState(g, fieldState(def, j, r));
       return r;
     }
+    // while typing: a value that now validates clears the highlight at once; a new error waits for focusout
+    function softValidate(def, inp, j) {
+      var g = inp.closest('.ocr-field');
+      var r = validateField(def, inp.value), st = fieldState(def, j, r);
+      var prev = g.getAttribute('data-fx') || '';
+      if (st.level === 'error' && prev !== 'error') st = { level: '', reason: '' };
+      if (!r.error && !r.warn) {
+        g.querySelector('.form-error').textContent = ''; g.querySelector('.ocr-warn').textContent = '';
+        inp.removeAttribute('aria-invalid');
+      } else if (prev === 'error') {
+        g.querySelector('.form-error').textContent = r.error; g.querySelector('.ocr-warn').textContent = r.warn;
+        if (r.error) inp.setAttribute('aria-invalid', 'true'); else inp.removeAttribute('aria-invalid');
+      }
+      applyState(g, st);
+    }
     function defOf(key) { return FIELD_DEFS.filter(function (d) { return d.key === key; })[0]; }
+
+    /* issue summary above the sections + per-section count chips */
+    var fxSummary = null, fxWeak = null;
+    function fxBox() {
+      if (fxSummary) return fxSummary;
+      fxSummary = el('div', 'ocr-fx-summary');
+      fxSummary.id = 'ocr-fx-summary';
+      var f = $('ocr-fields');
+      f.parentNode.insertBefore(fxSummary, f);
+      return fxSummary;
+    }
+    function fxChip(g, cls) {
+      var key = g.getAttribute('data-key'), def = defOf(key);
+      var b = el('button', 'ocr-fx-chip ' + cls);
+      b.type = 'button';
+      b.setAttribute('data-fx-go', key);
+      b.appendChild(el('span', 'ocr-fx-chip-dot'));
+      b.appendChild(el('strong', null, def ? def.label : key));
+      var reason = g.getAttribute('data-fx-reason') || '';
+      if (reason && cls !== 'is-missing') b.appendChild(el('span', 'ocr-fx-chip-why', reason));
+      return b;
+    }
+    function renderIssues(j) {
+      var box = fxBox();
+      box.textContent = '';
+      var all = qsa('#ocr-fields .ocr-field');
+      var bad = all.filter(function (g) { var l = g.getAttribute('data-fx'); return l === 'error' || l === 'review'; });
+      var miss = all.filter(function (g) { return g.getAttribute('data-fx') === 'missing'; });
+      bad.sort(function (a, b) { return (a.getAttribute('data-fx') === 'error' ? 0 : 1) - (b.getAttribute('data-fx') === 'error' ? 0 : 1); });
+      box.className = 'ocr-fx-summary ' + (bad.length ? (bad.some(function (g) { return g.getAttribute('data-fx') === 'error'; }) ? 'is-error' : 'is-review') : 'is-ok');
+      var head = el('div', 'ocr-fx-sum-head');
+      var title = el('strong', 'ocr-fx-sum-title', bad.length ? (bad.length === 1 ? T('fx_sum_one') : T('fx_sum_many', { n: bad.length })) : T('fx_sum_ok'));
+      head.appendChild(title);
+      if (bad.length) head.appendChild(el('span', 'ocr-fx-sum-hint', T('fx_sum_hint')));
+      box.appendChild(head);
+      if (bad.length) {
+        var list = el('div', 'ocr-fx-chips');
+        bad.forEach(function (g) { list.appendChild(fxChip(g, g.getAttribute('data-fx') === 'error' ? 'is-error' : 'is-review')); });
+        box.appendChild(list);
+      }
+      if (miss.length) {
+        box.appendChild(el('div', 'ocr-fx-sum-sub', T('fx_missing_title', { n: miss.length })));
+        var ml = el('div', 'ocr-fx-chips');
+        miss.forEach(function (g) { ml.appendChild(fxChip(g, 'is-missing')); });
+        box.appendChild(ml);
+      }
+      qsa('#ocr-fields .ocr-fx-sec').forEach(function (sec) {
+        var fs = qsa('.ocr-field', sec);
+        var n = fs.filter(function (g) { var l = g.getAttribute('data-fx'); return l === 'error' || l === 'review'; }).length;
+        var m = fs.filter(function (g) { return g.getAttribute('data-fx') === 'missing'; }).length;
+        var hasErr = fs.some(function (g) { return g.getAttribute('data-fx') === 'error'; });
+        var c = sec.querySelector('.ocr-fx-count');
+        c.className = 'ocr-fx-count ' + (n ? (hasErr ? 'is-error' : 'is-review') : m ? 'is-missing' : 'is-ok');
+        c.textContent = n ? T('fx_chip_n', { n: n }) + (m ? ' · ' + T('fx_chip_missing', { n: m }) : '') : m ? T('fx_chip_missing', { n: m }) : T('fx_chip_ok');
+      });
+    }
+    function fxGo(key) {
+      var inp = $('of-' + key);
+      if (!inp) return;
+      try { inp.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { inp.scrollIntoView(); }
+      try { inp.focus({ preventScroll: true }); } catch (e2) { inp.focus(); }
+    }
+    document.addEventListener('click', function (e) {
+      var b = e.target.closest && e.target.closest('[data-fx-go]');
+      if (b && fxSummary && fxSummary.contains(b)) fxGo(b.getAttribute('data-fx-go'));
+    });
+
+    /* weak local reading → suggest the AI reading (scanned B/L / invoices) */
+    function renderWeak(j) {
+      if (!fxWeak) {
+        fxWeak = el('div', 'alert alert-warning mb-2 ocr-fx-weak');
+        fxWeak.id = 'ocr-fx-weak';
+        fxWeak.setAttribute('role', 'note');
+        var lc = $('ocr-low-conf');
+        lc.parentNode.insertBefore(fxWeak, lc.nextSibling);
+      }
+      fxWeak.textContent = '';
+      var need = fxLayout(j).need, empty = need.filter(function (k) { return !hasVal(j, k); }).length;
+      var lowConf = j.confidence != null && j.confidence < 80;
+      var mostEmpty = need.length > 0 && empty / need.length > 0.5;
+      // a bill of lading read as an invoice: B/L data found, invoice data not
+      var blKeys = ['bl_number', 'vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'shipper', 'consignee'];
+      var looksBl = (j.docType === 'commercial_invoice' || j.docType === 'operator_invoice') &&
+        blKeys.filter(function (k) { return hasVal(j, k); }).length >= 3 && !hasVal(j, 'invoice_number') && !hasVal(j, 'total');
+      var weak = j.engine !== ENGINE_AI && (lowConf || mostEmpty);
+      var show = weak || looksBl;
+      fxWeak.hidden = !show;
+      // this alert says more (and offers the AI reading); without it the plain low-confidence alert is back
+      $('ocr-low-conf').hidden = show || !(j.confidence != null && j.confidence < LOW_CONF);
+      if (!show) return;
+      if (looksBl) {
+        var tb = el('div', 'ocr-fx-weak-body ocr-fx-type-hint');
+        tb.appendChild(el('strong', null, T('fx_type_bl_title')));
+        tb.appendChild(el('p', null, T('fx_type_bl_text')));
+        var tbtn = el('button', 'btn btn-secondary btn-sm', T('fx_type_bl_btn'));
+        tbtn.type = 'button';
+        tbtn.addEventListener('click', function () {
+          typeSel.value = 'bill_of_lading';
+          typeSel.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        tb.appendChild(tbtn);
+        fxWeak.appendChild(tb);
+        if (!weak) return;
+      }
+      var why = [];
+      if (lowConf) why.push(T('fx_weak_conf', { n: Math.round(j.confidence) }));
+      if (mostEmpty) why.push(T('fx_weak_empty', { a: empty, b: need.length }));
+      var body = el('div', 'ocr-fx-weak-body');
+      body.appendChild(el('strong', null, T('fx_weak_title')));
+      body.appendChild(el('p', null, T('fx_weak_text', { why: why.join(I18N && I18N.lang && I18N.lang() === 'en' ? ', ' : '، ') })));
+      var canAi = ONLINE && STAFF && AI.enabled;
+      if (canAi && j.file && AI.remaining !== 0) {
+        var btn = el('button', 'btn btn-primary btn-sm', T('fx_weak_ai_btn'));
+        btn.type = 'button';
+        btn.disabled = running;
+        btn.addEventListener('click', function () { rereadWithAi(j); });
+        body.appendChild(btn);
+      } else if (canAi && AI.remaining === 0) {
+        body.appendChild(el('p', 'text-sm', T('fx_weak_quota')));
+      } else if (canAi) {
+        body.appendChild(el('p', 'text-sm', T('fx_weak_nofile')));
+      } else if (ONLINE) {
+        body.appendChild(el('p', 'text-sm', T('fx_weak_admin')));
+        var a = el('a', 'btn btn-ghost btn-sm', T('fx_weak_admin_link'));
+        a.href = 'admin.html#org';
+        body.appendChild(a);
+      } else {
+        body.appendChild(el('p', 'text-sm', T('fx_weak_offline')));
+      }
+      fxWeak.appendChild(body);
+    }
+    function rereadWithAi(j) {
+      if (running || !j || !j.file || !$('ocr-engine-ai')) return;
+      var edited = Object.keys(j.fields).some(function (k) { return j.fields[k] && j.fields[k].source === 'manual'; });
+      if (!edited) { startAiReread(j); return; }
+      ask({ title: T('fx_weak_ai_btn'), text: T('fx_weak_confirm'), okText: T('fx_weak_ai_btn'), danger: true })
+        .then(function (yes) { if (yes) startAiReread(j); });
+    }
+    function startAiReread(j) {
+      if (running || !j || !j.file) return;
+      var r = $('ocr-engine-ai');
+      if (!r) return;
+      r.checked = true;
+      syncEngineUi();
+      var dt = $('ocr-doc-type');
+      if (dt && j.docType && dt.querySelector('option[value="' + j.docType + '"]')) dt.value = j.docType;
+      j.status = 'queued'; j.statusText = 'بانتظار القراءة';
+      announce(T('fx_weak_started'));
+      renderQueue(); runQueue();
+    }
+
     $('ocr-fields').addEventListener('input', function (e) {
       var g = e.target.closest('.ocr-field'), j = current();
       if (!g || !j) return;
@@ -1017,6 +1300,8 @@
       var src = g.querySelector('.ocr-src');
       var si = srcInfo(j.fields[key]);
       src.className = 'ocr-src' + (si ? ' ' + si.cls : ''); src.textContent = si ? si.text : ''; src.hidden = !si;
+      softValidate(defOf(key), e.target, j);
+      renderIssues(j);
     });
     $('ocr-fields').addEventListener('focusout', function (e) {
       var g = e.target.closest && e.target.closest('.ocr-field'), j = current();
@@ -1025,6 +1310,7 @@
       var r = showValidation(defOf(key), e.target, true);
       if (j.fields[key] && !r.error) j.fields[key].value = r.value;
       renderChecks(j);
+      renderIssues(j);
     });
     function num(j, key) { var f = j.fields[key]; return f ? P.parseAmount(f.value) : null; }
     function renderChecks(j) {
@@ -1142,7 +1428,7 @@
 
     /* text + type */
     $('ocr-text').addEventListener('input', function () { var j = current(); if (j) j.text = this.value.slice(0, MAX_TEXT); });
-    typeSel.addEventListener('change', function () { var j = current(); if (j) { j.docType = this.value; renderMeta(j); } });
+    typeSel.addEventListener('change', function () { var j = current(); if (j) { j.docType = this.value; renderMeta(j); renderFields(j); } });   // sections follow the type; edits live in j.fields
     $('ocr-reextract').addEventListener('click', function () {
       var j = current();
       if (j && j.engine === ENGINE_AI) { toast(T('ai_reextract_off'), 'info'); return; }

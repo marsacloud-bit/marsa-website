@@ -498,6 +498,30 @@
                 <span class="ocr-match-counts" id="ocr-match-counts"></span>
               </div>
               <div class="ocr-match-alerts" id="ocr-match-alerts"></div>
+              <!-- match v2: exceptions only (mismatch / partial / missing key field / invalid value); a row leads to its field -->
+              <div class="ocr-mx-block ocr-mx-exc" id="ocr-mx-exc">
+                <h4 class="ocr-mx-h" id="ocr-mx-exc-title" data-i18n="ocr.mx_exc_title">التعارضات والحقول المفقودة</h4>
+                <p class="ocr-mx-ok" id="ocr-mx-exc-ok" role="note" hidden><span class="ocr-mx-ok-icon" aria-hidden="true">✓</span> <span data-i18n="ocr.mx_exc_none">لا توجد تعارضات — كل الحقول المشتركة متطابقة</span></p>
+                <p class="text-sm text-muted ocr-mx-hint" id="ocr-mx-exc-hint" data-i18n="ocr.mx_exc_hint">اضغط على أي صف للانتقال إلى الحقل وتصحيحه.</p>
+                <div class="table-wrap ocr-mx-exc-wrap" id="ocr-mx-exc-wrap">
+                  <table class="table ocr-mx-exc-table" id="ocr-mx-exc-table" aria-labelledby="ocr-mx-exc-title">
+                    <thead id="ocr-mx-exc-head"></thead>
+                    <tbody id="ocr-mx-exc-body"></tbody>
+                  </table>
+                </div>
+                <p class="text-sm text-muted ocr-mx-more" id="ocr-mx-exc-more" hidden></p>
+              </div>
+              <!-- match v2: one read-only sheet per document read (every field the reading returned) -->
+              <div class="ocr-mx-block ocr-mx-sheets-block" id="ocr-mx-sheets-block">
+                <h4 class="ocr-mx-h" data-i18n="ocr.mx_sheets_title">بيانات المستندات</h4>
+                <div class="ocr-mx-legend" aria-hidden="true">
+                  <span class="ocr-mx-lg is-bad" data-i18n="ocr.mx_lg_bad">خطأ / اختلاف</span>
+                  <span class="ocr-mx-lg is-warn" data-i18n="ocr.mx_lg_warn">يحتاج مراجعة</span>
+                  <span class="ocr-mx-lg is-miss" data-i18n="ocr.mx_lg_miss">لم يُقرأ</span>
+                </div>
+                <div class="ocr-mx-sheets" id="ocr-mx-sheets"></div>
+              </div>
+              <h4 class="ocr-mx-h" data-i18n="ocr.mx_cmp_title">مراجعة القيم المشتركة</h4>
               <p class="text-sm text-muted ocr-match-hint" data-i18n="ocr.m_table_hint">القيم قابلة للتعديل: صحّح أي قيمة قرأها Claude خطأً فتُعاد المطابقة فورًا (يُعلَّم الحقل «مصحَّح» في الحفظ). الحقول الأساسية معلّمة بـ ★.</p>
               <div class="table-wrap ocr-match-table-wrap">
                 <table class="table ocr-match-table" id="ocr-match-table">
