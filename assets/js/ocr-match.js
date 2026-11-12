@@ -258,7 +258,8 @@
         if (s.res.reused) stEl.appendChild(el('span', 'ocr-match-slot-conf', ' · ' + T('m_reused_free')));
         if (s.res.mean_confidence != null) stEl.appendChild(el('span', 'ocr-match-slot-conf', ' · ' + T('ai_conf', { n: Math.round(Number(s.res.mean_confidence)) })));
       }
-      var pct = s.status === 'sending' ? 15 : s.status === 'reading' ? 55 : s.status === 'done' ? 100 : 0;
+      var pct = s.status === 'sending' ? 3 : s.status === 'reading' ? Math.round(s.pct || 5) : s.status === 'done' ? 100 : 0;
+      if (s.status === 'reading' && msg && !s.error) stEl.firstChild.textContent = msg + ' ' + pct + '%';
       pr.hidden = !(s.status === 'sending' || s.status === 'reading');
       pr.setAttribute('aria-valuenow', String(pct));
       pr.firstElementChild.style.width = pct + '%';
@@ -320,8 +321,19 @@
     function readSlot(k, orgId) {
       var s = S.slots[k];
       s.status = 'sending'; s.error = ''; renderSlot(k);
+      var stop = function () { if (s.timer) { clearInterval(s.timer); s.timer = null; } };
+      stop();
       return fileB64(s.file).then(function (b64) {
-        s.status = 'reading'; renderSlot(k);
+        s.status = 'reading'; s.pct = 5; renderSlot(k);
+        // one answer, no server progress: the bar eases 5% → 95% (time constant ~35 s) and jumps to 100% when done
+        var t0 = Date.now();
+        s.timer = setInterval(function () {
+          if (s.status !== 'reading') { stop(); return; }
+          s.pct = Math.min(95, 5 + 90 * (1 - Math.exp(-(Date.now() - t0) / 35000)));
+          var pr = qsa('[data-progress="' + k + '"]')[0], stEl = qsa('[data-status="' + k + '"]')[0], p = Math.round(s.pct);
+          if (pr) { pr.setAttribute('aria-valuenow', String(p)); pr.firstElementChild.style.width = p + '%'; }
+          if (stEl && stEl.firstChild && !s.error) stEl.firstChild.textContent = T('ai_reading') + ' ' + p + '%';
+        }, 400);
         var q = { orgId: orgId || undefined, docType: DOC_TYPE[k], file: { media_type: s.mime, data_b64: b64 }, lang: lang() };
         if (PROMPT[k]) q.promptVersion = PROMPT[k];
         return API.aiExtract(q);
@@ -329,10 +341,12 @@
         if (!r || r.error || !r.data) throw (r && r.error) || new Error(T('m_err_generic'));
         // a v3 answer from a reading already saved (reused) was not charged
         if (AI.remaining != null && !r.data.reused) { AI.remaining = Math.max(0, AI.remaining - 1); showRemaining(); }
+        stop();
         takeReading(k, r.data);
         s.status = 'done'; renderSlot(k);
         return true;
       }).catch(function (e) {
+        stop();
         s.status = 'ready'; s.error = errMsg(e); renderSlot(k);
         return false;
       });

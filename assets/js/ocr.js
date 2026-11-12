@@ -814,19 +814,36 @@
       });
     }
     function aiLevel(c) { return c >= 0.85 ? 'high' : (c >= 0.6 ? 'medium' : 'low'); }
+    // the AI answer comes back in one piece (no server-side progress): the bar keeps moving on an easing curve
+    // (5% → 95%, time constant ~35 s: about 45% at 20 s, 80% at 60 s, 90% at 90 s) and jumps to 100% when done
+    function aiEta(t) { return Math.min(95, 5 + 90 * (1 - Math.exp(-t / 35000))); }
+    function startAiTicker(j) {
+      var t0 = Date.now();
+      var tick = function () {
+        if (j.status !== 'running') { stopAiTicker(j); return; }
+        var pct = Math.max(j.progress || 0, aiEta(Date.now() - t0));
+        setProgress(j, pct, T('ai_reading') + ' ' + Math.round(pct) + '%');
+      };
+      stopAiTicker(j);
+      j.aiTimer = setInterval(tick, 400);
+      tick();
+    }
+    function stopAiTicker(j) { if (j && j.aiTimer) { clearInterval(j.aiTimer); j.aiTimer = null; } }
     function processAiJob(j) {
       var mt = aiMediaType(j.file);
       if (!mt) return Promise.reject(new Error(T('ai_unsupported')));
       if (j.file.size > (mt === 'application/pdf' ? AI_MAX_FILE : AI_MAX_IMAGE)) return Promise.reject(new Error(T('ai_too_large')));
-      setProgress(j, 10, T('ai_sending'), true);
+      setProgress(j, 3, T('ai_sending'), true);
       return fileB64(j.file).then(function (b64) {
-        setProgress(j, 30, T('ai_reading'), true);
+        startAiTicker(j);
         return activeOrg().then(function (oid) {
           return API.aiExtract({ orgId: oid || undefined, docType: aiRequestType(j.docType), promptVersion: AI_PROMPT,
             file: { media_type: mt, data_b64: b64 }, lang: I18N && I18N.lang ? I18N.lang() : 'ar' });
         });
       }).then(function (r) {
+        stopAiTicker(j);
         if (r.error) throw new Error(r.error.message || T('ai_unsupported'));
+        setProgress(j, 100, T('ai_reading') + ' 100%');
         var d = r.data;
         // v3: the same file already read and saved comes back as that reading (reused: no Claude call, no charge); it
         // is opened as the saved row, never saved a second time
@@ -838,7 +855,7 @@
         }
         if (AI.remaining != null && !(d && d.reused)) { AI.remaining = Math.max(0, AI.remaining - 1); showAiRemaining(); }
         return d;
-      });
+      }, function (e) { stopAiTicker(j); throw e; });
     }
     // the Edge Function's answer → the job (same shape as an OCR job; untrusted values are only ever set as text)
     function finishAiJob(j, res) {
