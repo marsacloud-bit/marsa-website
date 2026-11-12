@@ -1997,7 +1997,7 @@ async function secFrontEnd() {
     return (a.data.name === 'ai_access' && a.data.a.p_org === A && b.data.name === 'ai_get_settings' && c.data.name === 'ai_save_settings'
       && c.data.a.p_payload.consent_ack === true) || J({ a, b, c });
   });
-  await check('ocr.html: the AI engine group is hidden by default and its note names Anthropic; Tesseract checked by default', () =>
+  await check('ocr.html: the AI engine group is hidden by default and its note names Anthropic; Tesseract checked in the markup (the fallback — ocr.js selects AI when available)', () =>
     (/<fieldset class="fieldset ocr-engine" id="ocr-engine-group" hidden>/.test(html) && /id="ocr-engine-tesseract" value="tesseract" checked/.test(html)
       && /id="ocr-ai-note" role="note" hidden/.test(html) && /Anthropic/.test(html.slice(html.indexOf('ocr-ai-note')))) || 'ocr.html');
   await check('ocr.js: AI mode only online + staff + ai_access can_use; aiExtract; engine claude-opus-5-5 + ai_usage_id on save; warnings as textContent', () =>
@@ -2018,6 +2018,98 @@ async function secFrontEnd() {
       && job.engine === 'claude-opus-5-5' && job.langs === 'auto' && job.ai.usageId === 'u9' && job.ai.costUsd === 0.0123 && job.pages === 2
       && job.extracted.total === '10' && job.status === 'done') || J(job);
   });
+  // 2026-11-12 (owner: «انا عايز كل حاجه تتقرا»): AI is the default engine when available; ai-doc-v3 + 'auto'; every field shown
+  await check('ocr.js (vm): syncEngineUi selects the AI engine by default when available (online + staff + enabled + quota), keeps a Tesseract pick, falls back on quota 0', () => {
+    const i = ocr.indexOf('    var userEngine = '), j = ocr.indexOf('    // the AI mode exists only for staff');
+    if (i < 0 || j < i) return 'markers';
+    const mk = id => ({ id, checked: id === 'ocr-engine-tesseract', hidden: true, value: id === 'ocr-engine-ai' ? 'ai' : 'tesseract', on: {}, addEventListener(e, f) { this.on[e] = f; } });
+    const nodes = { 'ocr-engine-group': { hidden: true }, 'ocr-engine-ai': mk('ocr-engine-ai'), 'ocr-engine-tesseract': mk('ocr-engine-tesseract'), 'ocr-ai-note': { hidden: true } };
+    const radio = (id, on) => { nodes['ocr-engine-ai'].checked = id === 'ocr-engine-ai' ? on : !on; nodes['ocr-engine-tesseract'].checked = !nodes['ocr-engine-ai'].checked; };
+    const c = { ONLINE: true, STAFF: true, AI: { enabled: true, remaining: 50 }, $: id => nodes[id] || null, showAiRemaining() {},
+      qsa: () => [nodes['ocr-engine-tesseract'], nodes['ocr-engine-ai']] };
+    vm.createContext(c);
+    vm.runInContext(ocr.slice(i, j) + ';this.syncEngineUi = syncEngineUi;', c);
+    c.syncEngineUi();
+    const def = nodes['ocr-engine-ai'].checked && !nodes['ocr-engine-group'].hidden && !nodes['ocr-ai-note'].hidden;
+    radio('ocr-engine-tesseract', true); nodes['ocr-engine-tesseract'].on.change();       // the user picks Tesseract
+    c.syncEngineUi();                                                                        // e.g. an org change
+    const kept = nodes['ocr-engine-tesseract'].checked && nodes['ocr-ai-note'].hidden;
+    radio('ocr-engine-ai', true); nodes['ocr-engine-ai'].on.change();
+    c.AI.remaining = 0; c.syncEngineUi();
+    const quota = nodes['ocr-engine-tesseract'].checked;
+    c.AI.remaining = null; c.AI.enabled = true; c.syncEngineUi();
+    const unlimited = nodes['ocr-engine-ai'].checked;
+    c.AI.enabled = false; c.syncEngineUi();
+    const off = nodes['ocr-engine-tesseract'].checked && nodes['ocr-engine-group'].hidden && nodes['ocr-ai-note'].hidden;
+    return (def && kept && quota && unlimited && off) || J({ def, kept, quota, unlimited, off });
+  });
+  await check('ocr.js: the reading is sent as ai-doc-v3 with doc type auto (customs declaration typed) — extract.js: a typed invoice request drops the B/L keys, auto asks for all', () => {
+    const i = ocr.indexOf('    function aiRequestType('), j = ocr.indexOf('\n', i);
+    const c = {}; vm.createContext(c); vm.runInContext(ocr.slice(i, j) + ';this.f = aiRequestType;', c);
+    const types = ['commercial_invoice', 'operator_invoice', 'bill_of_lading', 'packing_list', 'certificate_of_origin', 'other'];
+    const blOnly = ['notify_party', 'booking_number', 'place_of_receipt', 'freight_terms', 'measurement_cbm', 'shipping_line'];
+    const lost = blOnly.filter(k => X.KEYS_FOR_V3.commercial_invoice.indexOf(k) === -1);
+    const autoAll = ['bill_of_lading', 'commercial_invoice', 'packing_list', 'supplier_invoice'].every(t => X.KEYS_FOR_V3[t].every(k => X.KEYS_FOR_V3.auto.indexOf(k) !== -1));
+    return (types.every(t => c.f(t) === 'auto') && c.f('customs_declaration') === 'customs_declaration' && /var AI_PROMPT = 'ai-doc-v3';/.test(ocr)
+      && /docType: aiRequestType\(j\.docType\), promptVersion: AI_PROMPT,/.test(ocr) && lost.length === blOnly.length && autoAll) || J({ lost, autoAll });
+  });
+  await check('ocr.js (vm): finishAiJob (v3) — a B/L picked as «فاتورة تجارية» becomes a B/L; every field kept, only DB keys in extracted; containers kept', () => {
+    const i = ocr.indexOf('    function aiLevel('), j = ocr.indexOf('\n', ocr.indexOf('    function aiLevel('));
+    const k = ocr.indexOf('    function finishAiJob('), l = ocr.indexOf('\n    }\n', k);
+    const P = require(path.join(ROOT, 'assets', 'js', 'ocr-parse.js'));
+    const c2 = { MAX_TEXT: 200000, ENGINE_AI: 'claude-opus-5-5', AI_DOC: {}, P,
+      DOC_TYPES: [['commercial_invoice', ''], ['operator_invoice', ''], ['bill_of_lading', ''], ['customs_declaration', ''], ['packing_list', ''], ['other', '']] };
+    vm.createContext(c2);
+    vm.runInContext(ocr.slice(i, j) + '\n' + ocr.slice(k, l + 7) + ';this.finishAiJob = finishAiJob;', c2);
+    const job = { docType: 'commercial_invoice' };
+    c2.finishAiJob(job, { usage_id: 'u3', kind: 'bill_of_lading', doc_type: 'bill_of_lading', detected_type: 'bill_of_lading', detected_documents: ['bill_of_lading'],
+      mean_confidence: 90, raw_text: 'x', usage: { cost_usd: 0.02 }, ai_detail: { prompt_version: 'ai-doc-v3' },
+      fields: [{ name: 'bl_number', value: 'SYNBL1', confidence: 0.98, page: 1 }, { name: 'seal_numbers', value: 'SL1, SL2', confidence: 0.9, page: 1 },
+        { name: 'notify_party', value: 'SAME AS CONSIGNEE', confidence: 0.9, page: 1 }, { name: 'gross_weight', value: '18250', confidence: 0.9, page: 1 },
+        { name: 'mystery_key', value: 'v', confidence: 0.5, page: 1 }, { name: 'Bad Key!', value: 'x', confidence: 1, page: 1 }],
+      line_items: [{ description: 'GAUZE', packages: 19, gross_weight: 4040, container_number: 'MSCU1234566' }],
+      containers: [{ container_number: 'MSCU1234566', seal_number: 'SL1', size_type: '40HC', packages_count: 19, net_weight: 3900, gross_weight: 4040 }], warnings: [] });
+    const decl = { docType: 'customs_declaration' };
+    c2.finishAiJob(decl, { usage_id: 'u4', kind: 'customs_declaration', doc_type: 'customs_declaration', detected_type: 'customs_declaration',
+      detected_documents: ['customs_declaration', 'bill_of_lading'], fields: [{ name: 'declaration_type', value: 'import', confidence: 0.9 }], line_items: [], containers: [], warnings: [] });
+    return (job.docType === 'bill_of_lading' && job.ai.typeFrom === 'commercial_invoice' && job.fields.mystery_key && !job.fields['Bad Key!']
+      && job.extracted.seal_numbers === 'SL1, SL2' && job.extracted.notify_party === 'SAME AS CONSIGNEE' && !('mystery_key' in job.extracted)
+      && job.containers.length === 1 && job.containers[0].size_type === '40HC' && job.items[0].packages === 19 && job.ai.detail.prompt_version === 'ai-doc-v3'
+      && decl.docType === 'customs_declaration' && decl.ai.typeFrom === null && decl.extracted.declaration_type === 'import') || J({ job, decl });
+  });
+  await check('ocr.js (vm): finishAiJob — a reused stored reading keeps the saved type and opens with its reviewed values (no machine values over corrections)', () => {
+    const i = ocr.indexOf('    function aiLevel('), j = ocr.indexOf('\n', ocr.indexOf('    function aiLevel('));
+    const k = ocr.indexOf('    function finishAiJob('), l = ocr.indexOf('\n    }\n', k);
+    const P = require(path.join(ROOT, 'assets', 'js', 'ocr-parse.js'));
+    const c4 = { MAX_TEXT: 200000, ENGINE_AI: 'claude-opus-5-5', AI_DOC: {}, P, SAVE_KEYS: P.DB_FIELD_KEYS,
+      DOC_TYPES: [['commercial_invoice', ''], ['operator_invoice', ''], ['bill_of_lading', ''], ['customs_declaration', ''], ['packing_list', ''], ['other', '']] };
+    vm.createContext(c4);
+    vm.runInContext(ocr.slice(i, j) + '\n' + ocr.slice(k, l + 7) + ';this.finishAiJob = finishAiJob;', c4);
+    const job = { docType: 'commercial_invoice' };
+    const row = { id: 'e1', doc_type: 'packing_list', reviewed_fields: { bl_number: 'FIXEDBL', notify_party: 'NP' }, line_items: [{ description: 'REVIEWED' }] };
+    c4.finishAiJob(job, { usage_id: 'u5', reused: true, engine: 'claude-opus-5-5', extraction_id: 'e1', kind: 'packing_list', doc_type: 'bill_of_lading',
+      detected_type: 'bill_of_lading', detected_documents: ['bill_of_lading'], savedRow: row, ai_detail: { prompt_version: 'ai-doc-v3' },
+      fields: [{ name: 'bl_number', value: 'MACHINEBL', confidence: 0.9 }, { name: 'vessel', value: 'GONE', confidence: 0.9 }],
+      line_items: [{ description: 'MACHINE' }], containers: [], warnings: [] });
+    return (job.docType === 'packing_list' && job.fields.bl_number.value === 'FIXEDBL' && job.fields.bl_number.source === 'manual'
+      && !job.fields.vessel && job.fields.notify_party.value === 'NP' && job.items[0].description === 'REVIEWED' && job.saved.id === 'e1'
+      && job.ai.detail === null && job.ai.reused === true && job.extracted.bl_number === 'MACHINEBL') || J(job);
+  });
+  await check('ocr.js: «حقول أخرى» section for unknown keys; FIELD_DEFS cover every v3 / declaration key (extract.js) with ar + en labels; saves send DB keys only (+ ai_detail)', () => {
+    const dicts = {};
+    const reg = { register: (ns, d) => { dicts[ns] = d; } };
+    { const c3 = { window: { MarsaI18n: reg } }; vm.createContext(c3); vm.runInContext(rd('assets/i18n/ocr.js'), c3); }
+    const want = X.V3_KEYS.concat(X.DECL_KEYS);
+    const noDef = want.filter(k => ocr.indexOf("{ key: '" + k + "'") === -1);
+    const noLbl = want.filter(k => !dicts.ocr.ar['f_' + k] || !dicts.ocr.en['f_' + k]);
+    const P = require(path.join(ROOT, 'assets', 'js', 'ocr-parse.js'));
+    const dbOk = X.SHIP_KEYS_V3.every(k => P.DB_FIELD_KEYS.indexOf(k) !== -1) && P.DB_FIELD_KEYS.every(k => X.SHIP_KEYS_V3.indexOf(k) !== -1);
+    return (noDef.length === 0 && noLbl.length === 0 && dbOk && /plan\.push\(\{ id: 'other', keys: rest \}\);/.test(ocr) && dicts.ocr.ar.fx_sec_other && dicts.ocr.en.fx_sec_other
+      && /extracted_fields: P\.plainFields\(j\.extracted \|\| \{\}, SAVE_KEYS\)/.test(ocr) && /rf = savedFields\(j\)/.test(ocr) && /\{ ai_detail: j\.ai\.detail \}/.test(ocr)
+      && /id="ocr-containers" hidden/.test(html) && /id="ocr-items-head"/.test(html)) || J({ noDef, noLbl, dbOk });
+  });
+  await check('ocr-match.js: every slot is read with ai-doc-v3', () =>
+    /var PROMPT = \{ invoice: 'ai-doc-v3', bl: 'ai-doc-v3', declaration: 'ai-doc-v3', packing: 'ai-doc-v3' \};/.test(rd('assets/js/ocr-match.js')) || 'PROMPT');
   await check('admin.js: AI card in the org view (admin), consent checkbox only when switching on, consent_ack sent only off → on', () =>
     (/return aiSettingsCard\(\)\.then/.test(adm) && /call\('aiGetSettings', S\.orgId\)/.test(adm) && /call\('aiSaveSettings', S\.orgId, payload\)/.test(adm)
       && /if \(on && !a\.enabled\) payload\.consent_ack = true;/.test(adm) && /consent\.hidden = !!a\.enabled \|\| !form\.elements\.ai_enabled\.checked;/.test(adm)

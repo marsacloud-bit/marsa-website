@@ -99,6 +99,15 @@
 .ocr-items input[aria-invalid="true"] { border-color: var(--danger); background: #FFFBFB; }
 .ocr-items .ocr-desc { min-width: 220px; }
 .ocr-items-foot { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; margin-block-start: 12px; }
+/* AI reading v3: the per-container rows (read-only) under the items + the «حقول أخرى» section */
+.ocr-containers { margin-block-start: 20px; }
+.ocr-containers-title { margin: 0 0 4px; font-size: var(--fs-md, 1.0625rem); color: var(--navy); }
+.ocr-containers-wrap { max-height: 420px; overflow: auto; }
+.ocr-containers-table { min-width: 620px; }
+.ocr-containers-table th { position: sticky; inset-block-start: 0; z-index: 1; }
+.ocr-containers-table td { padding: 6px 8px; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ocr-containers-table td:first-child { color: var(--muted); width: 36px; text-align: center; }
+.ocr-fx-sec[data-sec="other"] { border-style: dashed; }
 
 .ocr-export { display: flex; flex-wrap: wrap; gap: 8px; margin-block-start: 24px; padding: 14px; border-radius: var(--r); background: var(--bg); border: 1px solid var(--border); }
 

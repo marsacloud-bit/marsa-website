@@ -18,7 +18,10 @@
      decodeZatcaQr(base64)            → { seller_name, vat_number, timestamp, total, vat_total } | null
      extractFields(text, docType)     → { fields: { key: { value, confidence, source } }, lineItems: [] }
      mergeQr(result, qr)              → result with the QR values applied (higher trust)
-     plainFields(fields)              → { key: "value" } (what is stored in extracted_fields)
+     plainFields(fields, keys?)       → { key: "value" } (what is stored in extracted_fields); keys = the allowed keys
+                                        (default FIELD_KEYS; DB_FIELD_KEYS for an AI ai-doc-v3 reading)
+     DB_FIELD_KEYS                    → the shipment / declaration keys of app.extraction_field_keys() (20261120000100 —
+                                        20261121000100 without the appointment / EIR keys): what an ocr.html save may send
      safeCell(v) / toDelimited(rows, delim) → CSV/TSV text with formula-injection guard
    }
    confidence: 'high' = label found + value passes its check (or QR),
@@ -40,6 +43,13 @@
     'vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'shipper', 'consignee',
     // AI reading v2 (ai-doc-v2, 20261116000100): the fields the invoice ↔ B/L ↔ declaration match compares
     'gross_weight', 'net_weight', 'packages_count', 'package_type', 'goods_description', 'incoterms'];
+  // app.extraction_field_keys() of the live schema (20261119000100 DOCS + 20261120000100 DECL): FIELD_KEYS + the ai-doc-v3
+  // keys. ocr.html shows every key a reading returns; only these are saved (extracted_fields / reviewed_fields).
+  var DB_FIELD_KEYS = FIELD_KEYS.concat(['seal_numbers', 'consignee_name', 'notify_party', 'booking_number', 'place_of_receipt',
+    'place_of_delivery', 'freight_terms', 'measurement_cbm', 'temperature_c', 'shipping_line', 'export_country', 'payment_terms',
+    'packing_list_number', 'packing_list_date',
+    'declaration_type', 'declaration_status', 'declaration_date', 'declaration_date_hijri', 'importer_name_ar', 'broker_name',
+    'local_value', 'payment_method']);
 
   /* ---------------------------------------------------------------
      Digits, amounts, dates
@@ -425,7 +435,7 @@
     bl_number: [rx(['رقم بوليصة الشحن الجوي', 'رقم بوليصة الشحن', 'رقم البوليصة', 'رقم بوليصة', 'بوليصة الشحن رقم', 'B\\s*\\/\\s*L\\s*(?:No|Number|#)?\\.?', 'BL\\s*(?:No|Number|#)\\.?', 'Bill\\s*of\\s*Lading\\s*(?:No|Number|#)?\\.?', 'BOL\\s*(?:No|#)?\\.?', '[MH]BL\\s*(?:No|#)?\\.?', 'AWB\\s*(?:No|Number|#)?\\.?', 'Air\\s*Waybill\\s*(?:No|Number)?\\.?'])],
     declaration_number: [rx(['رقم البيان الجمركي', 'رقم البيان', 'بيان جمركي رقم', 'رقم بيان', 'Customs\\s*Declaration\\s*(?:No|Number)?\\.?', 'Declaration\\s*(?:No|Number|#)\\.?', 'Bayan\\s*(?:No|Number)?\\.?'])],
     country_of_origin: [rx(['بلد المنشأ', 'دولة المنشأ', 'بلد المنشا', 'منشأ البضاعة', 'Country\\s*of\\s*Origin', 'Origin\\s*Country', 'Made\\s*in']),
-      rx(['المنشأ', 'المنشا', 'Origin'])],
+      rx(['المنشأ', 'المنشا', 'Origin(?![A-Za-z])'])],      // "Origin", not "Number of original Bs/L"
     currency: [rx(['العملة', 'عملة الفاتورة', 'Currency'])]
   };
   // "Customer ID" / "رقم العميل" / "الرقم الضريبي للمورد" are not name labels
@@ -719,6 +729,7 @@
     { key: 'country_of_origin', re: /\bcountry\s+of\s+origin\b|\borigin\s+country\b|بلد\s*المنش[أا]/i }
   ];
   var PKG_RE = /(?:^|[^\w.,])(\d{1,3}(?:[.,]\d{3})+|\d+)\s*(PALLETS?|PLTS?|CARTONS?|CTNS?|PACKAGES?|PKGS?|PACKS?|BAGS?|BOXES|BOX|DRUMS?|ROLLS?|BALES?|CRATES?|CASES?|BUNDLES?|SACKS?|CASKS?|TUBES?|COILS?|UNITS?|IBCS?|SKIDS?|طرود|طرد|كرتون|كراتين|طبالي|طبلية|أكياس|اكياس|كيس|صناديق|صندوق|براميل|برميل|لفات|بالات)(?![A-Za-z])/i;
+  var NOT_PKG = /\b(?:ORIGINALS?|COP(?:Y|IES)|PAGES?|OF|SHEETS?|B\s*\/\s*L|BS\s*\/\s*L|FREIGHT|PAYABLE)\b|صفح|نسخ|أصل|اصل|من\s+\d/i;
   var INCO_RE = /\b(EXW|FCA|FAS|FOB|CFR|CIF|CPT|CIP|DAP|DPU|DAT|DDP|DDU|C\s?&\s?F|CNF)\b/i;
   var WEIGHT_RE = /(\d[\d.,]*\d|\d)\s*(KGS?|KILOS?|KILOGRAMS?|K\.G\.?|MT|M\.T\.|TONS?|TONNES?|LBS?|كغ|كجم|كيلو(?:غرام|جرام)?|طن)?(?![A-Za-z])/i;
 
@@ -767,9 +778,13 @@
     if (FIELD_KEYS.indexOf(key) === -1) return;
     fields[key] = F(value, conf || 'medium');
   }
+  // a weight needs a unit (kg / kgs / kilo / MT / tons / lbs …); without one only a cell that is just a number (the value
+  // under a weight label column) is taken — "Number of original Bs/L 3", "Page 1 of 2", "3 ORIGINALS" are not weights
   function weightKg(s) {
-    var m = WEIGHT_RE.exec(String(s || ''));
+    var str = String(s || '');
+    var m = WEIGHT_RE.exec(str);
     if (!m) return '';
+    if (!m[2] && !/^[\s(\[]*\d[\d.,\s]*[\s)\].:;]*$/.test(str)) return '';
     var n = parseAmount(m[1]);
     if (n == null || !(n > 0)) return '';
     var u = String(m[2] || '').toUpperCase();
@@ -811,6 +826,8 @@
       case 'packages_count': {
         var pm = PKG_RE.exec(' ' + v);
         if (pm) { putShip(fields, 'packages_count', trimNum(parseAmount(pm[1])), conf); putShip(fields, 'package_type', pm[2].toUpperCase(), conf); return; }
+        // a bare number: not a page number / copy count ("1 of 2", "3 ORIGINALS", "Page 2", "1/3")
+        if (NOT_PKG.test(v) || /^\d+\s*\/\s*\d+$/.test(v)) return;
         var pn = /^(\d{1,3}(?:[.,]\d{3})+|\d+)(?:\s|$)/.exec(v);
         if (pn) {
           putShip(fields, 'packages_count', trimNum(parseAmount(pn[1])), conf);
@@ -854,6 +871,23 @@
     }
   }
 
+  // "Gross weight (in KGS): 18,250" on one line: only separators / the unit between the label and the number (another
+  // label in between — "Gross weight  Number of original Bs/L 3" — is not this value), and the number ends the cell
+  function WEIGHT_FALLBACK(kind) {
+    var lbl = kind === 'gross' ? '\\bgross\\s*(?:weight|wt)|\\bG\\.\\s?W\\.?' : '\\bnet\\s*(?:weight|wt)|\\bN\\.\\s?W\\.?';
+    return new RegExp('(?:' + lbl + ')[ \\t]*(?:[,(\\[]?[ \\t]*(?:in[ \\t]+)?(?:kgs?|kilos?|kilograms?)\\.?[ \\t]*[)\\]]?)?[ \\t:.\\-–=]{0,6}' +
+      '(\\d[\\d.,]*(?:[ \\t]*(?:KGS?|KILOS?|KILOGRAMS?|MT|TONS?|TONNES?|LBS?)\\b)?)(?![\\d.,])', 'ig');
+  }
+  // the first fallback match whose number has a unit, or ends its cell (line end / a column gap)
+  function weightFallback(joined, kind) {
+    var re = WEIGHT_FALLBACK(kind), m;
+    while ((m = re.exec(joined))) {
+      if (/[A-Za-z]/.test(m[1])) return m[1];
+      var after = joined.slice(m.index + m[0].length);
+      if (/^(?:[ \t]*$|[ \t]*\n|[ \t]{2,}|[ \t]*\|)/.test(after)) return m[1];
+    }
+    return '';
+  }
   function shippingFields(t, fields, docType) {
     var raw = String(t || '').split('\n').map(function (l) { return l.replace(/\s+$/, ''); });
     var isBL = docType === 'bill_of_lading';
@@ -898,8 +932,11 @@
       if (!segs.length) return;
       var pick = function (h) {
         if (needing.length === 1 && hits.length === 1 && segs.length > 1 && h.start <= 2) return segs[0];
-        if (segs.length === needing.length) return segs[needing.indexOf(h)];
-        if (needing.length === 1 && segs.length === 1) return segs[0];
+        // value cells in label order only when every label of the row waits for a value; otherwise by column
+        if (segs.length === needing.length && needing.length === hits.length) return segs[needing.indexOf(h)];
+        // one value cell under a row of several labels belongs to the label of its column, never to the only empty one
+        // ("Number of original Bs/L     Gross Weight" → "3" is the originals count, not a weight)
+        if (needing.length === 1 && segs.length === 1 && hits.length === 1) return segs[0];
         // by column: the value cell whose start is nearest the label start
         var best = null, bd = 1e9;
         segs.forEach(function (s) { var d = Math.abs(s.start - h.start); if (d < bd) { bd = d; best = s; } });
@@ -909,6 +946,9 @@
         if (!h.def.key) return;
         var s = pick(h);
         if (!s) return;
+        // a cell that starts with a label is a label, not a value ("Number of original Bs/L 3", "Freight payable at")
+        var sh = labelHits(s.text);
+        if (sh.length && sh[0].start <= 1) return;
         if (h.def.key === 'goods_description' && segs.length === 1) {
           setShipValue(fields, 'goods_description', blockLines(k, 4).join(' '), 'medium');
           return;
@@ -930,12 +970,12 @@
       if (best) { putShip(fields, 'packages_count', trimNum(parseAmount(best[1])), 'low'); putShip(fields, 'package_type', best[2].toUpperCase(), 'low'); }
     }
     if (!fields.gross_weight) {
-      var gw = /\b(?:gross\s*(?:weight|wt)|G\.\s?W\.?)[^\d\n]{0,20}(\d[\d.,]*\s*(?:KGS?|KILOS?|MT|TONS?|LBS?)?)/i.exec(joined);
-      if (gw) { var g = weightKg(gw[1]); if (g) putShip(fields, 'gross_weight', g, 'low'); }
+      var gw = weightFallback(joined, 'gross');
+      if (gw) { var g = weightKg(gw); if (g) putShip(fields, 'gross_weight', g, 'low'); }
     }
     if (!fields.net_weight) {
-      var nw = /\b(?:net\s*(?:weight|wt)|N\.\s?W\.?)[^\d\n]{0,20}(\d[\d.,]*\s*(?:KGS?|KILOS?|MT|TONS?|LBS?)?)/i.exec(joined);
-      if (nw) { var nn = weightKg(nw[1]); if (nn) putShip(fields, 'net_weight', nn, 'low'); }
+      var nw = weightFallback(joined, 'net');
+      if (nw) { var nn = weightKg(nw); if (nn) putShip(fields, 'net_weight', nn, 'low'); }
     }
     if (!fields.incoterms) {
       var ic = /\b(EXW|FCA|FAS|FOB|CFR|CIF|CPT|CIP|DAP|DPU|DDP)\s+([A-Z][A-Z]{2,}(?:\s[A-Z]{3,})?)\b/.exec(joined);
@@ -1006,10 +1046,10 @@
     if (!f.currency) f.currency = { value: 'SAR', confidence: 'medium', source: 'qr' };   // ZATCA amounts are in SAR
     return { fields: f, lineItems: result.lineItems || [] };
   }
-  function plainFields(fields) {
-    var out = {};
+  function plainFields(fields, keys) {
+    var out = {}, allow = Array.isArray(keys) ? keys : FIELD_KEYS;
     Object.keys(fields || {}).forEach(function (k) {
-      if (FIELD_KEYS.indexOf(k) === -1) return;
+      if (allow.indexOf(k) === -1) return;
       var v = fields[k];
       v = v && typeof v === 'object' ? v.value : v;
       if (v != null && String(v).trim() !== '') out[k] = String(v).trim();
@@ -1037,7 +1077,7 @@
   }
 
   return {
-    FIELD_KEYS: FIELD_KEYS,
+    FIELD_KEYS: FIELD_KEYS, DB_FIELD_KEYS: DB_FIELD_KEYS,
     normalizeDigits: normalizeDigits, parseAmount: parseAmount, formatAmount: formatAmount, normalizeDate: normalizeDate,
     isValidSaudiVat: isValidSaudiVat, isValidContainer: isValidContainer, containerCheckDigit: containerCheckDigit,
     isValidIban: isValidIban, normalizeCountry: normalizeCountry,

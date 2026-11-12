@@ -302,7 +302,7 @@
                   <table class="table ocr-items">
                     <caption class="sr-only">بنود المستند القابلة للتعديل</caption>
                     <thead>
-                      <tr><th scope="col">#</th><th scope="col">الوصف</th><th scope="col">رمز HS</th><th scope="col">الكمية</th><th scope="col">سعر الوحدة</th><th scope="col">المبلغ</th><th scope="col"><span class="sr-only">حذف</span></th></tr>
+                      <tr id="ocr-items-head"><th scope="col">#</th><th scope="col">الوصف</th><th scope="col">رمز HS</th><th scope="col">الكمية</th><th scope="col">سعر الوحدة</th><th scope="col">المبلغ</th><th scope="col"><span class="sr-only">حذف</span></th></tr>
                     </thead>
                     <tbody id="ocr-items-body"></tbody>
                   </table>
@@ -313,6 +313,18 @@
                     إضافة بند
                   </button>
                   <span class="text-sm" id="ocr-items-sum" aria-live="polite"></span>
+                </div>
+                <!-- AI reading v3: one row per container (number, seal, size / type, packages, weights); filled by ocr.js -->
+                <div class="ocr-containers" id="ocr-containers" hidden>
+                  <h3 class="ocr-containers-title"><span data-i18n="ocr.cont_title">الحاويات</span> <span class="num" id="ocr-containers-count"></span></h3>
+                  <p class="text-sm text-muted" data-i18n="ocr.cont_hint">كما قرأها Claude من المستند. لتصحيح رقم حاوية أو ختم عدّل حقلَي «أرقام الحاويات» و«أرقام الأختام» في البيانات المستخرجة.</p>
+                  <div class="table-wrap ocr-containers-wrap">
+                    <table class="table ocr-containers-table">
+                      <caption class="sr-only" data-i18n="ocr.cont_caption">حاويات المستند كما قُرئت</caption>
+                      <thead><tr id="ocr-containers-head"></tr></thead>
+                      <tbody id="ocr-containers-body"></tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
 

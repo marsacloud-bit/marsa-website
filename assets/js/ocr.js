@@ -15,7 +15,15 @@
      (MarsaApi.aiExtract) and from there to Anthropic; the page says so before
      the user picks it. Fields come back with a confidence 0..1 and server
      warnings (ISO 6346, VAT, totals); saving uses the same flow with engine
-     'claude-opus-5-5' + ai_usage_id. Tesseract stays the default.
+     'claude-opus-5-5' + ai_usage_id (+ ai_detail). When the AI reading is available
+     (online, staff, enabled, quota not used up) it is the default engine; Tesseract
+     stays the alternative (kept when the user picks it in this page session).
+     The reading uses prompt 'ai-doc-v3' and doc type 'auto' (the widest key list
+     of extract.js: every B/L, invoice and packing key) — only «بيان جمركي» is sent
+     typed (its declaration hints); the detected kind then sets the type. Every
+     returned field is shown (unknown keys under «حقول أخرى»), line items with their
+     extra columns and the per-container rows; only the keys of
+     app.extraction_field_keys() (MarsaOcrParse.DB_FIELD_KEYS) are saved.
    - Save: signed-in staff (online) → MarsaApi.saveExtraction (+ optional
      transaction link and original upload); otherwise the local history
      "marsa_extractions" (MarsaApi.localExtractions).
@@ -87,6 +95,15 @@
     // page doc type → the AI doc type (the others are detected: 'auto')
     var AI_DOC = { commercial_invoice: 'commercial_invoice', operator_invoice: 'supplier_invoice', bill_of_lading: 'bill_of_lading',
       customs_declaration: 'customs_declaration' };
+    var AI_PROMPT = 'ai-doc-v3';
+    // the doc type sent to ai-extract (v3). extract.js KEYS_FOR_V3: a typed request only asks for (and only keeps) the keys
+    // of that type — a B/L picked as «فاتورة تجارية» would lose notify / booking / place of receipt / freight / CBM /
+    // shipping line, and a typed B/L the invoice money keys. 'auto' asks for SHIP_KEYS_V3 (every B/L, invoice, packing and
+    // declaration key, the declaration keys kept only on a declaration) and the detected kind sets the type. Only the
+    // customs declaration stays typed: it has its own hints (declared value as total, the B/L exactly as printed, every
+    // container) that 'auto' would not send.
+    function aiRequestType(t) { return t === 'customs_declaration' ? 'customs_declaration' : 'auto'; }
+    var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     var I18N = window.MarsaI18n || null;
     function T(key, vars) {
       var k = 'ocr.' + key;
@@ -129,8 +146,41 @@
       { key: 'packages_count', label: T('f_packages_count'), kind: 'text', ltr: true, ai: true },
       { key: 'package_type', label: T('f_package_type'), kind: 'text', ltr: true, ai: true },
       { key: 'goods_description', label: T('f_goods_description'), kind: 'text', ai: true },
-      { key: 'incoterms', label: T('f_incoterms'), kind: 'text', ltr: true, ai: true }
+      { key: 'incoterms', label: T('f_incoterms'), kind: 'text', ltr: true, ai: true },
+      // AI reading v3 (ai-doc-v3, 20261119000100): the extended shipping keys
+      { key: 'seal_numbers', label: T('f_seal_numbers'), kind: 'list', ltr: true, ai: true },
+      { key: 'consignee_name', label: T('f_consignee_name'), kind: 'text', ai: true },
+      { key: 'notify_party', label: T('f_notify_party'), kind: 'text', ai: true },
+      { key: 'booking_number', label: T('f_booking_number'), kind: 'id', ltr: true, ai: true },
+      { key: 'place_of_receipt', label: T('f_place_of_receipt'), kind: 'text', ai: true },
+      { key: 'place_of_delivery', label: T('f_place_of_delivery'), kind: 'text', ai: true },
+      { key: 'freight_terms', label: T('f_freight_terms'), kind: 'text', ai: true },
+      { key: 'measurement_cbm', label: T('f_measurement_cbm'), kind: 'text', ltr: true, ai: true },
+      { key: 'temperature_c', label: T('f_temperature_c'), kind: 'text', ltr: true, ai: true },
+      { key: 'shipping_line', label: T('f_shipping_line'), kind: 'text', ai: true },
+      { key: 'export_country', label: T('f_export_country'), kind: 'text', ai: true },
+      { key: 'payment_terms', label: T('f_payment_terms'), kind: 'text', ai: true },
+      { key: 'packing_list_number', label: T('f_packing_list_number'), kind: 'id', ltr: true, ai: true },
+      { key: 'packing_list_date', label: T('f_packing_list_date'), kind: 'date', ltr: true, ph: 'YYYY-MM-DD', ai: true },
+      // declaration reading (20261120000100): returned on a customs declaration only
+      { key: 'declaration_type', label: T('f_declaration_type'), kind: 'text', ai: true },
+      { key: 'declaration_status', label: T('f_declaration_status'), kind: 'text', ai: true },
+      { key: 'declaration_date', label: T('f_declaration_date'), kind: 'date', ltr: true, ph: 'YYYY-MM-DD', ai: true },
+      { key: 'declaration_date_hijri', label: T('f_declaration_date_hijri'), kind: 'text', ltr: true, ph: 'yyyy/mm/dd', ai: true },
+      { key: 'importer_name_ar', label: T('f_importer_name_ar'), kind: 'text', ai: true },
+      { key: 'broker_name', label: T('f_broker_name'), kind: 'text', ai: true },
+      { key: 'local_value', label: T('f_local_value'), kind: 'amount', ltr: true, ai: true },
+      { key: 'payment_method', label: T('f_payment_method'), kind: 'text', ai: true }
     ];
+    // a key a reading returned that has no definition here: shown under «حقول أخرى» with a label made from the key
+    var EXTRA_DEFS = Object.create(null);
+    function humanKey(k) { var x = String(k || '').replace(/_+/g, ' ').trim(); return x ? x.charAt(0).toUpperCase() + x.slice(1) : String(k); }
+    function extraDef(k) {
+      if (!EXTRA_DEFS[k]) EXTRA_DEFS[k] = { key: k, label: humanKey(k), kind: 'text', extra: true };
+      return EXTRA_DEFS[k];
+    }
+    // the keys saved (app.extraction_field_keys of the live schema); the others are display-only
+    var SAVE_KEYS = P && P.DB_FIELD_KEYS ? P.DB_FIELD_KEYS : (P ? P.FIELD_KEYS : []);
     var FIELD_LABEL = {};
     FIELD_DEFS.forEach(function (d) { FIELD_LABEL[d.key] = d.label; });
     var CONF_LABEL = { high: 'ثقة عالية', medium: 'ثقة متوسطة', low: 'ثقة منخفضة — راجعه', manual: 'معدّل يدويًا' };
@@ -766,53 +816,100 @@
       return fileB64(j.file).then(function (b64) {
         setProgress(j, 30, T('ai_reading'), true);
         return activeOrg().then(function (oid) {
-          return API.aiExtract({ orgId: oid || undefined, docType: AI_DOC[j.docType] || 'auto', file: { media_type: mt, data_b64: b64 },
-            lang: I18N && I18N.lang ? I18N.lang() : 'ar' });
+          return API.aiExtract({ orgId: oid || undefined, docType: aiRequestType(j.docType), promptVersion: AI_PROMPT,
+            file: { media_type: mt, data_b64: b64 }, lang: I18N && I18N.lang ? I18N.lang() : 'ar' });
         });
       }).then(function (r) {
         if (r.error) throw new Error(r.error.message || T('ai_unsupported'));
-        if (AI.remaining != null) { AI.remaining = Math.max(0, AI.remaining - 1); showAiRemaining(); }
-        return r.data;
+        var d = r.data;
+        // v3: the same file already read and saved comes back as that reading (reused: no Claude call, no charge); it
+        // is opened as the saved row, never saved a second time
+        if (d && d.reused && UUID_RE.test(String(d.extraction_id || '')) && typeof API.getExtraction === 'function') {
+          return API.getExtraction(d.extraction_id).then(function (g) {
+            if (g && !g.error && g.data && g.data.id === d.extraction_id) d.savedRow = g.data;
+            return d;
+          }, function () { return d; });
+        }
+        if (AI.remaining != null && !(d && d.reused)) { AI.remaining = Math.max(0, AI.remaining - 1); showAiRemaining(); }
+        return d;
       });
     }
     // the Edge Function's answer → the job (same shape as an OCR job; untrusted values are only ever set as text)
     function finishAiJob(j, res) {
       var fields = {};
+      // every returned field is kept (shown; unknown keys under «حقول أخرى»); only the DB keys are saved
       (res.fields || []).forEach(function (f) {
-        if (!f || typeof f.name !== 'string' || typeof f.value !== 'string') return;
+        if (!f || typeof f.name !== 'string' || typeof f.value !== 'string' || !/^[a-z][a-z0-9_]{0,59}$/.test(f.name)) return;
         var c = Number(f.confidence); if (!isFinite(c)) c = 0;
         fields[f.name] = { value: f.value, confidence: aiLevel(c), source: 'ai', score: c, page: f.page || null, valid: f.valid !== false };
       });
       j.fields = fields;
       j.items = (res.line_items || []).map(function (x) { return Object.assign({}, x); });
       j.machineItems = (res.line_items || []).map(function (x) { return Object.assign({}, x); });
-      j.extracted = P.plainFields(fields);
+      // ai-doc-v3: one row per container (number, seal, size / type, packages, weights) — shown in the items tab
+      j.containers = (Array.isArray(res.containers) ? res.containers : []).filter(function (c) { return c && typeof c === 'object'; })
+        .slice(0, 300).map(function (c) { return Object.assign({}, c); });
+      j.extracted = P.plainFields(fields, P.DB_FIELD_KEYS);
       j.text = String(res.raw_text || '').slice(0, MAX_TEXT);
       j.confidence = res.mean_confidence == null ? null : Number(res.mean_confidence);
-      j.engine = ENGINE_AI; j.langs = 'auto';
+      j.engine = res.reused && res.engine ? String(res.engine) : ENGINE_AI; j.langs = 'auto';
       var maxPage = 0;
       (res.fields || []).forEach(function (f) { if (f && f.page > maxPage) maxPage = f.page; });
       j.pages = maxPage || null; j.pageCount = j.pages;
-      // a type the AI was not told (packing list, other …) takes the detected one
-      if (!AI_DOC[j.docType] && DOC_TYPES.some(function (t) { return t[0] === res.kind; })) j.docType = res.kind;
+      // the type follows what Claude found (it was asked with 'auto', or the typed declaration was something else);
+      // 'other' / an unknown kind keeps the user's choice. The change is shown on the result.
+      var before = j.docType;
+      var KIND = { supplier_invoice: 'operator_invoice' };
+      var det = typeof res.detected_type === 'string' ? (KIND[res.detected_type] || res.detected_type) : '';
+      var kind = typeof res.kind === 'string' ? res.kind : '';
+      var known = function (t) { return t && t !== 'other' && DOC_TYPES.some(function (x) { return x[0] === t; }); };
+      if (known(kind) && kind !== j.docType) j.docType = kind;
+      var docs = Array.isArray(res.detected_documents) ? res.detected_documents : [];
+      // a reused stored reading keeps the saved row's type (kind = row.doc_type, maybe corrected by the reviewer)
+      if (!res.reused && known(det) && det !== j.docType && docs.indexOf(res.doc_type) === -1) j.docType = det;
+      // a reused stored reading opens with its reviewed values (the same as reopening it from the history), so a save
+      // never puts the machine values back over the reviewer's corrections
+      var sr = res.savedRow;
+      if (sr && sr.reviewed_fields && typeof sr.reviewed_fields === 'object') {
+        var rv = sr.reviewed_fields;
+        Object.keys(fields).forEach(function (k) { if (SAVE_KEYS.indexOf(k) !== -1 && !(typeof rv[k] === 'string' && rv[k])) delete fields[k]; });
+        Object.keys(rv).forEach(function (k) {
+          if (typeof rv[k] !== 'string' || !rv[k] || !/^[a-z][a-z0-9_]{0,59}$/.test(k)) return;
+          if (!fields[k] || fields[k].value !== rv[k]) fields[k] = { value: rv[k], confidence: 'manual', source: 'manual' };
+        });
+      }
+      if (sr && Array.isArray(sr.line_items)) j.items = sr.line_items.map(function (x) { return Object.assign({}, x); });
       j.ai = { usageId: res.usage_id, model: res.model || ENGINE_AI, warnings: (res.warnings || []).slice(0, 60),
-        costUsd: res.usage && res.usage.cost_usd != null ? Number(res.usage.cost_usd) : null };
+        costUsd: res.usage && res.usage.cost_usd != null ? Number(res.usage.cost_usd) : null,
+        typeFrom: j.docType !== before ? before : null, reused: !!res.reused,
+        detail: res.ai_detail && typeof res.ai_detail === 'object' && !res.reused ? res.ai_detail : null };
+      if (res.savedRow) j.saved = { id: res.savedRow.id, where: 'server', row: res.savedRow };
       j.status = 'done'; j.progress = 100;
     }
     function showAiRemaining() {
       var n = $('ocr-ai-remaining');
       if (n) n.textContent = AI.remaining == null ? '' : T('ai_remaining', { n: AI.remaining });
     }
+    // the engine the user picked in this page session ('' = none yet): the AI reading is the default whenever it is
+    // available (online + staff + enabled + quota not used up); a Tesseract pick is kept on later org / role changes
+    var userEngine = '';
+    function aiAvailable() { return ONLINE && STAFF && AI.enabled && AI.remaining !== 0; }
     function syncEngineUi() {
       var g = $('ocr-engine-group');
       var show = ONLINE && STAFF && AI.enabled;
       if (g) g.hidden = !show;
       if (!show && $('ocr-engine-tesseract')) $('ocr-engine-tesseract').checked = true;
+      if (show && $('ocr-engine-ai') && $('ocr-engine-tesseract')) {
+        if (!aiAvailable()) $('ocr-engine-tesseract').checked = true;           // quota used up: the browser reading
+        else if (userEngine !== 'tesseract') $('ocr-engine-ai').checked = true;  // default: the AI reading
+      }
       var note = $('ocr-ai-note');
       if (note) note.hidden = !(show && $('ocr-engine-ai') && $('ocr-engine-ai').checked);
       showAiRemaining();
     }
-    qsa('input[name="ocr-engine"]').forEach(function (r) { r.addEventListener('change', syncEngineUi); });
+    qsa('input[name="ocr-engine"]').forEach(function (r) {
+      r.addEventListener('change', function () { if (r.checked) userEngine = r.value === 'tesseract' ? 'tesseract' : 'ai'; syncEngineUi(); });
+    });
     // the AI mode exists only for staff of an org whose admin enabled it (MarsaApi.aiAccess = public.ai_access)
     function initAi() {
       AI.enabled = false; AI.remaining = null;
@@ -899,6 +996,7 @@
       if (focus) { $('ocr-result-title').focus(); }
     }
     function badge(cls, text) { return el('span', 'badge ' + cls, text); }
+    function docTypeLabel(t) { return (DOC_TYPES.filter(function (x) { return x[0] === t; })[0] || DOC_TYPES[6])[1]; }
     function renderMeta(j) {
       var box = $('ocr-result-meta');
       box.textContent = '';
@@ -907,7 +1005,7 @@
       if (j.engine === ENGINE_AI) {
         box.appendChild(badge('badge-teal', T('ai_badge')));
         if (j.confidence != null) box.appendChild(badge(j.confidence < LOW_CONF ? 'badge-warning' : 'badge-success', T('ai_conf', { n: Math.round(j.confidence) })));
-        if (j.ai && j.ai.costUsd != null) box.appendChild(badge('badge-blue', T('ai_cost', { usd: j.ai.costUsd.toFixed(4) })));
+        if (j.ai && j.ai.costUsd != null && !j.ai.reused) box.appendChild(badge('badge-blue', T('ai_cost', { usd: j.ai.costUsd.toFixed(4) })));
       } else if (j.confidence != null) box.appendChild(badge(j.confidence < LOW_CONF ? 'badge-warning' : 'badge-success', 'متوسط دقة القراءة: ' + Math.round(j.confidence) + '%'));
       else box.appendChild(badge('badge-success', 'نص PDF أصلي (دون تعرّف ضوئي)'));
       if (j.pages) box.appendChild(badge('badge-blue', 'الصفحات: ' + j.pages + (j.truncated ? ' (أول ' + MAX_PAGES + ' من ' + j.pageCount + ')' : '')));
@@ -915,6 +1013,9 @@
       if (j.qr) box.appendChild(badge('badge-teal', 'رمز QR للفاتورة الإلكترونية ✓'));
       else if (j.qrOther) box.appendChild(badge('badge-warning', 'رمز QR غير مطابق لصيغة الفاتورة الإلكترونية'));
       if (j.saved) box.appendChild(badge('badge-success', j.saved.where === 'server' ? 'محفوظ على الخادم' : 'محفوظ على هذا الجهاز'));
+      if (j.ai && j.ai.reused) box.appendChild(badge('badge-teal', T('ai_reused')));
+      // the AI found another kind of document than the one picked: the type (and the sections) follow it
+      if (j.ai && j.ai.typeFrom && j.ai.typeFrom !== j.docType) box.appendChild(badge('badge-warning', T('ai_type_set', { from: docTypeLabel(j.ai.typeFrom), to: docTypeLabel(j.docType) })));
       // the weak-reading alert (fields v2) says more and replaces this one
       $('ocr-low-conf').hidden = !(j.confidence != null && j.confidence < LOW_CONF) || !!(fxWeak && !fxWeak.hidden && j.engine !== ENGINE_AI);
     }
@@ -948,6 +1049,9 @@
           var bad = list.filter(function (c) { return !P.isValidContainer(c); });
           if (bad.length) out.warn = 'تحقّق من: ' + bad.slice(0, 4).join('، ') + (bad.length > 4 ? '…' : '') + ' — لا يطابق رقم التحقق (ISO 6346).';
           break;
+        case 'list':
+          out.value = v.split(/[\s,;،]+/).filter(Boolean).join(', ').slice(0, 1200);
+          break;
         case 'hs':
           var codes = v.split(/[\s,;،]+/).filter(Boolean);
           out.value = codes.join(', ');
@@ -966,7 +1070,7 @@
           out.value = v.slice(0, 60);
           break;
         default:
-          out.value = v.slice(0, 255);
+          out.value = v.slice(0, 2000);     // the DB limit of one field value (app.extraction_fields_ok)
       }
       return out;
     }
@@ -979,11 +1083,15 @@
     }
     /* fields v2: grouped sections per document type + issue highlight (summary, pulse, «لم يُقرأ») */
     var FX_SECTIONS = {
-      doc: ['invoice_number', 'invoice_date', 'bl_number', 'declaration_number'],
-      parties: ['supplier_name', 'supplier_vat', 'buyer_name', 'buyer_vat', 'shipper', 'consignee'],
-      transport: ['vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'incoterms'],
-      cargo: ['container_numbers', 'packages_count', 'package_type', 'gross_weight', 'net_weight', 'goods_description', 'hs_codes', 'country_of_origin'],
-      money: ['currency', 'subtotal', 'vat_amount', 'total', 'iban']
+      doc: ['invoice_number', 'invoice_date', 'bl_number', 'booking_number', 'declaration_number', 'declaration_type', 'declaration_status',
+        'declaration_date', 'declaration_date_hijri', 'packing_list_number', 'packing_list_date'],
+      parties: ['supplier_name', 'supplier_vat', 'buyer_name', 'buyer_vat', 'shipper', 'consignee', 'consignee_name', 'notify_party',
+        'importer_name_ar', 'broker_name'],
+      transport: ['vessel', 'voyage', 'shipping_line', 'port_of_loading', 'port_of_discharge', 'place_of_receipt', 'place_of_delivery',
+        'export_country', 'freight_terms', 'incoterms'],
+      cargo: ['container_numbers', 'seal_numbers', 'packages_count', 'package_type', 'gross_weight', 'net_weight', 'measurement_cbm',
+        'temperature_c', 'goods_description', 'hs_codes', 'country_of_origin'],
+      money: ['currency', 'subtotal', 'vat_amount', 'total', 'local_value', 'payment_terms', 'payment_method', 'iban']
     };
     var FX_INVOICE_SHOW = ['invoice_number', 'invoice_date', 'supplier_name', 'supplier_vat', 'buyer_name', 'buyer_vat', 'currency', 'subtotal',
       'vat_amount', 'total', 'bl_number', 'container_numbers', 'hs_codes', 'country_of_origin'];
@@ -992,8 +1100,8 @@
       bill_of_lading: { order: ['doc', 'parties', 'transport', 'cargo', 'money'],
         parties: ['shipper', 'consignee', 'supplier_name', 'supplier_vat', 'buyer_name', 'buyer_vat'],
         doc: ['bl_number', 'invoice_number', 'invoice_date', 'declaration_number'],
-        show: ['bl_number', 'shipper', 'consignee', 'vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'container_numbers', 'packages_count',
-          'package_type', 'gross_weight', 'net_weight', 'goods_description', 'hs_codes', 'country_of_origin'],
+        show: ['bl_number', 'shipper', 'consignee', 'notify_party', 'vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'container_numbers',
+          'seal_numbers', 'packages_count', 'package_type', 'gross_weight', 'net_weight', 'goods_description', 'hs_codes', 'country_of_origin'],
         need: ['bl_number', 'shipper', 'consignee', 'vessel', 'port_of_loading', 'port_of_discharge', 'container_numbers', 'packages_count', 'gross_weight', 'goods_description'] },
       commercial_invoice: { order: ['doc', 'parties', 'money', 'cargo', 'transport'],
         show: FX_INVOICE_SHOW.concat(['packages_count', 'gross_weight', 'net_weight', 'goods_description']),
@@ -1003,13 +1111,14 @@
       customs_declaration: { order: ['doc', 'parties', 'cargo', 'transport', 'money'],
         doc: ['declaration_number', 'bl_number', 'invoice_number', 'invoice_date'],
         parties: ['consignee', 'shipper', 'buyer_name', 'buyer_vat', 'supplier_name', 'supplier_vat'],
-        show: ['declaration_number', 'bl_number', 'invoice_number', 'consignee', 'container_numbers', 'packages_count', 'gross_weight', 'net_weight',
-          'hs_codes', 'country_of_origin', 'vessel', 'port_of_loading', 'port_of_discharge', 'currency', 'total', 'vat_amount'],
+        show: ['declaration_number', 'declaration_type', 'declaration_date', 'bl_number', 'invoice_number', 'consignee', 'container_numbers',
+          'packages_count', 'gross_weight', 'net_weight', 'hs_codes', 'country_of_origin', 'vessel', 'port_of_loading', 'port_of_discharge',
+          'currency', 'total', 'vat_amount'],
         need: ['declaration_number', 'bl_number', 'container_numbers', 'hs_codes'] },
       packing_list: { order: ['doc', 'parties', 'cargo', 'transport', 'money'],
         parties: ['shipper', 'consignee', 'supplier_name', 'buyer_name', 'supplier_vat', 'buyer_vat'],
-        show: ['invoice_number', 'invoice_date', 'bl_number', 'shipper', 'consignee', 'container_numbers', 'packages_count', 'package_type', 'gross_weight',
-          'net_weight', 'goods_description', 'hs_codes', 'country_of_origin'],
+        show: ['packing_list_number', 'packing_list_date', 'invoice_number', 'invoice_date', 'bl_number', 'shipper', 'consignee', 'container_numbers',
+          'packages_count', 'package_type', 'gross_weight', 'net_weight', 'measurement_cbm', 'goods_description', 'hs_codes', 'country_of_origin'],
         need: ['packages_count', 'gross_weight', 'net_weight', 'goods_description'] },
       certificate_of_origin: { order: ['doc', 'parties', 'cargo', 'transport', 'money'],
         parties: ['shipper', 'consignee', 'supplier_name', 'buyer_name', 'supplier_vat', 'buyer_vat'],
@@ -1023,12 +1132,19 @@
       containers: 'fx_r_container', hs: 'fx_r_hs', digits: 'fx_r_digits' };
     function fxLayout(j) { return FX_LAYOUT[j && j.docType] || FX_LAYOUT.other; }
     function hasVal(j, k) { var f = j.fields[k]; return !!(f && String(f.value == null ? '' : f.value).trim()); }
+    // sections in the type's order (a type's own key order first, then the section's other keys); every filled key the
+    // sections do not place — an unknown key returned by a reading included — goes to «حقول أخرى» (nothing returned is hidden)
     function fxPlan(j) {
-      var L = fxLayout(j);
-      return L.order.map(function (sid) {
-        var keys = (L[sid] || FX_SECTIONS[sid]).filter(function (k) { return defOf(k) && (L.show.indexOf(k) !== -1 || hasVal(j, k)); });
+      var L = fxLayout(j), placed = {};
+      var plan = L.order.map(function (sid) {
+        var own = L[sid] || [], keys = own.concat(FX_SECTIONS[sid].filter(function (k) { return own.indexOf(k) === -1; }));
+        keys = keys.filter(function (k) { return knownDef(k) && (L.show.indexOf(k) !== -1 || hasVal(j, k)); });
+        keys.forEach(function (k) { placed[k] = 1; });
         return { id: sid, keys: keys };
-      }).filter(function (s) { return s.keys.length; });
+      });
+      var rest = Object.keys(j.fields || {}).filter(function (k) { return !placed[k] && /^[a-z][a-z0-9_]{0,59}$/.test(k) && hasVal(j, k); });
+      plan.push({ id: 'other', keys: rest });
+      return plan.filter(function (s) { return s.keys.length; });
     }
     function aiWarnFor(j, key) {
       var aw = j.ai && j.ai.warnings ? j.ai.warnings : [];
@@ -1077,7 +1193,7 @@
         inp.type = 'text'; inp.id = 'of-' + def.key; inp.autocomplete = 'off';
         inp.dir = def.ltr ? 'ltr' : 'auto';   // a Latin name in an Arabic page keeps its punctuation in place
         if (def.ph) inp.placeholder = def.ph;
-        inp.maxLength = def.kind === 'containers' || def.kind === 'hs' ? 1200 : 255;
+        inp.maxLength = def.kind === 'containers' || def.kind === 'hs' || def.kind === 'list' ? 1200 : 2000;
         inp.value = f ? f.value : '';
         var errId = 'of-' + def.key + '-err', warnId = 'of-' + def.key + '-warn', whyId = 'of-' + def.key + '-why';
         inp.setAttribute('aria-describedby', src.id + ' ' + errId + ' ' + warnId + ' ' + whyId);
@@ -1138,7 +1254,15 @@
       }
       applyState(g, st);
     }
-    function defOf(key) { return FIELD_DEFS.filter(function (d) { return d.key === key; })[0]; }
+    function knownDef(key) { return FIELD_DEFS.filter(function (d) { return d.key === key; })[0]; }
+    function defOf(key) { return knownDef(key) || extraDef(key); }
+    function labelOf(key) { var d = defOf(key); return d ? d.label : key; }
+    // every field to list in an export: the known ones in their order, then the other filled keys
+    function exportDefs(f) {
+      var out = FIELD_DEFS.filter(function (d) { return f[d.key]; });
+      Object.keys(f).forEach(function (k) { if (!knownDef(k) && f[k]) out.push(extraDef(k)); });
+      return out;
+    }
 
     /* issue summary above the sections + per-section count chips */
     var fxSummary = null, fxWeak = null;
@@ -1281,7 +1405,7 @@
       if (running || !j || !j.file) return;
       var r = $('ocr-engine-ai');
       if (!r) return;
-      r.checked = true;
+      r.checked = true; userEngine = 'ai';       // the user asked for the AI reading
       syncEngineUi();
       var dt = $('ocr-doc-type');
       if (dt && j.docType && dt.querySelector('option[value="' + j.docType + '"]')) dt.value = j.docType;
@@ -1338,7 +1462,8 @@
         inner.appendChild(el('strong', null, T('ai_warn_title')));
         var ul = el('ul');
         aw.forEach(function (x) {
-          var label = x && x.field ? (FIELD_LABEL[x.field] || x.field) + ': ' : '';
+          var fk = x && typeof x.field === 'string' ? x.field : '';
+          var label = fk ? (fk === 'containers' ? T('cont_title') : /^[a-z][a-z0-9_]{0,59}$/.test(fk) ? labelOf(fk) : fk) + ': ' : '';
           ul.appendChild(el('li', null, label + String((x && x.text) || '')));
         });
         inner.appendChild(ul);
@@ -1347,22 +1472,43 @@
       }
     }
 
-    /* line items */
+    /* line items: the 5 base columns, + the ai-doc-v3 item columns a reading filled (unit, packages, weights, container,
+       seal, origin, scientific name, notes — app.extraction_items_ok keys); + the per-container rows (read-only) */
     var ITEM_COLS = [['description', 'الوصف', 'ocr-desc', false], ['hs_code', 'رمز HS', '', true], ['quantity', 'الكمية', '', true], ['unit_price', 'سعر الوحدة', '', true], ['amount', 'المبلغ', '', true]];
+    var ITEM_EXTRA = [['unit', 'it_unit', false], ['packages', 'it_packages', true], ['net_weight', 'it_net_weight', true],
+      ['gross_weight', 'it_gross_weight', true], ['container_number', 'it_container_number', true], ['seal_number', 'it_seal_number', true],
+      ['origin_country', 'it_origin_country', false], ['scientific_name', 'it_scientific_name', false], ['notes', 'it_notes', false]];
+    var CONT_COLS = [['container_number', 'it_container_number'], ['seal_number', 'it_seal_number'], ['size_type', 'cont_size_type'],
+      ['packages_count', 'it_packages'], ['net_weight', 'it_net_weight'], ['gross_weight', 'it_gross_weight']];
+    function filled(v) { return v != null && String(v).trim() !== ''; }
+    function itemCols(j) {
+      var extra = ITEM_EXTRA.filter(function (c) { return j.items.some(function (it) { return filled(it[c[0]]); }); })
+        .map(function (c) { return [c[0], T(c[1]), c[0] === 'notes' || c[0] === 'scientific_name' ? 'ocr-desc' : '', c[2]]; });
+      return ITEM_COLS.concat(extra);
+    }
     function renderItems(j) {
       var tb = $('ocr-items-body');
       tb.textContent = '';
+      var cols = itemCols(j);
+      var hr = $('ocr-items-head');
+      if (hr) {
+        hr.textContent = '';
+        var th0 = el('th', null, '#'); th0.scope = 'col'; hr.appendChild(th0);
+        cols.forEach(function (c) { var th = el('th', null, c[1]); th.scope = 'col'; hr.appendChild(th); });
+        var thx = el('th'); thx.scope = 'col'; thx.appendChild(el('span', 'sr-only', 'حذف')); hr.appendChild(thx);
+      }
       j.items.forEach(function (it, i) {
         var tr = el('tr');
         tr.setAttribute('data-i', String(i));
         tr.appendChild(el('td', 'num', String(i + 1)));
-        ITEM_COLS.forEach(function (c) {
+        cols.forEach(function (c) {
           var td = el('td'), inp = el('input', c[2] + (c[3] ? ' num' : ''));
           inp.type = 'text'; inp.value = it[c[0]] == null ? '' : String(it[c[0]]);
           inp.setAttribute('data-col', c[0]);
           inp.setAttribute('aria-label', c[1] + ' — البند ' + (i + 1));
-          if (c[3]) { inp.dir = 'ltr'; inp.inputMode = c[0] === 'hs_code' ? 'numeric' : 'decimal'; }
-          inp.maxLength = c[0] === 'description' ? 300 : 40;
+          if (c[3]) { inp.dir = 'ltr'; inp.inputMode = c[0] === 'hs_code' ? 'numeric' : (/number$/.test(c[0]) ? 'text' : 'decimal'); }
+          else inp.dir = 'auto';
+          inp.maxLength = c[0] === 'description' || c[0] === 'notes' || c[0] === 'scientific_name' ? 300 : 40;
           td.appendChild(inp); tr.appendChild(td);
         });
         var tdx = el('td'), rm = iconBtn(ICON.x, 'حذف البند ' + (i + 1), 'is-danger');
@@ -1370,8 +1516,34 @@
         tdx.appendChild(rm); tr.appendChild(tdx);
         tb.appendChild(tr);
       });
-      $('ocr-items-count').textContent = j.items.length ? '(' + j.items.length + ')' : '';
+      var nc = (j.containers || []).length;
+      $('ocr-items-count').textContent = j.items.length || nc ? '(' + j.items.length + (nc ? ' · ' + T('cont_n', { n: nc }) : '') + ')' : '';
       updateItemsSum(j);
+      renderContainers(j);
+    }
+    // the per-container rows of an ai-doc-v3 reading (ai_detail.containers): read-only — the container / seal numbers
+    // are also in the «أرقام الحاويات» / «أرقام الأختام» fields, which are the ones to correct
+    function renderContainers(j) {
+      var box = $('ocr-containers');
+      if (!box) return;
+      var rows = j.containers || [];
+      box.hidden = !rows.length;
+      var body = $('ocr-containers-body'), head = $('ocr-containers-head');
+      body.textContent = ''; head.textContent = '';
+      if (!rows.length) return;
+      $('ocr-containers-count').textContent = '(' + rows.length + ')';
+      var th0 = el('th', null, '#'); th0.scope = 'col'; head.appendChild(th0);
+      CONT_COLS.forEach(function (c) { var th = el('th', null, T(c[1])); th.scope = 'col'; head.appendChild(th); });
+      rows.forEach(function (r, i) {
+        var tr = el('tr');
+        tr.appendChild(el('td', null, String(i + 1)));
+        CONT_COLS.forEach(function (c) {
+          var td = el('td'), v = el('bdi', null, r[c[0]] == null ? '' : String(r[c[0]]));
+          v.dir = 'ltr';
+          td.appendChild(v); tr.appendChild(td);
+        });
+        body.appendChild(tr);
+      });
     }
     function sumItems(j) {
       if (!j.items.length) return null;
@@ -1428,7 +1600,7 @@
 
     /* text + type */
     $('ocr-text').addEventListener('input', function () { var j = current(); if (j) j.text = this.value.slice(0, MAX_TEXT); });
-    typeSel.addEventListener('change', function () { var j = current(); if (j) { j.docType = this.value; renderMeta(j); renderFields(j); } });   // sections follow the type; edits live in j.fields
+    typeSel.addEventListener('change', function () { var j = current(); if (j) { j.docType = this.value; if (j.ai) j.ai.typeFrom = null; renderMeta(j); renderFields(j); } });   // sections follow the type; edits live in j.fields
     $('ocr-reextract').addEventListener('click', function () {
       var j = current();
       if (j && j.engine === ENGINE_AI) { toast(T('ai_reextract_off'), 'info'); return; }
@@ -1449,21 +1621,39 @@
     /* ---------------------------------------------------------------
        Export
        --------------------------------------------------------------- */
-    function plainCurrent(j) { return P.plainFields(j.fields); }
+    // every filled field (exports, copy, request hand-off) / the fields a save sends (the DB keys only)
+    function plainCurrent(j) {
+      var out = {};
+      Object.keys(j.fields || {}).forEach(function (k) {
+        var f = j.fields[k], v = f && typeof f === 'object' ? f.value : f;
+        if (/^[a-z][a-z0-9_]{0,59}$/.test(k) && v != null && String(v).trim() !== '') out[k] = String(v).trim();
+      });
+      return out;
+    }
+    function savedFields(j) { return P.plainFields(j.fields, SAVE_KEYS); }
+    // the reviewed items: the 5 base keys always, the v3 item keys when filled (all within app.extraction_items_ok)
     function cleanItems(j) {
       return j.items.map(function (it) {
-        return { description: String(it.description || '').trim(), hs_code: String(it.hs_code || '').trim(), quantity: String(it.quantity || '').trim(),
+        var o = { description: String(it.description || '').trim(), hs_code: String(it.hs_code || '').trim(), quantity: String(it.quantity || '').trim(),
           unit_price: String(it.unit_price || '').trim(), amount: String(it.amount || '').trim() };
-      }).filter(function (it) { return it.description || it.amount || it.quantity; });
+        ITEM_EXTRA.forEach(function (c) { if (filled(it[c[0]])) o[c[0]] = String(it[c[0]]).trim().slice(0, 2000); });
+        return o;
+      }).filter(function (it) { return it.description || it.amount || it.quantity || ITEM_EXTRA.some(function (c) { return filled(it[c[0]]); }); });
     }
     function tableRows(j) {
       var f = plainCurrent(j), rows = [['الحقل', 'القيمة']];
-      FIELD_DEFS.forEach(function (d) { if (f[d.key]) rows.push([d.label, f[d.key]]); });
-      var items = cleanItems(j);
+      exportDefs(f).forEach(function (d) { rows.push([d.label, f[d.key]]); });
+      var items = cleanItems(j), cols = itemCols(j);
       if (items.length) {
         rows.push([]);
-        rows.push(['#', 'الوصف', 'رمز HS', 'الكمية', 'سعر الوحدة', 'المبلغ']);
-        items.forEach(function (it, i) { rows.push([String(i + 1), it.description, it.hs_code, it.quantity, it.unit_price, it.amount]); });
+        rows.push(['#'].concat(cols.map(function (c) { return c[1]; })));
+        items.forEach(function (it, i) { rows.push([String(i + 1)].concat(cols.map(function (c) { return it[c[0]] == null ? '' : String(it[c[0]]); }))); });
+      }
+      var cr = j.containers || [];
+      if (cr.length) {
+        rows.push([]);
+        rows.push(['#'].concat(CONT_COLS.map(function (c) { return T(c[1]); })));
+        cr.forEach(function (r, i) { rows.push([String(i + 1)].concat(CONT_COLS.map(function (c) { return r[c[0]] == null ? '' : String(r[c[0]]); }))); });
       }
       return rows;
     }
@@ -1471,7 +1661,7 @@
       return {
         source: { name: j.name, size: j.size, mime: j.mime || null, sha256: j.sha256 || null, pages: j.pages || null },
         doc_type: j.docType, engine: j.engine || null, languages: j.langs || null, mean_confidence: j.confidence,
-        extracted_fields: j.extracted || {}, reviewed_fields: plainCurrent(j), line_items: cleanItems(j),
+        extracted_fields: j.extracted || {}, reviewed_fields: plainCurrent(j), line_items: cleanItems(j), containers: j.containers || [],
         qr_payload: j.qr || null, raw_text: j.text || '', exported_at: new Date().toISOString()
       };
     }
@@ -1499,16 +1689,23 @@
           else if (kind === 'xlsx') {
             if (!X) { toast('تعذّر إنشاء ملف Excel. استخدم CSV.', 'error'); return; }
             var f = plainCurrent(j), fr = [['الحقل', 'القيمة', 'المصدر']];
-            FIELD_DEFS.forEach(function (d) {
-              if (!f[d.key]) return;
+            exportDefs(f).forEach(function (d) {
               var si = srcInfo(j.fields[d.key]);
               fr.push([d.label, d.kind === 'amount' ? numOrStr(f[d.key]) : f[d.key], si ? si.text : '']);
             });
-            var ir = [['#', 'الوصف', 'رمز HS', 'الكمية', 'سعر الوحدة', 'المبلغ']];
-            cleanItems(j).forEach(function (it, i) { ir.push([i + 1, it.description, it.hs_code, numOrStr(it.quantity), numOrStr(it.unit_price), numOrStr(it.amount)]); });
+            var icols = itemCols(j);
+            var ir = [['#'].concat(icols.map(function (c) { return c[1]; }))];
+            cleanItems(j).forEach(function (it, i) { ir.push([i + 1].concat(icols.map(function (c) { var v = it[c[0]] == null ? '' : it[c[0]]; return c[3] && !/number$|hs_code/.test(c[0]) ? numOrStr(v) : v; }))); });
             var tr = [['النص']];
             String(j.text || '').split('\n').slice(0, 20000).forEach(function (l) { tr.push([l.slice(0, 32000)]); });
-            download(X.write([{ name: 'البيانات', rows: fr }, { name: 'البنود', rows: ir }, { name: 'النص', rows: tr }]), name + '.xlsx');
+            var sheets = [{ name: 'البيانات', rows: fr }, { name: 'البنود', rows: ir }];
+            if ((j.containers || []).length) {
+              var cr = [['#'].concat(CONT_COLS.map(function (c) { return T(c[1]); }))];
+              j.containers.forEach(function (r, i) { cr.push([i + 1].concat(CONT_COLS.map(function (c) { return r[c[0]] == null ? '' : r[c[0]]; }))); });
+              sheets.push({ name: 'الحاويات', rows: cr });
+            }
+            sheets.push({ name: 'النص', rows: tr });
+            download(X.write(sheets), name + '.xlsx');
           }
         } catch (e) { toast('تعذّر إنشاء الملف.', 'error'); }
       });
@@ -1577,12 +1774,14 @@
         source_mime: j.mime ? String(j.mime).slice(0, 120) : null, source_size: j.size > 0 ? j.size : null,
         source_pages: j.pages ? Math.min(Math.max(j.pages, 1), 200) : null, engine: String(j.engine || ENGINE_OCR).slice(0, 80),
         languages: String(j.langs || 'ara+eng').slice(0, 40), mean_confidence: j.confidence == null ? null : Math.min(100, Math.max(0, j.confidence)),
-        raw_text: String(j.text || '').slice(0, MAX_TEXT), extracted_fields: j.extracted || {}, qr_payload: j.qr || null,
+        raw_text: String(j.text || '').slice(0, MAX_TEXT), extracted_fields: P.plainFields(j.extracted || {}, SAVE_KEYS), qr_payload: j.qr || null,
         line_items: (j.machineItems || []).map(function (x) { return Object.assign({}, x); })
-      }, j.engine === ENGINE_AI && j.ai && j.ai.usageId ? { ai_usage_id: j.ai.usageId, languages: 'auto', qr_payload: null } : {});
+      }, j.engine === ENGINE_AI && j.ai && j.ai.usageId ? { ai_usage_id: j.ai.usageId, languages: 'auto', qr_payload: null } : {},
+      // ai-doc-v3: the machine detail (containers, confidences, detected type) — bound to the usage row's file hash
+      j.engine === ENGINE_AI && j.ai && j.ai.usageId && j.ai.detail ? { ai_detail: j.ai.detail } : {});
     }
     // order-independent: jsonb returns keys sorted by length, not in insertion order
-    var ITEM_KEYS = ['description', 'hs_code', 'quantity', 'unit_price', 'amount'];
+    var ITEM_KEYS = ['description', 'hs_code', 'quantity', 'unit_price', 'amount'].concat(ITEM_EXTRA.map(function (c) { return c[0]; }));
     function sameFields(a, b) {
       a = a || {}; b = b || {};
       var ka = Object.keys(a).filter(function (k) { return a[k] != null && String(a[k]) !== ''; });
@@ -1596,7 +1795,7 @@
       });
     }
     function reviewPatch(j, row) {
-      var p = {}, rf = plainCurrent(j), items = cleanItems(j);
+      var p = {}, rf = savedFields(j), items = cleanItems(j);
       var st = $('ocr-review-status').value, note = $('ocr-review-note').value.trim().slice(0, 1000);
       var prevReviewed = row.reviewed_fields || row.extracted_fields || {};
       if (!sameFields(rf, prevReviewed)) p.reviewed_fields = rf;

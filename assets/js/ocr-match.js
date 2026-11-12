@@ -7,8 +7,8 @@
    - Shown only online, to signed-in staff, when MarsaApi.aiAccess says the org may use
      AI reading (same gate as the AI engine in ocr.js). Each document is one AI reading
      (MarsaApi.aiExtract, run in parallel): 2 readings, 3 with the declaration, up to 4 with the packing list
-     (بيان التعبئة: doc_type 'packing_list', read with prompt 'ai-doc-v3' — that slot only; a v3 answer with
-     reused:true is a reading already saved: no charge, its extraction_id is used as is).
+     (بيان التعبئة: doc_type 'packing_list'). Every slot is read with prompt 'ai-doc-v3' (extended keys, containers);
+     a v3 answer with reused:true is a reading already saved: no charge, its extraction_id is used as is).
    - mode (two_way / three_way) is decided by the declaration only; a packing list adds a column, the pairs
      inv_pack / bl_pack / decl_pack and engine version match-v2 (saved with packing_extraction_id, 20261126000100).
    - Result: MarsaDocMatch.compare → banner + table (values editable → instant
@@ -60,8 +60,10 @@
     var AI_MEDIA = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', pdf: 'application/pdf' };
     var SLOTS = ['invoice', 'bl', 'declaration', 'packing'];
     var DOC_TYPE = { invoice: 'commercial_invoice', bl: 'bill_of_lading', declaration: 'customs_declaration', packing: 'packing_list' };
-    // the packing list exists only in the ai-doc-v3 prompt; the other slots keep the default prompt
-    var PROMPT = { packing: 'ai-doc-v3' };
+    // every slot is read with the ai-doc-v3 prompt (the packing list exists only there; the invoice / B/L / declaration
+    // get the extended keys — seals, notify party, booking, places, freight, CBM, shipping line, the declaration keys — which
+    // the per-document sheets list; the match engine (doc-match.js) compares its own keys only, unchanged)
+    var PROMPT = { invoice: 'ai-doc-v3', bl: 'ai-doc-v3', declaration: 'ai-doc-v3', packing: 'ai-doc-v3' };
     var PAIR_DOCS = E.PAIRS && E.PAIRS.inv_pack ? E.PAIRS : { inv_bl: ['invoice', 'bl'], inv_decl: ['invoice', 'declaration'], bl_decl: ['bl', 'declaration'],
       inv_pack: ['invoice', 'packing'], bl_pack: ['bl', 'packing'], decl_pack: ['declaration', 'packing'] };
     var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

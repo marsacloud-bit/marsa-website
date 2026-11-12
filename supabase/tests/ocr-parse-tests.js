@@ -154,6 +154,65 @@ check('no shipping keys invented on a plain VAT invoice', () => {
 });
 check('empty / null text', () => J(P.extractFields('', 'bill_of_lading').fields) === '{}' && J(P.extractFields(null).fields) === '{}');
 
+/* --- 5. numbers of unrelated labels are not weights / packages (scanned B/L, owner report 2026-11-12) --- */
+section('5. "Number of original Bs/L 3", "Freight payable at", page numbers → never a weight or a package count');
+const BL5 = [
+  'BILL OF LADING                                   B/L No: SYNBL0777Z',
+  'Shipper',
+  'SAMPLE EXPORT INDUSTRIES CO.',
+  '',
+  'Consignee',
+  'BETA TRADING EST.',
+  'Freight payable at              Number of original Bs/L 3',
+  'DESTINATION',
+  'Number of original Bs/L         Gross Weight',
+  '3',
+  'Gross Weight (KGS)              Number of original Bs/L',
+  '                                3',
+  'No. of packages                 Number of original Bs/L',
+  '                                3',
+  'Page 1 of 2'
+].join('\n');
+const b5 = plain(BL5, 'bill_of_lading');
+check('the B/L label row "Freight payable at  Number of original Bs/L 3": no gross weight, no packages, no package type, no "origin"', () =>
+  (!b5.gross_weight && !b5.net_weight && !b5.packages_count && !b5.package_type && !b5.country_of_origin) || J(b5));
+check('the same B/L still reads its B/L number / shipper / consignee', () =>
+  expect(b5, { bl_number: 'SYNBL0777Z', shipper: 'SAMPLE EXPORT INDUSTRIES CO.', consignee: 'BETA TRADING EST.' }));
+check('"Number of original Bs/L  Gross Weight" / "3  18,250 KGS" → the weight of its own column (18250)', () => {
+  const x = plain(['Number of original Bs/L     Gross Weight', '3                           18,250 KGS'].join('\n'), 'bill_of_lading');
+  return x.gross_weight === '18250' || J(x);
+});
+check('a bare number under the weight label column is a weight ("Gross weight" / "18250")', () => {
+  const x = plain(['Gross weight', '18250'].join('\n'), 'bill_of_lading');
+  return x.gross_weight === '18250' || J(x);
+});
+check('"Gross weight" / "Page 1 of 3" and "Gross weight  3 ORIGINALS" are not weights', () => {
+  const a = plain(['Gross weight', 'Page 1 of 3'].join('\n'), 'bill_of_lading');
+  const b = plain('Gross weight  3 ORIGINALS', 'bill_of_lading');
+  const c = plain('Gross wt: 3 originals issued', 'bill_of_lading');
+  return (!a.gross_weight && !b.gross_weight && !c.gross_weight && !b.country_of_origin && !c.country_of_origin) || J({ a, b, c });
+});
+check('inline weights with a unit still read ("Gross weight (in KGS): 18,250.500", "G.W. 4.040,000 Kgs")', () => {
+  const a = plain('Gross weight (in KGS): 18,250.500', 'commercial_invoice');
+  const b = plain('Remarks  G.W. 4.040,000 Kgs', 'commercial_invoice');
+  return (a.gross_weight === '18250.5' && b.gross_weight === '4040') || J({ a, b });
+});
+check('"No. of packages" / "1 of 2" (a page number) and "2/3" are not package counts', () => {
+  const a = plain(['No. of packages', '1 of 2'].join('\n'), 'bill_of_lading');
+  const b = plain(['Total packages', '2/3'].join('\n'), 'bill_of_lading');
+  return (!a.packages_count && !b.packages_count) || J({ a, b });
+});
+check('"Origin: TURKEY" is still the country of origin (the "original" guard is a word boundary only)', () => {
+  const x = plain('Origin: TURKEY', 'commercial_invoice');
+  return x.country_of_origin === 'تركيا' || J(x);
+});
+check('plainFields(fields, DB_FIELD_KEYS) keeps the ai-doc-v3 keys; the default keeps FIELD_KEYS only', () => {
+  const f = { seal_numbers: { value: 'SL1' }, notify_party: { value: 'N' }, vessel: { value: 'V' }, secret: { value: 'x' } };
+  const all = P.plainFields(f, P.DB_FIELD_KEYS), def = P.plainFields(f);
+  return (J(all) === J({ seal_numbers: 'SL1', notify_party: 'N', vessel: 'V' }) && J(def) === J({ vessel: 'V' })
+    && P.FIELD_KEYS.every(k => P.DB_FIELD_KEYS.includes(k)) && P.DB_FIELD_KEYS.length === P.FIELD_KEYS.length + 22) || J({ all, def });
+});
+
 console.log('\n' + '-'.repeat(70));
 console.log((fail ? 'FAILED' : 'OK') + ' — ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
