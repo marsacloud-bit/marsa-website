@@ -1,12 +1,16 @@
 /* ==========================================================================
-   مرسى | MARSA — ocr.html: invoice ↔ B/L ↔ customs declaration matching (AI)
+   مرسى | MARSA — ocr.html: invoice ↔ B/L ↔ customs declaration ↔ packing list matching (AI)
    Plain IIFE, no modules. Depends on window.MarsaDocMatch (doc-match.js, the pure
    engine), window.MarsaApi (supa.js), window.XlsxLite (xlsx-lite.js), optional
    window.MarsaShell (app-shell.js) and window.MarsaI18n (strings 'ocr.m_*').
 
    - Shown only online, to signed-in staff, when MarsaApi.aiAccess says the org may use
      AI reading (same gate as the AI engine in ocr.js). Each document is one AI reading
-     (MarsaApi.aiExtract, run in parallel): 2 readings, or 3 with the declaration.
+     (MarsaApi.aiExtract, run in parallel): 2 readings, 3 with the declaration, up to 4 with the packing list
+     (بيان التعبئة: doc_type 'packing_list', read with prompt 'ai-doc-v3' — that slot only; a v3 answer with
+     reused:true is a reading already saved: no charge, its extraction_id is used as is).
+   - mode (two_way / three_way) is decided by the declaration only; a packing list adds a column, the pairs
+     inv_pack / bl_pack / decl_pack and engine version match-v2 (saved with packing_extraction_id, 20261126000100).
    - Result: MarsaDocMatch.compare → banner + table (values editable → instant
      recompute, flagged 'corrected'), items / warnings, per-row "reviewed" ticks.
    - Save: MarsaApi.saveExtraction for each reading (engine claude, ai_usage_id,
@@ -54,9 +58,13 @@
     var AI_MAX_FILE = 10 * 1024 * 1024;           // PDF
     var AI_MAX_IMAGE = 5 * 1024 * 1024;           // image
     var AI_MEDIA = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', pdf: 'application/pdf' };
-    var SLOTS = ['invoice', 'bl', 'declaration'];
-    var DOC_TYPE = { invoice: 'commercial_invoice', bl: 'bill_of_lading', declaration: 'customs_declaration' };
-    var PAIR_DOCS = { inv_bl: ['invoice', 'bl'], inv_decl: ['invoice', 'declaration'], bl_decl: ['bl', 'declaration'] };
+    var SLOTS = ['invoice', 'bl', 'declaration', 'packing'];
+    var DOC_TYPE = { invoice: 'commercial_invoice', bl: 'bill_of_lading', declaration: 'customs_declaration', packing: 'packing_list' };
+    // the packing list exists only in the ai-doc-v3 prompt; the other slots keep the default prompt
+    var PROMPT = { packing: 'ai-doc-v3' };
+    var PAIR_DOCS = E.PAIRS && E.PAIRS.inv_pack ? E.PAIRS : { inv_bl: ['invoice', 'bl'], inv_decl: ['invoice', 'declaration'], bl_decl: ['bl', 'declaration'],
+      inv_pack: ['invoice', 'packing'], bl_pack: ['bl', 'packing'], decl_pack: ['declaration', 'packing'] };
+    var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     var LOW_CONF = 0.6;
     var STATUS_CLS = { match: 'is-match', mismatch: 'is-mismatch', partial: 'is-partial', missing: 'is-missing', info: 'is-info' };
     var OVERALL_CLS = { match: 'is-match', review: 'is-partial', mismatch: 'is-mismatch' };
@@ -221,12 +229,13 @@
         stEl.classList.add(s.error ? 'is-error' : (s.status === 'done' ? 'is-done' : 'is-busy'));
       }
       if (s.status === 'done' && s.res) {
-        var mism = (s.res.warnings || []).filter(function (w) { return w && w.code === 'doc_type_mismatch'; })[0];
-        if (mism) {
-          var w = el('div', 'alert alert-warning ocr-match-type-warn', T('m_type_mismatch', { doc: docName(k), kind: kindName(s.res.detected_type || s.res.doc_type) }));
+        var mk = mismatchKind(k, s.res);
+        if (mk) {
+          var w = el('div', 'alert alert-warning ocr-match-type-warn', T('m_type_mismatch', { doc: docName(k), kind: kindName(mk) }));
           w.setAttribute('role', 'note');
           stEl.appendChild(w);
         }
+        if (s.res.reused) stEl.appendChild(el('span', 'ocr-match-slot-conf', ' · ' + T('m_reused_free')));
         if (s.res.mean_confidence != null) stEl.appendChild(el('span', 'ocr-match-slot-conf', ' · ' + T('ai_conf', { n: Math.round(Number(s.res.mean_confidence)) })));
       }
       var pct = s.status === 'sending' ? 15 : s.status === 'reading' ? 55 : s.status === 'done' ? 100 : 0;
@@ -237,6 +246,15 @@
       drop.classList.toggle('has-file', !!s.file);
       drop.classList.toggle('is-error', !!s.error);
       var inp = $('ocr-match-file-' + k); if (inp) inp.disabled = S.running;
+    }
+    // the kind of document the reading says it is, when it is not the slot's (null otherwise)
+    function mismatchKind(k, res) {
+      if (!res) return null;
+      var w = (res.warnings || []).filter(function (x) { return x && x.code === 'doc_type_mismatch'; })[0];
+      if (w) return res.detected_type || res.doc_type;
+      // a reused stored reading is returned as itself: it may be another kind of document
+      if (res.reused && res.kind && res.kind !== DOC_TYPE[k]) return res.kind;
+      return null;
     }
     function kindName(kind) {
       var map = { commercial_invoice: 'm_kind_invoice', bill_of_lading: 'm_kind_bl', customs_declaration: 'm_kind_declaration', supplier_invoice: 'm_kind_supplier',
@@ -281,10 +299,13 @@
       s.status = 'sending'; s.error = ''; renderSlot(k);
       return fileB64(s.file).then(function (b64) {
         s.status = 'reading'; renderSlot(k);
-        return API.aiExtract({ orgId: orgId || undefined, docType: DOC_TYPE[k], file: { media_type: s.mime, data_b64: b64 }, lang: lang() });
+        var q = { orgId: orgId || undefined, docType: DOC_TYPE[k], file: { media_type: s.mime, data_b64: b64 }, lang: lang() };
+        if (PROMPT[k]) q.promptVersion = PROMPT[k];
+        return API.aiExtract(q);
       }).then(function (r) {
         if (!r || r.error || !r.data) throw (r && r.error) || new Error(T('m_err_generic'));
-        if (AI.remaining != null) { AI.remaining = Math.max(0, AI.remaining - 1); showRemaining(); }
+        // a v3 answer from a reading already saved (reused) was not charged
+        if (AI.remaining != null && !r.data.reused) { AI.remaining = Math.max(0, AI.remaining - 1); showRemaining(); }
         takeReading(k, r.data);
         s.status = 'done'; renderSlot(k);
         return true;
@@ -330,7 +351,7 @@
         SLOTS.forEach(renderSlot);
         S.readAt = new Date().toISOString();
         var failed = todo.filter(function (k, i) { return !oks[i]; });
-        if (S.slots.invoice.res && S.slots.bl.res && (!S.slots.declaration.file || S.slots.declaration.res)) {
+        if (S.slots.invoice.res && S.slots.bl.res && (!S.slots.declaration.file || S.slots.declaration.res) && (!S.slots.packing.file || S.slots.packing.res)) {
           recompute(true);
         } else if (failed.length) {
           showError(T('m_err_failed', { docs: failed.map(docName).join('، ') }));
@@ -378,6 +399,12 @@
       setSaveMsg('', '');
     }
     function cols() { return SLOTS.filter(function (k) { return S.result && S.result.documents.indexOf(k) !== -1; }); }
+    // pair chips: whenever more than two documents are compared (three-way, or with the packing list)
+    function multi(R) { return !!R && (R.mode === 'three_way' || R.documents.length > 2); }
+    function modeText(R) {
+      var m = R.mode === 'three_way' ? T('m_mode_three') : T('m_mode_two');
+      return R.with_packing || R.documents.indexOf('packing') !== -1 ? T('m_mode_with_packing', { mode: m }) : m;
+    }
     function correctedKeys(row) {
       var any = false;
       cols().forEach(function (k) {
@@ -399,7 +426,7 @@
       mrow(T('m_meta_date'), fmtDate(S.readAt || new Date().toISOString()));
       mrow(T('m_meta_org'), orgName(S.orgId));
       cols().forEach(function (k) { mrow(docName(k), S.slots[k].file ? S.slots[k].file.name : ''); });
-      mrow(T('m_meta_mode'), R.mode === 'three_way' ? T('m_mode_three') : T('m_mode_two'));
+      mrow(T('m_meta_mode'), modeText(R));
       // banner
       var ov = $('ocr-match-overall');
       ov.textContent = T('m_overall_' + R.overall);
@@ -414,10 +441,9 @@
       // alerts: document type mismatches
       var al = $('ocr-match-alerts'); al.textContent = '';
       cols().forEach(function (k) {
-        var res = S.slots[k].res;
-        var w = res && (res.warnings || []).filter(function (x) { return x && x.code === 'doc_type_mismatch'; })[0];
-        if (w) {
-          var a = el('div', 'alert alert-warning', T('m_type_mismatch', { doc: docName(k), kind: kindName(res.detected_type || res.doc_type) }));
+        var mk = mismatchKind(k, S.slots[k].res);
+        if (mk) {
+          var a = el('div', 'alert alert-warning', T('m_type_mismatch', { doc: docName(k), kind: kindName(mk) }));
           a.setAttribute('role', 'note'); al.appendChild(a);
         }
       });
@@ -486,7 +512,7 @@
         tdS.appendChild(el('span', 'ocr-match-chip ' + STATUS_CLS[row.status], T('m_st_' + row.status)));
         var det = L(row, 'detail');
         if (det) tdS.appendChild(el('span', 'ocr-match-detail', det));
-        if (R.mode === 'three_way') {
+        if (multi(R)) {
           var pw = el('span', 'ocr-match-pairs');
           Object.keys(PAIR_DOCS).forEach(function (p) {
             var ps = row.pairs && row.pairs[p];
@@ -621,7 +647,8 @@
       var R = S.result, it = R.items, box = $('ocr-match-items-box');
       var head = $('ocr-match-items-head'), body = $('ocr-match-items-body'), note = $('ocr-match-items-note');
       head.textContent = ''; body.textContent = ''; note.textContent = '';
-      var C = cols();
+      // the packing list's line items are not compared by the engine: no column for it here
+      var C = cols().filter(function (k) { return k !== 'packing'; });
       var hr = el('tr');
       [T('m_item_hs'), T('m_item_desc')].concat(C.map(function (k) { return T('m_item_qty') + ' — ' + docName(k); })).concat([T('m_col_status')])
         .forEach(function (h) { var th = el('th', null, h); th.scope = 'col'; hr.appendChild(th); });
@@ -692,7 +719,8 @@
        miss = a field this document normally carries (and that matters) but the reading did not return (dashed)
        All values via textContent; a value with no Arabic letters is shown left-to-right (<bdi dir="ltr">).
        --------------------------------------------------------------- */
-    var SHEET_ORDER = ['bl', 'invoice', 'declaration'];
+    // the reference sheet's order (البوليصة / الفاتورة التجارية / بيان التعبئة), then the declaration
+    var SHEET_ORDER = ['bl', 'invoice', 'packing', 'declaration'];
     var LVL_RANK = { '': 0, miss: 1, warn: 2, bad: 3 };
     // server checks that mean "this value is not valid" (red); the other server checks are remarks to review (amber)
     var INVALID_WARN = ['container_check_digit', 'hs_format', 'vat_format', 'date_format', 'amount_format', 'currency_format',
@@ -862,7 +890,7 @@
       var rest = keys.filter(function (x) { return SHEET_KEYS.indexOf(x) === -1; });
       keys = SHEET_KEYS.filter(function (x) { return keys.indexOf(x) !== -1; }).concat(rest);
       // the document's own number first
-      var lead = { bl: 'bl_number', invoice: 'invoice_number', declaration: 'declaration_number' }[k];
+      var lead = { bl: 'bl_number', invoice: 'invoice_number', declaration: 'declaration_number', packing: 'packing_list_number' }[k];
       if (keys.indexOf(lead) > 0) { keys.splice(keys.indexOf(lead), 1); keys.unshift(lead); }
       Object.keys(iss).forEach(function (x) {
         if (keys.indexOf(x) === -1 && (iss[x].lvl === 'miss' || iss[x].bad.length)) keys.push(x);
@@ -1174,6 +1202,8 @@
         raw_text: String(res.raw_text || '').slice(0, 200000), extracted_fields: res.extracted_fields && typeof res.extracted_fields === 'object' ? res.extracted_fields : (s.orig || {}),
         qr_payload: null, line_items: (res.line_items || []).map(function (x) { return Object.assign({}, x); }), ai_usage_id: res.usage_id
       };
+      // an ai-doc-v3 reading (the packing list) is saved with its detail, as the batch reader does
+      if (res.ai_detail && typeof res.ai_detail === 'object') row.ai_detail = res.ai_detail;
       if (txId && !attach) row.transaction_id = txId;
       else if (S.orgId) row.org_id = S.orgId;
       return row;
@@ -1199,6 +1229,11 @@
         }
         return { data: hit, error: null, reused: true };
       };
+      // a v3 answer that is a reading already saved (reused:true): that extraction is used, never saved a second time
+      var res = S.slots[k].res || {};
+      if (res.reused && UUID_RE.test(String(res.extraction_id || ''))) {
+        return Promise.resolve(reuse({ id: res.extraction_id, doc_type: res.kind || res.doc_type, transaction_id: res.transaction_id || null, document_id: null, stored: true }));
+      }
       // with "attach", the reading is inserted unlinked and then linked: one already on that transaction is reused first
       var first = attach && txId ? lookup(txId).then(function (f) { return f && !f.error ? reuse(f.data) : null; }) : Promise.resolve(null);
       return first.then(function (got) {
@@ -1279,8 +1314,18 @@
                 });
               });
             }
+            // a stored v3 reading (reused:true) that is not on a transaction yet: link it to the transaction the user
+            // picked, like a reading saved now (without "attach" that row would carry transaction_id)
+            if (!attach && txId && reused && r.data.stored && !r.data.transaction_id && has('reviewExtraction')) {
+              tasks = tasks.then(function () {
+                return API.reviewExtraction(r.data.id, { transaction_id: txId }).then(function (u) {
+                  if (u && u.error) notes.push(T('m_note_review_failed', { doc: docName(k), msg: errMsg(u.error) }));
+                });
+              });
+            }
             // a reused reading that is already linked to the transaction / a document keeps its link
-            if (attach && S.slots[k].file && !(reused && r.data.document_id)) {
+            // (a stored v3 reading already on a transaction keeps it too)
+            if (attach && S.slots[k].file && !(reused && (r.data.document_id || (r.data.stored && r.data.transaction_id)))) {
               tasks = tasks.then(function () {
                 return API.attachExtractionDocument(r.data.id, { file: S.slots[k].file, transactionId: txId, kind: DOC_TYPE[k] }).then(function (a) {
                   if (!a.error) return null;
@@ -1301,6 +1346,7 @@
           orgId: S.orgId || undefined, transactionId: txId || null,
           invoiceExtractionId: S.saved.extractions.invoice.id, blExtractionId: S.saved.extractions.bl.id,
           declarationExtractionId: S.saved.extractions.declaration ? S.saved.extractions.declaration.id : null,
+          packingExtractionId: S.saved.extractions.packing ? S.saved.extractions.packing.id : null,
           mode: S.result.mode, engineVersion: S.result.version, overall: S.result.overall, counts: S.result.counts,
           rows: payloadRows(), reviewedRows: reviewedRows(), note: noteText(), idempotencyKey: idemKey()
         }).then(function (r) {
@@ -1406,7 +1452,8 @@
       main.appendChild(el('span', 'ocr-h-name', title));
       var sub = el('div', 'ocr-h-sub');
       sub.appendChild(el('span', null, fmtDate(m.created_at)));
-      sub.appendChild(el('span', null, m.mode === 'three_way' ? T('m_mode_three') : T('m_mode_two')));
+      var md = m.mode === 'three_way' ? T('m_mode_three') : T('m_mode_two');
+      sub.appendChild(el('span', null, m.with_packing || m.packing_extraction_id ? T('m_mode_with_packing', { mode: md }) : md));
       var c = countsOf(m);
       sub.appendChild(el('span', 'num', '✓' + c.match + ' ≈' + c.partial + ' ?' + c.missing + ' ✗' + c.mismatch));
       sub.appendChild(el('span', null, m.status === 'reviewed' ? T('m_review_approved') : T('m_review_pending')));
@@ -1447,7 +1494,7 @@
           extraction_id: S.saved.extractions[k] ? S.saved.extractions[k].id : null, fields: plainFields(s) };
       });
       return { app: 'marsa', kind: 'document_match', version: R.version, generated_at: new Date().toISOString(), read_at: S.readAt,
-        mode: R.mode, overall: R.overall, counts: R.counts, documents: docs, rows: payloadRows(), items: R.items,
+        mode: R.mode, with_packing: !!R.with_packing, overall: R.overall, counts: R.counts, documents: docs, rows: payloadRows(), items: R.items,
         reviewed_rows: reviewedRows(), approved: !!S.approved, reviewer: reviewerName() || null, note: noteText() || null,
         match_id: S.saved.match ? S.saved.match.id : null };
     }
@@ -1470,7 +1517,7 @@
         });
         var sum = [[T('m_sum_item'), T('m_sum_value')],
           [T('m_report_title'), T('m_overall_' + R.overall)],
-          [T('m_meta_mode'), R.mode === 'three_way' ? T('m_mode_three') : T('m_mode_two')],
+          [T('m_meta_mode'), modeText(R)],
           [T('m_meta_date'), fmtDate(S.readAt || new Date().toISOString())],
           [T('m_meta_org'), orgName(S.orgId)]];
         C.forEach(function (k) { sum.push([docName(k), S.slots[k].file ? S.slots[k].file.name : '']); });
@@ -1529,7 +1576,7 @@
     // maxScale: upper bound of the pixel ratio (a retry after a failed encode passes 1)
     function drawReport(maxScale) {
       var R = S.result, C = cols(), rtl = lang() !== 'en';
-      var W = 1400, PAD = 40, SCALE = Math.min(maxScale || 2, Math.max(1, window.devicePixelRatio || 1));
+      var W = C.length > 3 ? 1600 : 1400, PAD = 40, SCALE = Math.min(maxScale || 2, Math.max(1, window.devicePixelRatio || 1));
       var FONT = 'Cairo, "Segoe UI", Tahoma, Arial, sans-serif';
       var canvas = document.createElement('canvas');
       var ctx = canvas.getContext('2d');
@@ -1580,7 +1627,7 @@
         C.forEach(function (k, i) { var v = row.values[k]; out[k] = wrap(v === undefined ? '—' : (v == null || v === '' ? '—' : v), spec[i + 1].w - 2 * CELL_PAD, F_CELL); });
         var det = L(row, 'detail') || '';
         out.detail = det ? wrap(det, 330 - 2 * CELL_PAD, F_SMALL) : [];
-        if (R.mode === 'three_way') {
+        if (multi(R)) {
           var pp = Object.keys(PAIR_DOCS).filter(function (p) { return row.pairs && row.pairs[p] && (row.pairs[p] !== 'missing' || row.status === 'missing'); })
             .map(function (p) { return T('m_pair_' + p) + ' ' + pairMark(row.pairs[p]); }).join('   ');
           if (pp) out.detail = out.detail.concat(wrap(pp, 330 - 2 * CELL_PAD, F_SMALL));
@@ -1595,7 +1642,7 @@
       metaLines.push(T('m_meta_date') + ': ' + fmtDate(S.readAt || new Date().toISOString()));
       if (orgName(S.orgId)) metaLines.push(T('m_meta_org') + ': ' + orgName(S.orgId));
       C.forEach(function (k) { if (S.slots[k].file) metaLines.push(docName(k) + ': ' + S.slots[k].file.name); });
-      metaLines.push(T('m_meta_mode') + ': ' + (R.mode === 'three_way' ? T('m_mode_three') : T('m_mode_two')));
+      metaLines.push(T('m_meta_mode') + ': ' + modeText(R));
       var revLines = [T('m_reviewer') + ': ' + (reviewerName() || '—') + '   ·   ' + T('m_review_state') + ': '
         + (S.approved || (S.saved.match && S.saved.match.status === 'reviewed') ? T('m_review_approved') : T('m_review_pending'))
         + '   ·   ' + T('m_reviewed_n', { n: reviewedRows().length, total: R.rows.length })];

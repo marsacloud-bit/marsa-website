@@ -1,11 +1,22 @@
 /* ==========================================================================
-   مرسى | MARSA — document matching engine (invoice ↔ B/L ↔ customs declaration)
+   مرسى | MARSA — document matching engine (invoice ↔ B/L ↔ customs declaration ↔ packing list)
    Pure, deterministic, no DOM. UMD: window.MarsaDocMatch + module.exports.
-   Contract: SPEC.md §2 + ADDENDUM (three-way match). Version 'match-v1'.
+   Contract: SPEC.md §2 + ADDENDUM (three-way match) + packing list (20261126000100).
+   Version 'match-v1' without a packing list, 'match-v2' with one (a result without packing is unchanged).
 
-   compare({invoice:{fields, items}, bl:{fields, items}, declaration?:{fields, items}})
+   compare({invoice:{fields, items}, bl:{fields, items}, declaration?:{fields, items}, packing?:{fields, items}})
      → { version, mode: 'two_way'|'three_way', rows: [...], items: {...},
-         counts: {match, mismatch, partial, missing}, overall: 'match'|'mismatch'|'review' }
+         counts: {match, mismatch, partial, missing}, overall: 'match'|'mismatch'|'review',
+         documents, generated_at, with_packing: boolean, docs (= documents) }
+   mode is decided by the declaration only (invoice + B/L + declaration → three_way); the packing list
+   (بيان التعبئة, ai-extract doc_type 'packing_list', prompt ai-doc-v3) is an optional fourth document:
+   - it feeds invoice_number, container_numbers, shipper, consignee, gross / net weight, packages_count,
+     package_type, goods_description, hs_codes, country_of_origin; it is "expected" (a missing value counts as
+     'missing') only for container_numbers, gross_weight, net_weight and packages_count. Its invoice number is
+     its invoice_number, or its packing_list_number when that equals the invoice number of the invoice /
+     declaration (a packing list numbered after its invoice); any other packing list number is not a reference.
+   - pairs inv_pack, bl_pack, decl_pack; row values / conf / src / pairs carry the 'packing' keys only when a
+     packing list was given (without one every row is exactly as in match-v1). Its line items are not compared.
 
    fields = { key: {value, score?} } (a plain string value is accepted too);
    items  = [{description, hs_code, quantity, unit_price, amount}].
@@ -30,11 +41,16 @@
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  var VERSION = 'match-v1';
-  var DOCS = ['invoice', 'bl', 'declaration'];
-  var DOC_AR = { invoice: 'الفاتورة', bl: 'البوليصة', declaration: 'البيان' };
-  var DOC_EN = { invoice: 'the invoice', bl: 'the B/L', declaration: 'the declaration' };
-  var PAIRS = [['inv_bl', 'invoice', 'bl'], ['inv_decl', 'invoice', 'declaration'], ['bl_decl', 'bl', 'declaration']];
+  var VERSION = 'match-v1';           // invoice ↔ B/L (↔ declaration)
+  var VERSION_PACKING = 'match-v2';   // + packing list
+  var BASE_DOCS = ['invoice', 'bl', 'declaration'];
+  var DOCS = BASE_DOCS.concat(['packing']);
+  var DOC_AR = { invoice: 'الفاتورة', bl: 'البوليصة', declaration: 'البيان', packing: 'بيان التعبئة' };
+  var DOC_EN = { invoice: 'the invoice', bl: 'the B/L', declaration: 'the declaration', packing: 'the packing list' };
+  var DOC_MASC = { declaration: 1, packing: 1 };   // Arabic verb agreement: البيان / بيان التعبئة يختلف، الفاتورة / البوليصة تختلف
+  var BASE_PAIRS = [['inv_bl', 'invoice', 'bl'], ['inv_decl', 'invoice', 'declaration'], ['bl_decl', 'bl', 'declaration']];
+  var PACK_PAIRS = [['inv_pack', 'invoice', 'packing'], ['bl_pack', 'bl', 'packing'], ['decl_pack', 'declaration', 'packing']];
+  var PAIRS = BASE_PAIRS.concat(PACK_PAIRS);
   var RANK = { match: 0, partial: 1, mismatch: 2 };
 
   /* ------------------------------------------------------------------
@@ -589,29 +605,39 @@
      ------------------------------------------------------------------ */
   var F = [
     { key: 'invoice_number', ar: 'رقم الفاتورة', en: 'Invoice number', cmp: cmpId, crit: 'three',
-      keys: { invoice: ['invoice_number'], bl: ['invoice_number'], declaration: ['invoice_number'] }, exp: ['invoice', 'declaration'], opt: ['bl'] },
+      keys: { invoice: ['invoice_number'], bl: ['invoice_number'], declaration: ['invoice_number'], packing: ['invoice_number', 'packing_list_number'] },
+      exp: ['invoice', 'declaration'], opt: ['bl', 'packing'], refOnly: { packing_list_number: true } },
     { key: 'bl_number', ar: 'رقم البوليصة', en: 'B/L number', cmp: cmpId, crit: 'three',
       keys: { invoice: ['bl_number'], bl: ['bl_number'], declaration: ['bl_number'] }, exp: ['bl', 'declaration'], opt: ['invoice'] },
     { key: 'declaration_number', ar: 'رقم البيان الجمركي', en: 'Declaration number', cmp: cmpId, crit: false, info: true,
       keys: { invoice: ['declaration_number'], bl: ['declaration_number'], declaration: ['declaration_number'] }, exp: ['declaration'], opt: ['invoice', 'bl'] },
     { key: 'container_numbers', ar: 'أرقام الحاويات', en: 'Container numbers', cmp: cmpContainers, crit: true, set: 'containers',
-      keys: { invoice: ['container_numbers'], bl: ['container_numbers'], declaration: ['container_numbers'] }, exp: ['bl', 'declaration'], opt: ['invoice'] },
+      keys: { invoice: ['container_numbers'], bl: ['container_numbers'], declaration: ['container_numbers'], packing: ['container_numbers'] },
+      exp: ['bl', 'declaration', 'packing'], opt: ['invoice'] },
     { key: 'shipper', ar: 'الشاحن / المورد', en: 'Shipper / supplier', cmp: cmpName, crit: false,
-      keys: { invoice: ['shipper', 'supplier_name'], bl: ['shipper'], declaration: ['shipper', 'supplier_name'] }, exp: ['invoice', 'bl'], opt: ['declaration'] },
+      keys: { invoice: ['shipper', 'supplier_name'], bl: ['shipper'], declaration: ['shipper', 'supplier_name'], packing: ['shipper', 'supplier_name'] },
+      exp: ['invoice', 'bl'], opt: ['declaration', 'packing'] },
     { key: 'consignee', ar: 'المرسل إليه / المستورد', en: 'Consignee / importer', cmp: cmpName, crit: true,
-      keys: { invoice: ['consignee', 'buyer_name'], bl: ['consignee'], declaration: ['consignee', 'buyer_name'] }, exp: ['invoice', 'bl', 'declaration'], opt: [] },
+      keys: { invoice: ['consignee', 'buyer_name'], bl: ['consignee'], declaration: ['consignee', 'buyer_name'], packing: ['consignee', 'consignee_name', 'buyer_name'] },
+      exp: ['invoice', 'bl', 'declaration'], opt: ['packing'] },
     { key: 'gross_weight', ar: 'الوزن الإجمالي (كجم)', en: 'Gross weight (kg)', cmp: cmpWeight, crit: true, num: 'kg',
-      keys: { invoice: ['gross_weight'], bl: ['gross_weight'], declaration: ['gross_weight'] }, exp: ['bl', 'declaration'], opt: ['invoice'] },
+      keys: { invoice: ['gross_weight'], bl: ['gross_weight'], declaration: ['gross_weight'], packing: ['gross_weight'] },
+      exp: ['bl', 'declaration', 'packing'], opt: ['invoice'] },
     { key: 'net_weight', ar: 'الوزن الصافي (كجم)', en: 'Net weight (kg)', cmp: cmpWeight, crit: false, num: 'kg',
-      keys: { invoice: ['net_weight'], bl: ['net_weight'], declaration: ['net_weight'] }, exp: [], opt: ['invoice', 'bl', 'declaration'] },
+      keys: { invoice: ['net_weight'], bl: ['net_weight'], declaration: ['net_weight'], packing: ['net_weight'] },
+      exp: ['packing'], opt: ['invoice', 'bl', 'declaration'] },
     { key: 'packages_count', ar: 'عدد الطرود', en: 'Number of packages', cmp: cmpCount, crit: true, num: 'n',
-      keys: { invoice: ['packages_count'], bl: ['packages_count'], declaration: ['packages_count'] }, exp: ['bl', 'declaration'], opt: ['invoice'] },
+      keys: { invoice: ['packages_count'], bl: ['packages_count'], declaration: ['packages_count'], packing: ['packages_count'] },
+      exp: ['bl', 'declaration', 'packing'], opt: ['invoice'] },
     { key: 'package_type', ar: 'نوع الطرود', en: 'Package type', cmp: cmpPackageType, crit: false,
-      keys: { invoice: ['package_type'], bl: ['package_type'], declaration: ['package_type'] }, exp: ['bl'], opt: ['invoice', 'declaration'] },
+      keys: { invoice: ['package_type'], bl: ['package_type'], declaration: ['package_type'], packing: ['package_type'] },
+      exp: ['bl'], opt: ['invoice', 'declaration', 'packing'] },
     { key: 'hs_codes', ar: 'رموز HS (6 خانات)', en: 'HS codes (6 digits)', cmp: cmpHs, crit: true, set: 'hs',
-      keys: { invoice: ['hs_codes'], bl: ['hs_codes'], declaration: ['hs_codes'] }, exp: ['invoice', 'declaration'], opt: ['bl'] },
+      keys: { invoice: ['hs_codes'], bl: ['hs_codes'], declaration: ['hs_codes'], packing: ['hs_codes'] },
+      exp: ['invoice', 'declaration'], opt: ['bl', 'packing'] },
     { key: 'country_of_origin', ar: 'بلد المنشأ', en: 'Country of origin', cmp: cmpCountry, crit: false,
-      keys: { invoice: ['country_of_origin'], bl: ['country_of_origin'], declaration: ['country_of_origin'] }, exp: ['invoice', 'declaration'], opt: ['bl'] },
+      keys: { invoice: ['country_of_origin'], bl: ['country_of_origin'], declaration: ['country_of_origin'], packing: ['country_of_origin'] },
+      exp: ['invoice', 'declaration'], opt: ['bl', 'packing'] },
     { key: 'port_of_loading', ar: 'ميناء الشحن', en: 'Port of loading', cmp: cmpPort, crit: false,
       keys: { invoice: ['port_of_loading'], bl: ['port_of_loading'], declaration: ['port_of_loading'] }, exp: ['bl'], opt: ['invoice', 'declaration'] },
     { key: 'port_of_discharge', ar: 'ميناء التفريغ', en: 'Port of discharge', cmp: cmpPort, crit: false,
@@ -621,7 +647,8 @@
     { key: 'incoterms', ar: 'شروط التسليم (Incoterms)', en: 'Incoterms', cmp: cmpIncoterms, crit: false,
       keys: { invoice: ['incoterms'], bl: ['incoterms'], declaration: ['incoterms'] }, exp: ['invoice'], opt: ['bl', 'declaration'] },
     { key: 'goods_description', ar: 'وصف البضاعة', en: 'Goods description', cmp: cmpDesc, crit: false,
-      keys: { invoice: ['goods_description'], bl: ['goods_description'], declaration: ['goods_description'] }, exp: ['invoice', 'bl'], opt: ['declaration'] },
+      keys: { invoice: ['goods_description'], bl: ['goods_description'], declaration: ['goods_description'], packing: ['goods_description'] },
+      exp: ['invoice', 'bl'], opt: ['declaration', 'packing'] },
     { key: 'invoice_date', ar: 'تاريخ الفاتورة', en: 'Invoice date', cmp: cmpDate, crit: false,
       keys: { invoice: ['invoice_date'], declaration: ['invoice_date'] }, exp: ['invoice', 'declaration'], opt: [] },
     { key: 'currency', ar: 'العملة', en: 'Currency', cmp: cmpCurrency, crit: false,
@@ -706,11 +733,34 @@
     return { s: 'mismatch', diff: Math.round(Math.abs(x - y) * 100) / 100 };
   }
 
-  function buildRow(d, docs, present, mode) {
+  // a reference key (refOnly) counts only when it equals the value another document gives for this row
+  // (a packing list numbered after its invoice); any other value of it is not this row's value
+  function pickRef(d, docs, present, k) {
+    var keys = d.keys[k];
+    for (var i = 0; i < keys.length; i++) {
+      var g = getField(docs[k], keys[i]);
+      if (!g) continue;
+      if (d.refOnly && d.refOnly[keys[i]]) {
+        var ok = BASE_DOCS.some(function (o) {
+          if (o === k || present.indexOf(o) === -1 || !d.keys[o]) return false;
+          var go = pick(docs[o], d.keys[o]);
+          if (!go) return false;
+          try { return d.cmp(g.value, go.value).s === 'match'; } catch (e) { return false; }
+        });
+        if (!ok) continue;
+      }
+      g.key = keys[i];
+      return g;
+    }
+    return null;
+  }
+
+  // active = the documents a row has keys for (the three base ones, + 'packing' when a packing list was given)
+  function buildRow(d, docs, present, mode, active, pairList) {
     var values = {}, conf = {}, src = {}, have = [], corrected = false;
-    DOCS.forEach(function (k) {
+    active.forEach(function (k) {
       if (present.indexOf(k) === -1 || !d.keys[k]) { values[k] = undefined; conf[k] = null; src[k] = d.keys[k] ? d.keys[k][0] : null; return; }
-      var g = pick(docs[k], d.keys[k]);
+      var g = d.refOnly ? pickRef(d, docs, present, k) : pick(docs[k], d.keys[k]);
       values[k] = g ? g.value : null;
       conf[k] = g ? g.score : null;
       src[k] = g ? g.key : d.keys[k][0];
@@ -724,8 +774,9 @@
     var missingAny = applicable.filter(function (k) { return have.indexOf(k) === -1; });
 
     // pairwise comparisons
-    var pairs = { inv_bl: null, inv_decl: null, bl_decl: null }, res = {};
-    PAIRS.forEach(function (p) {
+    var pairs = {}, res = {};
+    pairList.forEach(function (p) { pairs[p[0]] = null; });
+    pairList.forEach(function (p) {
       var a = p[1], b = p[2];
       if (applicable.indexOf(a) === -1 || applicable.indexOf(b) === -1) return;
       var va = values[a], vb = values[b];
@@ -776,7 +827,7 @@
       // reference) is shown as partial for the reviewer, not as a critical mismatch
       var critOnly = null;
       if (d.crit === 'three' && mode === 'three_way' && worst === 'mismatch') {
-        PAIRS.forEach(function (p) { if (d.exp.indexOf(p[1]) !== -1 && d.exp.indexOf(p[2]) !== -1) critOnly = p[0]; });
+        pairList.forEach(function (p) { if (d.exp.indexOf(p[1]) !== -1 && d.exp.indexOf(p[2]) !== -1) critOnly = p[0]; });
         if (critOnly && !(res[critOnly] && res[critOnly].r.s === 'mismatch')) {
           status = 'partial';
           var optDocs = d.opt.filter(function (k) { return have.indexOf(k) !== -1; });
@@ -786,16 +837,26 @@
           }
         }
       }
-      if (worst !== 'match' && have.length === 3) {
-        // which document disagrees
+      if (worst !== 'match' && have.length >= 3) {
+        // which document disagrees: the documents linked by matching pairs form groups; one group of all but one
+        // document → that one differs; no matching pair at all → they all disagree
         var ok = done.filter(function (k) { return res[k].r.s === 'match'; });
-        if (ok.length === 1) {
-          var odd = DOCS.filter(function (x) { return x !== res[ok[0]].a && x !== res[ok[0]].b; })[0];
-          var both = [res[ok[0]].a, res[ok[0]].b];
-          dar.push(DOC_AR[odd] + (odd === 'declaration' ? ' يختلف' : ' تختلف') + ' عن ' + docList(both, 'ar'));
+        var grp = {};
+        have.forEach(function (x) { grp[x] = x; });
+        var root = function (x) { while (grp[x] !== x) x = grp[x]; return x; };
+        ok.forEach(function (k) { var ra = root(res[k].a), rb = root(res[k].b); if (ra !== rb) grp[rb] = ra; });
+        var sizes = {};
+        have.forEach(function (x) { var r0 = root(x); sizes[r0] = (sizes[r0] || 0) + 1; });
+        var roots = Object.keys(sizes);
+        if (ok.length && roots.length === 2 && (sizes[roots[0]] === 1 || sizes[roots[1]] === 1)) {
+          var oddRoot = sizes[roots[0]] === 1 ? roots[0] : roots[1];
+          var odd = have.filter(function (x) { return root(x) === oddRoot; })[0];
+          var both = have.filter(function (x) { return x !== odd; });
+          dar.push(DOC_AR[odd] + (DOC_MASC[odd] ? ' يختلف' : ' تختلف') + ' عن ' + docList(both, 'ar'));
           den.push(cap(DOC_EN[odd]) + ' differs from ' + docList(both, 'en'));
         } else if (!ok.length) {
-          dar.push('القيم مختلفة في المستندات الثلاثة'); den.push('The three documents disagree');
+          if (have.length === 3) { dar.push('القيم مختلفة في المستندات الثلاثة'); den.push('The three documents disagree'); }
+          else { dar.push('القيم مختلفة في المستندات الأربعة'); den.push('The four documents disagree'); }
         }
       } else if (worst !== 'match' && have.length === 2 && done.length === 1) {
         dar.push(docList(have, 'ar') + (worst === 'partial' ? ': تطابق جزئي' : ': غير متطابقين'));
@@ -849,7 +910,8 @@
   }
   function compareItems(docs, present) {
     var lists = {};
-    DOCS.forEach(function (k) { lists[k] = present.indexOf(k) !== -1 ? itemsOf(docs[k]) : undefined; });
+    // the packing list's line items (packages / weights per line) are not compared with the invoice quantities
+    BASE_DOCS.forEach(function (k) { lists[k] = present.indexOf(k) !== -1 ? itemsOf(docs[k]) : undefined; });
     var out = { invoice: lists.invoice || [], bl: lists.bl || [], declaration: lists.declaration || [], groups: [], totals: null, status: null };
     // internal invoice check
     var inv = lists.invoice || [];
@@ -865,7 +927,7 @@
       out.totals = { items_sum: sum, reference: ref, reference_key: ref == null ? null : refKey, complete: withAmt.length === inv.length,
         status: ref == null ? 'info' : (stOk ? 'match' : 'mismatch') };
     }
-    var others = DOCS.filter(function (k) { return k !== 'invoice' && lists[k] && lists[k].length; });
+    var others = BASE_DOCS.filter(function (k) { return k !== 'invoice' && lists[k] && lists[k].length; });
     if (!inv.length || !others.length) return out;
     var GI = groupItems(inv), GO = {};
     others.forEach(function (k) { GO[k] = groupItems(lists[k]); });
@@ -912,37 +974,45 @@
       var d = input[k];
       if (isObj(d)) { docs[k] = { fields: isObj(d.fields) ? d.fields : {}, items: Array.isArray(d.items) ? d.items : [] }; present.push(k); }
     });
-    // invoice and B/L are the basis; a declaration alone with one of them still compares what it can
-    var mode = present.indexOf('declaration') !== -1 && present.length === 3 ? 'three_way' : 'two_way';
+    // invoice and B/L are the basis; a declaration alone with one of them still compares what it can.
+    // The mode is decided by the declaration only (the packing list never makes a match three-way).
+    var mode = present.indexOf('declaration') !== -1 && present.indexOf('invoice') !== -1 && present.indexOf('bl') !== -1 ? 'three_way' : 'two_way';
+    var withPacking = present.indexOf('packing') !== -1;
+    var active = withPacking ? DOCS : BASE_DOCS, pairList = withPacking ? PAIRS : BASE_PAIRS;
+    // the synthetic rows (invoice_totals / items): the same per-document keys as the field rows
+    var blank = function (v) { var o = {}; active.forEach(function (k) { o[k] = v; }); return o; };
+    var blankPairs = function () { var o = {}; pairList.forEach(function (p) { o[p[0]] = null; }); return o; };
     var rows = [];
     F.forEach(function (d) {
       if (d.key === 'declaration_number' && present.indexOf('declaration') === -1) return;
-      var r = buildRow(d, docs, present, mode);
+      var r = buildRow(d, docs, present, mode, active, pairList);
       if (r) rows.push(r);
     });
     var items = compareItems(docs, present);
     if (items.totals && items.totals.status !== 'info') {
       var t = items.totals, ok = t.status === 'match';
+      var tv = blank(undefined); tv.invoice = fmtNum(t.items_sum);
       rows.push({ key: 'invoice_totals', label_ar: LABELS.invoice_totals.ar, label_en: LABELS.invoice_totals.en,
-        values: { invoice: fmtNum(t.items_sum), bl: undefined, declaration: undefined }, status: ok ? 'match' : 'mismatch',
+        values: tv, status: ok ? 'match' : 'mismatch',
         detail_ar: (ok ? 'مجموع البنود يساوي ' : 'مجموع البنود لا يساوي ') + (t.reference_key === 'total' ? 'الإجمالي' : 'المجموع قبل الضريبة') + ' (' + fmtNum(t.reference) + ')'
           + (t.complete ? '' : '؛ بعض البنود بلا مبلغ'),
         detail_en: 'Items sum ' + (ok ? 'equals' : 'does not equal') + ' the ' + (t.reference_key === 'total' ? 'total' : 'subtotal') + ' (' + fmtNum(t.reference) + ')'
           + (t.complete ? '' : '; some items have no amount'),
-        critical: false, conf: { invoice: null, bl: null, declaration: null }, pairs: { inv_bl: null, inv_decl: null, bl_decl: null },
-        src: { invoice: null, bl: null, declaration: null } });
+        critical: false, conf: blank(null), pairs: blankPairs(), src: blank(null) });
     }
     if (items.status) {
       var mis = items.groups.filter(function (g) { return g.status !== 'match'; });
       var codes = mis.slice(0, 6).map(function (g) { return g.hs6 || g.description.slice(0, 30); });
+      var iv = blank(undefined);
+      iv.invoice = String(items.invoice.length);
+      iv.bl = present.indexOf('bl') !== -1 ? String(items.bl.length) : undefined;
+      iv.declaration = present.indexOf('declaration') !== -1 ? String(items.declaration.length) : undefined;
       rows.push({ key: 'items', label_ar: LABELS.items.ar, label_en: LABELS.items.en,
-        values: { invoice: String(items.invoice.length), bl: present.indexOf('bl') !== -1 ? String(items.bl.length) : undefined,
-          declaration: present.indexOf('declaration') !== -1 ? String(items.declaration.length) : undefined },
+        values: iv,
         status: items.status,
         detail_ar: mis.length ? 'بنود تختلف كمياتها أو لا تظهر في كل المستندات: ' + codes.join('، ') : 'كميات البنود متطابقة',
         detail_en: mis.length ? 'Items whose quantities differ or that are not on every document: ' + codes.join(', ') : 'Item quantities agree',
-        critical: false, conf: { invoice: null, bl: null, declaration: null }, pairs: { inv_bl: null, inv_decl: null, bl_decl: null },
-        src: { invoice: null, bl: null, declaration: null } });
+        critical: false, conf: blank(null), pairs: blankPairs(), src: blank(null) });
     }
     var counts = { match: 0, mismatch: 0, partial: 0, missing: 0 };
     rows.forEach(function (r) { if (Object.prototype.hasOwnProperty.call(counts, r.status)) counts[r.status]++; });
@@ -951,8 +1021,8 @@
     else if (rows.some(function (r) { return (r.critical && (r.status === 'partial' || r.status === 'missing')) || r.status === 'mismatch'; })) overall = 'review';
     else if (!rows.some(function (r) { return r.status === 'match'; })) overall = 'review';   // nothing could be compared
     if (present.indexOf('invoice') === -1 || present.indexOf('bl') === -1) overall = overall === 'mismatch' ? 'mismatch' : 'review';
-    return { version: VERSION, mode: mode, rows: rows, items: items, counts: counts, overall: overall,
-      documents: present.slice(), generated_at: opts.now ? String(opts.now) : null };
+    return { version: withPacking ? VERSION_PACKING : VERSION, mode: mode, rows: rows, items: items, counts: counts, overall: overall,
+      documents: present.slice(), generated_at: opts.now ? String(opts.now) : null, with_packing: withPacking, docs: present.slice() };
   }
 
   /* ------------------------------------------------------------------
@@ -980,7 +1050,10 @@
   }
 
   return {
-    VERSION: VERSION, DOCS: DOCS.slice(), ROW_KEYS: ROW_KEYS.slice(), LABELS: LABELS,
+    VERSION: VERSION, VERSION_PACKING: VERSION_PACKING, VERSIONS: [VERSION, VERSION_PACKING],
+    DOCS: DOCS.slice(), BASE_DOCS: BASE_DOCS.slice(), ROW_KEYS: ROW_KEYS.slice(), LABELS: LABELS,
+    DOC_LABELS: { ar: JSON.parse(JSON.stringify(DOC_AR)), en: JSON.parse(JSON.stringify(DOC_EN)) },
+    PAIRS: (function () { var o = {}; PAIRS.forEach(function (p) { o[p[0]] = [p[1], p[2]]; }); return o; })(),
     FIELDS: F.map(function (d) { return { key: d.key, label_ar: d.ar, label_en: d.en, keys: d.keys, exp: d.exp.slice(), opt: d.opt.slice(), critical: d.crit }; }),
     compare: compare,
     // helpers (tests / UI)

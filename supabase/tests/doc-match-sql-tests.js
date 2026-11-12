@@ -14,6 +14,9 @@
   the match's and the extractions' transaction, clients / strangers / anon denied, no direct write); review / void flows;
   the guard (machine result immutable, voided rows frozen, no DELETE even for the owner); the audit trail without the
   compared values; supa.js (vm, mocked client); and convert_org_to_production deleting the org's matches (last).
+  + 20261126000100_doc_match_packing.sql (the packing list as a 4th optional document, engine match-v2): file conventions,
+  preflight / re-run / catalog delta, grants, save with packing (kind / org / voided / distinct / engine rules / rows keys /
+  transaction), list, visibility through the packing extraction, review / void, guard + table checks, supa.js pass-through.
 
   usage:
     NODE_PATH=/tmp/pgtest/node_modules node supabase/tests/doc-match-sql-tests.js [/path/to/marsa-website] [--quiet]
@@ -207,7 +210,7 @@ async function secFile() {
       && !/sk-ant|api\.anthropic\.com/i.test(src)) || 'body';
   });
   // later phases may follow this file (20261117000100 legacy_core: re-creates convert_delete_tables with party_ports)
-  const LATER_PHASES = ['20261117000100_legacy_core.sql', '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql'];
+  const LATER_PHASES = ['20261117000100_legacy_core.sql', '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql'];
   await check('this file is present; only the listed later phases follow it', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -299,7 +302,8 @@ async function secGrants() {
                         WHERE n.nspname = 'app' AND (p.proname LIKE 'doc_match%' OR p.proname LIKE 'tg_document_matches%' OR p.proname IN ('convert_delete_tables', 'convert_delete_guards', 'extraction_field_keys'))
                         ORDER BY 1`);
     const open = r.filter(x => x.au).map(x => x.proname);
-    return (J(open) === J(['doc_match_visible', 'extraction_field_keys']) && r.every(x => !x.an) && r.length === 10) || J(r);
+    // 12 = the 10 of this file + the two overloads of 20261126000100 (doc_match_rows_check(jsonb, text, boolean), doc_match_visible(… 6 uuids))
+    return (J(open) === J(['doc_match_visible', 'doc_match_visible', 'extraction_field_keys']) && r.every(x => !x.an) && r.length === 12) || J(r);
   });
   await check('anon cannot read the table nor call the RPCs', async () => {
     const a = await tryErr(() => as('anon', `SELECT 1 FROM public.document_matches`));
@@ -647,7 +651,7 @@ async function secSupa() {
     ['select', 'eq', 'is', 'order', 'limit', 'maybeSingle', 'range', 'or', 'single', 'insert', 'update'].forEach(m => {
       b[m] = function () { b.ops.push([m].concat([].slice.call(arguments))); return b; };
     });
-    b.then = (res, rej) => { calls.push({ from: table, ops: b.ops }); return Promise.resolve(listRes).then(res, rej); };
+    b.then = (res, rej) => { calls.push({ from: table, ops: b.ops }); return Promise.resolve(typeof listRes === 'function' ? listRes() : listRes).then(res, rej); };
     return b;
   }
   const client = {
@@ -741,6 +745,67 @@ async function secSupa() {
       && d[0].transaction_ref === 'MRS-2026-000001' && J(d[0].counts) === J({ match: 3, mismatch: 0, partial: 1, missing: 1 }) && d[0].status === 'reviewed'
       && !('transactions' in d[0]) && d[1].transaction_ref === null && d[1].status === 'voided') || J({ ops, d });
   });
+  // packing list (20261126000100)
+  await check('saveDocumentMatch + packingExtractionId → payload.packing_extraction_id, engine match-v2 by default; the mode stays from the declaration', async () => {
+    calls.length = 0;
+    nextRpc = { data: { id: 'x', created_at: 'now', status: 'saved' }, error: null };
+    await api.saveDocumentMatch({ orgId: ORG, invoiceExtractionId: X.inv, blExtractionId: X.bl, packingExtractionId: X.pack, overall: 'review', rows: [{ key: 'vessel', status: 'match' }] });
+    const p = calls[0] && calls[0].args.p_payload;
+    calls.length = 0;
+    await api.saveDocumentMatch({ orgId: ORG, invoiceExtractionId: X.inv, blExtractionId: X.bl, declarationExtractionId: X.decl, packingExtractionId: X.pack,
+      engineVersion: 'match-v2', overall: 'review', rows: [{ key: 'vessel', status: 'match' }] });
+    const p3 = calls[0] && calls[0].args.p_payload;
+    return (p && p.packing_extraction_id === X.pack && p.engine_version === 'match-v2' && p.mode === 'two_way' && p.declaration_extraction_id === null
+      && p3.packing_extraction_id === X.pack && p3.mode === 'three_way' && p3.engine_version === 'match-v2') || J({ p, p3 });
+  });
+  await check('saveDocumentMatch without a packing list: no packing_extraction_id key at all (a database without 20261126000100 keeps working), engine match-v1', async () => {
+    calls.length = 0;
+    await api.saveDocumentMatch({ orgId: ORG, invoiceExtractionId: X.inv, blExtractionId: X.bl, overall: 'review', rows: [{ key: 'vessel', status: 'match' }] });
+    const p = calls[0] && calls[0].args.p_payload;
+    calls.length = 0;
+    const bad = await api.saveDocumentMatch({ orgId: ORG, invoiceExtractionId: X.inv, blExtractionId: X.bl, packingExtractionId: 'nope', overall: 'review', rows: [{}] });
+    return (p && !('packing_extraction_id' in p) && p.engine_version === 'match-v1' && calls.length === 0
+      && bad.error.code === 'MRS_INVALID' && bad.error.field === 'packing_extraction_id') || J({ p, bad: bad.error });
+  });
+  await check('listDocumentMatches / getDocumentMatch select packing_extraction_id; rows carry packing_extraction_id + with_packing', async () => {
+    calls.length = 0;
+    listRes = { data: [{ id: 'm1', created_at: 't', overall: 'review', mode: 'two_way', transaction_id: null, transactions: null, packing_extraction_id: X.pack,
+      engine_version: 'match-v2', match_count: 1, mismatch_count: 0, partial_count: 0, missing_count: 0, status: 'saved', voided_at: null }], error: null };
+    const r = await api.listDocumentMatches({ orgId: ORG });
+    const ops = J(calls.find(x => x.from === 'document_matches').ops);
+    listRes = { data: { id: 'm2', packing_extraction_id: null, rows: [], transactions: null, match_count: 0 }, error: null };
+    calls.length = 0;
+    const g = await api.getDocumentMatch(X.m1);
+    const gops = J(calls.find(x => x.from === 'document_matches').ops);
+    return (/packing_extraction_id/.test(ops) && /packing_extraction_id/.test(gops) && r.data[0].packing_extraction_id === X.pack && r.data[0].with_packing === true
+      && g.data.packing_extraction_id === null && g.data.with_packing === false) || J({ ops, r: r.data, g });
+  });
+  await check('a database without 20261126000100 (42703 unknown column): list / get read the earlier columns once more (packing_extraction_id null)', async () => {
+    calls.length = 0;
+    let n = 0;
+    listRes = () => (++n === 1
+      ? { data: null, error: { code: '42703', message: 'column document_matches.packing_extraction_id does not exist', details: null, hint: null } }
+      : { data: [{ id: 'm1', created_at: 't', overall: 'match', mode: 'two_way', transactions: null, match_count: 1, mismatch_count: 0, partial_count: 0, missing_count: 0 }], error: null });
+    const r = await api.listDocumentMatches({ orgId: ORG });
+    const sel = calls.filter(x => x.from === 'document_matches').map(x => J(x.ops.find(o => o[0] === 'select')));
+    n = 0;
+    listRes = () => (++n === 1 ? { data: null, error: { code: '42501', message: 'permission denied for table document_matches' } } : { data: [], error: null });
+    const e = await api.listDocumentMatches({ orgId: ORG });
+    listRes = { data: [], error: null };
+    return (r.data && r.data.length === 1 && r.data[0].packing_extraction_id === null && sel.length === 2 && /packing_extraction_id/.test(sel[0])
+      && !/packing_extraction_id/.test(sel[1]) && e.error && n === 1) || J({ r, sel, e, n });
+  });
+  await check('server errors on the packing slot: MRS_MATCH_DOC_KIND names «بيان التعبئة»; MRS_NOT_FOUND / MRS_REQUIRED packing_extraction_id have their own text', async () => {
+    nextRpc = { data: null, error: { message: 'MRS_MATCH_DOC_KIND', details: 'packing_extraction_id', code: 'P0001' } };
+    const a = await api.saveDocumentMatch({ orgId: ORG, invoiceExtractionId: X.inv, blExtractionId: X.bl, packingExtractionId: X.pack, overall: 'match', rows: [{ key: 'vessel', status: 'match' }] });
+    nextRpc = { data: null, error: { message: 'MRS_NOT_FOUND', details: 'packing_extraction_id', code: 'P0001' } };
+    const b = await api.saveDocumentMatch({ orgId: ORG, invoiceExtractionId: X.inv, blExtractionId: X.bl, packingExtractionId: X.pack, overall: 'match', rows: [{ key: 'vessel', status: 'match' }] });
+    nextRpc = { data: null, error: { message: 'MRS_REQUIRED', details: 'packing_extraction_id', code: 'P0001' } };
+    const c = await api.saveDocumentMatch({ orgId: ORG, invoiceExtractionId: X.inv, blExtractionId: X.bl, engineVersion: 'match-v2', overall: 'match', rows: [{ key: 'vessel', status: 'match' }] });
+    nextRpc = { data: { id: 'x', created_at: 'now', status: 'saved' }, error: null };
+    return (a.error.code === 'MRS_MATCH_DOC_KIND' && /بيان التعبئة/.test(a.error.message) && /قراءة بيان التعبئة غير موجودة/.test(b.error.message)
+      && /بيان التعبئة/.test(c.error.message)) || J({ a: a.error, b: b.error, c: c.error });
+  });
   await check('demo mode (no config): every match call → MRS_DEMO_MODE, nothing stored locally', async () => {
     const d = load({});
     const a2 = d.api;
@@ -754,6 +819,259 @@ async function secSupa() {
     const codes = [...new Set((fs.readFileSync(MIG_FILE, 'utf8').match(/app\.fail\('(MRS_[A-Z_]+)'/g) || []).map(x => x.slice(10, -1)))];
     const missing = codes.filter(c => !new RegExp('\\b' + c + ':').test(src));
     return (bad.length === 0 && missing.length === 0) || J({ bad, missing });
+  });
+}
+
+/* ================================================================== 11. packing list (20261126000100) */
+const PMIG = '20261126000100_doc_match_packing.sql';
+const PMIG_FILE = path.join(MIG_DIR, PMIG);
+const P_NEW_FNS = ['app.doc_match_rows_check(p_rows jsonb, p_mode text, p_packing boolean)',
+  'app.doc_match_visible(p_org uuid, p_tx uuid, p_inv uuid, p_bl uuid, p_decl uuid, p_pack uuid)'];
+const P_RECREATED = ['app.doc_match_rows_check(p_rows jsonb, p_mode text)', 'app.doc_match_visible(p_org uuid, p_tx uuid, p_inv uuid, p_bl uuid, p_decl uuid)',
+  'app.tg_document_matches_guard()', 'public.review_document_match(p_id uuid, p_reviewed_rows jsonb, p_note text)',
+  'public.save_document_match(p_org uuid, p_payload jsonb)', 'public.void_document_match(p_id uuid, p_reason text)'];
+// rows of a match with the packing list: + values / conf 'packing' and the pairs inv_pack, bl_pack (+ decl_pack in three_way)
+function rowsP(list, three) {
+  return list.map(r => {
+    const st = r.status === 'info' ? null : r.status;
+    const pairs = Object.assign({}, r.pairs, { inv_pack: st, bl_pack: st }, three ? { decl_pack: st } : {});
+    return Object.assign({}, r, { values: Object.assign({ packing: r.values && r.values.bl !== undefined ? r.values.bl : 'A' }, r.values),
+      conf: Object.assign({ packing: 0.85 }, r.conf), pairs });
+  });
+}
+function payloadP(o) {
+  return payload(Object.assign({ packing_extraction_id: X.pack, engine_version: 'match-v2', rows: rowsP(GOOD_ROWS) }, o || {}));
+}
+
+async function secPackFile() {
+  section('11a. packing list migration: file conventions, all_migrations.sql');
+  const src = fs.readFileSync(PMIG_FILE, 'utf8');
+  const heads = src.match(/CREATE OR REPLACE FUNCTION[\s\S]*?AS \$\$/g) || [];
+  await check('file conventions: header, encoding guard, preflight on 20261125000100, schema_versions row, no BEGIN / COMMIT, search_path = \'\' on every function', () => {
+    const c = src.replace(/--.*$/gm, '');
+    const bad = heads.filter(h => !/SET search_path = ''/.test(h));
+    return (/^-- =+\n-- Marsa — STAGING \/ PROTOTYPE\. 20261126000100 — /.test(src) && /ENCODING ERROR: Arabic text was pasted incorrectly/.test(src)
+      && /version = '20261125000100'/.test(src) && /MATCH PACKING preflight: apply legacy_import first/.test(src)
+      && src.includes("INSERT INTO public.schema_versions (version, name) VALUES ('20261126000100', 'doc_match_packing')\nON CONFLICT (version) DO NOTHING;")
+      && !/^\s*(BEGIN|COMMIT|ROLLBACK)\s*;/im.test(c) && heads.length === 8 && bad.length === 0) || J({ n: heads.length, bad: bad.map(b => b.slice(0, 80)) });
+  });
+  await check('SECURITY DEFINER exactly on the 3 RPCs and the 2 visibility helpers; every refusal through app.fail(\'MRS_*\'); no new error code', () => {
+    const definer = heads.filter(h => /SECURITY DEFINER/.test(h)).map(h => (h.match(/FUNCTION ([a-z_.]+)\(/) || [])[1]).sort();
+    const raises = (src.match(/RAISE EXCEPTION[^;]*;/g) || []).filter(r => !/ENCODING ERROR|MATCH PACKING preflight/.test(r));
+    const codes = [...new Set((src.match(/app\.fail\('([A-Z_]+)'/g) || []).map(x => x.slice(10, -1)))];
+    const old = new Set((fs.readFileSync(MIG_FILE, 'utf8').match(/app\.fail\('([A-Z_]+)'/g) || []).map(x => x.slice(10, -1)));
+    return (J(definer) === J(['app.doc_match_visible', 'app.doc_match_visible', 'public.review_document_match', 'public.save_document_match', 'public.void_document_match'])
+      && raises.length === 0 && codes.length > 5 && codes.every(c => old.has(c))) || J({ definer, raises: raises.length, codes });
+  });
+  await check('no TRUNCATE / DROP TABLE / DROP FUNCTION / DISABLE TRIGGER; no key or endpoint; the arguments of save / review / void unchanged', () => {
+    const c = src.replace(/--.*$/gm, '');
+    return (!/\bTRUNCATE\b/i.test(c) && !/\bDROP\s+(TABLE|FUNCTION|SCHEMA|COLUMN)/i.test(c) && !/DISABLE TRIGGER/i.test(c) && !/session_replication_role/.test(c)
+      && !/sk-ant|api\.anthropic\.com/i.test(src) && /FUNCTION public\.save_document_match\(p_org uuid, p_payload jsonb\) RETURNS jsonb/.test(src)
+      && /FUNCTION public\.review_document_match\(p_id uuid, p_reviewed_rows jsonb, p_note text\) RETURNS jsonb/.test(src)
+      && /FUNCTION public\.void_document_match\(p_id uuid, p_reason text\) RETURNS jsonb/.test(src)) || 'body';
+  });
+  await check('this file is the latest migration', () => migFiles()[migFiles().length - 1] === PMIG || 'latest: ' + migFiles().pop());
+  await check('all_migrations.sql holds this file verbatim (appended last, in order) + a header line', () => {
+    const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
+    const marker = '-- ===== migrations/' + PMIG + ' =====\n';
+    const i = all.indexOf(marker);
+    const next = all.indexOf('\n-- ===== migrations/', i + marker.length);
+    const body = all.slice(i + marker.length, next < 0 ? undefined : next);
+    const order = (all.match(/^-- ===== migrations\/(\S+) =====$/gm) || []).map(l => l.split('/')[1].split(' ')[0]);
+    return (i > 0 && next < 0 && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
+      && all.slice(0, all.indexOf('DO $guard$')).includes('health_check() = 20261125000100') && all.slice(0, all.indexOf('DO $guard$')).includes(PMIG)
+      && J(order) === J(migFiles())) || 'not appended verbatim / no header line / order';
+  });
+  await check('docs: DOC_MATCH_AR.md names the migration and the packing slot; LEGACY_PORT_PLAN_AR.md has a dated line', () => {
+    const d = rd('docs/online/DOC_MATCH_AR.md'), pl = rd('docs/online/LEGACY_PORT_PLAN_AR.md');
+    const miss = [PMIG, 'packing_extraction_id', 'بيان التعبئة', 'match-v2', 'packing_list', 'ai-doc-v3'].filter(k => !d.includes(k));
+    return (miss.length === 0 && /\(2026-11-12\)[^\n]*20261126000100_doc_match_packing\.sql/.test(pl)) || J({ miss, plan: /20261126000100/.test(pl) });
+  });
+}
+
+async function secPackPreflight() {
+  section('11b. packing list migration: preflight, re-run, catalog delta (separate database, no seed)');
+  const src = fs.readFileSync(PMIG_FILE, 'utf8');
+  const d = await freshDb(PMIG);
+  try {
+    await withDb(d, async () => {
+      const C0 = await catalog();
+      const cols0 = (await q(`SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'document_matches' ORDER BY 1`)).map(x => x.column_name);
+      await db.exec(`DELETE FROM public.schema_versions WHERE version = '20261125000100'`);
+      const msg = await tryErr(() => db.exec(src));
+      const cols1 = (await q(`SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'document_matches' ORDER BY 1`)).map(x => x.column_name);
+      await check('without legacy_import: exact preflight message, nothing created', async () =>
+        (msg.startsWith('MATCH PACKING preflight: apply legacy_import first (schema_versions lacks 20261125000100 legacy_import)')
+          && J(cols0) === J(cols1) && !cols1.includes('packing_extraction_id') && J(C0) === J(await catalog())) || 'got: ' + msg);
+      await db.exec(`INSERT INTO public.schema_versions (version, name) VALUES ('20261125000100', 'legacy_import')`);
+      const r1 = await tryErr(() => db.exec(src));
+      const C1 = await catalog();
+      const k1 = await q(`SELECT conname, pg_get_constraintdef(oid) def FROM pg_constraint WHERE conrelid = 'public.document_matches'::regclass ORDER BY 1`);
+      const r2 = await tryErr(() => db.exec(src));
+      const k2 = await q(`SELECT conname, pg_get_constraintdef(oid) def FROM pg_constraint WHERE conrelid = 'public.document_matches'::regclass ORDER BY 1`);
+      await check('applies, and re-runs on top of itself with an identical catalog and constraints; one schema_versions row', async () =>
+        (r1 === 'ok' && r2 === 'ok' && J(C1) === J(await catalog()) && J(k1) === J(k2)
+          && (await num(`SELECT count(*) n FROM public.schema_versions WHERE version = '20261126000100'`)) === 1) || J({ r1, r2 }));
+      const s0 = new Map(C0.fns.map(f => [f.sig, f]));
+      await check('catalog: exactly the 2 new overloads; only the 6 re-created bodies changed (ACL / definer / config kept); no table / trigger / policy added', () => {
+        const added = C1.fns.filter(f => !s0.has(f.sig)).map(f => f.sig).sort();
+        const changed = C1.fns.filter(f => s0.has(f.sig) && J(s0.get(f.sig)) !== J(f)).map(f => f.sig).sort();
+        const sameMeta = P_RECREATED.every(sig => { const a = s0.get(sig), b = C1.fns.find(f => f.sig === sig); return a && b && a.acl === b.acl && a.d === b.d && a.c === b.c; });
+        return (J(added) === J(P_NEW_FNS.slice().sort()) && J(changed) === J(P_RECREATED.slice().sort()) && sameMeta
+          && J(C0.tables) === J(C1.tables) && J(C0.trg) === J(C1.trg) && J(C0.pol) === J(C1.pol)) || J({ added, changed, sameMeta });
+      });
+      await check('column packing_extraction_id uuid NULL; composite FK (id, org_id) → document_extractions; distinct + engine checks; an index', async () => {
+        const c = await one(`SELECT data_type t, is_nullable n FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'document_matches' AND column_name = 'packing_extraction_id'`);
+        const k = new Map(k1.map(x => [x.conname, x.def]));
+        const ix = await one(`SELECT count(*)::int n FROM pg_indexes WHERE tablename = 'document_matches' AND indexname = 'document_matches_pack_idx'`);
+        return (c && c.t === 'uuid' && c.n === 'YES'
+          && /FOREIGN KEY \(packing_extraction_id, org_id\) REFERENCES (public\.)?document_extractions\(id, org_id\)/.test(k.get('document_matches_pack_fk') || '')
+          && /packing_extraction_id/.test(k.get('document_matches_pack_distinct_chk') || '') && /match-v2/.test(k.get('document_matches_pack_engine_chk') || '')
+          && k.has('document_matches_distinct_chk') && k.has('document_matches_mode_chk') && ix.n === 1) || J({ c, k: k1.map(x => x.conname) });
+      });
+      await check('the SELECT policy goes through the 6-argument helper (+ packing_extraction_id); the conversion lists are unchanged', async () => {
+        const p = await one(`SELECT qual FROM pg_policies WHERE tablename = 'document_matches' AND policyname = 'document_matches_select'`);
+        const t = C0.fns.find(f => f.sig === 'app.convert_delete_tables()'), t1 = C1.fns.find(f => f.sig === 'app.convert_delete_tables()');
+        return (/doc_match_visible\(org_id, transaction_id, invoice_extraction_id, bl_extraction_id, declaration_extraction_id, packing_extraction_id\)/.test(p.qual)
+          && J(t) === J(t1)) || J(p);
+      });
+    });
+  } finally { await d.close(); }
+}
+
+async function secPack() {
+  section('11c. packing list: grants, save (match-v2), list, visibility, review / void, guard, table checks');
+  await check('grants: the 6-argument visibility helper executable by authenticated only; the 3-argument rows check closed; RPC grants unchanged', async () => {
+    const r = await one(`SELECT has_function_privilege('authenticated', 'app.doc_match_visible(uuid,uuid,uuid,uuid,uuid,uuid)', 'EXECUTE') va,
+                                has_function_privilege('anon', 'app.doc_match_visible(uuid,uuid,uuid,uuid,uuid,uuid)', 'EXECUTE') vn,
+                                has_function_privilege('service_role', 'app.doc_match_visible(uuid,uuid,uuid,uuid,uuid,uuid)', 'EXECUTE') vs,
+                                has_function_privilege('authenticated', 'app.doc_match_rows_check(jsonb,text,boolean)', 'EXECUTE') ra,
+                                has_function_privilege('authenticated', 'app.doc_match_rows_check(jsonb,text)', 'EXECUTE') r2,
+                                has_function_privilege('authenticated', 'public.save_document_match(uuid,jsonb)', 'EXECUTE') sa,
+                                has_function_privilege('anon', 'public.save_document_match(uuid,jsonb)', 'EXECUTE') sn,
+                                has_function_privilege('service_role', 'public.save_document_match(uuid,jsonb)', 'EXECUTE') ss`);
+    return (r.va && !r.vn && !r.vs && !r.ra && !r.r2 && r.sa && !r.sn && !r.ss) || J(r);
+  });
+  X.pack = await ext('packing_list', { fields: { packing_list_number: 'PL-0001', gross_weight: '27500', packages_count: '1200' } });
+  X.pack2 = await ext('packing_list');
+  await check('old saves keep their meaning: every match saved before is match-v1 with packing_extraction_id NULL', async () => {
+    const r = await one(`SELECT count(*)::int n, count(*) FILTER (WHERE engine_version = 'match-v1' AND packing_extraction_id IS NULL)::int v1 FROM public.document_matches`);
+    return (r.n > 10 && r.n === r.v1) || J(r);
+  });
+  await check('two_way + packing (match-v2): saved; packing values / pairs stored; mode stays two_way', async () => {
+    const r = await save('staff', payloadP());
+    X.mP = r.id;
+    const m = await one(`SELECT packing_extraction_id p, declaration_extraction_id d, mode, engine_version e, rows FROM public.document_matches WHERE id = $1`, [r.id]);
+    return (r.status === 'saved' && r.mode === 'two_way' && m.p === X.pack && m.d === null && m.mode === 'two_way' && m.e === 'match-v2'
+      && m.rows[0].values.packing !== undefined && m.rows[0].pairs.bl_pack === 'match' && m.rows[0].conf.packing === 0.85) || J({ r, m });
+  });
+  await check('three_way + packing (match-v2): saved with decl_pack pairs; mode three_way (decided by the declaration)', async () => {
+    const r = await save('staff', payloadP({ mode: 'three_way', declaration_extraction_id: X.decl, rows: rowsP(rows3(GOOD_ROWS), true) }));
+    X.mP3 = r.id;
+    const m = await one(`SELECT packing_extraction_id p, declaration_extraction_id d, mode, rows FROM public.document_matches WHERE id = $1`, [r.id]);
+    return (m.p === X.pack && m.d === X.decl && m.mode === 'three_way' && m.rows[0].pairs.decl_pack === 'match' && m.rows[0].values.declaration === 'A') || J(m);
+  });
+  await check('B/L gross 25000 vs packing gross 27500: a critical mismatch row must be saved as overall mismatch', async () => {
+    const mm = row('gross_weight', 'mismatch', { critical: true, values: { invoice: 25000, bl: 25000, packing: 27500 }, conf: { invoice: 0.9, bl: 0.9, packing: 0.9 },
+      pairs: { inv_bl: 'match', inv_pack: 'mismatch', bl_pack: 'mismatch' } });
+    const bad = await code(() => save('staff', payloadP({ rows: [mm], counts: { mismatch: 1 }, reviewed_rows: [] })));
+    const ok = await save('staff', payloadP({ overall: 'mismatch', rows: [mm], counts: { mismatch: 1 }, reviewed_rows: [] }));
+    return (bad === 'MRS_INVALID overall' && ok.overall === 'mismatch') || J({ bad, ok });
+  });
+  const ib = await ext('commercial_invoice');
+  const voidedPack = await ext('packing_list');
+  await as('staff', `UPDATE public.document_extractions SET voided_at = now(), void_reason = 'خطأ' WHERE id = $1`, [voidedPack]);
+  const packB = await ext('packing_list', { org: B, by: U.staffB });
+  const cases = [
+    ['match-v2 without a packing list', () => payload({ engine_version: 'match-v2' }), 'MRS_REQUIRED packing_extraction_id'],
+    ['match-v1 with a packing list', () => payloadP({ engine_version: 'match-v1' }), 'MRS_INVALID engine_version'],
+    ['another engine version (match-v3)', () => payloadP({ engine_version: 'match-v3' }), 'MRS_INVALID engine_version'],
+    ['packing id malformed', () => payloadP({ packing_extraction_id: 'x' }), 'MRS_INVALID packing_extraction_id'],
+    ['packing = the invoice', () => payloadP({ packing_extraction_id: X.inv }), 'MRS_INVALID packing_extraction_id'],
+    ['packing = the B/L', () => payloadP({ packing_extraction_id: X.bl }), 'MRS_INVALID packing_extraction_id'],
+    ['packing = the declaration', () => payloadP({ mode: 'three_way', declaration_extraction_id: X.decl, packing_extraction_id: X.decl, rows: rowsP(rows3(GOOD_ROWS), true) }), 'MRS_INVALID packing_extraction_id'],
+    ['a commercial invoice in the packing slot', () => payloadP({ packing_extraction_id: ib }), 'MRS_MATCH_DOC_KIND packing_extraction_id'],
+    ['a packing list in the invoice slot', () => payloadP({ invoice_extraction_id: X.pack2 }), 'MRS_MATCH_DOC_KIND invoice_extraction_id'],
+    ['a voided packing list', () => payloadP({ packing_extraction_id: voidedPack }), 'MRS_MATCH_DOC_VOIDED packing_extraction_id'],
+    ['a packing list of another org', () => payloadP({ packing_extraction_id: packB }), 'MRS_NOT_FOUND packing_extraction_id'],
+    ['an unknown packing id', () => payloadP({ packing_extraction_id: 'd0c0ffff-0000-4000-8000-0000000000aa' }), 'MRS_NOT_FOUND packing_extraction_id'],
+    ['a packing value without the packing list (match-v1)', () => payload({ rows: rowsP(GOOD_ROWS) }), 'MRS_INVALID rows.values'],
+    ['a packing confidence without the packing list', () => payload({ rows: [row('vessel', 'match', { conf: { packing: 0.5 } })], counts: {} }), 'MRS_INVALID rows.conf'],
+    ['a packing pair without the packing list', () => payload({ rows: [row('vessel', 'match', { pairs: { inv_pack: 'match' } })], counts: {} }), 'MRS_INVALID rows.pairs'],
+    ['decl_pack in a two_way packing match', () => payloadP({ rows: [row('vessel', 'match', { pairs: { decl_pack: 'match' } })], counts: {} }), 'MRS_INVALID rows.pairs'],
+    ['an unknown document key next to packing', () => payloadP({ rows: [row('vessel', 'match', { values: { packing_list: 'x' } })], counts: {} }), 'MRS_INVALID rows.values'],
+    ['more than 60 rows (limit unchanged)', () => payloadP({ rows: Array.from({ length: 61 }, () => row('items', 'match')), counts: {} }), 'MRS_INVALID rows_too_many']
+  ];
+  for (const [name, mk, want] of cases) {
+    await check('packing refused: ' + name + ' → ' + want, async () => {
+      const got = await code(() => save('staff', mk()));
+      return got.startsWith(want) || 'got: ' + got;
+    });
+  }
+  await check('packing of another transaction → MRS_INVALID transaction_id; a packing list on a transaction is adopted (branch-scoped)', async () => {
+    const pd = await ext('packing_list', { tx: TX_DMM }), pj = await ext('packing_list', { tx: TX_JED });
+    const a = await code(() => save('staff', payloadP({ invoice_extraction_id: X.invJ, packing_extraction_id: pd })));
+    const b = await save('staff', payloadP({ packing_extraction_id: pj }));
+    const pj2 = await ext('packing_list', { tx: TX_JED });
+    const c = await code(() => save('dmm', payloadP({ packing_extraction_id: pj2 })));
+    return (a === 'MRS_INVALID transaction_id' && b.transaction_id === TX_JED && c === 'MRS_NOT_FOUND packing_extraction_id') || J({ a, b, c });
+  });
+  await check('idempotency with packing: the same key + payload replays (one row)', async () => {
+    const k = newKey();
+    const n0 = await num(`SELECT count(*) n FROM public.document_matches`);
+    const a = await save('staff', payloadP({ idempotencyKey: k })), b = await save('staff', payloadP({ idempotencyKey: k }));
+    return (a.id === b.id && b.replayed === true && (await num(`SELECT count(*) n FROM public.document_matches`)) === n0 + 1) || J({ a, b });
+  });
+  await check('list: staff read packing_extraction_id (null on the 2- / 3-document matches)', async () => {
+    const r = await as('staff', `SELECT id, packing_extraction_id p, engine_version e FROM public.document_matches WHERE id = ANY ($1)`, [[X.mP, X.mP3, X.m1, X.m3]]);
+    const by = new Map(r.map(x => [x.id, x]));
+    return (r.length === 4 && by.get(X.mP).p === X.pack && by.get(X.mP3).p === X.pack && by.get(X.m1).p === null && by.get(X.m3).p === null
+      && by.get(X.m1).e === 'match-v1') || J(r);
+  });
+  await check('visibility through the packing list: an unlinked match whose packing reading is LATER linked to a JED transaction is hidden from the DMM member', async () => {
+    const inv = await ext('commercial_invoice'), bl = await ext('bill_of_lading'), pk = await ext('packing_list');
+    X.pack3 = pk;
+    const r = await save('staff', payloadP({ invoice_extraction_id: inv, bl_extraction_id: bl, packing_extraction_id: pk }));
+    X.mPV = r.id;
+    const seen = async who => (await as(who, `SELECT 1 FROM public.document_matches WHERE id = $1`, [r.id])).length === 1;
+    const before = await seen('dmm');
+    await as('staff', `UPDATE public.document_extractions SET transaction_id = $2 WHERE id = $1`, [pk, TX_JED]);
+    const after = await seen('dmm'), jed = await seen('jed'), staff = await seen('staff');
+    const v5 = (await as('dmm', `SELECT app.doc_match_visible($1, NULL, $2, $3, NULL) v`, [A, inv, bl]))[0].v;
+    const v6 = (await as('dmm', `SELECT app.doc_match_visible($1, NULL, $2, $3, NULL, $4) v`, [A, inv, bl, pk]))[0].v;
+    const rv = await code(() => review('dmm', r.id, ['bl_number']));
+    const vd = await code(() => voidM('dmm', r.id, 'x'));
+    return (before && !after && jed && staff && v5 === true && v6 === false && rv === 'MRS_NOT_FOUND document_match' && vd === 'MRS_NOT_FOUND document_match')
+      || J({ before, after, jed, staff, v5, v6, rv, vd });
+  });
+  await check('review / void of a packing match: the JED member reviews then voids it; voided → frozen', async () => {
+    const r = await review('jed', X.mPV, ['bl_number', 'gross_weight'], 'راجعت بيان التعبئة');
+    const v = await voidM('jed', X.mPV, 'إعادة قراءة بيان التعبئة');
+    const again = await code(() => review('staff', X.mPV, ['bl_number']));
+    const m = await one(`SELECT status, voided_by, packing_extraction_id p FROM public.document_matches WHERE id = $1`, [X.mPV]);
+    return (r.status === 'reviewed' && v.status === 'voided' && v.voided_by === U.jed && again === 'MRS_MATCH_VOIDED' && m.p === X.pack3) || J({ r, v, again, m });
+  });
+  await check('org B never sees org A\'s packing matches; clients / anon nothing', async () => {
+    const b = await as('staffB', `SELECT 1 FROM public.document_matches WHERE packing_extraction_id IS NOT NULL`);
+    const p = await as('portal', `SELECT 1 FROM public.document_matches WHERE packing_extraction_id IS NOT NULL`);
+    return (b.length === 0 && p.length === 0) || J({ b: b.length, p: p.length });
+  });
+  await check('guard: owner UPDATE of packing_extraction_id → MRS_IMMUTABLE packing_extraction_id', async () => {
+    const got = await code(() => q(`UPDATE public.document_matches SET packing_extraction_id = $2 WHERE id = $1`, [X.mP, X.pack2]));
+    const nul = await code(() => q(`UPDATE public.document_matches SET packing_extraction_id = NULL WHERE id = $1`, [X.mP]));
+    return (got === 'MRS_IMMUTABLE packing_extraction_id' && nul === 'MRS_IMMUTABLE packing_extraction_id') || J({ got, nul });
+  });
+  await check('table checks (owner insert): packing = invoice → pack_distinct_chk; packing on match-v1 → pack_engine_chk; packing of org B → pack_fk', async () => {
+    const base = `INSERT INTO public.document_matches (org_id, invoice_extraction_id, bl_extraction_id, packing_extraction_id, mode, engine_version, overall, rows, created_by)`;
+    const r1 = `'[{"key":"vessel","status":"match"}]'`;
+    const a = await tryErr(() => q(`${base} VALUES ($1, $2, $3, $2, 'two_way', 'match-v2', 'match', ${r1}, $4)`, [A, X.inv, X.bl, U.staff]));
+    const b = await tryErr(() => q(`${base} VALUES ($1, $2, $3, $5, 'two_way', 'match-v1', 'match', ${r1}, $4)`, [A, X.inv, X.bl, U.staff, X.pack2]));
+    const c = await tryErr(() => q(`${base} VALUES ($1, $2, $3, $5, 'two_way', 'match-v2', 'match', ${r1}, $4)`, [A, X.inv, X.bl, U.staff, packB]));
+    return (a.includes('document_matches_pack_distinct_chk') && b.includes('document_matches_pack_engine_chk') && /document_matches_pack_fk|foreign key/.test(c)) || J({ a, b, c });
+  });
+  await check('audit: a packing match is audited (INSERT) without its rows; packing_extraction_id is in the trail', async () => {
+    const r = await one(`SELECT action, new_data FROM public.audit_log WHERE table_name = 'document_matches' AND row_id = $1 AND action = 'INSERT'`, [X.mP]);
+    return (r && !('rows' in r.new_data) && r.new_data.packing_extraction_id === X.pack) || J(r);
   });
 }
 
@@ -802,6 +1120,8 @@ async function secConvert() {
   console.log('Marsa — document matching SQL tests (PGlite; local only)');
   await secFile();
   await secPreflight();
+  await secPackFile();
+  await secPackPreflight();
 
   section('load shim + migrations + seed + fixtures');
   db = await freshDb();
@@ -815,6 +1135,7 @@ async function secConvert() {
   await secRls();
   await secReview();
   await secGuard();
+  await secPack();
   await secSupa();
   await secConvert();
   await check('no network call was attempted', () => fetchCalls === 0);

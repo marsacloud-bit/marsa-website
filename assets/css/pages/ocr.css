@@ -138,11 +138,12 @@
 }
 
 /* =====================================================================
-   Invoice ↔ B/L ↔ customs declaration matching (ocr-match.js). Prefix: .ocr-match-
+   Invoice ↔ B/L ↔ customs declaration ↔ packing list matching (ocr-match.js). Prefix: .ocr-match-
+   Four slots: 4 columns on wide screens, 2 × 2 on medium, one column on phones.
    ===================================================================== */
 .ocr-match-section[hidden] { display: none; }
 .ocr-match-card > .ocr-block-head { margin-block-end: 16px; }
-.ocr-match-slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-block-start: 18px; }
+.ocr-match-slots { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-block-start: 18px; }
 .ocr-match-slot { display: grid; gap: 8px; align-content: start; min-width: 0; }
 .ocr-match-drop { position: relative; padding: 22px 12px; text-align: center; min-height: 150px; display: grid; gap: 6px; align-content: center; justify-items: center; }
 .ocr-match-drop.has-file { border-style: solid; border-color: var(--teal); background: rgba(20, 163, 168, .05); }
@@ -248,7 +249,9 @@ html[dir="ltr"] .ocr-match-row.is-info > th { box-shadow: inset 4px 0 0 #14A3A8;
 .ocr-match-recent-block .ocr-history-tools h3 { margin: 0; }
 .ocr-match-recent-block[hidden] { display: none; }
 
-@media (max-width: 900px) { .ocr-match-slots { grid-template-columns: 1fr; } .ocr-match-drop { min-height: 120px; } }
+@media (max-width: 1100px) { .ocr-match-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 900px) { .ocr-match-drop { min-height: 120px; } }
+@media (max-width: 600px) { .ocr-match-slots { grid-template-columns: 1fr; } }
 @media (max-width: 640px) {
   .ocr-match-export .btn { flex: 1 1 calc(50% - 8px); }
   .ocr-match-export .btn-primary { flex-basis: 100%; }

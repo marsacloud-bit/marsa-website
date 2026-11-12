@@ -8,7 +8,9 @@
   descriptions, ids, vessels); two-way rows (match / partial / mismatch / missing / info, omitted rows, critical flags,
   pairs, confidence, details AR + EN); overall rules; three-way (declaration disagrees with both, agrees with one,
   missing fields, currency differs, total vs subtotal, mode); line items + invoice totals; corrections; robustness
-  against weird input; the UMD wrapper (window.MarsaDocMatch in a vm) and determinism.
+  against weird input; the UMD wrapper (window.MarsaDocMatch in a vm) and determinism; the optional packing list
+  (match-v2, 20261126000100): a v1 snapshot digest without it, the inv_pack / bl_pack / decl_pack pairs, gross
+  25000 vs 27500, missing packing values, the invoice reference via packing_list_number, with_packing / docs.
 
   usage:  node supabase/tests/doc-match-engine-tests.js [/path/to/marsa-website] [--quiet]
 */
@@ -595,6 +597,259 @@ section('21. overall rule table');
     return J(crit) === J(['consignee', 'container_numbers', 'gross_weight', 'hs_codes', 'packages_count']) || J(crit);
   });
 }
+
+/* ----------------------------------------------------------------- packing list (match-v2, 20261126000100) */
+function packing(over) {
+  return {
+    fields: Object.assign({
+      packing_list_number: { value: 'PL-2026-0042', score: 0.9 }, packing_list_date: { value: '2026-10-01', score: 0.9 },
+      invoice_number: { value: 'INV-2026-0042', score: 0.93 }, container_numbers: { value: 'MSCU1234566', score: 0.92 },
+      shipper: { value: 'Ningbo Sunrise Trading Co., Ltd.', score: 0.9 }, consignee_name: { value: 'Marsa Trading Company', score: 0.9 },
+      gross_weight: { value: '12,500 KGS', score: 0.9 }, net_weight: { value: '12,000 KGS', score: 0.9 }, packages_count: { value: '500', score: 0.94 },
+      package_type: { value: 'Cartons', score: 0.9 }, goods_description: { value: 'Brake pads and spare parts', score: 0.85 },
+      hs_codes: { value: '870830, 870899', score: 0.8 }, country_of_origin: { value: 'China', score: 0.9 }
+    }, over || {}),
+    items: [{ description: 'Brake pads front', hs_code: '8708.30.00', quantity: 9999, packages: 400, gross_weight: 10000 }]
+  };
+}
+// snapshot corpus (packing absent): fixed fixture variants + 400 seeded random inputs
+function snapshotCorpus() {
+  const out = [];
+  const W = (x) => x;
+  out.push({ invoice: invoice(), bl: bl() }, { invoice: invoice(), bl: bl(), declaration: decl() });
+  out.push({ invoice: invoice({ gross_weight: { value: '13000' } }), bl: bl(), declaration: decl({ currency: { value: 'SAR' } }) });
+  out.push({ invoice: invoice({ buyer_name: { value: 'Marsa' } }), bl: bl({ consignee: { value: 'Marsa Logistics Services' }, packages_count: { value: '1' } }), declaration: decl() });
+  out.push({ invoice: invoice(), bl: bl(), declaration: decl({ gross_weight: { value: '9000' }, invoice_number: { value: 'INV-9' } }) });
+  out.push({ invoice: invoice(), bl: bl({ invoice_number: { value: 'INV-OTHER-77' } }), declaration: decl() });
+  out.push({ invoice: { fields: omit(invoice().fields, ['container_numbers', 'net_weight']) }, bl: bl({ net_weight: null }), declaration: decl({ consignee: null }) });
+  out.push({ invoice: invoice() }, { bl: bl(), declaration: decl() }, { invoice: invoice(), declaration: decl() }, {});
+  let seed = 4242; const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const pool = ['', ' ', '0', '12500', '12,500 KGS', '13 MT', '500', '500 CTNS', 'CIF Jeddah', 'جدة', 'MSCU1234566', 'MSCU1234566, TGHU1234567', '8708.30', '870899',
+    'Marsa Trading Co', 'شركة مرسى للتجارة', 'NINGBO SUNRISE', 'China', 'الصين', 'USD', 'SAR', '25000', '2026-10-01', '01/10/2026', 'INV-2026-0042', 'MEDU12345678', null, 3.5, 'X'];
+  const keys = ['invoice_number', 'bl_number', 'container_numbers', 'shipper', 'supplier_name', 'consignee', 'buyer_name', 'gross_weight', 'net_weight',
+    'packages_count', 'package_type', 'hs_codes', 'country_of_origin', 'port_of_loading', 'port_of_discharge', 'vessel', 'incoterms', 'goods_description',
+    'invoice_date', 'currency', 'total', 'subtotal', 'declaration_number'];
+  const p = () => pool[Math.floor(rnd() * pool.length)];
+  const doc = () => { const f = {}; keys.forEach(k => { if (rnd() < 0.55) f[k] = rnd() < 0.4 ? p() : { value: p(), score: Math.round(rnd() * 100) / 100, corrected: rnd() < 0.1 }; });
+    return { fields: f, items: rnd() < 0.5 ? [{ description: p(), hs_code: p(), quantity: Math.floor(rnd() * 10), amount: p() }, { description: 'Brake pads', hs_code: '870830', quantity: 4, amount: 100 }] : [] }; };
+  for (let i = 0; i < 400; i++) {
+    const inp = {};
+    if (rnd() < 0.92) inp.invoice = doc();
+    if (rnd() < 0.92) inp.bl = doc();
+    if (rnd() < 0.5) inp.declaration = doc();
+    out.push(inp);
+  }
+  return out.map(W);
+}
+function snapshotDigest(strip) {
+  const h = require('crypto').createHash('sha256');
+  snapshotCorpus().forEach(inp => {
+    const r = M.compare(inp, { now: '2026-11-12T00:00:00Z' });
+    const o = {}; Object.keys(r).forEach(k => { if (!strip || (k !== 'with_packing' && k !== 'docs')) o[k] = r[k]; });
+    h.update(J(o) + '\n');
+  });
+  return h.digest('hex');
+}
+
+section('22. packing list absent: identical to match-v1');
+{
+  // sha256 of the results of snapshotCorpus() computed with the engine BEFORE the packing list was added
+  // (match-v1, 2026-11-12), the two new keys stripped. Update it only for an intended change of the v1 behaviour.
+  eq('snapshot of 412 results without a packing list is unchanged', snapshotDigest(true), 'f568c994bc91637717a3746c7ae73cd1deaac12feacbf1a65eaa9a5adb7dcd37');
+  const base = M.compare({ invoice: invoice(), bl: bl(), declaration: decl() });
+  eq('version stays match-v1', base.version, 'match-v1');
+  eq('with_packing false', base.with_packing, false);
+  eq('docs = documents', base.docs, base.documents);
+  eq('result keys: the old ones in order, then with_packing + docs',
+    Object.keys(base), ['version', 'mode', 'rows', 'items', 'counts', 'overall', 'documents', 'generated_at', 'with_packing', 'docs']);
+  check('no row carries a packing key (values / conf / src / pairs)', () => base.rows.every(r => !('packing' in r.values) && !('packing' in r.conf) && !('packing' in r.src)
+    && J(Object.keys(r.pairs)) === J(['inv_bl', 'inv_decl', 'bl_decl'])) || 'packing keys');
+  const two = M.compare({ invoice: invoice(), bl: bl() });
+  check('two-way: still match-v1 + three pair keys', () => two.version === 'match-v1' && two.rows.every(r => J(Object.keys(r.pairs)) === J(['inv_bl', 'inv_decl', 'bl_decl'])) || 'two');
+  check('packing: null / not an object → ignored (v1)', () => { const r = M.compare({ invoice: invoice(), bl: bl(), packing: null }); const r2 = M.compare({ invoice: invoice(), bl: bl(), packing: 'x' });
+    return r.version === 'match-v1' && !r.with_packing && r2.version === 'match-v1' && J(r.rows) === J(two.rows) || 'ignored'; });
+}
+
+section('23. packing list: exports');
+check('DOCS has packing last; BASE_DOCS the old three', () => J(M.DOCS) === J(['invoice', 'bl', 'declaration', 'packing']) && J(M.BASE_DOCS) === J(['invoice', 'bl', 'declaration']) || J(M.DOCS));
+check('VERSION_PACKING / VERSIONS', () => M.VERSION === 'match-v1' && M.VERSION_PACKING === 'match-v2' && J(M.VERSIONS) === J(['match-v1', 'match-v2']) || 'versions');
+check('PAIRS map incl. inv_pack / bl_pack / decl_pack', () => J(M.PAIRS) === J({ inv_bl: ['invoice', 'bl'], inv_decl: ['invoice', 'declaration'], bl_decl: ['bl', 'declaration'],
+  inv_pack: ['invoice', 'packing'], bl_pack: ['bl', 'packing'], decl_pack: ['declaration', 'packing'] }) || J(M.PAIRS));
+check('DOC_LABELS: بيان التعبئة / the packing list', () => M.DOC_LABELS.ar.packing === 'بيان التعبئة' && M.DOC_LABELS.en.packing === 'the packing list' || J(M.DOC_LABELS));
+check('FIELDS: packing feeds the contract fields, expected only for containers / weights / packages', () => {
+  const feeds = M.FIELDS.filter(f => f.keys.packing).map(f => f.key).sort();
+  const exp = M.FIELDS.filter(f => f.exp.indexOf('packing') !== -1).map(f => f.key).sort();
+  return J(feeds) === J(['consignee', 'container_numbers', 'country_of_origin', 'goods_description', 'gross_weight', 'hs_codes', 'invoice_number', 'net_weight',
+    'package_type', 'packages_count', 'shipper'].sort()) && J(exp) === J(['container_numbers', 'gross_weight', 'net_weight', 'packages_count']) || J([feeds, exp]);
+});
+check('ROW_KEYS unchanged (22, the DB allow-list)', () => M.ROW_KEYS.length === 22 || M.ROW_KEYS.length);
+
+section('24. packing list: four documents agree');
+{
+  const r = M.compare({ invoice: invoice(), bl: bl(), declaration: decl(), packing: packing() });
+  eq('version match-v2', r.version, 'match-v2');
+  eq('mode three_way (decided by the declaration)', r.mode, 'three_way');
+  eq('with_packing true', r.with_packing, true);
+  eq('documents / docs list packing', [r.documents, r.docs], [['invoice', 'bl', 'declaration', 'packing'], ['invoice', 'bl', 'declaration', 'packing']]);
+  eq('overall match', r.overall, 'match');
+  check('no mismatch / missing / partial', () => r.counts.mismatch === 0 && r.counts.missing === 0 && r.counts.partial === 0 || J(r.counts));
+  check('every row carries the packing keys and the six pairs', () => r.rows.every(x => 'packing' in x.values && 'packing' in x.conf && 'packing' in x.src
+    && J(Object.keys(x.pairs)) === J(['inv_bl', 'inv_decl', 'bl_decl', 'inv_pack', 'bl_pack', 'decl_pack'])) || 'shape');
+  check('gross: all six pairs match, packing value + conf + src', () => { const g = row(r, 'gross_weight');
+    return J(g.pairs) === J({ inv_bl: 'match', inv_decl: 'match', bl_decl: 'match', inv_pack: 'match', bl_pack: 'match', decl_pack: 'match' })
+      && g.values.packing === '12,500 KGS' && g.conf.packing === 0.9 && g.src.packing === 'gross_weight' || J(g); });
+  check('consignee from consignee_name (src)', () => { const c = row(r, 'consignee'); return c.status === 'match' && c.src.packing === 'consignee_name' && c.pairs.decl_pack === 'match' || J(c); });
+  check('net weight: invoice + B/L + packing match (declaration not applicable value)', () => { const n = row(r, 'net_weight'); return n.status === 'match' && n.pairs.inv_pack === 'match' && n.pairs.bl_pack === 'match' || J(n); });
+  check('rows without packing keys keep packing undefined (total / currency / dates)', () => ['total', 'currency', 'invoice_date'].every(k => row(r, k) && row(r, k).values.packing === undefined
+    && row(r, k).pairs.inv_pack === null && row(r, k).src.packing === null) || 'undef');
+  check('critical set is the three-way set', () => J(r.rows.filter(x => x.critical).map(x => x.key).sort())
+    === J(['bl_number', 'consignee', 'container_numbers', 'gross_weight', 'hs_codes', 'invoice_number', 'packages_count', 'total']) || 'crit');
+  check('packing line items are not compared (items row + groups as without packing)', () => {
+    const r0 = M.compare({ invoice: invoice(), bl: bl(), declaration: decl() });
+    const it = row(r, 'items'), it0 = row(r0, 'items');
+    return J(r.items) === J(r0.items) && (it ? it.values.packing === undefined && it.pairs.decl_pack === null : true) && J(!!it) === J(!!it0) || J([r.items, it]);
+  });
+  check('invoice_totals row carries the packing keys', () => { const t = row(r, 'invoice_totals'); return t && 'packing' in t.values && t.values.packing === undefined && t.conf.packing === null && 'bl_pack' in t.pairs || J(t); });
+  check('same rows as without packing for fields packing does not feed', () => {
+    const r0 = M.compare({ invoice: invoice(), bl: bl(), declaration: decl() });
+    return ['bl_number', 'port_of_loading', 'vessel', 'incoterms', 'total'].every(k => row(r, k).status === row(r0, k).status) || 'same';
+  });
+}
+
+section('25. packing list: gross 25000 vs 27500 (يوجد اختلاف)');
+{
+  const W = { gross_weight: { value: '25000', score: 0.9 } };
+  const r = M.compare({ invoice: invoice(W), bl: bl({ gross_weight: { value: '25,000 KGS' } }), declaration: decl(W), packing: packing({ gross_weight: { value: '27,500 KGS', score: 0.9 } }) });
+  const g = row(r, 'gross_weight');
+  eq('gross row mismatch', g.status, 'mismatch');
+  eq('critical', g.critical, true);
+  eq('overall mismatch', r.overall, 'mismatch');
+  eq('pairs: base agree, every packing pair differs', g.pairs, { inv_bl: 'match', inv_decl: 'match', bl_decl: 'match', inv_pack: 'mismatch', bl_pack: 'mismatch', decl_pack: 'mismatch' });
+  check('detail names the packing list as the odd one + the difference (AR + EN)', () => /^بيان التعبئة يختلف عن الفاتورة، البوليصة والبيان/.test(g.detail_ar) && /الفرق 2,500 كجم/.test(g.detail_ar)
+    && /^The packing list differs from the invoice, the B\/L and the declaration/.test(g.detail_en) && /Difference 2,500 kg/.test(g.detail_en) || J([g.detail_ar, g.detail_en]));
+  eq('counts: one mismatch only', r.counts.mismatch, 1);
+  const two = M.compare({ invoice: invoice(W), bl: bl({ gross_weight: { value: '25000 KG' } }), packing: packing({ gross_weight: { value: '27500' } }) });
+  check('two-way + packing: mode two_way, bl_pack mismatch, decl pairs null, overall mismatch', () => { const x = row(two, 'gross_weight');
+    return two.mode === 'two_way' && two.with_packing && two.version === 'match-v2' && x.pairs.bl_pack === 'mismatch' && x.pairs.inv_bl === 'match'
+      && x.pairs.inv_decl === null && x.pairs.decl_pack === null && two.overall === 'mismatch' && /^بيان التعبئة يختلف عن الفاتورة والبوليصة/.test(x.detail_ar) || J([two.mode, x]); });
+  check('B/L alone differs from invoice + declaration + packing (feminine verb)', () => {
+    const x = row(M.compare({ invoice: invoice(), bl: bl({ gross_weight: { value: '9000' } }), declaration: decl(), packing: packing() }), 'gross_weight');
+    return x.status === 'mismatch' && /^البوليصة تختلف عن الفاتورة، البيان وبيان التعبئة/.test(x.detail_ar) || J(x.detail_ar);
+  });
+  check('2 + 2 split: no single odd document named', () => {
+    const x = row(M.compare({ invoice: invoice(), bl: bl(), declaration: decl({ gross_weight: { value: '9000' } }), packing: packing({ gross_weight: { value: '9000' } }) }), 'gross_weight');
+    return x.status === 'mismatch' && !/يختلف عن|تختلف عن|disagree/.test(x.detail_ar + x.detail_en) || J(x.detail_ar);
+  });
+  check('four documents disagree', () => {
+    const x = row(M.compare({ invoice: invoice({ gross_weight: { value: '1000' } }), bl: bl({ gross_weight: { value: '2000' } }), declaration: decl({ gross_weight: { value: '3000' } }),
+      packing: packing({ gross_weight: { value: '4000' } }) }), 'gross_weight');
+    return /المستندات الأربعة/.test(x.detail_ar) && /four documents disagree/.test(x.detail_en) || J(x.detail_ar);
+  });
+  check('packages differ on the packing list → critical mismatch', () => { const r2 = M.compare({ invoice: invoice(), bl: bl(), packing: packing({ packages_count: { value: '480' } }) });
+    return st(r2, 'packages_count') === 'mismatch' && r2.overall === 'mismatch' && row(r2, 'packages_count').pairs.bl_pack === 'mismatch' || J(row(r2, 'packages_count')); });
+  check('net weight differs only on the packing list → mismatch, overall review (not critical)', () => { const r2 = M.compare({ invoice: invoice(), bl: bl(), packing: packing({ net_weight: { value: '11000' } }) });
+    return st(r2, 'net_weight') === 'mismatch' && !row(r2, 'net_weight').critical && r2.overall === 'review' || J([row(r2, 'net_weight'), r2.overall]); });
+}
+
+section('26. packing list: missing values');
+{
+  const full = M.compare({ invoice: invoice(), bl: bl(), declaration: decl(), packing: packing() });
+  const r = M.compare({ invoice: invoice(), bl: bl(), declaration: decl(), packing: { fields: omit(packing().fields, ['packages_count']) } });
+  const p = row(r, 'packages_count');
+  eq('packages missing on the packing list → missing', p.status, 'missing');
+  check('detail: لا يظهر في بيان التعبئة / Not shown on the packing list', () => /لا يظهر في بيان التعبئة/.test(p.detail_ar) && /Not shown on the packing list/.test(p.detail_en) || J(p));
+  eq('packing pairs missing, base pairs match', p.pairs, { inv_bl: 'match', inv_decl: 'match', bl_decl: 'match', inv_pack: 'missing', bl_pack: 'missing', decl_pack: 'missing' });
+  eq('counts.missing +1 over the full match', r.counts.missing, full.counts.missing + 1);
+  eq('overall review (critical row missing)', r.overall, 'review');
+  check('values.packing null (uploaded, no value), src = packages_count', () => p.values.packing === null && p.src.packing === 'packages_count' || J(p));
+  ['gross_weight', 'container_numbers', 'net_weight'].forEach(k => {
+    check(k + ' missing on the packing list → missing', () => st(M.compare({ invoice: invoice(), bl: bl(), packing: { fields: omit(packing().fields, [k]) } }), k) === 'missing' || 'st');
+  });
+  ['shipper', 'consignee_name', 'goods_description', 'package_type', 'hs_codes', 'country_of_origin'].forEach(k => {
+    check(k + ' absent on the packing list (optional) → not missing', () => {
+      const x = M.compare({ invoice: invoice(), bl: bl(), declaration: decl(), packing: { fields: omit(packing().fields, [k]) } });
+      const key = k === 'consignee_name' ? 'consignee' : k;
+      return st(x, key) === st(M.compare({ invoice: invoice(), bl: bl(), declaration: decl() }), key) || J(row(x, key));
+    });
+  });
+  check('net weight only on the packing list → info (no other document expected)', () => {
+    const x = M.compare({ invoice: { fields: omit(invoice().fields, ['net_weight']) }, bl: bl({ net_weight: null }), packing: packing() });
+    return st(x, 'net_weight') === 'info' || J(row(x, 'net_weight'));
+  });
+  check('net weight row appears only because of the packing list', () => {
+    const inv = { fields: omit(invoice().fields, ['net_weight']) }, b = bl({ net_weight: null });
+    return row(M.compare({ invoice: inv, bl: b }), 'net_weight') === null && row(M.compare({ invoice: inv, bl: b, packing: packing() }), 'net_weight') !== null || 'row';
+  });
+  check('empty packing list: v2, containers / gross / packages missing, overall review', () => {
+    const x = M.compare({ invoice: invoice(), bl: bl(), declaration: decl(), packing: { fields: {} } });
+    return x.version === 'match-v2' && x.with_packing && ['container_numbers', 'gross_weight', 'packages_count'].every(k => st(x, k) === 'missing') && x.overall === 'review' || J(x.counts);
+  });
+  check('invoice + packing only (no B/L) → review', () => { const x = M.compare({ invoice: invoice(), packing: packing() }); return x.overall === 'review' && x.mode === 'two_way' || x.overall; });
+  check('invoice + B/L + packing (no declaration) is never three_way', () => M.compare({ invoice: invoice(), bl: bl(), packing: packing() }).mode === 'two_way' || 'mode');
+}
+
+section('27. packing list: decl_pack pair + invoice reference');
+{
+  const r = M.compare({ invoice: invoice(), bl: bl(), declaration: decl({ container_numbers: { value: 'TGHU1234567' } }), packing: packing({ container_numbers: { value: 'MSCU1234566, TGHU1234567' } }) });
+  const c = row(r, 'container_numbers');
+  check('decl_pack partial (one container in common), bl_pack partial, bl_decl mismatch', () => c.pairs.decl_pack === 'partial' && c.pairs.bl_pack === 'partial' && c.pairs.bl_decl === 'mismatch'
+    && c.status === 'mismatch' || J(c.pairs));
+  check('set detail names the packing list', () => /في بيان التعبئة فقط: TGHU1234567/.test(c.detail_ar) && /Only in the packing list: TGHU1234567/.test(c.detail_en) || J(c.detail_ar));
+  const d2 = row(M.compare({ invoice: invoice(), bl: bl(), declaration: decl({ hs_codes: { value: '870830' } }), packing: packing({ hs_codes: { value: '870830' } }) }), 'hs_codes');
+  eq('decl_pack match when both carry the same HS', d2.pairs.decl_pack, 'match');
+  const i1 = row(M.compare({ invoice: invoice(), bl: bl(), declaration: decl(), packing: packing({ invoice_number: null, packing_list_number: { value: 'INV-2026-0042', score: 0.8 } }) }), 'invoice_number');
+  check('packing_list_number equal to the invoice number counts as its invoice reference', () => i1.values.packing === 'INV-2026-0042' && i1.src.packing === 'packing_list_number'
+    && i1.pairs.inv_pack === 'match' && i1.pairs.decl_pack === 'match' && i1.status === 'match' || J(i1));
+  const i2 = row(M.compare({ invoice: invoice(), bl: bl(), declaration: decl(), packing: packing({ invoice_number: null }) }), 'invoice_number');
+  check('another packing_list_number is not a reference (packing value null, row still match)', () => i2.values.packing === null && i2.src.packing === 'invoice_number'
+    && i2.pairs.inv_pack === 'missing' && i2.status === 'match' || J(i2));
+  const i3 = row(M.compare({ invoice: invoice(), bl: bl(), declaration: decl(), packing: packing({ invoice_number: { value: 'INV-2026-9999' } }) }), 'invoice_number');
+  check('three-way: a packing list citing another invoice → partial (optional reference), not critical mismatch', () => i3.status === 'partial' && i3.pairs.inv_pack === 'mismatch'
+    && /بيان التعبئة فقط \(مرجع اختياري\)/.test(i3.detail_ar) || J(i3));
+  const i4 = M.compare({ invoice: invoice(), bl: bl(), packing: packing({ invoice_number: { value: 'INV-2026-9999' } }) });
+  check('two-way: invoice number differs on the packing list → mismatch, not critical, overall review', () => st(i4, 'invoice_number') === 'mismatch' && !row(i4, 'invoice_number').critical
+    && i4.overall === 'review' || J([row(i4, 'invoice_number'), i4.overall]));
+  check('Arabic packing list: consignee in Arabic vs Arabic invoice', () => {
+    const x = M.compare({ invoice: { fields: { buyer_name: 'شركة الفجر للتجارة', gross_weight: '100' } }, bl: { fields: { consignee: 'مؤسسة الفجر', gross_weight: '100 كجم' } },
+      packing: { fields: { consignee_name: 'الفجر', gross_weight: '٠٫١ طن' } } });
+    return st(x, 'consignee') === 'match' && st(x, 'gross_weight') === 'match' || J(x.rows);
+  });
+}
+
+section('28. packing list: robustness + determinism');
+check('corrections on the packing list keep row.corrected', () => row(M.compare({ invoice: invoice(), bl: bl(), packing: packing({ gross_weight: { value: '12500', corrected: true } }) }), 'gross_weight').corrected === true || 'corrected');
+check('deterministic with packing', () => { const i = { invoice: invoice(), bl: bl(), declaration: decl(), packing: packing() };
+  return J(M.compare(i, { now: 'x' })) === J(M.compare(JSON.parse(J(i)), { now: 'x' })) || 'det'; });
+check('input not mutated', () => { const p = packing(); const s0 = J(p); M.compare({ invoice: invoice(), bl: bl(), packing: p }); return J(p) === s0 || 'mutated'; });
+check('random fuzz with packing: 300 inputs never throw and keep the shape', () => {
+  let seed = 99; const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const pool = ['', '0', '12,5', '27500', '25000 KG', 'MSCU1234566', 'INV-1', 'PL-1', 'Marsa', 'جدة', '٫', null, 7, 'CTNS'];
+  const keys = ['invoice_number', 'packing_list_number', 'container_numbers', 'shipper', 'supplier_name', 'consignee', 'consignee_name', 'buyer_name', 'gross_weight',
+    'net_weight', 'packages_count', 'package_type', 'hs_codes', 'country_of_origin', 'goods_description', 'bl_number', 'total', 'currency'];
+  const doc = () => { const f = {}; keys.forEach(k => { if (rnd() < 0.5) f[k] = rnd() < 0.5 ? pool[Math.floor(rnd() * pool.length)] : { value: pool[Math.floor(rnd() * pool.length)], score: rnd() }; });
+    return { fields: f, items: [] }; };
+  const P6 = ['inv_bl', 'inv_decl', 'bl_decl', 'inv_pack', 'bl_pack', 'decl_pack'];
+  for (let i = 0; i < 300; i++) {
+    const inp = { invoice: rnd() < 0.9 ? doc() : undefined, bl: rnd() < 0.9 ? doc() : undefined, declaration: rnd() < 0.5 ? doc() : undefined, packing: doc() };
+    const r = M.compare(inp);
+    if (r.version !== 'match-v2' || r.with_packing !== true) return 'version ' + i;
+    if (r.mode !== (inp.invoice && inp.bl && inp.declaration ? 'three_way' : 'two_way')) return 'mode ' + i;
+    if (!r.rows.every(x => M.ROW_KEYS.includes(x.key) && J(Object.keys(x.pairs)) === J(P6) && 'packing' in x.values)) return 'row ' + i;
+    const sum = r.counts.match + r.counts.mismatch + r.counts.partial + r.counts.missing;
+    if (sum !== r.rows.filter(x => x.status !== 'info').length) return 'counts ' + i;
+    if (r.rows.some(x => x.critical && x.status === 'mismatch') && r.overall !== 'mismatch') return 'overall rule ' + i;
+  }
+  return true;
+});
+check('browser (vm): packing → match-v2', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'assets', 'js', 'doc-match.js'), 'utf8');
+  const win = {}; const ctx = { window: win }; vm.createContext(ctx); vm.runInContext(src, ctx);
+  return win.MarsaDocMatch.compare({ invoice: invoice(), bl: bl(), packing: packing() }).version === 'match-v2' || 'vm';
+});
+check('engine source stays ES5 (no let / const / arrow / template / class)', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'assets', 'js', 'doc-match.js'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  return !/\b(let|const|class)\s|=>|`/.test(src) || 'es6';
+});
 
 /* ----------------------------------------------------------------- summary */
 console.log('\nMarsa — doc-match engine tests: ' + pass + ' passed, ' + fail + ' failed (' + (pass + fail) + ' checks)');

@@ -74,7 +74,7 @@
       MRS_AI_UNAVAILABLE: 'خدمة القراءة بالذكاء الاصطناعي غير متاحة الآن. حاول لاحقًا أو استخدم القراءة داخل المتصفح.',
       MRS_AI_FAILED: 'تعذّرت القراءة بالذكاء الاصطناعي. حاول مرة أخرى أو استخدم القراءة داخل المتصفح.',
       // document matching (20261116000100): invoice ↔ B/L ↔ customs declaration
-      MRS_MATCH_DOC_KIND: 'المستند المحفوظ في خانة «{f}» ليس من النوع المطلوب (فاتورة تجارية، بوليصة شحن، بيان جمركي). تحقّق من نوع المستند ثم أعد القراءة.',
+      MRS_MATCH_DOC_KIND: 'المستند المحفوظ في خانة «{f}» ليس من النوع المطلوب (فاتورة تجارية، بوليصة شحن، بيان جمركي، بيان التعبئة). تحقّق من نوع المستند ثم أعد القراءة.',
       MRS_MATCH_DOC_VOIDED: 'قراءة «{f}» مُلغاة، فلا يمكن حفظ المطابقة عليها. اقرأ المستند من جديد ثم احفظ.',
       MRS_MATCH_VOIDED: 'هذه المطابقة مُلغاة ولا يمكن مراجعتها أو تعديلها.',
       MRS_EXPIRED: 'انتهت صلاحية هذا الرابط أو الدعوة. اطلب دعوة جديدة.',
@@ -179,6 +179,7 @@
       payment_document: 'مرفق السداد', invoice_number_dup: 'رقم الفاتورة',
       // document matching (20261116000100)
       invoice_extraction_id: 'الفاتورة التجارية', bl_extraction_id: 'بوليصة الشحن', declaration_extraction_id: 'البيان الجمركي',
+      packing_extraction_id: 'بيان التعبئة',
       reviewed_rows: 'الحقول المراجَعة', engine_version: 'إصدار المطابقة', overall: 'النتيجة العامة', counts: 'عدد النتائج',
       rows: 'حقول المطابقة', document_match: 'المطابقة',
       fullName: 'الاسم الكامل', company: 'اسم الشركة', phone: 'رقم الجوال', email: 'البريد الإلكتروني',
@@ -487,6 +488,8 @@
       'MRS_NOT_FOUND:invoice_extraction_id': 'قراءة الفاتورة التجارية غير موجودة أو لا تملك صلاحية عرضها.',
       'MRS_NOT_FOUND:bl_extraction_id': 'قراءة بوليصة الشحن غير موجودة أو لا تملك صلاحية عرضها.',
       'MRS_NOT_FOUND:declaration_extraction_id': 'قراءة البيان الجمركي غير موجودة أو لا تملك صلاحية عرضها.',
+      'MRS_NOT_FOUND:packing_extraction_id': 'قراءة بيان التعبئة غير موجودة أو لا تملك صلاحية عرضها.',
+      'MRS_REQUIRED:packing_extraction_id': 'مطابقة الإصدار match-v2 تحتاج قراءة بيان التعبئة. أعد المطابقة ثم احفظ.',
       'MRS_INVALID:overall': 'النتيجة العامة لا تتفق مع نتائج الحقول (اختلاف في حقل أساسي يعني «يوجد اختلاف»). أعد المطابقة ثم احفظ.',
       'MRS_INVALID:transaction_id': 'المستندات المقروءة مرتبطة بمعاملة أخرى. اختر المعاملة نفسها أو احفظ بدون معاملة.',
       'MRS_REQUIRED:reviewed_rows': 'علّم حقلًا واحدًا على الأقل بأنه «تمت مراجعته» قبل اعتماد المراجعة.',
@@ -548,13 +551,15 @@
         MRS_AI_FAILED: 'AI reading failed. Try again or use in-browser reading.',
         MRS_AI_WRONG_DOCUMENT: 'The uploaded document is not of the expected type ({f}). For an appointment invoice upload the appointment card itself; otherwise upload the empty-return receipt.',
         // document matching (20261116000100)
-        MRS_MATCH_DOC_KIND: 'The document saved as “{f}” is not of the expected type (commercial invoice, bill of lading, customs declaration). Check the document type and read it again.',
+        MRS_MATCH_DOC_KIND: 'The document saved as “{f}” is not of the expected type (commercial invoice, bill of lading, customs declaration, packing list). Check the document type and read it again.',
         MRS_MATCH_DOC_VOIDED: 'The “{f}” reading is void, so the match cannot be saved on it. Read the document again, then save.',
         MRS_MATCH_VOIDED: 'This match is void and cannot be reviewed or changed.',
         'cdetail_MRS_NOT_FOUND_document_match': 'The match does not exist or you may not view it.',
         'cdetail_MRS_NOT_FOUND_invoice_extraction_id': 'The commercial invoice reading does not exist or you may not view it.',
         'cdetail_MRS_NOT_FOUND_bl_extraction_id': 'The bill of lading reading does not exist or you may not view it.',
         'cdetail_MRS_NOT_FOUND_declaration_extraction_id': 'The customs declaration reading does not exist or you may not view it.',
+        'cdetail_MRS_NOT_FOUND_packing_extraction_id': 'The packing list reading does not exist or you may not view it.',
+        'cdetail_MRS_REQUIRED_packing_extraction_id': 'A match-v2 match needs the packing list reading. Match again, then save.',
         'cdetail_MRS_INVALID_overall': 'The overall result contradicts the field results (a difference in a key field means “differences found”). Match again, then save.',
         'cdetail_MRS_INVALID_transaction_id': 'The documents read are linked to another transaction. Choose that transaction or save without one.',
         'cdetail_MRS_REQUIRED_reviewed_rows': 'Tick at least one field as “reviewed” before approving the review.',
@@ -673,6 +678,7 @@
       I.register('field', { en: {
         // document matching (20261116000100)
         invoice_extraction_id: 'Commercial invoice', bl_extraction_id: 'Bill of lading', declaration_extraction_id: 'Customs declaration',
+        packing_extraction_id: 'Packing list',
         reviewed_rows: 'Reviewed fields', engine_version: 'Match version', overall: 'Overall result', counts: 'Result counts',
         rows: 'Match fields', document_match: 'Match',
         supplier_id: 'Supplier', invoice_number: 'Invoice number', invoice_date: 'Invoice date', due_date: 'Due date',
@@ -2534,23 +2540,40 @@
   /* ------------------------------------------------------------------
      Document matching (مطابقة المستندات) — migration 20261116000100. The comparison runs in the browser
      (assets/js/doc-match.js); these calls store the reviewed result of 2 (invoice + B/L) or 3 (+ customs declaration)
-     saved extractions. Staff only; RPCs only (the table is read-only to the API).
+     saved extractions, + the optional packing list (بيان التعبئة, 20261126000100: engine match-v2). Staff only; RPCs only
+     (the table is read-only to the API).
      ------------------------------------------------------------------ */
   var MATCH_MODES = ['two_way', 'three_way'];
   var MATCH_OVERALL = ['match', 'mismatch', 'review'];
-  var MATCH_COLS = 'id,org_id,transaction_id,invoice_extraction_id,bl_extraction_id,declaration_extraction_id,mode,engine_version,' +
+  var MATCH_COLS_V1 = 'id,org_id,transaction_id,invoice_extraction_id,bl_extraction_id,declaration_extraction_id,mode,engine_version,' +
     'overall,match_count,mismatch_count,partial_count,missing_count,reviewed_rows,note,status,reviewed_by,reviewed_at,review_note,' +
     'created_by,created_at,voided_at,void_reason';
+  // 20261126000100: + packing_extraction_id. A database without that migration answers 42703 (unknown column): the
+  // list / get calls then read the columns of 20261116000100 once more (packing_extraction_id = null).
+  var MATCH_COLS = MATCH_COLS_V1 + ',packing_extraction_id';
+  function matchNoPackingCol(res) {
+    var e = res && res.error, raw = e && e.raw;
+    return !!(e && raw && (raw.code === '42703' || raw.code === 'PGRST204') && /packing_extraction_id/.test(String(raw.message || '') + String(raw.details || '')));
+  }
+  function matchSelect(run) {
+    return online(function (c) { return run(c, MATCH_COLS); }).then(function (res) {
+      return matchNoPackingCol(res) ? online(function (c) { return run(c, MATCH_COLS_V1); }) : res;
+    });
+  }
   function matchCount(n) { n = Number(n); return isFinite(n) && n >= 0 && Math.floor(n) === n ? n : 0; }
-  // o = { orgId?, transactionId?, invoiceExtractionId, blExtractionId, declarationExtractionId?, mode?, engineVersion,
-  //       overall, counts {match, mismatch, partial, missing}, rows [...], reviewedRows [...]?, note?, idempotencyKey? }
-  //   (mode defaults to three_way when a declaration is given) → { id, created_at, status, transaction_id, mode, overall }
+  // o = { orgId?, transactionId?, invoiceExtractionId, blExtractionId, declarationExtractionId?, packingExtractionId?, mode?,
+  //       engineVersion, overall, counts {match, mismatch, partial, missing}, rows [...], reviewedRows [...]?, note?,
+  //       idempotencyKey? }
+  //   (mode defaults to three_way when a declaration is given — the packing list never changes the mode; engineVersion
+  //   defaults to match-v2 with a packing list, else match-v1; packing_extraction_id is sent only when given, so a database
+  //   without 20261126000100 keeps accepting the 2- / 3-document saves) → { id, created_at, status, transaction_id, mode, overall }
   function saveDocumentMatch(o) {
     o = o || {};
     if (!configured) return demoOnly();
     if (!isUuid(o.invoiceExtractionId)) return Promise.resolve(fail('MRS_REQUIRED', 'invoice_extraction_id'));
     if (!isUuid(o.blExtractionId)) return Promise.resolve(fail('MRS_REQUIRED', 'bl_extraction_id'));
     if (o.declarationExtractionId != null && !isUuid(o.declarationExtractionId)) return Promise.resolve(fail('MRS_INVALID', 'declaration_extraction_id'));
+    if (o.packingExtractionId != null && !isUuid(o.packingExtractionId)) return Promise.resolve(fail('MRS_INVALID', 'packing_extraction_id'));
     if (o.transactionId != null && !isUuid(o.transactionId)) return Promise.resolve(fail('MRS_INVALID', 'transaction_id'));
     var mode = o.mode || (o.declarationExtractionId ? 'three_way' : 'two_way');
     if (MATCH_MODES.indexOf(mode) === -1) return Promise.resolve(fail('MRS_INVALID', 'mode'));
@@ -2562,10 +2585,11 @@
     var payload = {
       invoice_extraction_id: o.invoiceExtractionId, bl_extraction_id: o.blExtractionId,
       declaration_extraction_id: o.declarationExtractionId || null, transaction_id: o.transactionId || null,
-      mode: mode, engine_version: String(o.engineVersion || 'match-v1'), overall: o.overall,
+      mode: mode, engine_version: String(o.engineVersion || (o.packingExtractionId ? 'match-v2' : 'match-v1')), overall: o.overall,
       counts: { match: matchCount(c.match), mismatch: matchCount(c.mismatch), partial: matchCount(c.partial), missing: matchCount(c.missing) },
       rows: o.rows, reviewed_rows: o.reviewedRows || [], note: o.note == null || o.note === '' ? null : String(o.note)
     };
+    if (o.packingExtractionId) payload.packing_extraction_id = o.packingExtractionId;
     return aiOrg(o.orgId).then(function (r) {
       if (r.error) return r;
       var oid = r.data;
@@ -2598,8 +2622,8 @@
     return aiOrg(o.orgId).then(function (r) {
       if (r.error) return r;
       var oid = r.data;
-      return online(function (c) {
-        var q = c.from('document_matches').select(MATCH_COLS + ',transactions(ref)').eq('org_id', oid)
+      return matchSelect(function (c, cols) {
+        var q = c.from('document_matches').select(cols + ',transactions(ref)').eq('org_id', oid)
           .order('created_at', { ascending: false }).limit(limit);
         if (o.transactionId) q = q.eq('transaction_id', o.transactionId);
         if (!o.includeVoided) q = q.is('voided_at', null);
@@ -2613,7 +2637,7 @@
   function getDocumentMatch(id) {
     if (!configured) return demoOnly();
     if (!isUuid(id)) return Promise.resolve(fail('MRS_INVALID', 'document_match'));
-    return online(function (c) { return c.from('document_matches').select(MATCH_COLS + ',rows,transactions(ref)').eq('id', id).maybeSingle(); })
+    return matchSelect(function (c, cols) { return c.from('document_matches').select(cols + ',rows,transactions(ref)').eq('id', id).maybeSingle(); })
       .then(function (r) { return r.error ? r : (r.data ? ok(matchRow(r.data)) : fail('MRS_NOT_FOUND', 'document_match')); });
   }
   function matchRow(m) {
@@ -2621,6 +2645,8 @@
     var tx = out.transactions;
     delete out.transactions;
     out.transaction_ref = tx && tx.ref ? tx.ref : null;
+    if (out.packing_extraction_id === undefined) out.packing_extraction_id = null;
+    out.with_packing = !!out.packing_extraction_id;
     out.counts = { match: m.match_count || 0, mismatch: m.mismatch_count || 0, partial: m.partial_count || 0, missing: m.missing_count || 0 };
     if (m.voided_at) out.status = 'voided';
     return out;

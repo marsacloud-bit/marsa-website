@@ -322,7 +322,12 @@ async function secFile() {
     (!/review_status\s*=\s*'approved'|'approved'\s*,\s*auth\.uid/.test(src) && !/return_status\s*=\s*'returned_verified'/.test(src)
      && !/INSERT INTO public\.(empty_return_proofs|billing_intents|client_charges)/.test(src) && !/net\.http|functions\.invoke/.test(src)
      && /'suggested'/.test(src) && /'review_status', 'pending'/.test(src)) || 'approval');
-  await check('this file is the latest migration', () => migFiles()[migFiles().length - 1] === MIG || 'latest: ' + migFiles().pop());
+  // later phases may follow this file (20261126000100 doc_match_packing: document_matches.packing_extraction_id; no import object)
+  const LATER_PHASES = ['20261126000100_doc_match_packing.sql'];
+  await check('this file is the latest migration (or only listed later phases follow it)', () => {
+    const later = migFiles().filter(f => f > MIG);
+    return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
+  });
   await check('all_migrations.sql holds this file verbatim (appended last, in order) + a header line', () => {
     const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
     const marker = '-- ===== migrations/' + MIG + ' =====\n';
@@ -330,7 +335,8 @@ async function secFile() {
     const next = all.indexOf('\n-- ===== migrations/', i + marker.length);
     const body = all.slice(i + marker.length, next < 0 ? undefined : next);
     const order = (all.match(/^-- ===== migrations\/(\S+) =====$/gm) || []).map(l => l.split('/')[1].split(' ')[0]);
-    return (i > 0 && next < 0 && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
+    const after = order.slice(order.indexOf(MIG) + 1);
+    return (i > 0 && after.every(f => LATER_PHASES.includes(f)) && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
       && all.slice(0, 24000).includes(MIG) && J(order) === J(migFiles())) || 'not appended verbatim / no header line / order';
   });
   await check('docs/online/LEGACY_IMPORT_AR.md names the migration, the RPCs, the headers and the safety rules', () => {

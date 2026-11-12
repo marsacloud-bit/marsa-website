@@ -426,16 +426,16 @@
             </span>
             <div>
               <h2 id="ocr-match-title" tabindex="-1" data-i18n="ocr.m_title">مطابقة الفاتورة والبوليصة والبيان الجمركي بالذكاء الاصطناعي</h2>
-              <p data-i18n="ocr.m_lead">ارفع الفاتورة التجارية وبوليصة الشحن (والبيان الجمركي إن توفر)، فيقرأها Claude معًا ويطابق بياناتها حقلًا بحقل: الحاويات والأوزان وعدد الطرود ورموز HS والموانئ والأطراف والقيمة. راجع النتيجة ثم احفظها أو صدّرها.</p>
+              <p data-i18n="ocr.m_lead">ارفع الفاتورة التجارية وبوليصة الشحن (والبيان الجمركي وبيان التعبئة إن توفرا)، فيقرأها Claude معًا ويطابق بياناتها حقلًا بحقل: الحاويات والأوزان وعدد الطرود ورموز HS والموانئ والأطراف والقيمة. راجع النتيجة ثم احفظها أو صدّرها.</p>
             </div>
           </div>
 
           <div class="alert alert-warning" id="ocr-match-note" role="note">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18h.01"/></svg>
-            <span><span data-i18n="ocr.m_note">تُرسل الملفات إلى خادم مرسى ثم إلى شركة Anthropic (مزوّد نموذج Claude) لقراءتها. كل مستند قراءة مستقلة: المطابقة تستهلك قراءتين (أو ثلاثًا مع البيان الجمركي) من حصة مؤسستك اليومية. الحد: 5 ميغابايت للصورة و10 ميغابايت لملف PDF؛ JPG وPNG وWEBP وGIF وPDF.</span> <span id="ocr-match-remaining"></span></span>
+            <span><span data-i18n="ocr.m_note">تُرسل الملفات إلى خادم مرسى ثم إلى شركة Anthropic (مزوّد نموذج Claude) لقراءتها. كل مستند قراءة مستقلة: المطابقة تستهلك قراءتين، وحتى أربع قراءات مع البيان الجمركي وبيان التعبئة، من حصة مؤسستك اليومية (الملف المقروء والمحفوظ سابقًا لا يُحتسب مرة أخرى). الحد: 5 ميغابايت للصورة و10 ميغابايت لملف PDF؛ JPG وPNG وWEBP وGIF وPDF.</span> <span id="ocr-match-remaining"></span></span>
           </div>
 
-          <!-- three slots -->
+          <!-- four slots: invoice + B/L (required), customs declaration + packing list (optional) -->
           <div class="ocr-match-slots" id="ocr-match-slots">
             <div class="ocr-match-slot" data-slot="invoice">
               <div class="dropzone ocr-dropzone ocr-match-drop" data-drop="invoice">
@@ -473,8 +473,21 @@
               <div class="progress ocr-mini-progress" data-progress="declaration" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="البيان الجمركي" hidden><div class="progress-bar"></div></div>
               <button type="button" class="btn btn-ghost btn-sm ocr-match-clear-slot" data-clear="declaration" hidden data-i18n="ocr.m_remove_file">إزالة الملف</button>
             </div>
+            <div class="ocr-match-slot" data-slot="packing">
+              <div class="dropzone ocr-dropzone ocr-match-drop" data-drop="packing">
+                <input type="file" id="ocr-match-file-packing" class="ocr-match-input" data-input="packing" accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,image/jpeg,image/png,image/webp,image/gif,application/pdf" aria-describedby="ocr-match-sub-packing">
+                <span class="ocr-match-slot-title" data-i18n="ocr.m_slot_packing">بيان التعبئة</span>
+                <span class="badge badge-sm badge-muted ocr-match-req" data-i18n="ocr.m_optional">اختياري</span>
+                <label class="dropzone-title" for="ocr-match-file-packing" data-i18n="ocr.m_drop">اسحب الملف وأفلته هنا، أو اضغط لاختياره</label>
+                <p class="dropzone-sub" id="ocr-match-sub-packing"><span class="ocr-match-fname" data-fname="packing"></span></p>
+              </div>
+              <div class="ocr-match-slot-status" data-status="packing" aria-live="polite"></div>
+              <div class="progress ocr-mini-progress" data-progress="packing" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="بيان التعبئة" hidden><div class="progress-bar"></div></div>
+              <button type="button" class="btn btn-ghost btn-sm ocr-match-clear-slot" data-clear="packing" hidden data-i18n="ocr.m_remove_file">إزالة الملف</button>
+            </div>
           </div>
           <p class="text-sm text-muted mt-2" data-i18n="ocr.m_three_hint">مع البيان الجمركي تصبح المطابقة ثلاثية: يُطابق البيان مع الفاتورة (الرقم والتاريخ والعملة والقيمة) ومع البوليصة (الرقم والحاويات والأوزان والطرود).</p>
+          <p class="text-sm text-muted mt-1" data-i18n="ocr.m_packing_hint">بيان التعبئة (قائمة التعبئة) اختياري: يُطابق مع البوليصة والفاتورة (والبيان) في المستورد/المشتري وعدد الطرود والوزن الإجمالي والوزن الصافي والحاويات ونوع البضاعة، ولا يغيّر نوع المطابقة.</p>
 
           <div class="ocr-actions">
             <button type="button" class="btn btn-ghost" id="ocr-match-reset" data-i18n="ocr.m_reset">مسح وبدء من جديد</button>

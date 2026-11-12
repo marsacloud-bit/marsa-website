@@ -320,7 +320,7 @@ async function secFile() {
     return bad.length === 0 || bad.map(b => b.slice(0, 80)).join(' | ');
   });
   // later phases may follow this file (20261125000100 legacy_import: re-creates att_reasons / alert_causes / rpt_tx_match / audit_label_of)
-  const LATER_PHASES = ['20261125000100_legacy_import.sql'];
+  const LATER_PHASES = ['20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
