@@ -75,7 +75,7 @@ def key_kind(k, ref):
     return 'anon' if pl.get('ref') == ref else 'other-project'
 
 STAGING = re.compile(r'staging|test environment|بيئة تجريبية|البيئة التجريبية|البيئة الحالية تجريبية|بيئة اختبار|بيئة التجربة'
-                     r'|خادم الاختبار', re.I)
+                     r'|خادم الاختبار|نسخة عرض تجريبية|نسخة العرض التجريبية', re.I)
 HIDDEN = re.compile(r'\s+hidden(?=[\s/>])')
 def start_tags(s, attr, fn):
     return re.sub(r'<[a-zA-Z][^<>]*\s' + attr + r'[^<>]*>', lambda m: fn(m.group(0)), s)
