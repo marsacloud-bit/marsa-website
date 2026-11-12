@@ -20,7 +20,7 @@
 ## طريقة التطبيق على قاعدة حية
 1. قاعدة بها legacy_decl (`health_check()` = 20261120000100): الصق الملف وحده في SQL Editor ثم Run. الملف قابل لإعادة التشغيل.
 2. انشر الدالة `ai-extract` (`python3 scripts/bundle-edge-function.py ai-extract`). النموذج يبقى `claude-opus-5-5` بنفس استدعاء
-   SDK (`client.beta.messages.create` مع `output_config` و`fallbacks: 'default'`).
+   SDK (`client.beta.messages.stream` ثم `finalMessage()` مع `output_config` و`fallbacks: 'default'`).
 3. إذا أعدت لصق 20261101000100 أو 20261114000100 أو 20261116000100 أو 20261119000100 أو 20261120000100 فالصق هذا الملف بعده.
 
 ## 1. القراءة الآلية `ai-doc-v3`

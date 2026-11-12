@@ -15,11 +15,20 @@
       schema, so 'high' would mostly add thinking tokens (output price) without better fields;
     - output_config.format json_schema (structured outputs): machine-readable result; numeric ranges are not
       expressible in the schema, so confidence 0..1 / page >= 1 are enforced here (postProcess);
-    - refusal fallbacks on by default: client.beta.messages.create with betas ['server-side-fallback-2026-07-01'] and
+    - refusal fallbacks on by default: client.beta.messages.stream with betas ['server-side-fallback-2026-07-01'] and
       fallbacks: 'default' (the API re-runs a declined request on Anthropic's recommended model);
     - stop_reason is checked ('refusal', 'max_tokens', anything but 'end_turn') BEFORE the content is read;
     - images as base64 image blocks (jpeg / png / webp / gif), PDFs as base64 document blocks, placed before the text;
-    - non-streaming, max_tokens 16000 (the skill's non-streaming default; keeps the call under the SDK HTTP timeout);
+    - streaming (client.beta.messages.stream(params, options) → await stream.finalMessage(), @anthropic-ai/sdk 1.5.0
+      BetaMessageStream): the final message is the same BetaMessage a non-streaming call returns (content incl. the
+      `fallback` block, stop_reason, usage with iterations accumulated from message_delta), and a failed call rejects
+      with the same typed APIError classes. Streaming because a long scanned invoice (~85 line items) took 92 s and
+      13.4k output tokens non-streaming — at the old 100 s timeout / 16000 max_tokens. max_tokens 32000 for the
+      shipping-document reads (B/L / invoice / packing list / declaration / auto: MAX_TOKENS_DOC), 16000 for the short
+      v3 card / EIR / payment readings (MAX_TOKENS). The SDK `timeout` only covers the wait for the response headers
+      of a stream, so callClaude also takes a whole-call deadline (options.deadlineMs → an AbortSignal; the abort
+      rejects with APIUserAbortError, settled 'unknown'): at ≈ 145 output tokens/s a 135 s deadline ends the read
+      near 19.5k output tokens, inside the 150 s request idle timeout;
     - reading the answer: only the text blocks AFTER the last `fallback` block (a declined attempt's partial text sits
       before it); cost from usage.iterations (one entry per attempt, each priced at its own model) when present, else the
       top-level usage (which covers only the attempt that produced the message);
@@ -93,7 +102,8 @@
   const MODEL = 'claude-opus-5-5';
   const ENGINE = MODEL;                                  // document_extractions.engine of an AI reading
   const EFFORT = 'medium';
-  const MAX_TOKENS = 16000;
+  const MAX_TOKENS = 16000;                              // v3 card / EIR / payment readings (short, bounded answers)
+  const MAX_TOKENS_DOC = 32000;                          // shipping-document reads (long line tables): streamed
   const BETAS = Object.freeze(['server-side-fallback-2026-07-01']);
   const FALLBACKS = 'default';
   const MAX_BYTES = 10 * 1024 * 1024;                    // decoded file size limit (10 MB: PDFs)
@@ -684,7 +694,12 @@
     } catch (e) { return 0; }
   }
 
-  // the Messages API params (for client.beta.messages.create)
+  // max_tokens of a request: 16000 for the v3 operational / payment readings, 32000 for every shipping-document read
+  function maxTokensFor(docType, version) {
+    return isV3(version) && (isOps(docType) || isPay(docType)) ? MAX_TOKENS : MAX_TOKENS_DOC;
+  }
+
+  // the Messages API params (for client.beta.messages.stream)
   function buildRequest(v) {
     const fileBlock = v.media_type === 'application/pdf'
       ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: v.data_b64 } }
@@ -711,7 +726,7 @@
     ].filter(x => x !== null).join('\n');
     return {
       model: MODEL,
-      max_tokens: MAX_TOKENS,
+      max_tokens: maxTokensFor(v.doc_type, v.prompt_version),
       betas: BETAS.slice(),
       fallbacks: FALLBACKS,
       output_config: { effort: EFFORT, format: { type: 'json_schema', schema: outputSchema(v.doc_type, v.prompt_version) } },
@@ -742,12 +757,31 @@
     };
   }
 
-  // the only network call — through the injected SDK client (index.ts: new Anthropic({apiKey}))
+  // the only network call — through the injected SDK client (index.ts: new Anthropic({apiKey})), streamed:
+  // client.beta.messages.stream(params, options) → stream.finalMessage() (the accumulated BetaMessage). options are the
+  // SDK request options, plus deadlineMs (ours, not sent to the SDK): the whole call — headers AND the streamed body —
+  // is aborted after that many ms (the SDK timeout stops counting once the response headers arrive); the stream then
+  // rejects with the SDK's APIUserAbortError. A failed call rejects with the SDK's typed errors (classifyCallError).
   function callClaude(client, params, options) {
-    if (!client || !client.beta || !client.beta.messages || typeof client.beta.messages.create !== 'function') {
-      return Promise.reject(new AiError('not_configured', 503));
+    const m = client && client.beta && client.beta.messages;
+    if (!m || typeof m.stream !== 'function') return Promise.reject(new AiError('not_configured', 503));
+    const o = Object.assign({}, options || {});
+    const ms = o.deadlineMs;
+    delete o.deadlineMs;
+    let timer = null;
+    if (ms !== undefined) {
+      if (!(Number.isFinite(ms) && ms > 0) || typeof AbortController !== 'function') return Promise.reject(new AiError('upstream_error', 502));
+      const ctl = new AbortController(), outer = o.signal;
+      if (outer) { if (outer.aborted) ctl.abort(); else outer.addEventListener('abort', () => ctl.abort(), { once: true }); }
+      o.signal = ctl.signal;
+      timer = setTimeout(() => ctl.abort(), ms);
     }
-    return client.beta.messages.create(params, options);
+    const done = () => { if (timer !== null) clearTimeout(timer); };
+    // finalMessage() is attached in the same tick as stream(): BetaMessageStream fires an unhandled rejection for an
+    // error emitted before any catching promise / listener exists (Deno would end the isolate)
+    let p;
+    try { const x = client.beta.messages.stream(params, o); p = x.finalMessage(); } catch (e) { done(); return Promise.reject(e); }
+    return Promise.resolve(p).then(msg => { done(); return msg; }, e => { done(); throw e; });
   }
 
   /* ------------------------------------------------------------------ response */
@@ -1791,15 +1825,20 @@
     return lines.join('\n').slice(0, 200000);
   }
 
-  // amount held by ai_reserve (and charged when the outcome is unknown): max_tokens of output + an input estimate
+  // amount held by ai_reserve (and charged when the outcome is unknown): max_tokens of output (maxTokens: the request's
+  // max_tokens, maxTokensFor(); default MAX_TOKENS_DOC, the larger) + an input estimate
   // (image ≈ 5k tokens; a PDF ≈ 4k tokens per page — the larger of the counted page objects and one page per ~150 KB),
   // input counted twice (a declined attempt + the fallback rescue), all at the highest price a fallback can bill
-  // ($5 / $25 per MTok)
+  // ($5 / $25 per MTok). Capped to (0, 50] like ai_reserve's p_est_usd check. Image: (2 × 8000 × 5 + 32000 × 25) / 1e6 =
+  // $0.88 for a shipping document, $0.48 for a card / EIR / payment reading (16000). The output a read can really bill
+  // is bounded by the call deadline (≈ 135 s × 145 tokens/s ≈ 19.5k, across a declined attempt and its rescue), below
+  // the 32000 held.
   const HOLD_IN_USD = 5, HOLD_OUT_USD = 25;
-  function estimateHoldUsd(mediaType, bytes, pages) {
+  function estimateHoldUsd(mediaType, bytes, pages, maxTokens) {
     const pdfPages = Math.min(600, Math.max(1, Math.ceil((Number(bytes) || 0) / 150000), int(pages)));
     const tok = mediaType === 'application/pdf' ? 3000 + pdfPages * 4000 : 3000 + 5000;
-    const usd = (2 * tok * HOLD_IN_USD + MAX_TOKENS * HOLD_OUT_USD) / 1e6;
+    const out = int(maxTokens) || MAX_TOKENS_DOC;
+    const usd = (2 * tok * HOLD_IN_USD + out * HOLD_OUT_USD) / 1e6;
     return Math.round(Math.min(50, Math.max(0.01, usd)) * 10000) / 10000;
   }
 
@@ -1816,12 +1855,19 @@
     if (is('APIUserAbortError') || is('APIConnectionError')) return { code: 'upstream_error', status: 502, settle: 'unknown' };   // timeouts too
     if (status === 529) return { code: 'upstream_busy', status: 503, settle: 'unknown' };
     if (status !== null && status >= 500) return { code: 'upstream_error', status: 502, settle: 'unknown' };
-    if (is('APIError') || (status !== null && status >= 400)) return { code: 'upstream_error', status: 502, settle: 'error' };
+    if (status !== null && status >= 400) return { code: 'upstream_error', status: 502, settle: 'error' };
+    // streaming: an `error` event in the middle of the stream (the model already ran) is an APIError without an HTTP
+    // status (type e.g. overloaded_error / api_error), and a body cut off mid-stream is an AnthropicError — may be billed
+    if (is('APIError') && status === null) {
+      return e.type === 'overloaded_error' ? { code: 'upstream_busy', status: 503, settle: 'unknown' } : { code: 'upstream_error', status: 502, settle: 'unknown' };
+    }
+    if (is('APIError')) return { code: 'upstream_error', status: 502, settle: 'error' };
+    if (is('AnthropicError')) return { code: 'upstream_error', status: 502, settle: 'unknown' };
     return { code: 'internal', status: 500, settle: 'unknown' };
   }
 
   const API = {
-    MODEL, ENGINE, EFFORT, MAX_TOKENS, BETAS, FALLBACKS, MAX_BYTES, MAX_IMAGE_BYTES, PROMPT_VERSION, MEDIA_TYPES, DOC_TYPES,
+    MODEL, ENGINE, EFFORT, MAX_TOKENS, MAX_TOKENS_DOC, maxTokensFor, BETAS, FALLBACKS, MAX_BYTES, MAX_IMAGE_BYTES, PROMPT_VERSION, MEDIA_TYPES, DOC_TYPES,
     DETECTED_TYPES, KIND_OF, ALL_KEYS, KEYS_FOR, MATCH_KEYS, INCOTERMS, MAX_WEIGHT_KG, MAX_PACKAGES, SYSTEM,
     PROMPT_VERSION_V3, PROMPT_VERSIONS, DOC_TYPES_V3, DETECTED_TYPES_V3, V3_KEYS, ALL_KEYS_V3, KEYS_FOR_V3, ITEM_KEYS_V3,
     CONTAINER_KEYS, SYSTEM_V3, identityName, keysFor, isSeal,

@@ -20,8 +20,12 @@
 // - The request path is handler.js (classic script, injected clients, Node-tested); request / schema / parsing /
 //   validation live in extract.js. Refusal fallbacks on (betas server-side-fallback-2026-07-01, fallbacks 'default');
 //   stop_reason is checked before the content is read.
-// - Timing: maxRetries 0 and a 100 s timeout, so getUser + ai_access + reserve + the Claude call + settle end inside the
-//   150 s wall clock (a retry could outlive it, be billed twice and leave the reservation to the 15-minute sweep).
+// - Timing: the response must start within Supabase's 150 s request idle timeout (wall clock 400 s). Claude is
+//   streamed (client.beta.messages.stream → finalMessage) with maxRetries 0; the SDK timeout (135 s) covers the wait
+//   for the response headers, and handler.js aborts the whole streamed call after claudeTimeoutMs (135 s, and at most
+//   145 s after the request started), so getUser + ai_access + reserve + the Claude call + settle end inside the 150 s
+//   (a retry could outlive it, be billed twice and leave the reservation to the 15-minute sweep). Shipping documents
+//   use max_tokens 32000 (measured: an ~85-line scanned invoice, 13.4k output tokens in 92 s).
 // - Secrets: ANTHROPIC_API_KEY is read here only (Deno.env), passed to the SDK client only, never logged, never returned,
 //   never sent to the database or to handler.js. Errors are fixed codes; upstream / SDK messages are never echoed.
 // - Env: SUPABASE_URL, SUPABASE_ANON_KEY (or SUPABASE_PUBLISHABLE_KEY), SUPABASE_SERVICE_ROLE_KEY (all injected by
@@ -35,7 +39,7 @@ import './handler.js';
 // deno-lint-ignore no-explicit-any
 const X: any = (globalThis as any).MarsaAiExtract;
 
-const CLAUDE_TIMEOUT_MS = 100000;                // one attempt, no retry: inside the 150 s wall clock
+const CLAUDE_TIMEOUT_MS = 135000;                // one attempt, no retry: inside the 150 s request idle timeout
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (!X || typeof X.handleRequest !== 'function') {
@@ -54,6 +58,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     serviceClient: () => createClient(url, serviceKey, opts),
     modelConfigured: apiKey !== '',
     claudeClient: () => new Anthropic({ apiKey, maxRetries: 0, timeout: CLAUDE_TIMEOUT_MS }),
+    claudeTimeoutMs: CLAUDE_TIMEOUT_MS,           // the whole streamed call (headers + body), see handler.js
     sdk: Anthropic,
     log: (text: string) => console.error(text),
   });

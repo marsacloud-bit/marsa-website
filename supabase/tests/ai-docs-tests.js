@@ -18,7 +18,7 @@
   model / effort / structured output / refusal fallbacks, schema rules, request validation, ISO 6346, stop_reason
   handling, response parsing, post-processing warnings, mocked Claude pipeline); static (no key / fetch / Deno outside
   index.ts, SDK pinned, fixed errors, CORS); the front end (static + vm). Review fixes: fallback switch point, per-attempt
-  pricing (p_attempts), unknown outcomes charge the hold, 5 MB images, PDF page holds, maxRetries 0 / 100 s, the body read
+  pricing (p_attempts), unknown outcomes charge the hold, 5 MB images, PDF page holds, maxRetries 0 / 135 s (streamed, whole-call deadline), the body read
   with a byte limit, handler.js run with mocked clients against the real reserve / settle, and the inbox Claude jobs in
   the same ledger (no user, shared consent / budget, refusals billed, in-flight holds counted).
 
@@ -728,7 +728,7 @@ async function secHelper() {
   await check('buildRequest (image): beta params, output_config {effort, json_schema}, no thinking / budget / temperature / prefill, image block first', () => {
     const p = X.buildRequest(X.validateRequest(goodBody()));
     const c = p.messages[0].content;
-    return (p.model === 'claude-opus-5-5' && p.max_tokens === 16000 && J(p.betas) === J(['server-side-fallback-2026-07-01']) && p.fallbacks === 'default'
+    return (p.model === 'claude-opus-5-5' && p.max_tokens === 32000 && J(p.betas) === J(['server-side-fallback-2026-07-01']) && p.fallbacks === 'default'
       && p.output_config.effort === 'medium' && p.output_config.format.type === 'json_schema' && !('thinking' in p) && !('temperature' in p)
       && !('top_p' in p) && !('output_format' in p) && p.messages.length === 1 && p.messages[0].role === 'user'
       && c[0].type === 'image' && c[0].source.type === 'base64' && c[0].source.media_type === 'image/png' && c[0].source.data === PNG
@@ -929,25 +929,67 @@ async function secHelper() {
     const r = await tryErr(() => insertExt('staff', extRow({ engine: 'tesseract.js@5.1.1', languages: 'eng', extracted_fields: out.extracted_fields })));
     return (r === 'ok' && Object.keys(out.extracted_fields).length === 6) || r;
   });
-  await check('estimateHoldUsd: at the highest fallback price ($5 / $25), input × 2: image = $0.48; PDF grows with size and pages; capped ≤ $50', () => {
+  await check('estimateHoldUsd: at the highest fallback price ($5 / $25), input × 2, output = the request\'s max_tokens: image = $0.88 (32000) / $0.48 (16000); PDF grows with size and pages; capped ≤ $50 (ai_reserve p_est_usd ≤ 50)', () => {
     const img = X.estimateHoldUsd('image/png', 2e6), small = X.estimateHoldUsd('application/pdf', 100000), large = X.estimateHoldUsd('application/pdf', 10 * 1024 * 1024);
     const paged = X.estimateHoldUsd('application/pdf', 100000, 200), huge = X.estimateHoldUsd('application/pdf', 100000, 100000);
-    return (img === 0.48 && large > small && paged > large && huge <= 50 && small > 0 && paged === Math.round((2 * (3000 + 200 * 4000) * 5 + 16000 * 25) / 1e6 * 1e4) / 1e4)
-      || J({ img, small, large, paged, huge });
+    const img16 = X.estimateHoldUsd('image/png', 2e6, 0, 16000), img32 = X.estimateHoldUsd('image/png', 2e6, 0, 32000);
+    const max = X.estimateHoldUsd('application/pdf', 10 * 1024 * 1024, 600, 32000);
+    return (img === 0.88 && img32 === 0.88 && img16 === 0.48 && large > small && paged > large && huge <= 50 && max <= 50 && max > 0 && small > 0
+      && paged === Math.round((2 * (3000 + 200 * 4000) * 5 + 32000 * 25) / 1e6 * 1e4) / 1e4)
+      || J({ img, img16, small, large, paged, huge, max });
   });
-  await check('callClaude: uses only the injected client (client.beta.messages.create with the params); no client → not_configured', async () => {
-    const calls = [];
-    const client = { beta: { messages: { create: async (params, opts) => { calls.push({ params, opts }); return msgOf(modelOut()); } } } };
+  await check('maxTokensFor: 32000 for the shipping-document reads (v2 any type, v3 B/L / invoice / packing list / declaration / auto), 16000 for the v3 card / EIR / payment readings', () => {
+    const v2 = ['bill_of_lading', 'commercial_invoice', 'customs_declaration', 'supplier_invoice', 'auto'].map(t => X.maxTokensFor(t, 'ai-doc-v2'));
+    const v3 = ['bill_of_lading', 'commercial_invoice', 'packing_list', 'customs_declaration', 'auto'].map(t => X.maxTokensFor(t, 'ai-doc-v3'));
+    const short = ['appointment_ticket', 'empty_return_receipt', 'appointment_invoice', 'payment_proof'].map(t => X.maxTokensFor(t, 'ai-doc-v3'));
+    return (X.MAX_TOKENS_DOC === 32000 && X.MAX_TOKENS === 16000 && v2.every(n => n === 32000) && v3.every(n => n === 32000) && short.every(n => n === 16000)) || J({ v2, v3, short });
+  });
+  await check('callClaude: streams through the injected client (client.beta.messages.stream(params, opts) → finalMessage(); never create); no stream method → not_configured', async () => {
+    const calls = [], creates = [];
+    const client = { beta: { messages: { create: async () => { creates.push(1); return msgOf(modelOut()); },
+      stream: (params, opts) => { calls.push({ params, opts }); return { finalMessage: async () => msgOf(modelOut()) }; } } } };
     const params = X.buildRequest(X.validateRequest(goodBody()));
     const m = await X.callClaude(client, params, { timeout: 5 });
-    let e = null;
+    let e = null, e2 = null;
     try { await X.callClaude(null, params); } catch (err) { e = err; }
-    return (calls.length === 1 && calls[0].params === params && calls[0].opts.timeout === 5 && m.stop_reason === 'end_turn'
-      && e && e.code === 'not_configured' && e.status === 503 && fetchCalls === 0) || J({ calls: calls.length, e: e && e.code });
+    try { await X.callClaude({ beta: { messages: { create: async () => msgOf(modelOut()) } } }, params); } catch (err) { e2 = err; }
+    return (calls.length === 1 && creates.length === 0 && calls[0].params === params && calls[0].opts.timeout === 5 && !('deadlineMs' in calls[0].opts) && m.stop_reason === 'end_turn'
+      && e && e.code === 'not_configured' && e.status === 503 && e2 && e2.code === 'not_configured' && fetchCalls === 0) || J({ calls: calls.length, creates: creates.length, e: e && e.code, e2: e2 && e2.code });
+  });
+  await check('callClaude deadline: deadlineMs (not passed to the SDK) aborts the whole streamed call through options.signal → the SDK abort error; a caller signal is chained; ≤ 0 → upstream_error without a call; the timer is cleared on success', async () => {
+    const seen = [];
+    const hang = { beta: { messages: { stream: (params, opts) => { seen.push(opts);
+      return { finalMessage: () => new Promise((res, rej) => { if (opts.signal.aborted) rej(new SDK.APIUserAbortError()); else opts.signal.addEventListener('abort', () => rej(new SDK.APIUserAbortError()), { once: true }); }) }; } } } };
+    const params = X.buildRequest(X.validateRequest(goodBody()));
+    const t = Date.now();
+    let a = null; try { await X.callClaude(hang, params, { deadlineMs: 30 }); } catch (err) { a = err; }
+    const took = Date.now() - t;
+    const outer = new AbortController();
+    const pb = X.callClaude(hang, params, { deadlineMs: 60000, signal: outer.signal });
+    outer.abort();
+    let b = null; try { await pb; } catch (err) { b = err; }
+    let c = null; try { await X.callClaude(hang, params, { deadlineMs: 0 }); } catch (err) { c = err; }
+    const okc = { beta: { messages: { stream: (p, o) => { seen.push(o); return { finalMessage: async () => msgOf(modelOut()) }; } } } };
+    const m = await X.callClaude(okc, params, { deadlineMs: 50 });
+    await new Promise(r => setTimeout(r, 80));
+    const last = seen[seen.length - 1];
+    return (a instanceof SDK.APIUserAbortError && took < 2000 && b instanceof SDK.APIUserAbortError && c && c.code === 'upstream_error' && seen.length === 3
+      && !('deadlineMs' in seen[0]) && m.stop_reason === 'end_turn' && last.signal && last.signal.aborted === false
+      && X.classifyCallError(a, SDK).settle === 'unknown') || J({ a: a && a.constructor.name, b: b && b.constructor.name, c: c && c.code, n: seen.length, took });
+  });
+  await check('callClaude: finalMessage() is attached in the same tick as stream() (BetaMessageStream fires an unhandled rejection for an error emitted before a catching promise exists)', async () => {
+    let early = false, attached = false;
+    const client = { beta: { messages: { stream: () => {
+      // like the SDK: the request's failure is handled one microtask after stream() returns
+      Promise.resolve().then(() => { if (!attached) early = true; });
+      return { finalMessage: () => { attached = true; return Promise.reject(new SDK.APIError(400, 'invalid_request_error')); } };
+    } } } };
+    let e = null; try { await X.callClaude(client, X.buildRequest(X.validateRequest(goodBody())), { deadlineMs: 5000 }); } catch (err) { e = err; }
+    return (!early && attached && e && e.status === 400 && X.classifyCallError(e, SDK).settle === 'error') || J({ early, attached, e: e && e.status });
   });
   await check('mocked pipeline: validate → build → mocked Claude → parse → postProcess → a row the database accepts', async () => {
     const v = X.validateRequest(goodBody({ file: { media_type: 'application/pdf', data_b64: PDF } }));
-    const client = { beta: { messages: { create: async () => msgOf(modelOut()) } } };
+    const client = { beta: { messages: { stream: () => ({ finalMessage: async () => msgOf(modelOut()) }) } } };
     const parsed = X.parseMessage(await X.callClaude(client, X.buildRequest(v)));
     const out = X.postProcess(parsed.data, v.doc_type);
     const id = await reserve(A, U.staff); await settle(id, parsed.usage.input_tokens, parsed.usage.output_tokens, 'ok', parsed.model);
@@ -1001,15 +1043,22 @@ async function secReviewHelper() {
     return J(r) === J(['upstream_busy/503/error', 'upstream_error/502/error', 'upstream_error/502/error', 'upstream_error/502/unknown', 'upstream_error/502/unknown',
       'upstream_error/502/unknown', 'upstream_error/502/unknown', 'upstream_busy/503/unknown', 'internal/500/unknown', 'not_configured/503/error']) || J(r);
   });
+  await check('classifyCallError (streaming): a mid-stream `error` event (APIError without status: overloaded_error / api_error) and a body cut off mid-stream (AnthropicError) → unknown (the model ran)', () => {
+    const r = [X.classifyCallError(new SDK.APIError(undefined, 'overloaded_error'), SDK), X.classifyCallError(new SDK.APIError(undefined, 'api_error'), SDK),
+      X.classifyCallError(new SDK.AnthropicError('stream ended without producing a Message with role=assistant'), SDK)].map(c => c.code + '/' + c.status + '/' + c.settle);
+    return J(r) === J(['upstream_busy/503/unknown', 'upstream_error/502/unknown', 'upstream_error/502/unknown']) || J(r);
+  });
 }
 
-/* mocked Anthropic SDK error classes (the shape of @anthropic-ai/sdk 1.5.0: APIConnectionTimeoutError extends APIConnectionError) */
-class MockAPIError extends Error { constructor(status) { super('upstream said sk-ant-SECRET and more'); this.status = status; } }
+/* mocked Anthropic SDK error classes (the shape of @anthropic-ai/sdk 1.5.0: AnthropicError ← APIError ← APIConnectionError ←
+   APIConnectionTimeoutError; APIUserAbortError ← APIError; a mid-stream `error` event is new APIError(undefined, body, …, type)) */
+class MockAnthropicError extends Error {}
+class MockAPIError extends MockAnthropicError { constructor(status, type) { super('upstream said sk-ant-SECRET and more'); this.status = status; this.type = type || null; } }
 class MockRateLimitError extends MockAPIError { constructor() { super(429); } }
 class MockAPIConnectionError extends MockAPIError { constructor() { super(undefined); } }
 class MockAPIConnectionTimeoutError extends MockAPIConnectionError {}
 class MockAPIUserAbortError extends MockAPIError { constructor() { super(undefined); } }
-const SDK = { APIError: MockAPIError, RateLimitError: MockRateLimitError, APIConnectionError: MockAPIConnectionError,
+const SDK = { AnthropicError: MockAnthropicError, APIError: MockAPIError, RateLimitError: MockRateLimitError, APIConnectionError: MockAPIConnectionError,
   APIConnectionTimeoutError: MockAPIConnectionTimeoutError, APIUserAbortError: MockAPIUserAbortError };
 
 const H = require(path.join(FN_DIR, 'handler.js'));
@@ -1033,7 +1082,16 @@ function hDeps(o) {
       from: () => { const q2 = { select: () => q2, eq: () => q2, maybeSingle: async () => ({ data: x.tx ? { id: 'tx' } : null, error: null }) }; return q2; }
     }),
     serviceClient: () => ({ rpc: (name, args) => { calls.push(name); d.last = d.last || {}; d.last[name] = args; return (x.settleFails && name === 'ai_settle') || (x.bindFails && name === 'ai_bind_source') ? Promise.resolve({ data: null, error: { message: 'down' } }) : sqlRpc('service', name, args); } }),
-    claudeClient: () => ({ beta: { messages: { create: async (params, opts) => { calls.push('claude'); d.params = params; d.opts = opts; if (x.throws) throw x.throws; return x.msg || msgOf(modelOut()); } } } })
+    claudeTimeoutMs: x.claudeTimeoutMs, now: x.now,
+    // the SDK's streaming helper: stream(params, opts) → {finalMessage()} (rejects with the typed error); create is kept
+    // only to prove the handler never calls it
+    claudeClient: () => ({ beta: { messages: {
+      create: async () => { calls.push('claude-create'); throw new Error('create must not be called'); },
+      stream: (params, opts) => { calls.push('claude'); d.params = params; d.opts = opts; d.streams = (d.streams || []).concat([params]);
+        const err = typeof x.throws === 'function' ? x.throws(d.streams.length) : x.throws;
+        return { finalMessage: () => x.hang ? new Promise((res, rej) => { if (opts.signal.aborted) rej(new SDK.APIUserAbortError()); else opts.signal.addEventListener('abort', () => rej(new SDK.APIUserAbortError()), { once: true }); })
+          : (err ? Promise.reject(err) : Promise.resolve(x.msg || msgOf(modelOut()))) };
+      } } } })
   };
   return d;
 }
@@ -1058,7 +1116,8 @@ async function secHandler() {
     const u = await usageRow(b.usage_id);
     const order = d.calls.filter(c => !/^log:/.test(c));
     return (r.status === 200 && J(order) === J(['user:ai_access', 'ai_reserve', 'claude', 'ai_settle']) && u.status === 'ok' && u.c === (2100 * 4 + 900 * 20) / 1e6
-      && u.h === 0.48 && b.engine === 'claude-opus-5-5' && b.extracted_fields.vessel === 'MSC TEST' && d.params.fallbacks === 'default'
+      && u.h === 0.88 && b.engine === 'claude-opus-5-5' && b.extracted_fields.vessel === 'MSC TEST' && d.params.fallbacks === 'default' && d.params.max_tokens === 32000
+      && d.opts && d.opts.signal && !('deadlineMs' in d.opts)
       && J(d.last.ai_settle.p_attempts) === J([{ model: 'claude-opus-5-5', input_tokens: 2100, output_tokens: 900 }]) && r.headers['access-control-allow-origin'] === 'https://marsacloud.com') || J({ r, order, u });
   });
   await check('review A-1 + A-2 end to end: partial text before a fallback block → 200; settle prices the declined claude-opus-5-5 attempt and the claude-opus-4-8 rescue', async () => {
@@ -1079,9 +1138,33 @@ async function secHandler() {
       const d = hDeps({ throws: e });
       const r = await H.handleRequest(hReq(goodBody()), d);
       const u = await lastUsage();
-      if (!(r.status === st && J(JSON.parse(r.body)) === J({ error: codeWant }) && u.status === 'error' && u.uo === true && u.c === u.h && u.h === 0.48
+      if (!(r.status === st && J(JSON.parse(r.body)) === J({ error: codeWant }) && u.status === 'error' && u.uo === true && u.c === u.h && u.h === 0.88
         && !/sk-ant|upstream said/.test(r.body + d.calls.join(' ')))) res.push(e.constructor.name + ' ' + J({ r, u }));
     }
+    return res.length === 0 || res.join(' | ');
+  });
+  await check('streaming: a 400 on the first stream → one retry without betas / fallbacks (same deadline) → 200; the streamed final message settles its usage.iterations', async () => {
+    const m = msgOf(modelOut(), { model: 'claude-opus-4-8', usage: { input_tokens: 2100, output_tokens: 900, iterations: [
+      { type: 'message', model: 'claude-opus-5-5', input_tokens: 2000, output_tokens: 300 }, { type: 'fallback_message', model: 'claude-opus-4-8', input_tokens: 2100, output_tokens: 900 }] } });
+    const d = hDeps({ msg: m, throws: n => (n === 1 ? new SDK.APIError(400) : null) });
+    const r = await H.handleRequest(hReq(goodBody()), d);
+    const u = await lastUsage();
+    return (r.status === 200 && d.streams.length === 2 && J(d.streams[0].betas) === J(['server-side-fallback-2026-07-01']) && d.streams[0].fallbacks === 'default'
+      && !('betas' in d.streams[1]) && !('fallbacks' in d.streams[1]) && d.streams[1].max_tokens === 32000 && u.status === 'ok' && u.i === 4100 && u.o === 1200
+      && !d.calls.includes('claude-create')) || J({ s: r.status, n: d.streams && d.streams.length, u });
+  });
+  await check('streaming deadline: a stream still running at claudeTimeoutMs is aborted → 502 upstream_error, settled unknown (hold charged); < 1 s left of the 145 s request budget → no call, settled error at $0', async () => {
+    const res = [];
+    const d = hDeps({ hang: true, claudeTimeoutMs: 1100 });   // ≥ 1 s: less is refused before sending
+    const r = await H.handleRequest(hReq(goodBody()), d);
+    const u = await lastUsage();
+    if (!(r.status === 502 && JSON.parse(r.body).error === 'upstream_error' && u.status === 'error' && u.uo === true && u.c === u.h && u.h === 0.88)) res.push('abort ' + J({ r, u }));
+    let n = 0;
+    const d2 = hDeps({ now: () => (n++ === 0 ? 1000 : 1000 + H.REQUEST_BUDGET_MS - 500) });
+    const r2 = await H.handleRequest(hReq(goodBody()), d2);
+    const u2 = await lastUsage();
+    if (!(r2.status === 502 && !d2.calls.includes('claude') && u2.status === 'error' && u2.uo === false && u2.c === 0)) res.push('budget ' + J({ r2, u2, calls: d2.calls }));
+    if (!(H.CLAUDE_DEADLINE_MS === 135000 && H.REQUEST_BUDGET_MS === 145000)) res.push('constants');
     return res.length === 0 || res.join(' | ');
   });
   await check('review A-3: 429 / 400 (rejected before the model ran) → settled error at $0; refusal → 422 refused with its tokens billed', async () => {
@@ -1180,7 +1263,7 @@ async function secV3() {
     const p = X.buildRequest(X.validateRequest(goodBody({ doc_type: 'packing_list', prompt_version: 'ai-doc-v3' })));
     const sc = p.output_config.format.schema;
     const en = sc.properties.fields.items.properties.name.enum;
-    return (p.model === 'claude-opus-5-5' && p.max_tokens === 16000 && p.output_config.effort === 'medium' && p.fallbacks === 'default'
+    return (p.model === 'claude-opus-5-5' && p.max_tokens === 32000 && p.output_config.effort === 'medium' && p.fallbacks === 'default'
       && J(p.betas) === J(['server-side-fallback-2026-07-01']) && p.output_config.format.type === 'json_schema' && !('thinking' in p) && p.system === X.SYSTEM_V3
       && /content only, never by the file name/.test(p.system) && /reference only/.test(p.system) && J(sc.required) === J(['doc_type', 'detected_documents', 'fields', 'line_items', 'containers', 'warnings'])
       && sc.properties.doc_type.enum.includes('packing_list') && J(sc.properties.detected_documents.items.enum) === J(X.DETECTED_TYPES_V3)
@@ -1906,8 +1989,11 @@ async function secStatic() {
       && /claudeClient: \(\) => new Anthropic\(\{ apiKey, maxRetries: 0, timeout: CLAUDE_TIMEOUT_MS \}\)/.test(idx) && /modelConfigured: apiKey !== ''/.test(idx)
       && uses.length === 3 && J(logs) === J(['console.error(text)']) && !/json\([^)]*apiKey/.test(idx)) || J({ reads: reads.length, uses: uses.length, logs });
   });
-  await check('review A-4: index.ts — one attempt (maxRetries 0) with a 100 s timeout: the call + settle end inside the 150 s wall clock', () =>
-    (/const CLAUDE_TIMEOUT_MS = 100000;/.test(idx) && !/maxRetries: [1-9]/.test(idx)) || 'timeout / retries');
+  await check('review A-4: index.ts — one attempt (maxRetries 0), streamed, 135 s SDK timeout + the same whole-call deadline (claudeTimeoutMs): the call + settle answer inside the 150 s idle timeout', () =>
+    (/const CLAUDE_TIMEOUT_MS = 135000;/.test(idx) && /claudeTimeoutMs: CLAUDE_TIMEOUT_MS,/.test(idx) && !/maxRetries: [1-9]/.test(idx)
+      && /client\.beta\.messages\.stream\(params, o\)/.test(fs.readFileSync(path.join(FN_DIR, 'extract.js'), 'utf8'))
+      && /p = x\.finalMessage\(\);/.test(fs.readFileSync(path.join(FN_DIR, 'extract.js'), 'utf8'))
+      && !/messages\.create\(/.test(fs.readFileSync(path.join(FN_DIR, 'extract.js'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, ''))) || 'timeout / retries / stream');
   await check('index.ts: official SDK pinned (npm:@anthropic-ai/sdk@1.5.0), supabase-js 2.45.4, extract.js + handler.js loaded, no raw fetch to Anthropic', () =>
     (/import Anthropic from 'npm:@anthropic-ai\/sdk@1\.5\.0';/.test(idx) && /from 'npm:@supabase\/supabase-js@2\.45\.4'/.test(idx)
       && /import '\.\/extract\.js';/.test(idx) && /import '\.\/handler\.js';/.test(idx) && !/\bfetch\s*\(/.test(idx) && !/api\.anthropic\.com/.test(idx)) || 'imports');
@@ -2017,6 +2103,63 @@ async function secFrontEnd() {
     return (job.fields.total.confidence === 'high' && job.fields.iban.confidence === 'low' && job.fields.total.source === 'ai' && job.docType === 'operator_invoice'
       && job.engine === 'claude-opus-5-5' && job.langs === 'auto' && job.ai.usageId === 'u9' && job.ai.costUsd === 0.0123 && job.pages === 2
       && job.extracted.total === '10' && job.status === 'done') || J(job);
+  });
+  await check('ocr.js (vm): runQueue reads up to 3 AI jobs at once (Tesseract one at a time), never more in flight than a known quota, shows the first finished job, per-job state, cancel stops them all', async () => {
+    const i = ocr.indexOf('    var AI_PARALLEL = 3;'), j = ocr.indexOf("    $('ocr-start').addEventListener('click', runQueue);");
+    if (i < 0 || j < i) return 'markers';
+    const flush = async () => { for (let n = 0; n < 6; n++) await new Promise(r => setImmediate(r)); };
+    const mkCtx = (mode, remaining) => {
+      const c = { jobs: [], running: false, cancelRequested: false, cancelGate: null, AI: { enabled: true, remaining }, window: {},
+        progressBox: { hidden: true }, inflight: 0, max: 0, pending: {}, shown: [], said: [], finished: [],
+        renderQueue() {}, setProgress() {}, announce(m) { c.said.push(m); }, showResult(id) { c.shown.push(id); },
+        engineMode: () => mode, $: id => ({ value: id === 'ocr-doc-type' ? 'auto' : 'ara+eng' }), isPdf: () => false,
+        sha256: f => Promise.resolve('h-' + f.name),
+        finishAiJob(jb, r) { jb.status = 'done'; jb.text = r.text; c.finished.push(jb.id); }, finishJob(jb, p) { jb.status = 'done'; jb.text = p[0].text; c.finished.push(jb.id); } };
+      const run = jb => { c.inflight++; c.max = Math.max(c.max, c.inflight);
+        return new Promise((res, rej) => { c.pending[jb.id] = { res: v => { c.inflight--; res(v); }, rej: e => { c.inflight--; rej(e); } }; }); };
+      c.processAiJob = jb => run(jb).then(v => { if (c.AI.remaining != null) c.AI.remaining = Math.max(0, c.AI.remaining - 1); return v; });
+      c.processImageJob = jb => run(jb).then(v => [{ text: v.text }]);
+      c.processPdfJob = c.processImageJob;
+      vm.createContext(c);
+      vm.runInContext(`function newGate() { var g = {}; g.p = new Promise(function (resolve, reject) { g.reject = reject; }); g.p.catch(function () {}); return g; }
+        function gated(p) { return cancelGate ? Promise.race([p, cancelGate.p]) : p; }
+        function cancelled() { var e = new Error('cancelled'); e.cancelled = true; return e; }` + ocr.slice(i, j) + ';this.runQueue = runQueue; this.newGate = newGate;', c);
+      c.jobs = [1, 2, 3, 4, 5].map(n => ({ id: 'j' + n, name: 'f' + n, file: { name: 'f' + n }, status: 'queued' }));
+      return c;
+    };
+    const res = [];
+    // AI, no quota: 3 at once; j2 finishes first → shown (once, after the run); the others keep their own text
+    const a = mkCtx('ai', null);
+    a.runQueue(); await flush();
+    const started = Object.keys(a.pending).join(',');
+    a.pending.j2.res({ text: 't2' }); await flush();
+    const after1 = Object.keys(a.pending).length;                 // j4 started in j2's slot
+    a.pending.j1.res({ text: 't1' }); a.pending.j3.rej(new Error('بطء')); await flush();
+    a.pending.j4.res({ text: 't4' }); await flush(); a.pending.j5.res({ text: 't5' }); await flush();
+    if (!(started === 'j1,j2,j3' && after1 === 4 && a.max === 3 && J(a.shown) === J(['j2']) && a.running === false && a.progressBox.hidden === true
+      && a.jobs[0].text === 't1' && a.jobs[1].text === 't2' && a.jobs[2].status === 'error' && a.jobs[2].error === 'بطء' && a.jobs[3].text === 't4'
+      && a.jobs.every(x => x.sha256 === 'h-' + x.name && x.mode === 'ai'))) res.push('ai ' + J({ started, after1, max: a.max, shown: a.shown, jobs: a.jobs }));
+    // a known quota of 2: never more than 2 in flight; at 0 with nothing in flight the next job is still sent (the server answers daily_cap)
+    const q = mkCtx('ai', 2);
+    q.runQueue(); await flush();
+    const qStart = Object.keys(q.pending).length;
+    q.pending.j1.res({ text: 'a' }); await flush();
+    const qAfter = Object.keys(q.pending).length;               // remaining 1, one in flight → none started
+    q.pending.j2.res({ text: 'b' }); await flush();             // remaining 0, nothing in flight → j3 sent
+    const qZero = Object.keys(q.pending).length;
+    if (!(qStart === 2 && qAfter === 2 && qZero === 3 && q.max <= 2)) res.push('quota ' + J({ qStart, qAfter, qZero, max: q.max }));
+    // Tesseract: one at a time
+    const t = mkCtx('tesseract', null);
+    t.runQueue(); await flush();
+    for (let n = 1; n <= 5; n++) { if (t.pending['j' + n]) t.pending['j' + n].res({ text: 'x' + n }); await flush(); }
+    if (!(t.max === 1 && t.finished.length === 5 && J(t.shown) === J(['j1']))) res.push('tesseract ' + J({ max: t.max, fin: t.finished }));
+    // cancel: the gate rejects every running job → cancelled, nothing else starts, nothing shown
+    const x = mkCtx('ai', null);
+    x.runQueue(); await flush();
+    x.cancelRequested = true; x.cancelGate.reject(Object.assign(new Error('cancelled'), { cancelled: true })); await flush();
+    if (!(x.running === false && x.jobs.slice(0, 3).every(jb => jb.status === 'cancelled') && x.jobs.slice(3).every(jb => jb.status === 'queued')
+      && x.shown.length === 0 && Object.keys(x.pending).length === 3 && x.cancelRequested === false)) res.push('cancel ' + J(x.jobs.map(jb => jb.status)));
+    return res.length === 0 || res.join(' | ');
   });
   // 2026-11-12 (owner: «انا عايز كل حاجه تتقرا»): AI is the default engine when available; ai-doc-v3 + 'auto'; every field shown
   await check('ocr.js (vm): syncEngineUi selects the AI engine by default when available (online + staff + enabled + quota), keeps a Tesseract pick, falls back on quota 0', () => {

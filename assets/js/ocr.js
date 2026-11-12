@@ -925,6 +925,10 @@
       }, function () { syncEngineUi(); return false; });
     }
 
+    // AI readings run up to AI_PARALLEL at a time (each is one Edge Function call, ~20–90 s, mostly waiting on Claude);
+    // the browser reading (Tesseract) stays one at a time: one shared worker (getWorker / logSink) and heavy canvas work.
+    // Each job keeps its own state (closures over j); the cancel gate stops them all; the first job to finish is shown.
+    var AI_PARALLEL = 3;
     function runQueue() {
       if (running) return;
       var todo = jobs.filter(function (j) { return j.status === 'queued' || j.status === 'cancelled'; });
@@ -933,14 +937,32 @@
       running = true; cancelRequested = false; cancelGate = newGate();
       progressBox.hidden = false;
       renderQueue();
-      var firstDone = null;
-      (function step() {
-        var j = jobs.filter(function (x) { return x.status === 'queued'; })[0];
-        if (!j || cancelRequested) return finish();
+      var firstDone = null, active = [], finished = false;
+      function canStart(mode) {
+        if (!active.length) return true;
+        if (mode !== 'ai' || active.length >= AI_PARALLEL) return false;
+        if (active.some(function (a) { return a.mode !== 'ai'; })) return false;   // never next to a Tesseract job
+        // a known daily quota: never more readings in flight than remain (a reused reading costs none — the next one
+        // waits for the answers). With none left and nothing in flight the job is sent: the server answers daily_cap.
+        return AI.remaining == null || AI.remaining - active.length > 0;
+      }
+      function pump() {
+        if (finished) return;
+        while (!cancelRequested) {
+          var j = jobs.filter(function (x) { return x.status === 'queued'; })[0];
+          if (!j) break;
+          var mode = engineMode();
+          if (!canStart(mode)) break;
+          start(j, mode);
+        }
+        if (!active.length) finish();
+      }
+      function start(j, mode) {
         j.status = 'running'; j.error = ''; j.qr = null; j.qrOther = false; j.processedThumb = false;
         j.saved = null;     // a re-read is a new extraction (new machine output)
         j.docType = $('ocr-doc-type').value; j.langs = $('ocr-langs').value;
-        j.mode = engineMode(); j.ai = null;
+        j.mode = mode; j.ai = null;
+        active.push(j);
         renderQueue();
         setProgress(j, 0, 'تحضير الملف…', true);
         sha256(j.file).then(function (h) { j.sha256 = h; })
@@ -955,9 +977,13 @@
             j.error = (e && e.message && /[\u0600-\u06ff]/.test(e.message)) ? e.message : 'تعذّرت قراءة هذا المستند. حاول مرة أخرى أو جرّب صورة أوضح.';
             if (window.console) console.warn('[ocr]', e);
           })
-          .then(function () { renderQueue(); step(); });
-      })();
+          .then(function () {
+            active = active.filter(function (x) { return x !== j; });
+            renderQueue(); pump();
+          });
+      }
       function finish() {
+        finished = true;
         running = false;
         progressBox.hidden = true;
         if (cancelRequested) announce('أُوقفت القراءة. اضغط «بدء القراءة» للمتابعة.');
@@ -965,6 +991,7 @@
         renderQueue();
         if (firstDone) showResult(firstDone.id, true);
       }
+      pump();
     }
     $('ocr-start').addEventListener('click', runQueue);
     $('ocr-cancel').addEventListener('click', function () {

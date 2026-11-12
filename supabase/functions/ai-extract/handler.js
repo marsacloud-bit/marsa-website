@@ -10,7 +10,11 @@
     deps.userClient(t)     supabase-js client acting as the caller (their access token)
     deps.serviceClient()   supabase-js service client (ai_reserve / ai_settle only)
     deps.modelConfigured   boolean: the Anthropic key is set (the key itself stays in index.ts)
-    deps.claudeClient()    an Anthropic SDK client (maxRetries 0, timeout inside the wall clock)
+    deps.claudeClient()    an Anthropic SDK client (maxRetries 0, timeout inside the wall clock); called with
+                           client.beta.messages.stream(params, {signal}) → finalMessage() (extract.js callClaude)
+    deps.claudeTimeoutMs   optional: the whole Claude call's deadline in ms (default CLAUDE_DEADLINE_MS, 135 s), also
+                           bounded by REQUEST_BUDGET_MS from the start of the request (the 150 s idle timeout)
+    deps.now()             optional: the clock in ms (default Date.now; tests)
     deps.sdk               the Anthropic class (typed error classes for classifyCallError)
     deps.log(text)         fixed-text log line (never a token, a key, an error message or document content)
     deps.X                 optional: the extract.js API (default globalThis.MarsaAiExtract)
@@ -40,6 +44,12 @@
   const DEV_ORIGIN_RE = /^http:\/\/127\.0\.0\.1(:\d{1,5})?$/;
   const MAX_BODY = 7 * 1024 * 1024 + 4096;         // base64 of a 5 MB image (~6.7 MB) …
   const MAX_BODY_PDF = 14 * 1024 * 1024 + 4096;    // … or of a 10 MB PDF (~13.4 MB) + the JSON envelope
+  // Timing (Supabase Edge Functions: the response must start within the 150 s request idle timeout). The streamed
+  // Claude call is aborted after CLAUDE_DEADLINE_MS, and never later than REQUEST_BUDGET_MS after the request started,
+  // which leaves ≥ 5 s for ai_settle and the response. Measured: a B/L PDF 20 s; an ~85-line scanned invoice 92 s
+  // (13.4k output tokens at ≈ 145 tokens/s), so 135 s covers ≈ 19.5k output tokens.
+  const CLAUDE_DEADLINE_MS = 135000;
+  const REQUEST_BUDGET_MS = 145000;
 
   function allowedOrigin(origin) {
     if (!origin) return null;
@@ -145,6 +155,8 @@
 
   async function handleRequest(req, deps) {
     const d = deps || {};
+    const now = typeof d.now === 'function' ? d.now : Date.now;
+    const t0 = now();
     const X = d.X || globalThis.MarsaAiExtract;          // extract.js (Deno: globalThis; Node tests: require())
     const log = typeof d.log === 'function' ? d.log : () => {};
     const hdr = name => (req.headers && typeof req.headers.get === 'function' ? req.headers.get(name) : null);
@@ -222,7 +234,7 @@
     /* -------------------------------------------------------------- reserve */
     const svc = d.serviceClient();
     const res = await svc.rpc('ai_reserve', { p_org: v.org_id, p_user: user.id, p_purpose: 'doc_extract',
-      p_est_usd: X.estimateHoldUsd(v.media_type, v.bytes, v.pages) });
+      p_est_usd: X.estimateHoldUsd(v.media_type, v.bytes, v.pages, X.maxTokensFor(v.doc_type, v.prompt_version)) });
     if (res.error || typeof res.data !== 'string') {
       const c = mrs(res.error);
       if (c === 'MRS_AI_DISABLED') return fail('ai_disabled', 403, origin);
@@ -272,8 +284,13 @@
         settle = { status: c.settle, model: X.MODEL, input: 0, output: 0, attempts: null };
         log('ai-extract: claude call failed (' + c.code + ', ' + c.settle + ', ' + why(e) + ')');
       };
+      // one deadline for the call (and the rare 400 retry, which is answered before the model runs)
+      const claudeMs = Number.isFinite(d.claudeTimeoutMs) && d.claudeTimeoutMs > 0 ? d.claudeTimeoutMs : CLAUDE_DEADLINE_MS;
+      const deadline = Math.min(now() + claudeMs, t0 + REQUEST_BUDGET_MS);
+      // < 1 s left → 0: callClaude refuses without sending (AiError upstream_error, settled 'error' at no cost)
+      const left = () => { const r = deadline - now(); return r >= 1000 ? r : 0; };
       try {
-        msg = await X.callClaude(d.claudeClient(), params);
+        msg = await X.callClaude(d.claudeClient(), params, { deadlineMs: left() });
       } catch (e) {
         const st = e && Number.isInteger(e.status) ? e.status : 0;
         // a 400 is rejected before the model runs (nothing billed). When the request carried the server-side
@@ -283,7 +300,7 @@
           log('ai-extract: claude call rejected (' + why(e) + '); retrying without the fallback beta');
           const p2 = Object.assign({}, params);
           delete p2.betas; delete p2.fallbacks;
-          try { msg = await X.callClaude(d.claudeClient(), p2); }
+          try { msg = await X.callClaude(d.claudeClient(), p2, { deadlineMs: left() }); }
           catch (e2) { fail1(e2); }
         } else {
           fail1(e);
@@ -341,6 +358,6 @@
     return json(body, 200, origin);
   }
 
-  const API = { handleRequest, readBody, allowedOrigin, sha256Hex, MAX_BODY, MAX_BODY_PDF, PROD_ORIGIN };
+  const API = { handleRequest, readBody, allowedOrigin, sha256Hex, MAX_BODY, MAX_BODY_PDF, PROD_ORIGIN, CLAUDE_DEADLINE_MS, REQUEST_BUDGET_MS };
   (typeof module === 'object' && module.exports) ? (module.exports = API) : (globalThis.MarsaAiExtract = Object.assign(globalThis.MarsaAiExtract || {}, API));
 })();

@@ -11,7 +11,7 @@
 ## طريقة التطبيق على قاعدة حية
 1. قاعدة بها legacy_docs (`health_check()` = 20261119000100): الصق الملف وحده في SQL Editor ثم Run. الملف قابل لإعادة التشغيل.
 2. انشر الدالة `ai-extract` (الملفات `index.ts` و`extract.js` و`handler.js`، أو `python3 scripts/bundle-edge-function.py ai-extract`).
-   النموذج يبقى `claude-opus-5-5` وبنفس طريقة استدعاء SDK (`client.beta.messages.create`). الطلب بلا `prompt_version` يبقى `ai-doc-v2` كما هو.
+   النموذج يبقى `claude-opus-5-5` وبنفس طريقة استدعاء SDK (`client.beta.messages.stream` ثم `finalMessage()`؛ مستندات الشحن بحد 32000 رمز ومهلة 135 ث). الطلب بلا `prompt_version` يبقى `ai-doc-v2` كما هو.
 3. إذا أعدت لصق 20261101000100 أو 20261106000100 أو 20261114000100 أو 20261115000100 أو 20261116000100 أو 20261117000100
    أو 20261118000100 أو 20261119000100 فالصق هذا الملف بعده مباشرة.
 
