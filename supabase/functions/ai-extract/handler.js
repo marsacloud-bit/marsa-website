@@ -262,7 +262,11 @@
         const c = X.classifyCallError(e, d.sdk);
         errCode = c.code; errStatus = c.status;
         settle = { status: c.settle, model: X.MODEL, input: 0, output: 0, attempts: null };
-        log('ai-extract: claude call failed (' + c.code + ', ' + c.settle + ')');
+        // the HTTP status and the API error type (a fixed enum such as authentication_error / billing_error /
+        // invalid_request_error) say why without any message text, key or document content
+        const st = e && Number.isInteger(e.status) ? e.status : 0;
+        const ty = e && typeof e.type === 'string' && /^[a-z_]{1,40}$/.test(e.type) ? e.type : '-';
+        log('ai-extract: claude call failed (' + c.code + ', ' + c.settle + ', http ' + st + ', ' + ty + ')');
       }
       if (msg) {
         const parsed = X.parseMessage(msg, v.prompt_version, v.doc_type);
