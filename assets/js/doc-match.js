@@ -87,6 +87,23 @@
   function words(s) {
     return fold(s).replace(/[^a-z0-9ء-ي]+/g, ' ').trim().split(' ').filter(Boolean);
   }
+  /* Case / spacing never makes two values differ (owner rule, 2026-11-12): looseKey drops every whitespace
+     (spaces, tabs, line breaks, NBSP and the other Unicode spaces, zero-width / direction marks), the Arabic
+     tatweel and tashkeel (harakat, shadda, sukun, superscript alef, Quranic marks), and lower-cases. Nothing else
+     is changed: other punctuation, letters and digits stay, so "MSCU-123" vs "MSCU123" is decided by the field's
+     own comparator, and different words / numbers still differ. Two text / id values with the same looseKey are a
+     'match' (lenient() below wraps every text / id comparator with it). */
+  var INVISIBLE = /[\s\u00A0\u1680\u180E\u2000-\u200F\u2028-\u202F\u205F-\u2064\u3000\uFEFF\u0640\u064B-\u065F\u0670\u06D6-\u06DC\u06DF-\u06E8\u06EA-\u06ED]+/g;
+  function looseKey(v) {
+    return str(v).toLowerCase().replace(INVISIBLE, '');
+  }
+  function looseSame(a, b) {
+    var x = looseKey(a);
+    return !!x && x === looseKey(b);
+  }
+  function lenient(fn) {
+    return function (a, b) { return looseSame(a, b) ? { s: 'match' } : fn(a, b); };
+  }
   function uniq(list) {
     var seen = {}, out = [];
     list.forEach(function (x) { if (!Object.prototype.hasOwnProperty.call(seen, x)) { seen[x] = 1; out.push(x); } });
@@ -604,20 +621,20 @@
      exp = expected documents (normally carry the field), opt = optional ones
      ------------------------------------------------------------------ */
   var F = [
-    { key: 'invoice_number', ar: 'رقم الفاتورة', en: 'Invoice number', cmp: cmpId, crit: 'three',
+    { key: 'invoice_number', ar: 'رقم الفاتورة', en: 'Invoice number', cmp: lenient(cmpId), crit: 'three',
       keys: { invoice: ['invoice_number'], bl: ['invoice_number'], declaration: ['invoice_number'], packing: ['invoice_number', 'packing_list_number'] },
       exp: ['invoice', 'declaration'], opt: ['bl', 'packing'], refOnly: { packing_list_number: true } },
-    { key: 'bl_number', ar: 'رقم البوليصة', en: 'B/L number', cmp: cmpId, crit: 'three',
+    { key: 'bl_number', ar: 'رقم البوليصة', en: 'B/L number', cmp: lenient(cmpId), crit: 'three',
       keys: { invoice: ['bl_number'], bl: ['bl_number'], declaration: ['bl_number'] }, exp: ['bl', 'declaration'], opt: ['invoice'] },
-    { key: 'declaration_number', ar: 'رقم البيان الجمركي', en: 'Declaration number', cmp: cmpId, crit: false, info: true,
+    { key: 'declaration_number', ar: 'رقم البيان الجمركي', en: 'Declaration number', cmp: lenient(cmpId), crit: false, info: true,
       keys: { invoice: ['declaration_number'], bl: ['declaration_number'], declaration: ['declaration_number'] }, exp: ['declaration'], opt: ['invoice', 'bl'] },
-    { key: 'container_numbers', ar: 'أرقام الحاويات', en: 'Container numbers', cmp: cmpContainers, crit: true, set: 'containers',
+    { key: 'container_numbers', ar: 'أرقام الحاويات', en: 'Container numbers', cmp: lenient(cmpContainers), crit: true, set: 'containers',
       keys: { invoice: ['container_numbers'], bl: ['container_numbers'], declaration: ['container_numbers'], packing: ['container_numbers'] },
       exp: ['bl', 'declaration', 'packing'], opt: ['invoice'] },
-    { key: 'shipper', ar: 'الشاحن / المورد', en: 'Shipper / supplier', cmp: cmpName, crit: false,
+    { key: 'shipper', ar: 'الشاحن / المورد', en: 'Shipper / supplier', cmp: lenient(cmpName), crit: false,
       keys: { invoice: ['shipper', 'supplier_name'], bl: ['shipper'], declaration: ['shipper', 'supplier_name'], packing: ['shipper', 'supplier_name'] },
       exp: ['invoice', 'bl'], opt: ['declaration', 'packing'] },
-    { key: 'consignee', ar: 'المرسل إليه / المستورد', en: 'Consignee / importer', cmp: cmpName, crit: true,
+    { key: 'consignee', ar: 'المرسل إليه / المستورد', en: 'Consignee / importer', cmp: lenient(cmpName), crit: true,
       keys: { invoice: ['consignee', 'buyer_name'], bl: ['consignee'], declaration: ['consignee', 'buyer_name'], packing: ['consignee', 'consignee_name', 'buyer_name'] },
       exp: ['invoice', 'bl', 'declaration'], opt: ['packing'] },
     { key: 'gross_weight', ar: 'الوزن الإجمالي (كجم)', en: 'Gross weight (kg)', cmp: cmpWeight, crit: true, num: 'kg',
@@ -629,29 +646,29 @@
     { key: 'packages_count', ar: 'عدد الطرود', en: 'Number of packages', cmp: cmpCount, crit: true, num: 'n',
       keys: { invoice: ['packages_count'], bl: ['packages_count'], declaration: ['packages_count'], packing: ['packages_count'] },
       exp: ['bl', 'declaration', 'packing'], opt: ['invoice'] },
-    { key: 'package_type', ar: 'نوع الطرود', en: 'Package type', cmp: cmpPackageType, crit: false,
+    { key: 'package_type', ar: 'نوع الطرود', en: 'Package type', cmp: lenient(cmpPackageType), crit: false,
       keys: { invoice: ['package_type'], bl: ['package_type'], declaration: ['package_type'], packing: ['package_type'] },
       exp: ['bl'], opt: ['invoice', 'declaration', 'packing'] },
-    { key: 'hs_codes', ar: 'رموز HS (6 خانات)', en: 'HS codes (6 digits)', cmp: cmpHs, crit: true, set: 'hs',
+    { key: 'hs_codes', ar: 'رموز HS (6 خانات)', en: 'HS codes (6 digits)', cmp: lenient(cmpHs), crit: true, set: 'hs',
       keys: { invoice: ['hs_codes'], bl: ['hs_codes'], declaration: ['hs_codes'], packing: ['hs_codes'] },
       exp: ['invoice', 'declaration'], opt: ['bl', 'packing'] },
-    { key: 'country_of_origin', ar: 'بلد المنشأ', en: 'Country of origin', cmp: cmpCountry, crit: false,
+    { key: 'country_of_origin', ar: 'بلد المنشأ', en: 'Country of origin', cmp: lenient(cmpCountry), crit: false,
       keys: { invoice: ['country_of_origin'], bl: ['country_of_origin'], declaration: ['country_of_origin'], packing: ['country_of_origin'] },
       exp: ['invoice', 'declaration'], opt: ['bl', 'packing'] },
-    { key: 'port_of_loading', ar: 'ميناء الشحن', en: 'Port of loading', cmp: cmpPort, crit: false,
+    { key: 'port_of_loading', ar: 'ميناء الشحن', en: 'Port of loading', cmp: lenient(cmpPort), crit: false,
       keys: { invoice: ['port_of_loading'], bl: ['port_of_loading'], declaration: ['port_of_loading'] }, exp: ['bl'], opt: ['invoice', 'declaration'] },
-    { key: 'port_of_discharge', ar: 'ميناء التفريغ', en: 'Port of discharge', cmp: cmpPort, crit: false,
+    { key: 'port_of_discharge', ar: 'ميناء التفريغ', en: 'Port of discharge', cmp: lenient(cmpPort), crit: false,
       keys: { invoice: ['port_of_discharge'], bl: ['port_of_discharge'], declaration: ['port_of_discharge'] }, exp: ['bl'], opt: ['invoice', 'declaration'] },
-    { key: 'vessel', ar: 'اسم السفينة', en: 'Vessel', cmp: cmpVessel, crit: false,
+    { key: 'vessel', ar: 'اسم السفينة', en: 'Vessel', cmp: lenient(cmpVessel), crit: false,
       keys: { invoice: ['vessel'], bl: ['vessel'], declaration: ['vessel'] }, exp: ['bl'], opt: ['invoice', 'declaration'] },
-    { key: 'incoterms', ar: 'شروط التسليم (Incoterms)', en: 'Incoterms', cmp: cmpIncoterms, crit: false,
+    { key: 'incoterms', ar: 'شروط التسليم (Incoterms)', en: 'Incoterms', cmp: lenient(cmpIncoterms), crit: false,
       keys: { invoice: ['incoterms'], bl: ['incoterms'], declaration: ['incoterms'] }, exp: ['invoice'], opt: ['bl', 'declaration'] },
-    { key: 'goods_description', ar: 'وصف البضاعة', en: 'Goods description', cmp: cmpDesc, crit: false,
+    { key: 'goods_description', ar: 'وصف البضاعة', en: 'Goods description', cmp: lenient(cmpDesc), crit: false,
       keys: { invoice: ['goods_description'], bl: ['goods_description'], declaration: ['goods_description'], packing: ['goods_description'] },
       exp: ['invoice', 'bl'], opt: ['declaration', 'packing'] },
-    { key: 'invoice_date', ar: 'تاريخ الفاتورة', en: 'Invoice date', cmp: cmpDate, crit: false,
+    { key: 'invoice_date', ar: 'تاريخ الفاتورة', en: 'Invoice date', cmp: lenient(cmpDate), crit: false,
       keys: { invoice: ['invoice_date'], declaration: ['invoice_date'] }, exp: ['invoice', 'declaration'], opt: [] },
-    { key: 'currency', ar: 'العملة', en: 'Currency', cmp: cmpCurrency, crit: false,
+    { key: 'currency', ar: 'العملة', en: 'Currency', cmp: lenient(cmpCurrency), crit: false,
       keys: { invoice: ['currency'], declaration: ['currency'] }, exp: ['invoice', 'declaration'], opt: [] },
     { key: 'total', ar: 'الإجمالي / القيمة الجمركية', en: 'Total / customs value', cmp: null, crit: true, num: 'money',
       keys: { invoice: ['total', 'subtotal'], declaration: ['total', 'subtotal'] }, exp: ['invoice', 'declaration'], opt: [] }
@@ -1057,10 +1074,14 @@
     FIELDS: F.map(function (d) { return { key: d.key, label_ar: d.ar, label_en: d.en, keys: d.keys, exp: d.exp.slice(), opt: d.opt.slice(), critical: d.crit }; }),
     compare: compare,
     // helpers (tests / UI)
-    normName: normName, cmpName: cmpName, normPort: normPort, cmpPort: cmpPort, normCountry: normCountry, normCurrency: normCurrency,
+    // the cmp* helpers are the lenient ones the rows use (case / spacing never differs: looseKey / looseSame)
+    normName: normName, cmpName: lenient(cmpName), normPort: normPort, cmpPort: lenient(cmpPort), normCountry: normCountry, normCurrency: normCurrency,
     containerSet: containerSet, iso6346Valid: iso6346Valid, hs6Set: hs6Set, numClose: numClose, parseNum: parseNum, parseWeight: parseWeight,
-    normPackageType: normPackageType, incotermCode: incotermCode, normDate: normDate, normId: normId, cmpId: cmpId, normVessel: normVessel,
-    descTokens: descTokens, cmpDesc: cmpDesc, fold: fold, fmtNum: fmtNum,
+    normPackageType: normPackageType, incotermCode: incotermCode, normDate: normDate, normId: normId, cmpId: lenient(cmpId), normVessel: normVessel,
+    descTokens: descTokens, cmpDesc: lenient(cmpDesc), fold: fold, fmtNum: fmtNum,
+    cmpVessel: lenient(cmpVessel), cmpContainers: lenient(cmpContainers), cmpHs: lenient(cmpHs), cmpPackageType: lenient(cmpPackageType),
+    cmpIncoterms: lenient(cmpIncoterms), cmpCurrency: lenient(cmpCurrency), cmpCountry: lenient(cmpCountry), cmpDate: lenient(cmpDate),
+    looseKey: looseKey, looseSame: looseSame,
     // legacy step 4 (20261120000100)
     blTokens: blTokens, blEquivalent: blEquivalent
   };

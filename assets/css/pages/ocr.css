@@ -694,3 +694,58 @@ html[dir="ltr"] .ocr-mx-cell.is-calm.is-warn { box-shadow: inset 4px 0 0 #B7791F
 .ocr-mx-ship-facts { display: flex; flex-wrap: wrap; gap: 2px 14px; }
 .ocr-mx-ship-fact { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px; min-width: 0; }
 .ocr-mx-ship-lbl { color: var(--muted); }
+
+/* ---- errors-only summary: the first block of the report (ocr-match.js renderSummary) ----
+   is-bad = open errors (red edge), is-done = every error reviewed (grey edge), is-ok = no error (green line only) */
+.ocr-mx-sum { margin-block-end: 16px; padding: 14px 16px; border-radius: var(--r, 12px); border: 1px solid #F1C3C8; border-inline-start: 5px solid #C8323C;
+  background: #FFF8F8; min-width: 0; }
+.ocr-mx-sum:focus { outline: none; }
+.ocr-mx-sum:focus-visible { outline: 3px solid rgba(63, 193, 208, .7); outline-offset: 2px; }
+.ocr-mx-sum.is-done { border-color: #D5DEE8; border-inline-start-color: #64748B; background: #F8FAFC; }
+.ocr-mx-sum.is-ok { padding: 0; border: 0; background: none; }
+.ocr-mx-sum.is-ok .ocr-mx-sum-head { display: none; }
+.ocr-mx-sum-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin-block-end: 6px; }
+.ocr-mx-sum-title { margin: 0; font-size: var(--fs-md, 1.05rem); color: #A0252E; }
+.ocr-mx-sum.is-done .ocr-mx-sum-title { color: var(--navy-dark); }
+.ocr-mx-sum-state { font-size: var(--fs-xs); color: var(--muted); font-weight: 700; }
+.ocr-mx-sum-hint { margin: 0 0 8px; }
+.ocr-mx-sum-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ocr-mx-sum-list[hidden] { display: none; }
+.ocr-mx-sum-item { display: flex; gap: 10px; align-items: flex-start; width: 100%; margin: 0; padding: 8px 10px; border: 1px solid #F3D0D4; border-radius: 10px;
+  background: #fff; color: inherit; font: inherit; text-align: start; cursor: pointer; min-width: 0; }
+.ocr-mx-sum-item:hover { background: #FFF1F2; }
+.ocr-mx-sum-item:focus { outline: none; }
+.ocr-mx-sum-item:focus-visible { outline: 3px solid rgba(63, 193, 208, .7); outline-offset: 1px; }
+.ocr-mx-sum-item.is-reviewed { border-color: #D5DEE8; background: #F8FAFC; }
+.ocr-mx-sum-icon { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #C8323C; color: #fff; font-size: 13px;
+  font-weight: 700; flex: none; margin-block-start: 1px; }
+.ocr-mx-sum-item.is-invalid .ocr-mx-sum-icon { background: #A0252E; }
+.ocr-mx-sum-item.is-reviewed .ocr-mx-sum-icon { background: #13955F; }
+.ocr-mx-sum-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 auto; }
+.ocr-mx-sum-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.ocr-mx-sum-label { font-weight: 700; color: var(--navy-dark); }
+.ocr-mx-sum-kind { font-size: var(--fs-xs); font-weight: 700; color: #A0252E; }
+.ocr-mx-sum-item.is-reviewed .ocr-mx-sum-kind { color: var(--muted); }
+.ocr-mx-sum-rev { font-size: var(--fs-xs); font-weight: 700; color: #0D6B44; }
+.ocr-mx-sum-vals { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: var(--fs-sm); min-width: 0; }
+.ocr-mx-sum-val { min-width: 0; overflow-wrap: anywhere; }
+.ocr-mx-sum-doc { color: var(--muted); }
+.ocr-mx-sum-val.is-bad bdi { color: #A0252E; font-weight: 700; }
+.ocr-mx-sum-item.is-reviewed .ocr-mx-sum-val.is-bad bdi { color: inherit; }
+.ocr-mx-sum-why { font-size: var(--fs-xs); color: var(--muted); line-height: 1.7; overflow-wrap: anywhere; }
+.ocr-mx-sum-quiet { margin: 8px 0 0; font-size: var(--fs-sm); }
+.ocr-mx-sum-quiet[hidden], .ocr-mx-sum-hint[hidden], .ocr-mx-sum-ok[hidden], .ocr-mx-sum-state[hidden] { display: none !important; }
+.ocr-mx-sum-link { margin: 0; padding: 0; border: 0; background: none; font: inherit; color: #8A5E04; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; text-align: start; }
+.ocr-mx-sum-link::before { content: '≈ '; text-decoration: none; }
+.ocr-mx-sum-link:focus-visible { outline: 3px solid rgba(63, 193, 208, .7); outline-offset: 2px; border-radius: 4px; }
+.ocr-mx-exc.ocr-mx-flash { animation: ocr-mx-flash 2.4s ease-out 1; outline: 3px solid transparent; outline-offset: 4px; border-radius: 8px; }
+@media (max-width: 640px) { .ocr-mx-sum { padding: 12px; } .ocr-mx-sum.is-ok { padding: 0; } .ocr-mx-sum-item { padding: 8px; gap: 8px; } }
+@media (prefers-reduced-motion: reduce) { .ocr-mx-exc.ocr-mx-flash { animation: none !important; outline: 3px solid #1673B8; } }
+@media print {
+  .ocr-mx-sum, .ocr-mx-sum-item, .ocr-mx-sum-icon { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body.ocr-print-match .ocr-mx-sum { break-inside: avoid; }
+  body.ocr-print-match .ocr-mx-sum-item { break-inside: avoid; padding: 4px 6px; }
+  body.ocr-print-match .ocr-mx-sum-link { text-decoration: none; color: #8A5E04; }
+}
+/* the single reader's long «تعرّف Claude على المستند …» badge wrapped nowhere and widened the page at 375px */
+.ocr-result-meta .badge { white-space: normal; max-width: 100%; overflow-wrap: anywhere; text-align: start; }

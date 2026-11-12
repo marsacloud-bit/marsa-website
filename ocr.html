@@ -529,6 +529,17 @@
                 <h3 class="ocr-match-report-title" data-i18n="ocr.m_report_title">تقرير مطابقة المستندات</h3>
                 <dl class="ocr-match-meta" id="ocr-match-meta"></dl>
               </div>
+              <!-- errors only (mismatch rows + invalid values), first thing after the head; a line leads to its row -->
+              <div class="ocr-mx-sum" id="ocr-mx-sum" role="region" aria-labelledby="ocr-mx-sum-title" tabindex="-1">
+                <div class="ocr-mx-sum-head">
+                  <h4 class="ocr-mx-sum-title" id="ocr-mx-sum-title">ملخص الأخطاء</h4>
+                  <span class="ocr-mx-sum-state" id="ocr-mx-sum-state" hidden></span>
+                </div>
+                <p class="ocr-mx-ok ocr-mx-sum-ok" id="ocr-mx-sum-ok" hidden><span class="ocr-mx-ok-icon" aria-hidden="true">✓</span> <span data-i18n="ocr.mx_sum_none">لا توجد أخطاء — كل القيم المشتركة متطابقة</span></p>
+                <p class="text-sm text-muted ocr-mx-hint ocr-mx-sum-hint" id="ocr-mx-sum-hint" data-i18n="ocr.mx_sum_hint" hidden>اضغط على أي خطأ للانتقال إلى صفه في جدول المقارنة.</p>
+                <ul class="ocr-mx-sum-list" id="ocr-mx-sum-list"></ul>
+                <p class="ocr-mx-sum-quiet" id="ocr-mx-sum-quiet" hidden><button type="button" class="ocr-mx-sum-link" id="ocr-mx-sum-review"></button></p>
+              </div>
               <div class="ocr-match-banner" id="ocr-match-banner" role="status" tabindex="-1">
                 <span class="ocr-match-overall" id="ocr-match-overall"></span>
                 <span class="ocr-match-counts" id="ocr-match-counts"></span>

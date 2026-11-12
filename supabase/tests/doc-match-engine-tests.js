@@ -655,7 +655,20 @@ section('22. packing list absent: identical to match-v1');
 {
   // sha256 of the results of snapshotCorpus() computed with the engine BEFORE the packing list was added
   // (match-v1, 2026-11-12), the two new keys stripped. Update it only for an intended change of the v1 behaviour.
-  eq('snapshot of 412 results without a packing list is unchanged', snapshotDigest(true), 'f568c994bc91637717a3746c7ae73cd1deaac12feacbf1a65eaa9a5adb7dcd37');
+  // 2026-11-12 (owner rule «الكابيتال والسمول مفهوش اخطاء … السبيس برضك مش خطأ»: text / id values that differ only in
+  // letter case or spacing — or are identical — are a match, doc-match.js looseKey / lenient). Was
+  // f568c994bc91637717a3746c7ae73cd1deaac12feacbf1a65eaa9a5adb7dcd37. Exactly 12 of the corpus results changed, all
+  // pairs of IDENTICAL texts that a field comparator could not parse and called 'mismatch' before:
+  //   #17  package_type invoice "0" = B/L "0": row mismatch → match (inv_bl match; counts.mismatch −1, match +1;
+  //        detail "do not match" → "Not shown on the declaration (not required)"; overall unchanged);
+  //   #62  goods_description B/L "8708.30" = declaration "8708.30": bl_decl mismatch → match, row stays mismatch,
+  //        detail "The three documents disagree" → "The invoice differs from the B/L and the declaration";
+  //   #105 #169 #233 #297 #361  goods_description invoice "0" = declaration "0": inv_decl → match, row stays mismatch,
+  //        detail → "The B/L differs from the invoice and the declaration";
+  //   #108 #172 #236 #300 #364  container_numbers B/L "8708.30" = declaration "8708.30": bl_decl → match, row stays
+  //        mismatch, detail → "The invoice differs from the B/L and the declaration".
+  // No other row, status, overall or count changed.
+  eq('snapshot of 412 results without a packing list is unchanged', snapshotDigest(true), '9108353b23921437f2900e1e441e5ccc27ff475a79cf85a847e2cee09595b6d4');
   const base = M.compare({ invoice: invoice(), bl: bl(), declaration: decl() });
   eq('version stays match-v1', base.version, 'match-v1');
   eq('with_packing false', base.with_packing, false);
@@ -850,6 +863,58 @@ check('engine source stays ES5 (no let / const / arrow / template / class)', () 
   const src = fs.readFileSync(path.join(ROOT, 'assets', 'js', 'doc-match.js'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
   return !/\b(let|const|class)\s|=>|`/.test(src) || 'es6';
 });
+
+section('25. case / spacing only is never a difference (owner rule 2026-11-12)');
+{
+  const C = (key, a, b, extraA, extraB) => { const fa = Object.assign({}, extraA || {}), fb = Object.assign({}, extraB || {}); fa[key] = a; fb[key] = b;
+    return key === 'invoice_date' ? M.compare({ invoice: { fields: fa }, declaration: { fields: fb } }) : M.compare({ invoice: { fields: fa }, bl: { fields: fb } }); };
+  const same = [
+    ['invoice_number', 'syn-inv-2026-0042', 'SYN-INV-2026-0042'], ['invoice_number', 'SYN INV 2026 0042', 'SYNINV20260042'],
+    ['bl_number', 'synbl 2611001', 'SYNBL2611001'], ['bl_number', ' SYNBL\n2611001 ', 'synbl2611001'],
+    ['container_numbers', 'AKKU 402214 9', 'AKKU4022149'], ['container_numbers', 'akku 40221 49', 'AKKU4022149'], ['container_numbers', 'tstu7710023 ', 'TSTU7710023'],
+    ['shipper', 'NORTHWIND TEXTILE MILLS CO .', 'Northwind Textile Mills Co.'], ['shipper', 'NORTHWIND  TEXTILE\tMILLS', 'northwind textile mills'],
+    ['consignee', 'AL MANARA TRADING', 'ALMANARA trading'], ['consignee', 'شـركة المنارة', 'شركة  المنارة'], ['consignee', 'شَرِكَةُ المَنَارَة', 'شركة المنارة'],
+    ['port_of_loading', 'NING BO', 'Ningbo'], ['port_of_loading', 'port  of xyzabc', 'PORT OF XYZABC'], ['port_of_discharge', 'jeddah islamic port', 'JEDDAH ISLAMIC  PORT'],
+    ['vessel', 'mv sample star', 'MV SAMPLESTAR'], ['vessel', 'MSC  ANNA', 'msc anna'],
+    ['package_type', 'Card Board Boxes', 'CARDBOARD BOXES'], ['package_type', 'ctns', 'CTNS'],
+    ['hs_codes', '8471 30', '847130'], ['hs_codes', '8708.30 .00', '8708.30.00'],
+    ['country_of_origin', 'Rep ublic of Narnia', 'republic of narnia'], ['country_of_origin', 'china', 'CHINA'],
+    ['incoterms', 'cif jed dah', 'CIF JEDDAH'], ['incoterms', 'Ex Works', 'EX  WORKS'],
+    ['goods_description', 'COTTON  T-SHIRTS ,\nKNITTED', 'cotton t-shirts, knitted'], ['goods_description', 'X', 'x'],
+    ['invoice_date', '2026 - 10 - 01', '2026-10-01']
+  ];
+  same.forEach(([k, a, b]) => {
+    check(k + ': ' + J(a) + ' = ' + J(b), () => { const r = C(k, a, b); return st(r, k) === 'match' && row(r, k).pairs[k === 'invoice_date' ? 'inv_decl' : 'inv_bl'] === 'match' || J(row(r, k)); });
+  });
+  check('currency (invoice ↔ declaration): " u s d" = "USD", "Us$" = "US$"', () => {
+    const a = M.compare({ invoice: { fields: { currency: ' u s d' } }, declaration: { fields: { currency: 'USD' } } });
+    const b = M.compare({ invoice: { fields: { currency: 'Us$' } }, declaration: { fields: { currency: 'US$' } } });
+    return st(a, 'currency') === 'match' && st(b, 'currency') === 'match' || J([row(a, 'currency'), row(b, 'currency')]); });
+  check('declaration number (three-way): "DEC 2026 77" = "dec202677"', () => {
+    const r = M.compare({ invoice: { fields: { declaration_number: 'DEC 2026 77' } }, bl: { fields: {} }, declaration: { fields: { declaration_number: 'dec202677' } } });
+    return st(r, 'declaration_number') === 'match' || J(row(r, 'declaration_number')); });
+  // nothing else is loosened
+  const differ = [
+    ['invoice_number', 'SYN-INV-2026-0042', 'SYN-INV-2026-0043', 'mismatch'], ['bl_number', 'SYNBL2611001', 'SYNBL2611009', 'mismatch'],
+    ['container_numbers', 'TSTU7710023', 'TSTU4022145', 'mismatch'], ['consignee', 'AL MANARA TRADING', 'AL MANARAH TRADING', 'partial'],
+    ['shipper', 'NORTHWIND TEXTILE', 'SOUTHWIND FABRICS', 'mismatch'], ['port_of_loading', 'Ningbo', 'Shanghai', 'mismatch'],
+    ['vessel', 'MV SAMPLE STAR', 'MV OTHER MOON', 'mismatch'], ['package_type', 'CTNS', 'PALLETS', 'mismatch'], ['hs_codes', '847130', '847150', 'mismatch'],
+    ['country_of_origin', 'China', 'India', 'mismatch'], ['incoterms', 'CIF', 'FOB', 'mismatch'], ['goods_description', 'cotton shirts', 'steel pipes', 'mismatch'],
+    ['invoice_date', '2026-10-01', '2026-10-02', 'mismatch'], ['gross_weight', '25000', '27500', 'mismatch'], ['packages_count', '20', '19', 'mismatch']
+  ];
+  differ.forEach(([k, a, b, want]) => {
+    check(k + ': ' + J(a) + ' vs ' + J(b) + ' stays ' + want, () => { const r = C(k, a, b); return st(r, k) === want || J(row(r, k)); });
+  });
+  check('a letter / punctuation difference is not spacing: "AB-12" vs "AB.12" ids decided by normId, "A/B" vs "AB" names', () =>
+    M.looseSame('AB-12', 'AB.12') === false && M.looseSame('a b', 'AB') === true && M.looseSame('é', 'e') === false && M.looseSame('', '') === false || 'loose');
+  check('looseKey: case, all Unicode spaces, zero-width / direction marks, tatweel, tashkeel', () =>
+    M.looseKey(' Ab C d​‏e\n') === 'abcde' && M.looseKey('مـرسـى') === 'مرسى' && M.looseKey('مَرْسًى') === 'مرسى' || J(M.looseKey(' Ab C')));
+  check('exported helpers are the lenient ones', () => M.cmpId('ab 12', 'AB12').s === 'match' && M.cmpHs('8471 30', '847130').s === 'match'
+    && M.cmpContainers('AKKU 402214 9', 'akku4022149').s === 'match' && M.cmpDesc('X', 'x').s === 'match' && M.cmpName('A  B', 'a b').s === 'match' || 'helpers');
+  check('packing list too: "mscu 123456 6" = "MSCU1234566"', () => {
+    const r = M.compare({ invoice: invoice(), bl: bl({ container_numbers: { value: 'MSCU1234566' } }), packing: packing({ container_numbers: { value: 'mscu 123456 6' } }) });
+    return st(r, 'container_numbers') === 'match' || J(row(r, 'container_numbers')); });
+}
 
 /* ----------------------------------------------------------------- summary */
 console.log('\nMarsa — doc-match engine tests: ' + pass + ' passed, ' + fail + ' failed (' + (pass + fail) + ' checks)');

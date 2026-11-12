@@ -412,7 +412,8 @@
       $('ocr-match-result').hidden = false;
       section.hidden = false;
       if (focus) {
-        var b = $('ocr-match-banner');
+        // the errors summary is the first thing of the report: it gets the focus (its heading carries the count)
+        var b = $('ocr-mx-sum') || $('ocr-match-banner');
         try { b.focus({ preventScroll: false }); } catch (e) { b.focus(); }
       }
     }
@@ -1067,7 +1068,81 @@
     }
     var EXC_ICON = { mismatch: '✗', partial: '≈', missing: '?', invalid: '!' };
     var EXC_CLS = { mismatch: 'is-mismatch', partial: 'is-partial', missing: 'is-missing', invalid: 'is-mismatch' };
+    /* errors-only summary, the first block of the report: rows with status 'mismatch' + values a reading flagged
+       invalid (e.g. a container number failing the ISO 6346 check digit). Never partial / missing / info (they stay in
+       the exceptions table, counted in one quiet line); letter case / spacing differences are 'match' in the engine
+       (doc-match.js looseKey), so they never get here. A line leads to its comparison-table row (or the sheet cell of
+       an invalid value) and flashes it; a reviewed row's line is shown as reviewed. Rebuilt with the exceptions. */
+    function isError(x) { return x.st === 'mismatch' || x.st === 'invalid'; }
+    function renderSummary() {
+      var box = $('ocr-mx-sum'), list = $('ocr-mx-sum-list');
+      if (!box || !list || !S.result) return;
+      var C = cols(), X2 = exceptionRows();
+      var errs = X2.rows.filter(isError);
+      var rest = X2.rows.filter(function (x) { return !isError(x); }).length;
+      errs.forEach(function (x) { if (x.st === 'invalid') x.reviewed = !!S.reviewed[x.key]; });
+      var nRev = errs.filter(function (x) { return x.reviewed; }).length, nOpen = errs.length - nRev;
+      box.className = 'ocr-mx-sum ' + (!errs.length ? 'is-ok' : (nOpen ? 'is-bad' : 'is-done'));
+      $('ocr-mx-sum-title').textContent = T('mx_sum_title', { n: errs.length });
+      var stEl = $('ocr-mx-sum-state');
+      stEl.textContent = nRev ? T('mx_sum_open', { n: nOpen }) + ' · ' + T('mx_sum_reviewed_n', { n: nRev }) : '';
+      stEl.hidden = !nRev;
+      $('ocr-mx-sum-ok').hidden = errs.length > 0;
+      $('ocr-mx-sum-hint').hidden = !errs.length;
+      list.textContent = '';
+      list.hidden = !errs.length;
+      errs.forEach(function (x) {
+        var li = el('li', 'ocr-mx-sum-li');
+        var b = el('button', 'ocr-mx-sum-item ' + (x.st === 'invalid' ? 'is-invalid' : 'is-mismatch') + (x.reviewed ? ' is-reviewed' : ''));
+        b.type = 'button';
+        b.setAttribute('data-target', x.target);
+        b.setAttribute('data-key', x.key);
+        if (x.doc) b.setAttribute('data-doc', x.doc);
+        var ic = el('span', 'ocr-mx-sum-icon', x.reviewed ? '✓' : (x.st === 'invalid' ? '!' : '✗'));
+        ic.setAttribute('aria-hidden', 'true');
+        b.appendChild(ic);
+        var main = el('span', 'ocr-mx-sum-main');
+        var top = el('span', 'ocr-mx-sum-top');
+        top.appendChild(el('span', 'ocr-mx-sum-label', x.label));
+        if (x.critical) { var cr = el('span', 'ocr-match-crit', '★'); cr.setAttribute('aria-hidden', 'true'); top.appendChild(cr); }
+        top.appendChild(el('span', 'ocr-mx-sum-kind', T('mx_st_' + x.st)));
+        if (x.reviewed) top.appendChild(el('span', 'ocr-mx-sum-rev', '✓ ' + T('mx_reviewed')));
+        main.appendChild(top);
+        var vals = el('span', 'ocr-mx-sum-vals');
+        C.forEach(function (k) {
+          var v = x.values ? x.values[k] : undefined;
+          if (v === undefined || ((v == null || v === '') && x.row)) return;   // a document without the value is not one of the differing values
+          var lv = x.row ? cellLevel(x.row, k) : (x.doc === k ? 'bad' : '');
+          var it = el('span', 'ocr-mx-sum-val' + (lv === 'bad' ? ' is-bad' : ''));
+          it.appendChild(el('span', 'ocr-mx-sum-doc', docName(k) + ': '));
+          if (v == null || v === '') it.appendChild(el('span', 'ocr-mx-none', T('mx_sum_none_read')));
+          else it.appendChild(valNode(String(v)));
+          vals.appendChild(it);
+        });
+        main.appendChild(vals);
+        var why = el('span', 'ocr-mx-sum-why', x.note || T('mx_st_' + x.st));
+        why.dir = 'auto';
+        main.appendChild(why);
+        b.appendChild(main);
+        b.setAttribute('aria-label', x.label + ' — ' + T('mx_st_' + x.st) + (x.reviewed ? ' (' + T('mx_reviewed') + ')' : '') + '. '
+          + (x.note || '') + ' ' + T('mx_sum_go'));
+        li.appendChild(b);
+        list.appendChild(li);
+      });
+      var q = $('ocr-mx-sum-quiet');
+      $('ocr-mx-sum-review').textContent = rest === 1 ? T('mx_sum_review_1') : T('mx_sum_review', { n: rest });
+      q.hidden = !rest;
+    }
+    (function () {
+      var list = $('ocr-mx-sum-list'), more = $('ocr-mx-sum-review');
+      if (list) list.addEventListener('click', function (e) {
+        var b = e.target && e.target.closest ? e.target.closest('[data-target]') : null;
+        if (b) goException(b);
+      });
+      if (more) more.addEventListener('click', function () { flash($('ocr-mx-exc')); });
+    })();
     function renderExceptions() {
+      renderSummary();
       var head = $('ocr-mx-exc-head'), body = $('ocr-mx-exc-body');
       if (!head || !body || !S.result) return;
       head.textContent = ''; body.textContent = '';
@@ -1980,7 +2055,7 @@
       syncRun();
       recompute(false);
       announce(T('mx_bridge_loaded', { n: n }));
-      var b = $('ocr-match-banner');
+      var b = $('ocr-mx-sum') || $('ocr-match-banner');
       try { $('ocr-match-result').scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' }); } catch (e) { /* noop */ }
       try { b.focus({ preventScroll: true }); } catch (e) { b.focus(); }
       return true;
