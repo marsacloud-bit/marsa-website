@@ -425,11 +425,7 @@
       render(patch);
       $('ocr-match-result').hidden = false;
       section.hidden = false;
-      if (focus) {
-        // the errors summary is the first thing of the report: it gets the focus (its heading carries the count)
-        var b = $('ocr-mx-sum') || $('ocr-match-banner');
-        try { b.focus({ preventScroll: false }); } catch (e) { b.focus(); }
-      }
+      if (focus) revealReport();   // the errors summary (or the report) is scrolled to and focused
     }
     function clearResult() {
       S.result = null; S.reviewed = {}; S.approved = false; S.saved.match = null; S.idem = null;
@@ -1096,6 +1092,7 @@
       var rest = X2.rows.filter(function (x) { return !isError(x); }).length;
       errs.forEach(function (x) { if (x.st === 'invalid') x.reviewed = !!S.reviewed[x.key]; });
       var nRev = errs.filter(function (x) { return x.reviewed; }).length, nOpen = errs.length - nRev;
+      S.errOpen = nOpen;
       box.className = 'ocr-mx-sum ' + (!errs.length ? 'is-ok' : (nOpen ? 'is-bad' : 'is-done'));
       $('ocr-mx-sum-title').textContent = T('mx_sum_title', { n: errs.length });
       var stEl = $('ocr-mx-sum-state');
@@ -1204,6 +1201,21 @@
         tr.setAttribute('aria-label', x.label + ' — ' + T('mx_st_' + x.st) + '. ' + T('mx_exc_go'));
         body.appendChild(tr);
       });
+    }
+    // after a comparison: with open errors the page scrolls down to «ملخص الأخطاء» by itself (below the fixed site
+    // header), otherwise to the top of the report; the focus follows without a second jump. Run a moment later so it
+    // wins over the reader's own focus on its result (ocr.js showResult runs just before).
+    function revealReport() {
+      setTimeout(function () {
+        var sum = $('ocr-mx-sum'), target = (S && S.errOpen > 0 && sum) ? sum : ($('ocr-match-report') || $('ocr-match-result'));
+        if (!target) return;
+        var hdr = document.querySelector('.site-header, header');
+        var off = (hdr && hdr.getBoundingClientRect().height || 72) + 16;
+        var y = target.getBoundingClientRect().top + (window.pageYOffset || document.documentElement.scrollTop || 0) - off;
+        try { window.scrollTo({ top: Math.max(0, y), behavior: reducedMotion() ? 'auto' : 'smooth' }); } catch (e) { window.scrollTo(0, Math.max(0, y)); }
+        var f = sum || $('ocr-match-banner');
+        if (f) { try { f.focus({ preventScroll: true }); } catch (e) { /* noop */ } }
+      }, 80);
     }
     function reducedMotion() { try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; } }
     function flash(n) {
@@ -2069,9 +2081,7 @@
       syncRun();
       recompute(false);
       announce(T('mx_bridge_loaded', { n: n }));
-      var b = $('ocr-mx-sum') || $('ocr-match-banner');
-      try { $('ocr-match-result').scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' }); } catch (e) { /* noop */ }
-      try { b.focus({ preventScroll: true }); } catch (e) { b.focus(); }
+      revealReport();
       return true;
     }
     function canCompare() { return !!(ONLINE && STAFF && AI.enabled); }
