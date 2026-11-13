@@ -25,7 +25,7 @@
      the usual way; a part of a combined file cannot be saved (one AI reading = one extraction): save is disabled with
      a note. shipmentCheck (UI only) shows «يبدو أن هذه المستندات لشحنات مختلفة» when the documents clearly belong
      to different shipments (the comparison is still shown).
-   - Check level (2026-11-13): checkbox #ocr-match-strict «تدقيق شديد». Unticked (default) = MarsaDocMatch 'basic': numbers /
+   - Check level (2026-11-13): always MarsaDocMatch 'strict' (the «تدقيق شديد» checkbox was removed on the owner's request). Formerly: 'basic': numbers /
      codes exact, names and kinds match from 60% similarity (or one containing the other); ticked = 'strict': text exact too.
      Remembered in localStorage (marsa.ocr.match.check); toggling recomputes without an AI call; shown in the report meta,
      print, Excel, PNG, JSON (check_mode) and recorded as the last line of the saved note (the SQL has no field for it).
@@ -421,40 +421,12 @@
       });
       return o;
     }
-    /* check level (owner, 2026-11-13): «تدقيق شديد» unticked = basic (numbers exact, names / kinds ≥ 60% similar),
-       ticked = strict (everything exact, text too). Remembered per browser; a change recomputes at once (no AI call). */
-    var CHECK_KEY = 'marsa.ocr.match.check';
+    /* check level: always strict (owner, 2026-11-13: «خلي الديفولت 100%، شيل التشيك») — every field, text too, must be
+       equal (only case / spacing / tatweel / tashkeel are ignored); numbers are exact. The engine's 'basic' level stays
+       available in doc-match.js but is not offered on the page. */
     var HAS_LEVEL = !!(E.CHECK_MODES && E.CHECK_MODES.indexOf('strict') !== -1);
-    function loadCheck() {
-      try { return window.localStorage && window.localStorage.getItem(CHECK_KEY) === 'strict' ? 'strict' : 'basic'; } catch (e) { return 'basic'; }
-    }
-    var CHECK = loadCheck();
+    var CHECK = 'strict';
     function checkText(level) { return T(level === 'strict' ? 'mx_check_strict_name' : 'mx_check_basic_name'); }
-    function syncCheck() {
-      var cb = $('ocr-match-strict');
-      if (cb) cb.checked = CHECK === 'strict';
-      var box = $('ocr-match-check');
-      if (box) { box.hidden = !HAS_LEVEL; box.classList.toggle('is-strict', CHECK === 'strict'); }
-    }
-    syncCheck();
-    if ($('ocr-match-strict')) {
-      $('ocr-match-strict').addEventListener('change', function () {
-        // a save in progress keeps the report it started with
-        if (S.saving) { this.checked = CHECK === 'strict'; return; }
-        CHECK = this.checked ? 'strict' : 'basic';
-        try { if (window.localStorage) window.localStorage.setItem(CHECK_KEY, CHECK); } catch (e) { /* private mode: this page only */ }
-        syncCheck();
-        if (!S.result) return;
-        S.approved = false; S.idem = null;
-        if (S.saved.match) {
-          // the saved match no longer reflects the report: the next save replaces it (the old one is voided then)
-          if (S.saved.match.id) S.saved.prevMatch = S.saved.match.id;
-          S.saved.match = null; setSaveMsg('warning', T('m_changed_after_save'));
-        }
-        recompute(false);
-        announce(T('mx_check_changed', { level: checkText(CHECK), overall: T('m_overall_' + S.result.overall) }));
-      });
-    }
     function recompute(focus, patch) {
       S.result = HAS_LEVEL ? E.compare(engineInput(), { mode: CHECK }) : E.compare(engineInput());
       // ticks survive a recompute for rows that still exist
