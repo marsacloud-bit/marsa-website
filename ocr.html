@@ -519,6 +519,10 @@
               <span data-i18n="ocr.m_run">اقرأ وطابق</span>
             </button>
           </div>
+          <div class="ocr-progress" id="ocr-match-progress" hidden>
+            <div class="progress-meta"><span id="ocr-match-progress-label"></span><span class="num" id="ocr-match-progress-pct">0%</span></div>
+            <div class="progress" role="progressbar" aria-labelledby="ocr-match-progress-label" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="ocr-match-progress-bar"><div class="progress-bar"></div></div>
+          </div>
           <p class="sr-only" id="ocr-match-live" role="status" aria-live="polite" aria-atomic="true"></p>
           <div class="alert alert-danger mt-2" id="ocr-match-error" role="alert" hidden><span id="ocr-match-error-text"></span></div>
           <!-- ===== result (the report: printed / exported) ===== -->

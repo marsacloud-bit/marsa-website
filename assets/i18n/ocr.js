@@ -70,6 +70,7 @@
       fx_weak_admin_link: 'فتح إعدادات المؤسسة', fx_weak_quota: 'انتهت حصة اليوم من القراءة بالذكاء الاصطناعي لمؤسستك.',
       fx_weak_nofile: 'هذه النتيجة مفتوحة من السجل: ارفع الملف الأصلي من جديد لقراءته بالذكاء الاصطناعي.',
       fx_weak_offline: 'جرّب صورة أوضح بدقة أعلى، أو خيار «أبيض وأسود».',
+      fx_run_label: 'قراءة المستندات بالذكاء الاصطناعي — انتهى {done} من {n}',
       fx_dup_file: 'الملف «{name}» موجود في القائمة بالفعل؛ لم يُضف مرة ثانية.',
       mx_dup_file: 'هذا الملف نفسه مختار في خانة {doc}. اختر الملف الصحيح لهذه الخانة.',
       // readings of the single reader compared in the matching report (ocr.js cmp_* → ocr-match.js compareReadings, no new AI call)
@@ -268,6 +269,7 @@
       fx_weak_admin_link: 'Open organization settings', fx_weak_quota: 'Your organization\'s AI reading quota for today is used up.',
       fx_weak_nofile: 'This result was opened from the history: upload the original file again to read it with AI.',
       fx_weak_offline: 'Try a sharper, higher-resolution image, or the “black & white” option.',
+      fx_run_label: 'Reading the documents with AI — {done} of {n} done',
       fx_dup_file: 'The file “{name}” is already in the list; it was not added again.',
       mx_dup_file: 'This same file is already chosen as the {doc}. Choose the right file for this slot.',
       cmp_title: 'These documents can be matched', cmp_btn: 'Compare these documents', cmp_file_btn: 'Compare the documents of this file ({n})',

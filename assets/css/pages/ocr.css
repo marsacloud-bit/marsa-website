@@ -757,3 +757,14 @@ html[dir="ltr"] .ocr-mx-cell.is-calm.is-warn { box-shadow: inset 4px 0 0 #B7791F
 .ocr-match-check-label input { flex-shrink: 0; width: 18px; height: 18px; margin-block-start: 3px; accent-color: var(--teal); }
 .ocr-match-check-hint { margin: 4px 0 0; padding-inline-start: 28px; }
 @media print { .ocr-match-check { display: none !important; } }
+
+/* reading indicator (ocr.js queue + ocr-match.js slots): three dots fading 0 → 1 one after another; the one bar is the total */
+.ocr-dots { display: inline-flex; gap: 4px; align-items: center; margin-inline-start: 8px; vertical-align: middle; }
+.ocr-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--teal, #0E7F84); opacity: 0; animation: ocr-dot-blink 1.2s ease-in-out infinite; }
+.ocr-dots i:nth-child(2) { animation-delay: .2s; }
+.ocr-dots i:nth-child(3) { animation-delay: .4s; }
+@keyframes ocr-dot-blink { 0%, 100% { opacity: 0; transform: scale(.8); } 45% { opacity: 1; transform: scale(1); } }
+.ocr-match-slot-status .ocr-dots { margin-inline-start: 6px; }
+#ocr-match-progress { margin-block: 12px 4px; }
+@media (prefers-reduced-motion: reduce) { .ocr-dots i { animation: none; opacity: .7; } }
+@media print { .ocr-dots { display: none; } }

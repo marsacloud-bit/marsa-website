@@ -378,13 +378,8 @@
           j.status === 'error' ? j.error : j.status === 'done' ? doneLabel(j) : j.statusText);
         meta.appendChild(st);
         body.appendChild(meta);
-        if (j.status === 'running') {
-          var pr = el('div', 'progress ocr-mini-progress');
-          pr.setAttribute('role', 'progressbar'); pr.setAttribute('aria-label', 'تقدّم قراءة ' + j.name);
-          pr.setAttribute('aria-valuemin', '0'); pr.setAttribute('aria-valuemax', '100'); pr.setAttribute('aria-valuenow', String(Math.round(j.progress)));
-          var bar = el('div', 'progress-bar'); bar.style.width = Math.round(j.progress) + '%';
-          pr.appendChild(bar); body.appendChild(pr);
-        }
+        // a file being read: three dots fading in and out one after another (the one bar is the total, below the list)
+        if (j.status === 'running') meta.appendChild(readingDots());
         li.appendChild(body);
 
         var tools = el('div', 'ocr-q-tools');
@@ -469,22 +464,39 @@
        --------------------------------------------------------------- */
     var progressBox = $('ocr-progress'), progressBar = $('ocr-progress-bar');
     var lastAnnounce = 0;
+    function readingDots() {
+      var d = el('span', 'ocr-dots');
+      d.setAttribute('aria-hidden', 'true');
+      for (var i = 0; i < 3; i++) d.appendChild(el('i', null));
+      return d;
+    }
+    // the bottom bar = the whole run: the mean progress of this run's files (a finished, failed or stopped file = 100)
+    function runTotals() {
+      var list = jobs.filter(function (x) { return x.inRun; });
+      if (!list.length) return { pct: 0, done: 0, n: 0 };
+      var sum = 0, done = 0;
+      list.forEach(function (x) {
+        var fin = x.status === 'done' || x.status === 'error' || x.status === 'cancelled';
+        if (fin) done++;
+        sum += fin ? 100 : Math.max(0, Math.min(100, x.progress || 0));
+      });
+      return { pct: sum / list.length, done: done, n: list.length };
+    }
     function setProgress(j, pct, text, force) {
       j.progress = Math.max(0, Math.min(100, pct));
       if (text) j.statusText = text;
       var li = queueEl.querySelector('[data-job="' + j.id + '"]');
       if (li) {
-        var bar = li.querySelector('.progress-bar'), pr = li.querySelector('[role="progressbar"]'), st = li.querySelector('.ocr-q-status');
-        if (bar) bar.style.width = Math.round(j.progress) + '%';
-        if (pr) pr.setAttribute('aria-valuenow', String(Math.round(j.progress)));
+        var st = li.querySelector('.ocr-q-status');
         if (st && text) st.textContent = text;
       }
-      var idx = jobs.indexOf(j) + 1, n = jobs.length;
-      var label = 'المستند ' + idx + ' من ' + n + ': ' + (j.statusText || '');
+      var tot = runTotals(), tp = Math.round(tot.pct);
+      var label = tot.n > 1 ? T('fx_run_label', { done: tot.done, n: tot.n })
+        : ('المستند ' + (jobs.indexOf(j) + 1) + ' من ' + jobs.length + ': ' + (j.statusText || ''));
       $('ocr-progress-label').textContent = label;
-      $('ocr-progress-pct').textContent = Math.round(j.progress) + '%';
-      progressBar.setAttribute('aria-valuenow', String(Math.round(j.progress)));
-      progressBar.querySelector('.progress-bar').style.width = Math.round(j.progress) + '%';
+      $('ocr-progress-pct').textContent = tp + '%';
+      progressBar.setAttribute('aria-valuenow', String(tp));
+      progressBar.querySelector('.progress-bar').style.width = tp + '%';
       var now = Date.now();
       if (force || now - lastAnnounce > 4000) { lastAnnounce = now; announce(label); }
     }
@@ -822,7 +834,7 @@
       var tick = function () {
         if (j.status !== 'running') { stopAiTicker(j); return; }
         var pct = Math.max(j.progress || 0, aiEta(Date.now() - t0));
-        setProgress(j, pct, T('ai_reading') + ' ' + Math.round(pct) + '%');
+        setProgress(j, pct, T('ai_reading'));
       };
       stopAiTicker(j);
       j.aiTimer = setInterval(tick, 400);
@@ -843,7 +855,7 @@
       }).then(function (r) {
         stopAiTicker(j);
         if (r.error) throw new Error(r.error.message || T('ai_unsupported'));
-        setProgress(j, 100, T('ai_reading') + ' 100%');
+        setProgress(j, 100, T('ai_reading'));
         var d = r.data;
         // v3: the same file already read and saved comes back as that reading (reused: no Claude call, no charge); it
         // is opened as the saved row, never saved a second time
@@ -958,7 +970,8 @@
       if (running) return;
       var todo = jobs.filter(function (j) { return j.status === 'queued' || j.status === 'cancelled'; });
       if (!todo.length) return;
-      todo.forEach(function (j) { j.status = 'queued'; j.statusText = 'بانتظار القراءة'; });
+      jobs.forEach(function (j) { j.inRun = false; });
+      todo.forEach(function (j) { j.status = 'queued'; j.statusText = 'بانتظار القراءة'; j.progress = 0; j.inRun = true; });
       running = true; cancelRequested = false; cancelGate = newGate();
       progressBox.hidden = false;
       renderQueue();

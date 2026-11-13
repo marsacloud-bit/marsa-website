@@ -263,8 +263,14 @@
         if (s.res.mean_confidence != null) stEl.appendChild(el('span', 'ocr-match-slot-conf', ' · ' + T('ai_conf', { n: Math.round(Number(s.res.mean_confidence)) })));
       }
       var pct = s.status === 'sending' ? 3 : s.status === 'reading' ? Math.round(s.pct || 5) : s.status === 'done' ? 100 : 0;
-      if (s.status === 'reading' && msg && !s.error) stEl.firstChild.textContent = msg + ' ' + pct + '%';
-      pr.hidden = !(s.status === 'sending' || s.status === 'reading');
+      // a slot being read: three dots fading in and out one after another; the one bar is the total under the slots
+      if ((s.status === 'sending' || s.status === 'reading') && !s.error) {
+        var dots = el('span', 'ocr-dots'); dots.setAttribute('aria-hidden', 'true');
+        for (var di = 0; di < 3; di++) dots.appendChild(el('i', null));
+        stEl.appendChild(dots);
+      }
+      pr.hidden = true;
+      syncTotal();
       pr.setAttribute('aria-valuenow', String(pct));
       pr.firstElementChild.style.width = pct + '%';
       clr.hidden = !s.file || S.running;
@@ -336,7 +342,7 @@
           s.pct = Math.min(95, 5 + 90 * (1 - Math.exp(-(Date.now() - t0) / 35000)));
           var pr = qsa('[data-progress="' + k + '"]')[0], stEl = qsa('[data-status="' + k + '"]')[0], p = Math.round(s.pct);
           if (pr) { pr.setAttribute('aria-valuenow', String(p)); pr.firstElementChild.style.width = p + '%'; }
-          if (stEl && stEl.firstChild && !s.error) stEl.firstChild.textContent = T('ai_reading') + ' ' + p + '%';
+          syncTotal();
         }, 400);
         var q = { orgId: orgId || undefined, docType: DOC_TYPE[k], file: { media_type: s.mime, data_b64: b64 }, lang: lang() };
         if (PROMPT[k]) q.promptVersion = PROMPT[k];
@@ -380,6 +386,7 @@
         return Promise.all(todo.map(function (k) { return sha256(S.slots[k].file).then(function (h) { S.slots[k].sha256 = h; }); })).then(run);
       }
       showError('');
+      SLOTS.forEach(function (k) { S.slots[k].inRun = todo.indexOf(k) !== -1; });
       S.running = true; syncRun();
       SLOTS.forEach(renderSlot);
       announce(T('m_reading_n', { n: todo.length }));
@@ -389,7 +396,7 @@
         return Promise.all(todo.map(function (k) { return readSlot(k, S.orgId); }));
       }).then(function (oks) {
         S.running = false;
-        SLOTS.forEach(renderSlot);
+        SLOTS.forEach(renderSlot); syncTotal();
         S.readAt = new Date().toISOString();
         var failed = todo.filter(function (k, i) { return !oks[i]; });
         if (S.slots.invoice.res && S.slots.bl.res && (!S.slots.declaration.file || S.slots.declaration.res) && (!S.slots.packing.file || S.slots.packing.res)) {
@@ -400,9 +407,30 @@
         if (failed.length && S.result) showError(T('m_err_failed', { docs: failed.map(docName).join('، ') }));
         syncRun();
       }).catch(function (e) {
-        S.running = false; SLOTS.forEach(renderSlot); syncRun();
+        S.running = false; SLOTS.forEach(renderSlot); syncRun(); syncTotal();
         showError(errMsg(e));
       });
+    }
+    // the total bar under the slots: the mean progress of the slots of this run (read / failed = 100)
+    function syncTotal() {
+      var box = $('ocr-match-progress');
+      if (!box) return;
+      var busy = SLOTS.filter(function (k) { var s = S.slots[k]; return s.inRun; });
+      if (!S.running || !busy.length) { box.hidden = true; return; }
+      var sum = 0, done = 0;
+      busy.forEach(function (k) {
+        var s = S.slots[k];
+        var p = s.status === 'reading' ? (s.pct || 5) : s.status === 'sending' ? 3 : 100;
+        if (s.status !== 'reading' && s.status !== 'sending') done++;
+        sum += p;
+      });
+      var pct = Math.round(sum / busy.length);
+      box.hidden = false;
+      $('ocr-match-progress-label').textContent = T('fx_run_label', { done: done, n: busy.length });
+      $('ocr-match-progress-pct').textContent = pct + '%';
+      var bar = $('ocr-match-progress-bar');
+      bar.setAttribute('aria-valuenow', String(pct));
+      bar.firstElementChild.style.width = pct + '%';
     }
     function showError(msg) {
       $('ocr-match-error-text').textContent = msg || '';
