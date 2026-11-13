@@ -10,7 +10,8 @@
   missing fields, currency differs, total vs subtotal, mode); line items + invoice totals; corrections; robustness
   against weird input; the UMD wrapper (window.MarsaDocMatch in a vm) and determinism; the optional packing list
   (match-v2, 20261126000100): a v1 snapshot digest without it, the inv_pack / bl_pack / decl_pack pairs, gross
-  25000 vs 27500, missing packing values, the invoice reference via packing_list_number, with_packing / docs.
+  25000 vs 27500, missing packing values, the invoice reference via packing_list_number, with_packing / docs; the check
+  levels compare(docs, { mode: 'basic' | 'strict' }) (2026-11-13): numbers never partial, names 60% / contains / script, strict text.
 
   usage:  node supabase/tests/doc-match-engine-tests.js [/path/to/marsa-website] [--quiet]
 */
@@ -914,6 +915,109 @@ section('25. case / spacing only is never a difference (owner rule 2026-11-12)')
   check('packing list too: "mscu 123456 6" = "MSCU1234566"', () => {
     const r = M.compare({ invoice: invoice(), bl: bl({ container_numbers: { value: 'MSCU1234566' } }), packing: packing({ container_numbers: { value: 'mscu 123456 6' } }) });
     return st(r, 'container_numbers') === 'match' || J(row(r, 'container_numbers')); });
+}
+
+section('26. check level (owner 2026-11-13): basic = numbers 100% + names / kinds ≥ 60%, strict = everything 100%');
+{
+  const C = (key, a, b, mode) => { const fa = {}, fb = {}; fa[key] = a; fb[key] = b;
+    const other = key === 'invoice_date' || key === 'currency' || key === 'total' ? 'declaration' : 'bl';
+    const inp = { invoice: { fields: fa } }; inp[other] = { fields: fb };
+    return mode === undefined ? M.compare(inp) : M.compare(inp, { mode }); };
+  const S3 = (key, a, b) => [st(C(key, a, b), key), st(C(key, a, b, 'basic'), key), st(C(key, a, b, 'strict'), key)];
+  check('no opts / no mode / an unknown mode → the legacy result, byte for byte, without check_mode', () => {
+    const corpus = snapshotCorpus().slice(0, 60);
+    return corpus.every(inp => { const a = J(M.compare(inp, { now: 'x' })); return a === J(M.compare(inp, { now: 'x', mode: 'lenient' })) && a === J(M.compare(inp, { now: 'x', mode: null }))
+      && !('check_mode' in JSON.parse(a)); }) || 'legacy differs'; });
+  check('check_mode is reported; CHECK_MODES / SIM_MIN exported', () =>
+    C('shipper', 'A', 'A', 'basic').check_mode === 'basic' && C('shipper', 'A', 'A', 'strict').check_mode === 'strict'
+    && J(M.CHECK_MODES) === J(['basic', 'strict']) && M.SIM_MIN === 0.6 || 'check_mode');
+  eq('PURE CARE MEDICAL CO. vs Pure Care Medical Est. → legacy / basic match, strict mismatch', S3('shipper', 'PURE CARE MEDICAL CO.', 'Pure Care Medical Est.'), ['match', 'match', 'mismatch']);
+  check('strict detail says why', () => /التدقيق الشديد/.test(row(C('shipper', 'PURE CARE MEDICAL CO.', 'Pure Care Medical Est.', 'strict'), 'shipper').detail_ar)
+    && /Strict check/.test(row(C('shipper', 'PURE CARE MEDICAL CO.', 'Pure Care Medical Est.', 'strict'), 'shipper').detail_en) || 'detail');
+  check('strict: only case / spacing / tatweel / tashkeel are equal', () => S3('consignee', 'pure  care medical co.', 'PURE CARE MEDICAL CO.')[2] === 'match'
+    && S3('consignee', 'مؤسسة مـرسـى', 'مؤسسة مَرسى')[2] === 'match' && S3('consignee', 'MARSA TRADING CO', 'MARSA TRADING CO.')[2] === 'mismatch' || 'strict eq');
+  check('similarity: token Jaccard / letter-pair Dice, 0.6 boundary', () => {
+    const a = M.similarity(M.normName('QWE RTY UIO PAS'), M.normName('QWE RTY UIO ZXCVBNMLKJ')), b = M.similarity(M.normName('QWE RTY UIO'), M.normName('QWE RTY ZXCVBNMLKJ'));
+    return a.ratio === 0.6 && !a.contains && b.ratio === 0.5 && M.similarity('abc', 'abc').ratio === 1 && M.similarity('', 'x').ratio === 0 || J({ a, b }); });
+  eq('names at exactly 60% → basic match (legacy partial)', S3('shipper', 'QWE RTY UIO PAS', 'QWE RTY UIO ZXCVBNMLKJ'), ['partial', 'match', 'mismatch']);
+  eq('names at 50% → mismatch in every level', S3('shipper', 'QWE RTY UIO', 'QWE RTY ZXCVBNMLKJ'), ['mismatch', 'mismatch', 'mismatch']);
+  check('the reason shows the percentage (60% boundary)', () => /متقاربان بنسبة 60%/.test(row(C('shipper', 'QWE RTY UIO PAS', 'QWE RTY UIO ZXCVBNMLKJ', 'basic'), 'shipper').detail_ar)
+    && /التشابه 50% فقط \(أقل من 60%\)/.test(row(C('shipper', 'QWE RTY UIO', 'QWE RTY ZXCVBNMLKJ', 'basic'), 'shipper').detail_ar) || 'pct');
+  eq('a spelling variant (66%) → basic match', S3('consignee', 'GULF HORIZON GENERAL TRADING', 'GULF HORIZEN GENRAL TRADING'), ['mismatch', 'match', 'mismatch']);
+  eq('one contains the other (AL MANARA / AL MANARAH) → basic match (legacy partial)', S3('consignee', 'AL MANARA TRADING', 'AL MANARAH TRADING'), ['partial', 'match', 'mismatch']);
+  eq('contains needs 4 letters (SUN / SUNRISE)', S3('shipper', 'SUN', 'SUNRISE'), ['mismatch', 'mismatch', 'mismatch']);
+  eq('Arabic vs Latin script → partial (script) in basic, mismatch in strict', S3('consignee', 'مؤسسة المنارة للتجارة', 'AL MANARA TRADING'), ['partial', 'partial', 'mismatch']);
+  eq('different companies stay a mismatch', S3('shipper', 'NORTHWIND TEXTILE', 'SOUTHWIND FABRICS'), ['mismatch', 'mismatch', 'mismatch']);
+  // review 2026-11-13: the measure is per word (a shared generic word must not carry two different names)
+  eq('one shared generic word is not 60% (SHANGHAI MACHINERY CO / NINGBO MACHINERY CO)', S3('shipper', 'SHANGHAI MACHINERY CO', 'NINGBO MACHINERY CO'), ['mismatch', 'mismatch', 'mismatch']);
+  eq('two different companies sharing TRADING → mismatch', S3('shipper', 'GULF HORIZON GENERAL TRADING', 'AL NOOR FOODSTUFF TRADING'), ['mismatch', 'mismatch', 'mismatch']);
+  eq('AL NOOR FOODSTUFF / AL NOOR TRADING: TRADING is a legal word, "AL NOOR" is part of the other → basic match', S3('shipper', 'AL NOOR FOODSTUFF', 'AL NOOR TRADING'), ['partial', 'match', 'mismatch']);
+  eq('SAUDI ARAMCO / SAUDI ELECTRICITY → mismatch', S3('consignee', 'SAUDI ARAMCO', 'SAUDI ELECTRICITY'), ['mismatch', 'mismatch', 'mismatch']);
+  check('similarity: a typo inside a word still counts (HORIZON / HORIZEN), a shared long word alone does not', () =>
+    M.similarity('gulf horizon general', 'gulf horizen genral').ratio >= 0.6 && M.similarity('shanghai machinery', 'ningbo machinery').ratio < 0.6 || 'soft');
+  eq('description: part of the other → basic match, strict mismatch', S3('goods_description', 'Brake pads for cars', 'brake pads'), ['match', 'match', 'mismatch']);
+  eq('description: unrelated goods → mismatch', S3('goods_description', 'cotton shirts', 'steel pipes'), ['mismatch', 'mismatch', 'mismatch']);
+  eq('package type alias (CARTONS / CTNS) → basic match, strict mismatch', S3('package_type', 'CARTONS', 'CTNS'), ['match', 'match', 'mismatch']);
+  eq('package type: two known kinds differ', S3('package_type', 'CARTONS', 'PALLETS'), ['mismatch', 'mismatch', 'mismatch']);
+  eq('vessel typo (MSC ANNA / MSC ANA) → basic match', S3('vessel', 'MSC ANNA', 'MSC ANA'), ['mismatch', 'match', 'mismatch']);
+  eq('port typo (Jeddah / Jedah port) → basic match', S3('port_of_loading', 'Jeddah', 'Jedah port'), ['mismatch', 'match', 'mismatch']);
+  eq('two known ports differ (Ningbo / Shanghai)', S3('port_of_loading', 'Ningbo', 'Shanghai'), ['mismatch', 'mismatch', 'mismatch']);
+  eq('country: a known country decides (Austria / Australia 71% similar is still a mismatch)', S3('country_of_origin', 'Austria', 'Australia'), ['mismatch', 'mismatch', 'mismatch']);
+  eq('country alias (China / PRC) → basic match, strict mismatch', S3('country_of_origin', 'China', 'PRC'), ['match', 'match', 'mismatch']);
+  eq('incoterms: same term, place typo → basic match', S3('incoterms', 'CIF Jeddah', 'CIF Jedda'), ['match', 'match', 'mismatch']);
+  eq('incoterms: other term → mismatch', S3('incoterms', 'CIF Jeddah', 'FOB Jeddah'), ['mismatch', 'mismatch', 'mismatch']);
+  // numbers: exact in both levels, never partial
+  eq('4040 vs 4100 kg → mismatch (الفرق 60)', S3('gross_weight', '4040', '4100'), ['mismatch', 'mismatch', 'mismatch']);
+  check('4040 vs 4100: the difference is shown', () => /الفرق 60 كجم/.test(row(C('gross_weight', '4040', '4100', 'basic'), 'gross_weight').detail_ar) || 'diff');
+  eq('4040 vs 4040.4 kg → legacy match (tolerance), levels mismatch', S3('gross_weight', '4040', '4040.4'), ['match', 'mismatch', 'mismatch']);
+  eq('12,500.000 KGS vs 12.5 MT → match (units / formats are parsing)', S3('gross_weight', '12,500.000 KGS', '12.5 MT'), ['match', 'match', 'match']);
+  eq('1000 LBS vs 453.6 KG → match (lbs conversion to 0.5 kg)', S3('gross_weight', '1000 LBS', '453.6 KG'), ['match', 'match', 'match']);
+  eq('AKKU4022149 vs AKKU4022145 → mismatch', S3('container_numbers', 'AKKU4022149', 'AKKU4022145'), ['mismatch', 'mismatch', 'mismatch']);
+  eq('one container shared, one extra → legacy partial, levels mismatch', S3('container_numbers', 'AKKU4022149, MSCU1234566', 'AKKU4022149'), ['partial', 'mismatch', 'mismatch']);
+  check('containers mismatch keeps "only in" detail', () => /في الفاتورة فقط: MSCU1234566/.test(row(C('container_numbers', 'AKKU4022149, MSCU1234566', 'AKKU4022149', 'basic'), 'container_numbers').detail_ar) || 'only');
+  eq('B/L prefix (MEDU1234567 / 1234567) → legacy partial, levels mismatch', S3('bl_number', 'MEDU1234567', '1234567'), ['partial', 'mismatch', 'mismatch']);
+  check('B/L prefix detail: part of the other + numbers must match 100%', () => /الأرقام يجب أن تتطابق 100%/.test(row(C('bl_number', 'MEDU1234567', '1234567', 'strict'), 'bl_number').detail_ar) || 'must');
+  eq('ids: label / case / spacing / leading zeros are normalisation', S3('invoice_number', 'Invoice No. inv-0042', 'INV-0042'), ['match', 'match', 'match']);
+  eq('HS 8708.30 vs heading 8708 → legacy partial, levels mismatch', S3('hs_codes', '8708.30', '8708'), ['partial', 'mismatch', 'mismatch']);
+  eq('HS on the first 6 digits (870830 vs 8708.30.00.10) → match', S3('hs_codes', '870830', '8708.30.00.10'), ['match', 'match', 'match']);
+  eq('packages 20 vs 19 → mismatch', S3('packages_count', '20', '19'), ['mismatch', 'mismatch', 'mismatch']);
+  eq('total 25000 vs 25100 → legacy match (0.5%), levels mismatch', S3('total', '25000', '25100'), ['match', 'mismatch', 'mismatch']);
+  eq('total 25,000.00 vs 25000 → match', S3('total', '25,000.00', '25000'), ['match', 'match', 'match']);
+  check('total in two currencies → legacy partial, levels mismatch', () => {
+    const inp = { invoice: { fields: { total: '100', currency: 'USD' } }, declaration: { fields: { total: '100', currency: 'SAR' } } };
+    return st(M.compare(inp), 'total') === 'partial' && st(M.compare(inp, { mode: 'basic' }), 'total') === 'mismatch' && st(M.compare(inp, { mode: 'strict' }), 'total') === 'mismatch' || 'cur'; });
+  eq('dates: 01/10/2026 vs 2026-10-01 match, another day mismatch', [S3('invoice_date', '01/10/2026', '2026-10-01')[1], S3('invoice_date', '2026-10-01', '2026-10-02')[2]], ['match', 'mismatch']);
+  eq('currency: US$ vs USD match, USD vs SAR mismatch', [S3('currency', 'US$', 'USD')[2], S3('currency', 'USD', 'SAR')[1]], ['match', 'mismatch']);
+  check('three-way: a B/L citing another invoice number → legacy partial, levels mismatch (the note says where)', () => {
+    const inp = { invoice: invoice(), bl: bl({ invoice_number: { value: 'INV-OTHER-77' } }), declaration: decl() };
+    const a = row(M.compare(inp), 'invoice_number'), b = row(M.compare(inp, { mode: 'basic' }), 'invoice_number');
+    return a.status === 'partial' && b.status === 'mismatch' && /مرجع اختياري/.test(b.detail_ar) || J([a, b]); });
+  check('invoice items sum: 1% tolerance in legacy, to the cent in levels', () => {
+    const inv = invoice({ subtotal: { value: '25100' }, total: { value: '25100' } });
+    const a = row(M.compare({ invoice: inv, bl: bl() }), 'invoice_totals'), b = row(M.compare({ invoice: inv, bl: bl() }, { mode: 'basic' }), 'invoice_totals');
+    return a.status === 'match' && b.status === 'mismatch' || J([a, b]); });
+  check('no number / code row is ever partial in a level (fixtures + 400-input corpus)', () => {
+    const numKeys = M.FIELDS.filter(f => f.kind === 'num').map(f => f.key).concat(['invoice_totals']);
+    const bad = [];
+    snapshotCorpus().forEach((inp, i) => ['basic', 'strict'].forEach(mode => {
+      M.compare(inp, { mode }).rows.forEach(r => { if (numKeys.indexOf(r.key) !== -1 && r.status === 'partial') bad.push([i, mode, r.key]); });
+    }));
+    return numKeys.length === 12 && bad.length === 0 || J({ numKeys, bad: bad.slice(0, 5) }); });
+  check('strict: no text row is partial and every text match is a looseKey match', () => {
+    const textKeys = M.FIELDS.filter(f => f.kind === 'text').map(f => f.key), bad = [];
+    snapshotCorpus().forEach((inp, i) => M.compare(inp, { mode: 'strict' }).rows.forEach(r => {
+      if (textKeys.indexOf(r.key) === -1) return;
+      if (r.status === 'partial') bad.push([i, r.key, 'partial']);
+      Object.keys(r.pairs).forEach(p => { if (r.pairs[p] !== 'match') return; const d = M.PAIRS[p]; if (!M.looseSame(r.values[d[0]], r.values[d[1]])) bad.push([i, r.key, p]); });
+    }));
+    return textKeys.length === 9 && bad.length === 0 || J(bad.slice(0, 5)); });
+  check('the levels are deterministic and never throw on the corpus (and with a packing list)', () => {
+    const c = snapshotCorpus().concat([{ invoice: invoice(), bl: bl(), declaration: decl(), packing: packing() }]);
+    return ['basic', 'strict'].every(mode => c.every(inp => J(M.compare(inp, { mode, now: 'x' })) === J(M.compare(inp, { mode, now: 'x' })))) || 'det'; });
+  check('the standard fixtures still agree in basic (only the strict level flags the spelling of the names)', () => {
+    const b = M.compare({ invoice: invoice(), bl: bl(), declaration: decl() }, { mode: 'basic' }), s2 = M.compare({ invoice: invoice(), bl: bl(), declaration: decl() }, { mode: 'strict' });
+    return st(b, 'consignee') === 'match' && st(b, 'shipper') === 'match' && st(b, 'gross_weight') === 'match' && st(s2, 'consignee') === 'mismatch' && st(s2, 'gross_weight') === 'match'
+      || J({ b: b.rows.map(r => [r.key, r.status]), s: s2.rows.map(r => [r.key, r.status]) }); });
 }
 
 /* ----------------------------------------------------------------- summary */

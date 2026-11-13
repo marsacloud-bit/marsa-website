@@ -25,6 +25,10 @@
      the usual way; a part of a combined file cannot be saved (one AI reading = one extraction): save is disabled with
      a note. shipmentCheck (UI only) shows «يبدو أن هذه المستندات لشحنات مختلفة» when the documents clearly belong
      to different shipments (the comparison is still shown).
+   - Check level (2026-11-13): checkbox #ocr-match-strict «تدقيق شديد». Unticked (default) = MarsaDocMatch 'basic': numbers /
+     codes exact, names and kinds match from 60% similarity (or one containing the other); ticked = 'strict': text exact too.
+     Remembered in localStorage (marsa.ocr.match.check); toggling recomputes without an AI call; shown in the report meta,
+     print, Excel, PNG, JSON (check_mode) and recorded as the last line of the saved note (the SQL has no field for it).
    - Untrusted values (readings, file names, server rows) only ever via textContent /
      value. The backend functions (saveDocumentMatch …) are feature-detected.
    ========================================================================== */
@@ -417,8 +421,42 @@
       });
       return o;
     }
+    /* check level (owner, 2026-11-13): «تدقيق شديد» unticked = basic (numbers exact, names / kinds ≥ 60% similar),
+       ticked = strict (everything exact, text too). Remembered per browser; a change recomputes at once (no AI call). */
+    var CHECK_KEY = 'marsa.ocr.match.check';
+    var HAS_LEVEL = !!(E.CHECK_MODES && E.CHECK_MODES.indexOf('strict') !== -1);
+    function loadCheck() {
+      try { return window.localStorage && window.localStorage.getItem(CHECK_KEY) === 'strict' ? 'strict' : 'basic'; } catch (e) { return 'basic'; }
+    }
+    var CHECK = loadCheck();
+    function checkText(level) { return T(level === 'strict' ? 'mx_check_strict_name' : 'mx_check_basic_name'); }
+    function syncCheck() {
+      var cb = $('ocr-match-strict');
+      if (cb) cb.checked = CHECK === 'strict';
+      var box = $('ocr-match-check');
+      if (box) { box.hidden = !HAS_LEVEL; box.classList.toggle('is-strict', CHECK === 'strict'); }
+    }
+    syncCheck();
+    if ($('ocr-match-strict')) {
+      $('ocr-match-strict').addEventListener('change', function () {
+        // a save in progress keeps the report it started with
+        if (S.saving) { this.checked = CHECK === 'strict'; return; }
+        CHECK = this.checked ? 'strict' : 'basic';
+        try { if (window.localStorage) window.localStorage.setItem(CHECK_KEY, CHECK); } catch (e) { /* private mode: this page only */ }
+        syncCheck();
+        if (!S.result) return;
+        S.approved = false; S.idem = null;
+        if (S.saved.match) {
+          // the saved match no longer reflects the report: the next save replaces it (the old one is voided then)
+          if (S.saved.match.id) S.saved.prevMatch = S.saved.match.id;
+          S.saved.match = null; setSaveMsg('warning', T('m_changed_after_save'));
+        }
+        recompute(false);
+        announce(T('mx_check_changed', { level: checkText(CHECK), overall: T('m_overall_' + S.result.overall) }));
+      });
+    }
     function recompute(focus, patch) {
-      S.result = E.compare(engineInput());
+      S.result = HAS_LEVEL ? E.compare(engineInput(), { mode: CHECK }) : E.compare(engineInput());
       // ticks survive a recompute for rows that still exist
       var keys = {}; S.result.rows.forEach(function (r) { keys[r.key] = 1; });
       Object.keys(S.reviewed).forEach(function (k) { if (!keys[k]) delete S.reviewed[k]; });
@@ -461,6 +499,7 @@
       mrow(T('m_meta_org'), orgName(S.orgId));
       cols().forEach(function (k) { mrow(docName(k), slotLabel(k)); });
       mrow(T('m_meta_mode'), modeText(R));
+      if (R.check_mode) mrow(T('mx_check_meta'), checkText(R.check_mode));
       // banner
       var ov = $('ocr-match-overall');
       ov.textContent = T('m_overall_' + R.overall);
@@ -1286,7 +1325,7 @@
         setSaveMsg('info', T('m_saving'));
         btn.disabled = true;
         var id = S.saved.match.id;
-        API.reviewDocumentMatch(id, reviewedRows(), noteText()).then(function (r) {
+        API.reviewDocumentMatch(id, reviewedRows(), savedNote()).then(function (r) {
           if (r.error) { setSaveMsg('error', T('m_save_failed', { msg: errMsg(r.error) })); return; }
           if (S.saved.match && S.saved.match.id === id) S.saved.match.status = (r.data && r.data.status) || 'reviewed';
           setSaveMsg('success', T('m_review_saved'));
@@ -1299,6 +1338,14 @@
       }
     });
     function noteText() { return String($('ocr-match-note-text').value || '').trim().slice(0, 1000); }
+    // the saved note: the reviewer's note + one line with the check level (save_document_match has no field for it;
+    // its rows / keys are fixed, the note is free text ≤ 1000)
+    function savedNote() {
+      var tag = S.result && S.result.check_mode ? '[' + T('mx_check_meta') + ': ' + checkText(S.result.check_mode) + ']' : '';
+      var n = noteText();
+      if (!tag) return n;
+      return (n ? n.slice(0, 1000 - tag.length - 1) + '\n' : '') + tag;
+    }
 
     /* ---------------------------------------------------------------
        Save in the system
@@ -1523,7 +1570,7 @@
           declarationExtractionId: S.saved.extractions.declaration ? S.saved.extractions.declaration.id : null,
           packingExtractionId: S.saved.extractions.packing ? S.saved.extractions.packing.id : null,
           mode: S.result.mode, engineVersion: S.result.version, overall: S.result.overall, counts: S.result.counts,
-          rows: payloadRows(), reviewedRows: reviewedRows(), note: noteText(), idempotencyKey: idemKey()
+          rows: payloadRows(), reviewedRows: reviewedRows(), note: savedNote(), idempotencyKey: idemKey()
         }).then(function (r) {
           if (r.error) throw r.error;
           S.saved.match = { id: r.data && r.data.id, status: (r.data && r.data.status) || 'saved', created_at: r.data && r.data.created_at };
@@ -1537,7 +1584,7 @@
           }
           return after.then(function () {
             if (!(S.approved && has('reviewDocumentMatch'))) return null;
-            return API.reviewDocumentMatch(S.saved.match.id, reviewedRows(), noteText()).then(function (v) {
+            return API.reviewDocumentMatch(S.saved.match.id, reviewedRows(), savedNote()).then(function (v) {
               if (v.error) notes.push(T('m_note_review_match_failed', { msg: errMsg(v.error) }));
               else S.saved.match.status = (v.data && v.data.status) || 'reviewed';
             });
@@ -1669,7 +1716,7 @@
           extraction_id: S.saved.extractions[k] ? S.saved.extractions[k].id : null, fields: plainFields(s) };
       });
       return { app: 'marsa', kind: 'document_match', version: R.version, generated_at: new Date().toISOString(), read_at: S.readAt,
-        mode: R.mode, with_packing: !!R.with_packing, overall: R.overall, counts: R.counts, documents: docs, rows: payloadRows(), items: R.items,
+        mode: R.mode, check_mode: R.check_mode || null, with_packing: !!R.with_packing, overall: R.overall, counts: R.counts, documents: docs, rows: payloadRows(), items: R.items,
         reviewed_rows: reviewedRows(), approved: !!S.approved, reviewer: reviewerName() || null, note: noteText() || null,
         match_id: S.saved.match ? S.saved.match.id : null };
     }
@@ -1693,6 +1740,7 @@
         var sum = [[T('m_sum_item'), T('m_sum_value')],
           [T('m_report_title'), T('m_overall_' + R.overall)],
           [T('m_meta_mode'), modeText(R)],
+          [T('mx_check_meta'), R.check_mode ? checkText(R.check_mode) : ''],
           [T('m_meta_date'), fmtDate(S.readAt || new Date().toISOString())],
           [T('m_meta_org'), orgName(S.orgId)]];
         C.forEach(function (k) { sum.push([docName(k), slotLabel(k)]); });
@@ -1818,6 +1866,7 @@
       if (orgName(S.orgId)) metaLines.push(T('m_meta_org') + ': ' + orgName(S.orgId));
       C.forEach(function (k) { if (slotLabel(k)) metaLines.push(docName(k) + ': ' + slotLabel(k)); });
       metaLines.push(T('m_meta_mode') + ': ' + modeText(R));
+      if (R.check_mode) metaLines.push(T('mx_check_meta') + ': ' + checkText(R.check_mode));
       var revLines = [T('m_reviewer') + ': ' + (reviewerName() || '—') + '   ·   ' + T('m_review_state') + ': '
         + (S.approved || (S.saved.match && S.saved.match.status === 'reviewed') ? T('m_review_approved') : T('m_review_pending'))
         + '   ·   ' + T('m_reviewed_n', { n: reviewedRows().length, total: R.rows.length })];

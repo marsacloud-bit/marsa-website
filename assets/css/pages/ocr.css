@@ -749,3 +749,11 @@ html[dir="ltr"] .ocr-mx-cell.is-calm.is-warn { box-shadow: inset 4px 0 0 #B7791F
 }
 /* the single reader's long «تعرّف Claude على المستند …» badge wrapped nowhere and widened the page at 375px */
 .ocr-result-meta .badge { white-space: normal; max-width: 100%; overflow-wrap: anywhere; text-align: start; }
+
+/* check level (ocr-match.js): «تدقيق شديد» checkbox right above the report; basic = numbers 100%, names / kinds 60% */
+.ocr-match-check { margin-block: 14px 4px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; background: #F6F9FC; }
+.ocr-match-check.is-strict { border-color: rgba(200, 50, 60, .35); background: var(--danger-bg); }
+.ocr-match-check-label { display: flex; align-items: flex-start; gap: 10px; font-weight: 700; color: var(--navy-dark); cursor: pointer; overflow-wrap: anywhere; }
+.ocr-match-check-label input { flex-shrink: 0; width: 18px; height: 18px; margin-block-start: 3px; accent-color: var(--teal); }
+.ocr-match-check-hint { margin: 4px 0 0; padding-inline-start: 28px; }
+@media print { .ocr-match-check { display: none !important; } }

@@ -2466,6 +2466,31 @@ async function secFrontEnd() {
     return (/if \(sk && sk !== DOC_TYPE\[k\]\) return T\('mx_save_block_kind'/.test(mx) && /if \(ids\[id\]\) return T\('mx_save_block_same'/.test(mx)
       && (i18n.match(/mx_save_block_same:/g) || []).length === 2) || 'saveBlock';
   });
+  await check('ocr-match: «تدقيق شديد» checkbox (default off = basic) above the report, hint, both levels wired to the engine, remembered (try/catch), meta / print / Excel / PNG / JSON / saved note', () => {
+    const i18n = rd('assets/i18n/ocr.js');
+    const cb = (html.match(/<input type="checkbox" id="ocr-match-strict"[^>]*>/) || [''])[0];
+    const keys = ['mx_check_label', 'mx_check_hint', 'mx_check_meta', 'mx_check_basic_name', 'mx_check_strict_name', 'mx_check_changed'];
+    const both = keys.every(k => (i18n.match(new RegExp('\\b' + k + ':', 'g')) || []).length === 2);
+    const pos = html.indexOf('id="ocr-match-check"'), rep = html.indexOf('id="ocr-match-result"');
+    return (!!cb && !/checked/.test(cb) && pos > 0 && pos < rep && /تدقيق شديد \(مراجعة كل شيء حتى النصوص بدقة 100%\)/.test(html)
+      && /المبدئي: الأرقام بدقة 100% والأسماء والأنواع بتشابه 60%/.test(html) && both
+      && /S\.result = HAS_LEVEL \? E\.compare\(engineInput\(\), \{ mode: CHECK \}\) : E\.compare\(engineInput\(\)\);/.test(mx)
+      && /try \{ return window\.localStorage && window\.localStorage\.getItem\(CHECK_KEY\) === 'strict' \? 'strict' : 'basic'; \} catch \(e\) \{ return 'basic'; \}/.test(mx)
+      && /try \{ if \(window\.localStorage\) window\.localStorage\.setItem\(CHECK_KEY, CHECK\); \} catch \(e\)/.test(mx)
+      && /if \(R\.check_mode\) mrow\(T\('mx_check_meta'\), checkText\(R\.check_mode\)\);/.test(mx) && /metaLines\.push\(T\('mx_check_meta'\)/.test(mx)
+      && /check_mode: R\.check_mode \|\| null/.test(mx) && /note: savedNote\(\)/.test(mx) && !/reviewDocumentMatch\([^)]*noteText\(\)\)/.test(mx)) || J({ cb, both, pos, rep });
+  });
+  await check('ocr-match.js (vm): savedNote — the reviewer note + one line with the level, ≤ 1000 chars; no level → the note as typed', () => {
+    const a = mx.indexOf('    function noteText('), b = mx.indexOf('    /* ---------------------------------------------------------------\n       Save in the system');
+    if (a < 0 || b < a) return 'markers';
+    const mk = (note, level) => {
+      const c = { $: () => ({ value: note }), S: { result: level ? { check_mode: level } : {} }, T: k => k, checkText: l => l === 'strict' ? 'STRICT' : 'BASIC' };
+      vm.createContext(c); vm.runInContext(mx.slice(a, b) + ';this.savedNote = savedNote;', c); return c.savedNote();
+    };
+    const long = mk('x'.repeat(1000), 'strict');
+    return (mk('ok', 'basic') === 'ok\n[mx_check_meta: BASIC]' && mk('', 'strict') === '[mx_check_meta: STRICT]' && mk(' hi ', null) === 'hi'
+      && long.length === 1000 && /\[mx_check_meta: STRICT\]$/.test(long)) || J([mk('ok', 'basic'), long.length]);
+  });
   await check('i18n: the compare / different-shipments / save-block keys exist in Arabic AND English; the banner says «يبدو أن هذه المستندات لشحنات مختلفة»', () => {
     const dicts = {};
     const reg = { register: (ns, d) => { dicts[ns] = d; } };

@@ -617,60 +617,200 @@
   }
 
   /* ------------------------------------------------------------------
+     Check level (owner, 2026-11-13): compare(docs, { mode: 'basic' | 'strict' }). Without it (or with any other value)
+     every row is exactly as before (match-v1 / match-v2 corpus digest unchanged); with it the result carries check_mode.
+     - numbers / codes (kind 'num': invoice / B/L / declaration numbers, containers, HS codes, weights, package counts,
+       totals, dates, currency) — in BOTH levels: equal after the existing parsing / normalisation (number formats, units,
+       labels such as "No.", case / spacing, leading zeros of an id, HS on its first 6 digits — a classification rule) or
+       'mismatch'; never 'partial' (no prefix / suffix id, no shared-container, no 4-digit heading, no weight / total
+       tolerance: a weight in lbs against one in kg is compared to the nearest 0.5 kg, a total / items sum to the cent).
+     - text (kind 'text': names, goods description, package type, ports, vessel, country, incoterms place):
+       basic  → 'match' when the field's own comparator says so (aliases, legal words "CO." / "Est." …), or one normalised
+                text contains the other (≥ 4 letters), or the similarity ≥ 0.60 (word Jaccard where two words
+                count as the same word by their letter-pair Dice — softJaccard — on the normalised text); two values that resolve to different known ports / package codes stay a
+                'mismatch' (a country: once one side is a known country the codes decide); Arabic vs Latin letters (nothing to compare) → 'partial' (why 'script': a person checks
+                it); else 'mismatch'.
+       strict → 'match' only when equal after looseKey (case / spacing / tatweel / tashkeel); anything else 'mismatch'.
+     ------------------------------------------------------------------ */
+  var CHECK_MODES = ['basic', 'strict'];
+  var SIM_MIN = 0.6, CONTAINS_MIN = 4;
+  function bigrams(s) { var out = []; for (var i = 0; i + 1 < s.length; i++) out.push(s.substr(i, 2)); return out; }
+  function dice(a, b) {   // multiset Dice coefficient of the letter pairs
+    if (!a.length || !b.length) return 0;
+    var left = b.slice(), inter = 0;
+    a.forEach(function (x) { var i = left.indexOf(x); if (i !== -1) { inter++; left.splice(i, 1); } });
+    return 2 * inter / (a.length + b.length);
+  }
+  // fuzzy word Jaccard: the words of both sides are paired one to one (best letter-pair Dice first, a pair counts only
+  // from 0.5 — "HORIZON" / "HORIZEN" 0.67), and Σsim / (|A| + |B| − Σsim) is the plain word Jaccard with typo-tolerant
+  // words. Measured per word on purpose: a Dice over the whole joined text lets one long shared generic word carry two
+  // different names ("SHANGHAI MACHINERY" / "NINGBO MACHINERY" would score 0.60 there; here 0.33).
+  function softJaccard(a, b) {
+    a = uniq(a); b = uniq(b);
+    if (!a.length || !b.length) return 0;
+    var cand = [];
+    a.forEach(function (x, i) {
+      b.forEach(function (y, j) {
+        var s = x === y ? 1 : dice(bigrams(x), bigrams(y));
+        if (s >= 0.5) cand.push([s, i, j]);
+      });
+    });
+    cand.sort(function (p, q) { return q[0] - p[0] || p[1] - q[1] || p[2] - q[2]; });
+    var ua = {}, ub = {}, sum = 0;
+    cand.forEach(function (c) { if (ua[c[1]] || ub[c[2]]) return; ua[c[1]] = ub[c[2]] = 1; sum += c[0]; });
+    return sum / (a.length + b.length - sum);
+  }
+  // x / y: normalised texts (words separated by one space) → { ratio 0..1, contains }
+  function similarity(x, y) {
+    x = String(x || '').replace(/\s+/g, ' ').trim(); y = String(y || '').replace(/\s+/g, ' ').trim();
+    if (!x || !y) return { ratio: 0, contains: false };
+    var cx = x.replace(/ /g, ''), cy = y.replace(/ /g, '');
+    if (cx === cy) return { ratio: 1, contains: true };
+    var contains = (cx.length >= CONTAINS_MIN && cy.indexOf(cx) !== -1) || (cy.length >= CONTAINS_MIN && cx.indexOf(cy) !== -1);
+    var wx = x.split(' '), wy = y.split(' ');
+    var r = Math.max(jaccard(wx, wy), softJaccard(wx, wy));
+    return { ratio: Math.round(r * 10000) / 10000, contains: contains };
+  }
+  function crossScript(a, b) { var sa = script(a), sb = script(b); return (sa === 'ar' && sb === 'latin') || (sa === 'latin' && sb === 'ar'); }
+  function codeIn(list, c) { for (var i = 0; i < list.length; i++) if (list[i][0] === c) return true; return false; }
+  function plainWords(v) { return words(v).join(' '); }
+  // per text field: the normalised form the similarity is measured on
+  var TEXT_NORM = {
+    shipper: function (v) { return normName(v) || plainWords(v); },
+    consignee: function (v) { return normName(v) || plainWords(v); },
+    goods_description: function (v) { return descTokens(v).join(' ') || plainWords(v); },
+    vessel: function (v) { return normVessel(v).toLowerCase(); },
+    port_of_loading: function (v) { return words(v).filter(function (x) { return PORT_NOISE.indexOf(x) === -1; }).join(' ') || plainWords(v); },
+    package_type: function (v) { return words(v).filter(function (x) { return !/^\d+$/.test(x); }).join(' '); },
+    country_of_origin: function (v) {
+      return words(v).filter(function (x) { return ['made', 'in', 'origin', 'country', 'of', 'the', 'منشا', 'بلد', 'صنع', 'في'].indexOf(x) === -1; }).join(' ');
+    }
+  };
+  TEXT_NORM.port_of_discharge = TEXT_NORM.port_of_loading;
+  // both sides resolve to a known code and the codes differ → a mismatch whatever the letters look like (Austria / Australia)
+  var TEXT_CODE = {
+    port_of_loading: function (v) { var c = normPort(v); return codeIn(PORTS, c) ? c : ''; },
+    package_type: function (v) { var c = normPackageType(v); return codeIn(PKG, c) ? c : ''; },
+    country_of_origin: function (v) { var c = normCountry(v); return codeIn(COUNTRIES, c) ? c : ''; }
+  };
+  TEXT_CODE.port_of_discharge = TEXT_CODE.port_of_loading;
+  function textBasic(key, base, a, b) {
+    var r = base(a, b);
+    if (r.s === 'match') return { s: 'match' };
+    var code = TEXT_CODE[key];
+    if (code) {
+      // a country is a closed list: once one side is a known country the codes decide (Austria ≠ Australia)
+      var ca = code(a), cb = code(b);
+      if (ca !== cb && (key === 'country_of_origin' ? ca || cb : ca && cb)) return { s: 'mismatch', why: 'code' };
+    }
+    var m = similarity((TEXT_NORM[key] || plainWords)(a), (TEXT_NORM[key] || plainWords)(b));
+    if (m.contains) return { s: 'match', why: 'lv_contains' };
+    if (m.ratio >= SIM_MIN) return { s: 'match', why: 'lv_similar', sim: m.ratio };
+    if (crossScript(a, b)) return { s: 'partial', why: 'script' };
+    return { s: 'mismatch', why: 'lv_low', sim: m.ratio };
+  }
+  function strictText(a, b) { return looseSame(a, b) ? { s: 'match' } : { s: 'mismatch', why: 'strict' }; }
+  function isLbs(v) { return typeof v !== 'number' && /\b(lb|lbs|pound|pounds)\b|رطل/.test(fold(v)); }
+  function exactWeight(a, b) {
+    var x = parseWeight(a), y = parseWeight(b);
+    if (x == null || y == null) return { s: 'mismatch', why: 'nan' };
+    if (Math.abs(x - y) <= (isLbs(a) !== isLbs(b) ? 0.5 : 0.0005)) return { s: 'match', x: x, y: y };
+    return { s: 'mismatch', x: x, y: y, diff: Math.round(Math.abs(x - y) * 1000) / 1000 };
+  }
+  function noPartial(fn, must) {   // a number / code comparator: 'partial' becomes 'mismatch' (its reason is kept)
+    return function (a, b) {
+      var r = fn(a, b);
+      if (r.s !== 'partial') return r;
+      var o = {}; Object.keys(r).forEach(function (k) { o[k] = r[k]; });
+      o.s = 'mismatch'; if (must) o.must = must;
+      return o;
+    };
+  }
+  // the row comparator of field d at a check level (no level → d.cmp, unchanged; the total has its own path)
+  function cmpAt(d, level) {
+    if (!level || !d.cmp) return d.cmp;
+    if (d.kind === 'num') {
+      if (d.key === 'gross_weight' || d.key === 'net_weight') return exactWeight;
+      if (d.key === 'hs_codes') return noPartial(d.cmp, 'hs_exact');
+      if (d.key === 'container_numbers') return noPartial(d.cmp);
+      return noPartial(d.cmp, 'id_exact');
+    }
+    if (level === 'strict') return strictText;
+    if (d.key === 'incoterms') {
+      return function (a, b) {
+        var r = d.cmp(a, b);
+        if (r.s === 'match') return r;
+        if (r.why === 'place') {   // same term: the named place is text
+          var code = incotermCode(a);
+          var strip = function (v) { return String(str(v)).replace(new RegExp('\\b' + code + '\\b', 'i'), '').replace(/incoterms?\s*\d{4}/i, ''); };
+          var p = textBasic('port_of_loading', lenient(cmpPort), strip(a), strip(b));
+          return p.s === 'match' ? p : { s: 'mismatch', why: 'place' };
+        }
+        if (r.why === 'nocode') {
+          var t = textBasic('incoterms', function () { return { s: 'mismatch' }; }, a, b);
+          return t.s === 'match' || t.s === 'partial' ? t : { s: 'mismatch', why: 'nocode' };
+        }
+        return r;
+      };
+    }
+    return function (a, b) { return textBasic(d.key, d.cmp, a, b); };
+  }
+
+  /* ------------------------------------------------------------------
      Field table: which extraction keys feed each row, per document
      exp = expected documents (normally carry the field), opt = optional ones
      ------------------------------------------------------------------ */
   var F = [
-    { key: 'invoice_number', ar: 'رقم الفاتورة', en: 'Invoice number', cmp: lenient(cmpId), crit: 'three',
+    { key: 'invoice_number', kind: 'num', ar: 'رقم الفاتورة', en: 'Invoice number', cmp: lenient(cmpId), crit: 'three',
       keys: { invoice: ['invoice_number'], bl: ['invoice_number'], declaration: ['invoice_number'], packing: ['invoice_number', 'packing_list_number'] },
       exp: ['invoice', 'declaration'], opt: ['bl', 'packing'], refOnly: { packing_list_number: true } },
-    { key: 'bl_number', ar: 'رقم البوليصة', en: 'B/L number', cmp: lenient(cmpId), crit: 'three',
+    { key: 'bl_number', kind: 'num', ar: 'رقم البوليصة', en: 'B/L number', cmp: lenient(cmpId), crit: 'three',
       keys: { invoice: ['bl_number'], bl: ['bl_number'], declaration: ['bl_number'] }, exp: ['bl', 'declaration'], opt: ['invoice'] },
-    { key: 'declaration_number', ar: 'رقم البيان الجمركي', en: 'Declaration number', cmp: lenient(cmpId), crit: false, info: true,
+    { key: 'declaration_number', kind: 'num', ar: 'رقم البيان الجمركي', en: 'Declaration number', cmp: lenient(cmpId), crit: false, info: true,
       keys: { invoice: ['declaration_number'], bl: ['declaration_number'], declaration: ['declaration_number'] }, exp: ['declaration'], opt: ['invoice', 'bl'] },
-    { key: 'container_numbers', ar: 'أرقام الحاويات', en: 'Container numbers', cmp: lenient(cmpContainers), crit: true, set: 'containers',
+    { key: 'container_numbers', kind: 'num', ar: 'أرقام الحاويات', en: 'Container numbers', cmp: lenient(cmpContainers), crit: true, set: 'containers',
       keys: { invoice: ['container_numbers'], bl: ['container_numbers'], declaration: ['container_numbers'], packing: ['container_numbers'] },
       exp: ['bl', 'declaration', 'packing'], opt: ['invoice'] },
-    { key: 'shipper', ar: 'الشاحن / المورد', en: 'Shipper / supplier', cmp: lenient(cmpName), crit: false,
+    { key: 'shipper', kind: 'text', ar: 'الشاحن / المورد', en: 'Shipper / supplier', cmp: lenient(cmpName), crit: false,
       keys: { invoice: ['shipper', 'supplier_name'], bl: ['shipper'], declaration: ['shipper', 'supplier_name'], packing: ['shipper', 'supplier_name'] },
       exp: ['invoice', 'bl'], opt: ['declaration', 'packing'] },
-    { key: 'consignee', ar: 'المرسل إليه / المستورد', en: 'Consignee / importer', cmp: lenient(cmpName), crit: true,
+    { key: 'consignee', kind: 'text', ar: 'المرسل إليه / المستورد', en: 'Consignee / importer', cmp: lenient(cmpName), crit: true,
       keys: { invoice: ['consignee', 'buyer_name'], bl: ['consignee'], declaration: ['consignee', 'buyer_name'], packing: ['consignee', 'consignee_name', 'buyer_name'] },
       exp: ['invoice', 'bl', 'declaration'], opt: ['packing'] },
-    { key: 'gross_weight', ar: 'الوزن الإجمالي (كجم)', en: 'Gross weight (kg)', cmp: cmpWeight, crit: true, num: 'kg',
+    { key: 'gross_weight', kind: 'num', ar: 'الوزن الإجمالي (كجم)', en: 'Gross weight (kg)', cmp: cmpWeight, crit: true, num: 'kg',
       keys: { invoice: ['gross_weight'], bl: ['gross_weight'], declaration: ['gross_weight'], packing: ['gross_weight'] },
       exp: ['bl', 'declaration', 'packing'], opt: ['invoice'] },
-    { key: 'net_weight', ar: 'الوزن الصافي (كجم)', en: 'Net weight (kg)', cmp: cmpWeight, crit: false, num: 'kg',
+    { key: 'net_weight', kind: 'num', ar: 'الوزن الصافي (كجم)', en: 'Net weight (kg)', cmp: cmpWeight, crit: false, num: 'kg',
       keys: { invoice: ['net_weight'], bl: ['net_weight'], declaration: ['net_weight'], packing: ['net_weight'] },
       exp: ['packing'], opt: ['invoice', 'bl', 'declaration'] },
-    { key: 'packages_count', ar: 'عدد الطرود', en: 'Number of packages', cmp: cmpCount, crit: true, num: 'n',
+    { key: 'packages_count', kind: 'num', ar: 'عدد الطرود', en: 'Number of packages', cmp: cmpCount, crit: true, num: 'n',
       keys: { invoice: ['packages_count'], bl: ['packages_count'], declaration: ['packages_count'], packing: ['packages_count'] },
       exp: ['bl', 'declaration', 'packing'], opt: ['invoice'] },
-    { key: 'package_type', ar: 'نوع الطرود', en: 'Package type', cmp: lenient(cmpPackageType), crit: false,
+    { key: 'package_type', kind: 'text', ar: 'نوع الطرود', en: 'Package type', cmp: lenient(cmpPackageType), crit: false,
       keys: { invoice: ['package_type'], bl: ['package_type'], declaration: ['package_type'], packing: ['package_type'] },
       exp: ['bl'], opt: ['invoice', 'declaration', 'packing'] },
-    { key: 'hs_codes', ar: 'رموز HS (6 خانات)', en: 'HS codes (6 digits)', cmp: lenient(cmpHs), crit: true, set: 'hs',
+    { key: 'hs_codes', kind: 'num', ar: 'رموز HS (6 خانات)', en: 'HS codes (6 digits)', cmp: lenient(cmpHs), crit: true, set: 'hs',
       keys: { invoice: ['hs_codes'], bl: ['hs_codes'], declaration: ['hs_codes'], packing: ['hs_codes'] },
       exp: ['invoice', 'declaration'], opt: ['bl', 'packing'] },
-    { key: 'country_of_origin', ar: 'بلد المنشأ', en: 'Country of origin', cmp: lenient(cmpCountry), crit: false,
+    { key: 'country_of_origin', kind: 'text', ar: 'بلد المنشأ', en: 'Country of origin', cmp: lenient(cmpCountry), crit: false,
       keys: { invoice: ['country_of_origin'], bl: ['country_of_origin'], declaration: ['country_of_origin'], packing: ['country_of_origin'] },
       exp: ['invoice', 'declaration'], opt: ['bl', 'packing'] },
-    { key: 'port_of_loading', ar: 'ميناء الشحن', en: 'Port of loading', cmp: lenient(cmpPort), crit: false,
+    { key: 'port_of_loading', kind: 'text', ar: 'ميناء الشحن', en: 'Port of loading', cmp: lenient(cmpPort), crit: false,
       keys: { invoice: ['port_of_loading'], bl: ['port_of_loading'], declaration: ['port_of_loading'] }, exp: ['bl'], opt: ['invoice', 'declaration'] },
-    { key: 'port_of_discharge', ar: 'ميناء التفريغ', en: 'Port of discharge', cmp: lenient(cmpPort), crit: false,
+    { key: 'port_of_discharge', kind: 'text', ar: 'ميناء التفريغ', en: 'Port of discharge', cmp: lenient(cmpPort), crit: false,
       keys: { invoice: ['port_of_discharge'], bl: ['port_of_discharge'], declaration: ['port_of_discharge'] }, exp: ['bl'], opt: ['invoice', 'declaration'] },
-    { key: 'vessel', ar: 'اسم السفينة', en: 'Vessel', cmp: lenient(cmpVessel), crit: false,
+    { key: 'vessel', kind: 'text', ar: 'اسم السفينة', en: 'Vessel', cmp: lenient(cmpVessel), crit: false,
       keys: { invoice: ['vessel'], bl: ['vessel'], declaration: ['vessel'] }, exp: ['bl'], opt: ['invoice', 'declaration'] },
-    { key: 'incoterms', ar: 'شروط التسليم (Incoterms)', en: 'Incoterms', cmp: lenient(cmpIncoterms), crit: false,
+    { key: 'incoterms', kind: 'text', ar: 'شروط التسليم (Incoterms)', en: 'Incoterms', cmp: lenient(cmpIncoterms), crit: false,
       keys: { invoice: ['incoterms'], bl: ['incoterms'], declaration: ['incoterms'] }, exp: ['invoice'], opt: ['bl', 'declaration'] },
-    { key: 'goods_description', ar: 'وصف البضاعة', en: 'Goods description', cmp: lenient(cmpDesc), crit: false,
+    { key: 'goods_description', kind: 'text', ar: 'وصف البضاعة', en: 'Goods description', cmp: lenient(cmpDesc), crit: false,
       keys: { invoice: ['goods_description'], bl: ['goods_description'], declaration: ['goods_description'], packing: ['goods_description'] },
       exp: ['invoice', 'bl'], opt: ['declaration', 'packing'] },
-    { key: 'invoice_date', ar: 'تاريخ الفاتورة', en: 'Invoice date', cmp: lenient(cmpDate), crit: false,
+    { key: 'invoice_date', kind: 'num', ar: 'تاريخ الفاتورة', en: 'Invoice date', cmp: lenient(cmpDate), crit: false,
       keys: { invoice: ['invoice_date'], declaration: ['invoice_date'] }, exp: ['invoice', 'declaration'], opt: [] },
-    { key: 'currency', ar: 'العملة', en: 'Currency', cmp: lenient(cmpCurrency), crit: false,
+    { key: 'currency', kind: 'num', ar: 'العملة', en: 'Currency', cmp: lenient(cmpCurrency), crit: false,
       keys: { invoice: ['currency'], declaration: ['currency'] }, exp: ['invoice', 'declaration'], opt: [] },
-    { key: 'total', ar: 'الإجمالي / القيمة الجمركية', en: 'Total / customs value', cmp: null, crit: true, num: 'money',
+    { key: 'total', kind: 'num', ar: 'الإجمالي / القيمة الجمركية', en: 'Total / customs value', cmp: null, crit: true, num: 'money',
       keys: { invoice: ['total', 'subtotal'], declaration: ['total', 'subtotal'] }, exp: ['invoice', 'declaration'], opt: [] }
   ];
   var LABELS = {};
@@ -732,6 +872,13 @@
     if (r.why === 'contains' || r.why === 'similar') { ar.push('الاسمان متقاربان وليسا متطابقين تمامًا'); en.push('Similar but not identical'); }
     if (r.why === 'script') { ar.push('اسم بالعربية وآخر بالإنجليزية؛ تحقّق منه يدويًا'); en.push('One name is in Arabic, the other in Latin script; check manually'); }
     if (r.why === 'prefix') { ar.push('أحد الرقمين جزء من الآخر (بادئة أو لاحقة)'); en.push('One number is part of the other (prefix / suffix)'); }
+    if (r.why === 'lv_contains') { ar.push('أحدهما جزء من الآخر — مقبول في التدقيق المبدئي'); en.push('One contains the other — accepted in the basic check'); }
+    if (r.why === 'lv_similar') { ar.push('متقاربان بنسبة ' + Math.floor(r.sim * 100) + '% — مقبول في التدقيق المبدئي (60% فأكثر)'); en.push('Similar (' + Math.floor(r.sim * 100) + '%) — accepted in the basic check (60% or more)'); }
+    if (r.why === 'lv_low') { ar.push('التشابه ' + Math.floor(r.sim * 100) + '% فقط (أقل من 60%)'); en.push('Only ' + Math.floor(r.sim * 100) + '% similar (below 60%)'); }
+    if (r.why === 'code') { ar.push('قيمتان مختلفتان'); en.push('Two different values'); }
+    if (r.why === 'strict') { ar.push('التدقيق الشديد: النص غير مطابق حرفيًا'); en.push('Strict check: the text is not identical'); }
+    if (r.must === 'id_exact') { ar.push('الأرقام يجب أن تتطابق 100%'); en.push('Numbers must match 100%'); }
+    if (r.must === 'hs_exact') { ar.push('رموز HS يجب أن تتطابق في أول 6 خانات'); en.push('HS codes must match on their first 6 digits'); }
     if (r.why === 'place') { ar.push('نفس الشرط بمكان تسليم مختلف'); en.push('Same term, different named place'); }
     if (r.why === 'nocode') { ar.push('لم يُتعرّف على رمز Incoterms'); en.push('No Incoterms code recognised'); }
     if (r.why === 'format') { ar.push('تاريخ بصيغة غير مفهومة'); en.push('Date format not recognised'); }
@@ -741,12 +888,13 @@
   }
 
   /* total / customs value: same currency required */
-  function cmpTotal(a, b, curA, curB) {
+  // level (basic / strict): to the cent, and two currencies are a mismatch (a number is never 'partial')
+  function cmpTotal(a, b, curA, curB, level) {
     var x = parseNum(a), y = parseNum(b);
     if (x == null || y == null) return { s: 'mismatch', why: 'nan' };
     var ca = normCurrency(curA), cb = normCurrency(curB);
-    if (ca && cb && ca !== cb) return { s: 'partial', why: 'currency' };
-    if (numClose(x, y, 1, 0.005)) return { s: 'match' };
+    if (ca && cb && ca !== cb) return { s: level ? 'mismatch' : 'partial', why: 'currency' };
+    if (level ? Math.abs(x - y) < 0.005 : numClose(x, y, 1, 0.005)) return { s: 'match' };
     return { s: 'mismatch', diff: Math.round(Math.abs(x - y) * 100) / 100 };
   }
 
@@ -773,7 +921,8 @@
   }
 
   // active = the documents a row has keys for (the three base ones, + 'packing' when a packing list was given)
-  function buildRow(d, docs, present, mode, active, pairList) {
+  function buildRow(d, docs, present, mode, active, pairList, level) {
+    var cmp = cmpAt(d, level);
     var values = {}, conf = {}, src = {}, have = [], corrected = false;
     active.forEach(function (k) {
       if (present.indexOf(k) === -1 || !d.keys[k]) { values[k] = undefined; conf[k] = null; src[k] = d.keys[k] ? d.keys[k][0] : null; return; }
@@ -808,13 +957,13 @@
         r = null;
         la.forEach(function (x) {
           lb.forEach(function (y) {
-            var t = cmpTotal(x.value, y.value, ca && ca.value, cb && cb.value);
+            var t = cmpTotal(x.value, y.value, ca && ca.value, cb && cb.value, level);
             if (!r || RANK[t.s] < RANK[r.s]) r = t;
           });
         });
-        if (!r) r = cmpTotal(va, vb, ca && ca.value, cb && cb.value);
+        if (!r) r = cmpTotal(va, vb, ca && ca.value, cb && cb.value, level);
       } else {
-        try { r = d.cmp(va, vb); } catch (e) { r = { s: 'mismatch' }; }
+        try { r = cmp(va, vb); } catch (e) { r = { s: 'mismatch' }; }
       }
       res[p[0]] = { r: r, a: a, b: b };
       pairs[p[0]] = r.s;
@@ -846,7 +995,8 @@
       if (d.crit === 'three' && mode === 'three_way' && worst === 'mismatch') {
         pairList.forEach(function (p) { if (d.exp.indexOf(p[1]) !== -1 && d.exp.indexOf(p[2]) !== -1) critOnly = p[0]; });
         if (critOnly && !(res[critOnly] && res[critOnly].r.s === 'mismatch')) {
-          status = 'partial';
+          // a check level: numbers are exact, the row stays a mismatch (the note still says where the difference is)
+          if (!level) status = 'partial';
           var optDocs = d.opt.filter(function (k) { return have.indexOf(k) !== -1; });
           if (optDocs.length) {
             dar.push('الاختلاف في ' + docList(optDocs, 'ar') + ' فقط (مرجع اختياري) — راجعه');
@@ -925,7 +1075,7 @@
     G.order.forEach(function (k) { var r = overlap(t, descTokens(G.map[k].description)); if (r > bestR) { bestR = r; best = G.map[k]; } });
     return bestR >= 0.6 ? best : null;
   }
-  function compareItems(docs, present) {
+  function compareItems(docs, present, level) {
     var lists = {};
     // the packing list's line items (packages / weights per line) are not compared with the invoice quantities
     BASE_DOCS.forEach(function (k) { lists[k] = present.indexOf(k) !== -1 ? itemsOf(docs[k]) : undefined; });
@@ -939,8 +1089,9 @@
       var ref = sub ? parseNum(sub.value) : null, refKey = 'subtotal';
       if (ref == null && tot) { ref = parseNum(tot.value); refKey = 'total'; }
       // a subtotal that misses but a total that hits (items listed VAT-inclusive) counts
-      var stOk = ref != null && numClose(sum, ref, 0.01, 0.01);
-      if (!stOk && refKey === 'subtotal' && tot && numClose(sum, parseNum(tot.value), 0.01, 0.01)) { ref = parseNum(tot.value); refKey = 'total'; stOk = true; }
+      var relT = level ? 0 : 0.01;   // a check level: to the cent
+      var stOk = ref != null && numClose(sum, ref, 0.01, relT);
+      if (!stOk && refKey === 'subtotal' && tot && numClose(sum, parseNum(tot.value), 0.01, relT)) { ref = parseNum(tot.value); refKey = 'total'; stOk = true; }
       out.totals = { items_sum: sum, reference: ref, reference_key: ref == null ? null : refKey, complete: withAmt.length === inv.length,
         status: ref == null ? 'info' : (stOk ? 'match' : 'mismatch') };
     }
@@ -959,7 +1110,7 @@
         used[o + '|' + go.key] = 1;
         row.quantity[o] = go.quantity;
         if (o === 'declaration') row.amount.declaration = go.amount;
-        if (gi.quantity != null && go.quantity != null && !numClose(gi.quantity, go.quantity, 0.001, 0.0005)) row.status = 'mismatch';
+        if (gi.quantity != null && go.quantity != null && !numClose(gi.quantity, go.quantity, 0.001, level ? 0 : 0.0005)) row.status = 'mismatch';
       });
       out.groups.push(row);
     });
@@ -986,6 +1137,8 @@
   function compare(input, opts) {
     input = isObj(input) ? input : {};
     opts = isObj(opts) ? opts : {};
+    // check level: 'basic' (numbers exact, text ≥ 60% similar) / 'strict' (everything exact); absent → the legacy rows
+    var level = CHECK_MODES.indexOf(opts.mode) !== -1 ? opts.mode : null;
     var docs = {}, present = [];
     DOCS.forEach(function (k) {
       var d = input[k];
@@ -1002,10 +1155,10 @@
     var rows = [];
     F.forEach(function (d) {
       if (d.key === 'declaration_number' && present.indexOf('declaration') === -1) return;
-      var r = buildRow(d, docs, present, mode, active, pairList);
+      var r = buildRow(d, docs, present, mode, active, pairList, level);
       if (r) rows.push(r);
     });
-    var items = compareItems(docs, present);
+    var items = compareItems(docs, present, level);
     if (items.totals && items.totals.status !== 'info') {
       var t = items.totals, ok = t.status === 'match';
       var tv = blank(undefined); tv.invoice = fmtNum(t.items_sum);
@@ -1038,8 +1191,10 @@
     else if (rows.some(function (r) { return (r.critical && (r.status === 'partial' || r.status === 'missing')) || r.status === 'mismatch'; })) overall = 'review';
     else if (!rows.some(function (r) { return r.status === 'match'; })) overall = 'review';   // nothing could be compared
     if (present.indexOf('invoice') === -1 || present.indexOf('bl') === -1) overall = overall === 'mismatch' ? 'mismatch' : 'review';
-    return { version: withPacking ? VERSION_PACKING : VERSION, mode: mode, rows: rows, items: items, counts: counts, overall: overall,
+    var out = { version: withPacking ? VERSION_PACKING : VERSION, mode: mode, rows: rows, items: items, counts: counts, overall: overall,
       documents: present.slice(), generated_at: opts.now ? String(opts.now) : null, with_packing: withPacking, docs: present.slice() };
+    if (level) out.check_mode = level;
+    return out;
   }
 
   /* ------------------------------------------------------------------
@@ -1071,8 +1226,8 @@
     DOCS: DOCS.slice(), BASE_DOCS: BASE_DOCS.slice(), ROW_KEYS: ROW_KEYS.slice(), LABELS: LABELS,
     DOC_LABELS: { ar: JSON.parse(JSON.stringify(DOC_AR)), en: JSON.parse(JSON.stringify(DOC_EN)) },
     PAIRS: (function () { var o = {}; PAIRS.forEach(function (p) { o[p[0]] = [p[1], p[2]]; }); return o; })(),
-    FIELDS: F.map(function (d) { return { key: d.key, label_ar: d.ar, label_en: d.en, keys: d.keys, exp: d.exp.slice(), opt: d.opt.slice(), critical: d.crit }; }),
-    compare: compare,
+    FIELDS: F.map(function (d) { return { key: d.key, label_ar: d.ar, label_en: d.en, keys: d.keys, exp: d.exp.slice(), opt: d.opt.slice(), critical: d.crit, kind: d.kind }; }),
+    compare: compare, CHECK_MODES: CHECK_MODES.slice(), SIM_MIN: SIM_MIN, similarity: similarity,
     // helpers (tests / UI)
     // the cmp* helpers are the lenient ones the rows use (case / spacing never differs: looseKey / looseSame)
     normName: normName, cmpName: lenient(cmpName), normPort: normPort, cmpPort: lenient(cmpPort), normCountry: normCountry, normCurrency: normCurrency,
