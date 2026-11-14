@@ -1307,6 +1307,8 @@
     need('overdue', cnt('containers', function (q) { return q.in('return_status', openRet).lt('return_deadline', todayISO(0)); }));
     need('due3', cnt('containers', function (q) { return q.in('return_status', openRet).gte('return_deadline', todayISO(0)).lte('return_deadline', todayISO(3)); }));
     need('evidence', cnt('containers', function (q) { return q.eq('return_status', 'evidence_submitted'); }));
+    // 20261128000100: extension requests sent to the shipping agent and not answered yet (RLS: the caller's branches)
+    need('rxSent', cnt('return_extension_requests', function (q) { return q.eq('status', 'sent'); }));
     need('docs', cnt('documents', function (q) { return q.eq('classification_status', 'unreviewed').is('voided_at', null); }));
     if (canAny(R.contact)) jobs.push(api.listContactMessages({ orgId: S.orgId, status: 'new', limit: 1 }).then(function (r) { st.msgNew = r.error ? null : r.count; }));
     if (ops) jobs.push(cnt('import_batches', function (q) { return q.eq('status', 'draft'); }).then(function (v) { st.impDraft = v; }));
@@ -1496,6 +1498,7 @@
         if (ops && st.req) attn.push({ title: t('attn_review'), href: '#requests?status=under_review', side: pillNode(st.req.under_review ? 'warning' : 'muted', fmtCount(st.req.under_review || 0)) });
         attn.push({ title: t('attn_evidence'), href: '#transactions?status=', side: pillNode(st.evidence ? 'warning' : 'muted', fmtCount(st.evidence)) });
         attn.push({ title: t('attn_due3'), href: '#transactions?status=', side: pillNode(st.due3 ? 'warning' : 'muted', fmtCount(st.due3)) });
+        if (st.rxSent != null) attn.push({ title: t('attn_rx_sent'), href: '#alerts', side: pillNode(st.rxSent ? 'info' : 'muted', fmtCount(st.rxSent)) });
         if (canAny(R.contact)) attn.push({ title: t('attn_messages'), href: '#messages?status=new', side: pillNode(st.msgNew ? 'info' : 'muted', fmtCount(st.msgNew)) });
         if (ops) attn.push({ title: t('attn_imports'), href: '#imports?status=draft', side: pillNode(st.impDraft ? 'warning' : 'muted', fmtCount(st.impDraft)) });
         out.appendChild(el('div', { class: 'adm-cols adm-cols-wide' }, [

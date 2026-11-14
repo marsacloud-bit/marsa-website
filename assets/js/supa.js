@@ -101,6 +101,8 @@
       // 20261127000100: draft transaction + approval
       MRS_TX_NOT_DRAFT: 'هذه المعاملة ليست مسودة (اعتُمدت من قبل أو أُنشئت معاملةً عادية)، فلا تحتاج إلى اعتماد.',
       MRS_TX_MATCH_MISMATCH: 'نتيجة المطابقة فيها اختلافات أو بيانات ناقصة ({f}). راجعها، ثم أكّد الاعتماد واكتب ملاحظة تشرح السبب.',
+      // 20261128000100: empty-return extension request to the shipping agent
+      MRS_RX_EXISTS: 'يوجد طلب تمديد مفتوح (جاهز أو مُرسَل) لهذا الوكيل أو لإحدى هذه الحاويات. افتحه وأكمله أو ألغِه بدل إنشاء طلب جديد.',
       MRS_DECL_ALREADY_APPROVED: 'اعتُمدت قراءة البيان هذه من قبل. لتعديل البيان استخدم «تصحيح البيان» في المعاملة.',
       // legacy step 5 (20261121000100): appointment card drafts, empty-return proofs, TASTO carrier order
       MRS_APPT_DRAFT_EXISTS: 'للمعاملة مسودة بطاقات مواعيد مفتوحة. افتحها واستكملها بدل إنشاء مسودة جديدة (لا حاجة لإعادة القراءة).',
@@ -201,6 +203,10 @@
       line_items: 'البنود', review_status: 'حالة المراجعة', review_note: 'ملاحظة المراجعة', doc_type: 'نوع المستند',
       source_name: 'اسم الملف', source_sha256: 'بصمة الملف', transaction_id: 'المعاملة', document_id: 'المستند الأصلي',
       void_reason: 'سبب الإلغاء',
+      // 20261128000100: extension request
+      container_ids: 'الحاويات', return_deadline: 'موعد إرجاع الفارغ', bl_id: 'البوليصة (لأكثر من وكيل ملاحي)', agent_party_id: 'الوكيل الملاحي',
+      to_address: 'بريد الوكيل الملاحي', requested_days: 'عدد أيام التمديد', requested_until: 'تاريخ التمديد المطلوب', decided_until: 'تاريخ المهلة الجديد',
+      outcome: 'النتيجة', placeholder: 'متغير في نص الرسالة', empty_return_rule: 'قاعدة مهلة الإرجاع', msg_thread_id: 'محادثة البريد',
       slug: 'المعرّف المختصر', name_ar: 'الاسم بالعربية', name_en: 'الاسم بالإنجليزية', ref_prefix: 'بادئة الأرقام المرجعية',
       default_locale: 'اللغة الافتراضية', admin_email: 'بريد مدير المؤسسة', code: 'رمز الفرع', city: 'المدينة',
       is_active: 'التفعيل', public_intake_enabled: 'استقبال الطلبات العامة', brand_color: 'لون الهوية',
@@ -2046,6 +2052,85 @@
   function saveEmptyReturnDeadline(containerId, deadline) { return rpc('save_empty_return_deadline', { p_container: containerId, p_deadline: deadline || null }); }
   // → { transaction_id, proofs [...], readiness }
   function listEmptyReturnProofs(txId) { return rpc('list_empty_return_proofs', { p_tx: txId }); }
+  /* 20261128000100 (docs/online/LEGACY_APPT_AR.md §5b): empty-return deadline → extension request to the shipping agent. The
+     program PREPARES the e-mail; the user sends it from their own mail program (mailto / copy) and records «تم الإرسال». */
+  // o = { containerIds? [uuid] (default: due within the lead time / overdue), blId?, agentPartyId?, requestedDays? | requestedUntil?
+  //   'YYYY-MM-DD', toAddress?, idemKey? } → request {id, status draft, containers, current_deadline, requested_until, to_address,
+  //   subject, body, agent_name, exception_id, …} + {missing_email, lead_days}   (MRS_REQUIRED bl_id when several agents, MRS_RX_EXISTS)
+  function rxPayload(o, map) {
+    var p = {};
+    Object.keys(map).forEach(function (k) { if (o[k] !== undefined) p[map[k]] = o[k]; });
+    return p;
+  }
+  function prepareReturnExtension(txId, o) {
+    o = o || {};
+    if (!isUuid(txId)) return Promise.resolve(fail('MRS_REQUIRED', 'transaction'));
+    if (o.containerIds != null && (!Array.isArray(o.containerIds) || !o.containerIds.length || !o.containerIds.every(isUuid))) return Promise.resolve(fail('MRS_INVALID', 'container_ids'));
+    var p = rxPayload(o, { containerIds: 'container_ids', blId: 'bl_id', agentPartyId: 'agent_party_id', requestedDays: 'requested_days',
+      requestedUntil: 'requested_until', toAddress: 'to_address' });
+    Object.keys(p).forEach(function (k) { if (p[k] === null || p[k] === '') delete p[k]; });
+    return idemRpc('prepare_return_extension', o.idemKey, function (k) { return { p_tx: txId, p_payload: withKey(p, k) }; });
+  }
+  // a draft only. o = { containerIds?, requestedDays? | requestedUntil?, toAddress? (null clears), subject?, body?, rerender? }
+  function updateReturnExtension(id, o) {
+    o = o || {};
+    if (!isUuid(id)) return Promise.resolve(fail('MRS_REQUIRED', 'request'));
+    var p = rxPayload(o, { containerIds: 'container_ids', requestedDays: 'requested_days', requestedUntil: 'requested_until', toAddress: 'to_address',
+      subject: 'subject', body: 'body' });
+    if (o.rerender) p.rerender = true;
+    return rpc('update_return_extension', { p_id: id, p_payload: p });
+  }
+  // the user's statement that they sent the e-mail themselves (the program sends nothing)
+  function markReturnExtensionSent(id, note) {
+    if (!isUuid(id)) return Promise.resolve(fail('MRS_REQUIRED', 'request'));
+    return rpc('mark_return_extension_sent', { p_id: id, p_note: note == null || !String(note).trim() ? null : String(note) });
+  }
+  // the agent's answer. o = { outcome 'approved'|'partially_approved'|'rejected', decidedUntil? 'YYYY-MM-DD', note?, containerIds?,
+  //   msgThreadId?, documentId?, idemKey? } → request + {updated [..], skipped [..], unchanged [..], demurrage_hint}
+  function decideReturnExtension(id, o) {
+    o = o || {};
+    if (!isUuid(id)) return Promise.resolve(fail('MRS_REQUIRED', 'request'));
+    if (['approved', 'partially_approved', 'rejected'].indexOf(o.outcome) === -1) return Promise.resolve(fail('MRS_REQUIRED', 'outcome'));
+    var p = rxPayload(o, { outcome: 'outcome', decidedUntil: 'decided_until', note: 'note', containerIds: 'container_ids', msgThreadId: 'msg_thread_id',
+      documentId: 'document_id' });
+    Object.keys(p).forEach(function (k) { if (p[k] === null || p[k] === '') delete p[k]; });
+    return idemRpc('decide_return_extension', o.idemKey, function (k) { return { p_id: id, p_payload: withKey(p, k) }; });
+  }
+  function cancelReturnExtension(id, reason) {
+    if (!isUuid(id)) return Promise.resolve(fail('MRS_REQUIRED', 'request'));
+    if (!reason || !String(reason).trim()) return Promise.resolve(fail('MRS_NOTE_REQUIRED', 'reason'));
+    return rpc('cancel_return_extension', { p_id: id, p_reason: String(reason).trim() });
+  }
+  // f = { transactionId?, status? (a status | 'active'), limit?, orgId? } → { items [...], total, counts {draft, sent} }
+  function listReturnExtensions(f) {
+    f = f || {};
+    var p = {};
+    if (f.transactionId) p.transaction_id = f.transactionId;
+    if (f.status) p.status = f.status;
+    if (f.limit) p.limit = f.limit;
+    return inActiveOrg(f.orgId, function (oid) { return rpc('list_return_extensions', { p_org: oid, p_filters: p }); });
+  }
+  // → { rules {lead_days, default_request_days}, defaults, overrides, template {subject, body, custom}, builtin, placeholders, can_edit }
+  function getEmptyReturnRules(o) {
+    o = o || {};
+    return inActiveOrg(o.orgId, function (oid) { return rpc('get_empty_return_rules', { p_org: oid }); });
+  }
+  // owner only: rules = {lead_days?, default_request_days?} (1..30), reason required
+  function setEmptyReturnRules(rules, reason, o) {
+    o = o || {};
+    if (!configured) return demoOnly();
+    if (!reason || !String(reason).trim()) return Promise.resolve(fail('MRS_NOTE_REQUIRED', 'reason'));
+    var r = rules && typeof rules === 'object' && !Array.isArray(rules) ? rules : {};
+    return inActiveOrg(o.orgId, function (oid) { return rpc('set_empty_return_rules', { p_org: oid, p_rules: r, p_reason: String(reason).trim() }); });
+  }
+  // owner only: tpl = {subject, body} | null (back to the built-in text), reason required
+  function setReturnExtensionTemplate(tpl, reason, o) {
+    o = o || {};
+    if (!configured) return demoOnly();
+    if (!reason || !String(reason).trim()) return Promise.resolve(fail('MRS_NOTE_REQUIRED', 'reason'));
+    var t = tpl && typeof tpl === 'object' ? { subject: String(tpl.subject || ''), body: String(tpl.body || '') } : {};
+    return inActiveOrg(o.orgId, function (oid) { return rpc('set_return_extension_template', { p_org: oid, p_tpl: t, p_reason: String(reason).trim() }); });
+  }
   // o = { orderNo (TASTO…), orderDate 'YYYY-MM-DD', partyId? | companyName?, idemKey? } → { transaction_id, ref, operational_status,
   //   transport_mode, order_no, order_date, party_id, party_name, party_created, already_exists, readiness }  (no stage change)
   function saveTransportCarrierOrder(txId, o) {
@@ -4510,6 +4595,10 @@
     createEmptyReturnProof: createEmptyReturnProof, verifyEmptyReturnProof: verifyEmptyReturnProof, voidEmptyReturnProof: voidEmptyReturnProof,
     saveEmptyReturnDeadline: saveEmptyReturnDeadline, listEmptyReturnProofs: listEmptyReturnProofs,
     saveTransportCarrierOrder: saveTransportCarrierOrder, txReadiness: txReadiness,
+    // 20261128000100: empty-return extension request
+    prepareReturnExtension: prepareReturnExtension, updateReturnExtension: updateReturnExtension, markReturnExtensionSent: markReturnExtensionSent,
+    decideReturnExtension: decideReturnExtension, cancelReturnExtension: cancelReturnExtension, listReturnExtensions: listReturnExtensions,
+    getEmptyReturnRules: getEmptyReturnRules, setEmptyReturnRules: setEmptyReturnRules, setReturnExtensionTemplate: setReturnExtensionTemplate,
     // legacy step 6 (20261122000100)
     recordPaymentBundle: recordPaymentBundle, correctPayment: correctPayment, voidPayment: voidPayment, reviewPayment: reviewPayment,
     addPaymentDocuments: addPaymentDocuments, removePaymentDocument: removePaymentDocument, getPayment: getPayment,

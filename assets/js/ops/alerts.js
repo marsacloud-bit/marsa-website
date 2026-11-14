@@ -648,7 +648,16 @@
   var SEVERITIES = ['critical', 'warning', 'info'];
   var KINDS = ['docs_missing', 'appointment_soon', 'appointment_missed', 'empty_return_due', 'empty_return_overdue', 'exception_open', 'declaration_stalled',
     // legacy step 8 (20261124000100): idle per status (app.status_aging_rules) and a gate-out appointment passed without an update
-    'status_stale', 'appointment_not_updated'];
+    'status_stale', 'appointment_not_updated',
+    // 20261128000100: a container that gated out with no empty-return deadline
+    'empty_return_no_deadline'];
+  // 20261128000100: the empty-return alerts lead to the extension request block of the transaction (#tx/<id>, section empty_return)
+  var RX_KINDS = ['empty_return_due', 'empty_return_overdue', 'empty_return_no_deadline'];
+  function rxAction(a) {
+    if (!a || RX_KINDS.indexOf(a.kind) === -1 || a.status === 'resolved' || !a.transaction_id) return null;
+    if (a.kind === 'empty_return_no_deadline') return 'al_rx_deadline';
+    return /طلب التمديد|extension request(ed| prepared)/.test(String(a.title_ar || '') + ' ' + String(a.title_en || '')) ? 'al_rx_open' : 'al_rx_prepare';
+  }
   var AF = { status: 'active', severity: '', kind: '', q: '' };   // filters survive navigation
 
   function statusOk(s, row) {
@@ -799,6 +808,11 @@
       var statusSub = a.status === 'acknowledged' && a.acknowledged_at ? U.t('al_acked_at', { d: U.fmtDate(a.acknowledged_at, true) })
         : a.status === 'resolved' && a.resolved_at ? U.t('al_resolved_at', { d: U.fmtDate(a.resolved_at, true), how: U.t(a.resolution === 'auto' ? 'al_resolution_auto' : 'al_resolution_manual') }) : null;
       var acts = U.el('div', { class: 'ops-row-actions' });
+      var rxk = writer ? rxAction(a) : null;
+      if (rxk) acts.appendChild(U.btn(U.t(rxk), 'btn-primary', function () {
+        Ops.pendingFocus = { tx: a.transaction_id, section: 'empty_return', open: 'rx' };
+        U.go(api, '#tx/' + a.transaction_id);
+      }, { 'data-act': 'alert-rx' }));
       if (writer && a.status === 'open') acts.appendChild(U.btn([U.icon('check'), U.el('span', { text: U.t('al_ack') })], 'btn-secondary', function (b) { ack(a, b); }));
       if (writer && a.status !== 'resolved') acts.appendChild(U.btn(U.t('al_resolve'), 'btn-subtle', function () { resolve(a); }));
       return U.el('tr', { 'data-id': a.id, class: a.status === 'resolved' ? 'is-muted' : null }, [
@@ -861,6 +875,7 @@
 
   Ops.views.alerts = {
     allow: 'staff', titleKey: 'ops.nav_alerts', icon: 'bell',
-    render: function (root, api) { return renderAlerts(root, api); }
+    render: function (root, api) { return renderAlerts(root, api); },
+    _pure: { KINDS: KINDS, RX_KINDS: RX_KINDS, rxAction: rxAction }
   };
 })();

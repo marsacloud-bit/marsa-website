@@ -359,6 +359,7 @@
       MRS_TX_MATCH_MISMATCH: 'نتيجة المطابقة فيها اختلافات أو بيانات ناقصة ({f}). راجعها، ثم أكّد الاعتماد واكتب ملاحظة تشرح السبب.',
       MRS_DECL_ALREADY_APPROVED: 'اعتُمدت قراءة البيان هذه من قبل. لتعديل البيان استخدم «تصحيح البيان» في المعاملة.',
       // legacy step 5 (20261121000100): appointment card drafts, empty-return proofs, TASTO carrier order
+      MRS_RX_EXISTS: 'يوجد طلب تمديد مفتوح (جاهز أو مُرسَل) لهذا الوكيل أو لإحدى هذه الحاويات. افتحه وأكمله أو ألغِه بدل إنشاء طلب جديد.',
       MRS_APPT_DRAFT_EXISTS: 'للمعاملة مسودة بطاقات مواعيد مفتوحة. افتحها واستكملها بدل إنشاء مسودة جديدة (لا حاجة لإعادة القراءة).',
       MRS_APPT_DRAFT_CLOSED: 'مسودة المواعيد مغلقة ({f}) ولا تقبل التعديل أو الاعتماد.',
       MRS_APPT_DRAFT_APPROVED: 'اعتُمدت بطاقات من هذه المسودة، فلا يمكن إلغاؤها أو نقلها إلى معاملة أخرى.',
@@ -604,6 +605,7 @@
       MRS_TX_MATCH_MISMATCH: 'The match has differences or missing data ({f}). Review them, then confirm the approval and write a note explaining why.',
       MRS_DECL_ALREADY_APPROVED: 'This declaration reading was approved before. To change the declaration use “Correct declaration” on the transaction.',
       // legacy step 5 (20261121000100): appointment card drafts, empty-return proofs, TASTO carrier order
+      MRS_RX_EXISTS: 'An open extension request (prepared or sent) already exists for this agent or one of these containers. Open and finish it, or cancel it, instead of creating a new one.',
       MRS_APPT_DRAFT_EXISTS: 'The transaction already has an open appointment-card draft. Open and finish it instead of creating a new one (no new read needed).',
       MRS_APPT_DRAFT_CLOSED: 'The appointment draft is closed ({f}) and cannot be changed or approved.',
       MRS_APPT_DRAFT_APPROVED: 'Cards of this draft were approved, so it cannot be cancelled or moved to another transaction.',
@@ -796,6 +798,9 @@
       note: 'Note', status: 'Status', branch: 'Branch', client: 'Client', role: 'Role',
       supersedes_id: 'Previous version', evidence_document_id: 'Evidence document',
       empty_return_receipt_required: 'Empty return receipt', operational_status: 'Operational status',
+      container_ids: 'Containers', return_deadline: 'Empty return deadline', bl_id: 'B/L (more than one shipping agent)', agent_party_id: 'Shipping agent',
+      to_address: 'Shipping agent e-mail', requested_days: 'Extension days', requested_until: 'Requested extension date', decided_until: 'New deadline',
+      outcome: 'Outcome', placeholder: 'Placeholder in the message text', empty_return_rule: 'Return deadline rule', msg_thread_id: 'E-mail thread',
       financial_status: 'Financial status', raw: 'Original value', row_status: 'Row status', same_status: 'Status',
       raw_text: 'Extracted text', extracted_fields: 'Extracted data', reviewed_fields: 'Reviewed data',
       line_items: 'Line items', review_status: 'Review status', review_note: 'Review note', doc_type: 'Document type',

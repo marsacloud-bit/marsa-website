@@ -363,10 +363,10 @@ async function secCatalog() {
   section('catalog: version, tables, RLS, privileges, no secrets, append-only, audit, bucket');
   await check('schema_versions has 20261107000100 g6b_inbox', async () =>
     (await count(`SELECT count(*)::int n FROM public.schema_versions WHERE version = '20261107000100' AND name = 'g6b_inbox'`)) === 1);
-  await check('transaction_events type CHECK = the full G5 list + message (+ tx_approval of the later phase 20261127000100)', async () => {
+  await check('transaction_events type CHECK = the full G5 list + message (+ tx_approval / return_extension of the later phases 20261127000100 / 20261128000100)', async () => {
     const d = (await one(`SELECT pg_get_constraintdef(oid) d FROM pg_constraint WHERE conname = 'transaction_events_event_type_check'`)).d;
     const got = [...d.matchAll(/'([a-z_]+)'::text/g)].map(m => m[1]).sort();
-    return JSON.stringify(got) === JSON.stringify(G5_EVENT_TYPES.concat('message', 'tx_approval').sort()) || got.join(',');
+    return JSON.stringify(got) === JSON.stringify(G5_EVENT_TYPES.concat('message', 'tx_approval', 'return_extension').sort()) || got.join(',');
   });
   await check('25 msg_* tables, RLS on every one; anon no grant; authenticated SELECT only (mock mailboxes: nothing)', async () => {
     const r = await q(`SELECT c.relname t, c.relrowsecurity rls,

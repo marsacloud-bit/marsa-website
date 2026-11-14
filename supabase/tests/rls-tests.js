@@ -317,6 +317,19 @@ async function importFixtures() {
   }
 }
 
+// return extension (20261128000100): one extension request per org (a container with a deadline + its detention_extension exception),
+// inserted by the owner (superuser); every RPC path is exercised by return-extension-sql-tests.js
+async function rxFixtures() {
+  for (const [org, tx, tag] of [[A, TX1, 'A'], [B, B_TX, 'B']]) {
+    const ctr = (await q(`INSERT INTO public.containers (org_id, transaction_id, container_no, return_deadline) VALUES ($1, $2, $3, current_date + 2) RETURNING id`,
+      [org, tx, tag === 'A' ? 'RXAU1000001' : 'RXBU1000001']))[0].id;
+    const exc = (await q(`INSERT INTO public.operational_exceptions (org_id, transaction_id, kind, reason, status) VALUES ($1, $2, 'detention_extension', 'rls fixture', 'in_progress') RETURNING id`,
+      [org, tx]))[0].id;
+    await q(`INSERT INTO public.return_extension_requests (org_id, transaction_id, container_ids, current_deadline, requested_days, requested_until, subject, body, exception_id)
+             VALUES ($1, $2, ARRAY[$3]::uuid[], current_date + 2, 7, current_date + 9, 'rls subject', 'rls body', $4)`, [org, tx, ctr, exc]);
+  }
+}
+
 async function payFixtures() {
   const rpcAs = async (who, sql, params) => (await as(who, sql, params))[0].r;
   for (const [who, org, br, tx, cl, tag] of [['adminA', A, JED, TX1, CL101, 'A'], ['finB', B, B_BR, B_TX, B_CL, 'B']]) {
@@ -616,6 +629,8 @@ const TENANT_TABLES = [
   // legacy import (20261125000100): the owner of the org only (org-wide admin, aal2); written only by the legacy_import_* RPCs
   ['legacy_import_runs', `SELECT id::text id FROM public.legacy_import_runs WHERE org_id = $1 LIMIT 1`, 'id::text', 'reason = reason'],
   ['legacy_import_rows', `SELECT id::text id FROM public.legacy_import_rows WHERE org_id = $1 LIMIT 1`, 'id::text', 'org_id = org_id'],
+  // return extension (20261128000100): staff SELECT only (branch-scoped), written only by the RPCs
+  ['return_extension_requests', `SELECT id::text id FROM public.return_extension_requests WHERE org_id = $1 LIMIT 1`, 'id::text', 'body = body'],
   ['invitations',        `SELECT id::text id FROM public.invitations WHERE org_id = $1 LIMIT 1`,        'id::text',  'email = email'],
   // G3 registry (20261103000100)
   ['parties',            `SELECT id::text id FROM public.parties WHERE org_id = $1 LIMIT 1`,            'id::text',  'name_ar = name_ar'],
@@ -713,7 +728,8 @@ async function main() {
   catch (e) { fail('legacy pay fixtures', errText(e)); return finish(); }
   try { await daftraFixtures(); pass('legacy daftra fixtures: one row per org in each step-7 table'); }
   catch (e) { fail('legacy daftra fixtures', errText(e)); return finish(); }
-  try { await importFixtures(); pass('legacy import fixtures: one run + one staged row per org'); }
+  try { await importFixtures();
+  await rxFixtures(); pass('legacy import fixtures: one run + one staged row per org'); }
   catch (e) { fail('legacy import fixtures', errText(e)); return finish(); }
 
   /* ---------------------------------------------------------------- catalog */
@@ -765,7 +781,7 @@ async function main() {
   });
   await check('anon has no USAGE on schema app', async () =>
     (await q(`SELECT has_schema_privilege('anon', 'app', 'USAGE') u`))[0].u === false);
-  await check('authenticated can execute only the 194 documented public RPCs', async () => {
+  await check('authenticated can execute only the 203 documented public RPCs', async () => {
     const r = await q(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                         WHERE n.nspname = 'public' AND has_function_privilege('authenticated', p.oid, 'EXECUTE') ORDER BY 1`);
     const exp = ['admin_list_members', 'admin_set_member_active', 'convert_request_to_transaction', 'import_commit', 'issue_tracking_token', 'my_context', 'public_track',
@@ -817,6 +833,9 @@ async function main() {
       'get_declaration_review', 'approve_declaration_extraction', 'get_transaction_declaration', 'search_hs_reference',
       // tx draft approval (20261127000100): draft transaction from a doc batch, approval after the declaration, the read side
       'create_draft_transaction', 'approve_transaction', 'get_transaction_approval',
+      // return extension (20261128000100): the extension request to the shipping agent + the org rule / template
+      'prepare_return_extension', 'update_return_extension', 'mark_return_extension_sent', 'decide_return_extension', 'cancel_return_extension',
+      'list_return_extensions', 'get_empty_return_rules', 'set_empty_return_rules', 'set_return_extension_template',
       // legacy appt (20261121000100): appointment card drafts, empty-return proofs, the TASTO carrier order, the readiness banner
       'appointment_card_state', 'save_appointment_draft', 'get_appointment_draft', 'cancel_appointment_draft', 'move_appointment_draft',
       'approve_appointment_draft', 'create_empty_return_proof', 'verify_empty_return_proof', 'void_empty_return_proof',
@@ -845,7 +864,7 @@ async function main() {
       'legacy_import_commit', 'legacy_import_void', 'legacy_import_get_run', 'legacy_import_list_runs', 'legacy_import_list_rows',
       'legacy_import_skip_rows', 'legacy_import_queue_daftra', 'legacy_import_daftra_candidates'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 300) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 309) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');

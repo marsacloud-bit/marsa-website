@@ -155,12 +155,12 @@ check('modules registered: views register / fasah_recon / changes / attention_ru
   (O.views.register && O.views.register.allow === 'staff' && O.views.fasah_recon && O.views.fasah_recon.allow === 'staff' && J(O.views.changes.allow) === J(['admin', 'supervisor'])
     && O.views.attention_rules && O.views.attention_rules.allow === 'staff' && O.views.reports && O.txSections.some(s => s.id === 'audit-trail')
     && CF && CF.VERSION === 'cf-1' && FR && typeof FR.compare === 'function' && AD && AD.VERSION === 'audit-diff-1') || Object.keys(O.views));
-check('read only: no step-8 view calls a write RPC except the owner settings (setStatusAgingRules / setEmailOtpLogin) and the export log', () => {
+check('read only: no step-8 view calls a write RPC except the owner settings (setStatusAgingRules / setEmailOtpLogin; + setEmptyReturnRules / setReturnExtensionTemplate of 20261128000100) and the export log', () => {
   const ui = SRC.register + SRC.recon + SRC.audit + SRC.colfilter;
   const calls = (ui.match(/U\.call\(api, '([a-zA-Z]+)'/g) || []).map(s => s.replace(/U\.call\(api, '|'/g, ''));
   const allowed = ['reportTransactions', 'txAttention', 'listClients', 'listMemberships', 'reportFasahScope', 'logReportExport', 'auditTrail'];
   const rulesCalls = (SRC.rules.match(/U\.call\(api, '([a-zA-Z]+)'/g) || []).map(s => s.replace(/U\.call\(api, '|'/g, ''));
-  return (calls.every(c => allowed.indexOf(c) !== -1) && J(rulesCalls.sort()) === J(['getStatusAgingRules', 'setEmailOtpLogin', 'setStatusAgingRules'])
+  return (calls.every(c => allowed.indexOf(c) !== -1) && J([...new Set(rulesCalls)].sort()) === J(['getEmptyReturnRules', 'getStatusAgingRules', 'setEmailOtpLogin', 'setEmptyReturnRules', 'setReturnExtensionTemplate', 'setStatusAgingRules'])
     && !/approve[A-Z]\w*\(|aiExtract|createBilling|pushDaftra|createDaftraDraft/.test(ui)) || J([calls, rulesCalls]);
 });
 
@@ -211,7 +211,7 @@ check('declaration_status labels (10) match 20261117000100', () => {
 });
 check('the new alert kinds have ops labels (ar + en) and are in the #alerts kind filter', () =>
   (/alert_kind_status_stale: 'معاملة متأخرة بلا تحديث'/.test(SRC.opsDict) && /alert_kind_appointment_not_updated: 'Appointment passed, movement not updated'/.test(SRC.opsDict)
-    && /'declaration_stalled',\s*\n\s*\/\/[^\n]*\n\s*'status_stale', 'appointment_not_updated'\]/.test(SRC.alerts)) || 'alerts');
+    && /'declaration_stalled',\s*\n\s*\/\/[^\n]*\n\s*'status_stale', 'appointment_not_updated'[,\]]/.test(SRC.alerts)) || 'alerts');
 check('i18n.js / supa.js: AUTH_OTP_INVALID (ar + en) and the step-8 detail messages kept', () =>
   ((SRC.i18n.match(/AUTH_OTP_INVALID:/g) || []).length === 2 && /AUTH_OTP_INVALID: 'الرمز غير صحيح أو انتهت صلاحيته\.'/.test(SRC.supa)
     && (SRC.i18n.match(/cdetail_MRS_INVALID_aging_rule:/g) || []).length === 2) || 'otp msg');
@@ -892,6 +892,50 @@ function rtApi(calls, rows) {
     check('regression: a staff reader sees the switched-off rule as «موقوفة» with no hours', () => {
       const tr = root5.querySelector('[data-rule="transport"]');
       return (/موقوفة/.test(tr.textContent) && !/24/.test(tr.querySelectorAll('td')[1].textContent)) || textOf(tr);
+    });
+  }
+
+  /* ================================================================ DOM: the empty-return rule card (20261128000100) */
+  section('DOM: #attention_rules — «مهلة إرجاع الحاويات الفارغة وطلب التمديد» (20261128000100)');
+  {
+    const ctx = context(), calls = [];
+    const data = { rules: DEFS8, defaults: DEFS8, overrides: {}, email_otp_login: false, can_edit: true };
+    const rx = { rules: { lead_days: 3, default_request_days: 7 }, defaults: { lead_days: 3, default_request_days: 7 }, overrides: {}, can_edit: true,
+      template: { subject: 'طلب تمديد {{tx_ref}}', body: 'السادة {{agent_name}}', custom: false }, builtin: { subject: 'طلب تمديد {{tx_ref}}', body: 'x' },
+      placeholders: ['tx_ref', 'agent_name'] };
+    const A = {
+      getStatusAgingRules: () => ok(data), getEmptyReturnRules: () => ok(rx),
+      setEmptyReturnRules: (r, reason) => { calls.push(['rules', r, reason]); return ok(Object.assign({}, rx, { rules: Object.assign({}, rx.rules, r), overrides: r })); },
+      setReturnExtensionTemplate: (t, reason) => { calls.push(['tpl', t, reason]); return ok(Object.assign({}, rx, { template: Object.assign({ custom: !!t }, t || rx.builtin) })); }
+    };
+    const root = ctx.document.createElement('div'); ctx.document.body.appendChild(root);
+    await ctx.w.MarsaOps.views.attention_rules.render(root, mkApi(ctx, A, ['admin'])); await settle(15);
+    const card = root.querySelector('.lrpt-rx-card');
+    check('the card: lead days 3 / default 7 inputs, the template with the placeholders; the aging table still has 18 hour inputs', () =>
+      (card && ctx.document.getElementById('lrpt-rx-lead').value === '3' && ctx.document.getElementById('lrpt-rx-days').value === '7'
+        && /\{\{tx_ref\}\} \{\{agent_name\}\}/.test(card.textContent) && root.querySelectorAll('.lrpt-hours').length === 18) || textOf(root).slice(0, 300));
+    ctx.document.getElementById('lrpt-rx-lead').value = '31';
+    card.querySelector('[data-act="rx-save"]').click(); await settle(5);
+    check('out of range → refused locally', () => (calls.length === 0 && /من 1 إلى 30/.test(card.textContent)) || J(calls));
+    ctx.document.getElementById('lrpt-rx-lead').value = '5';
+    card.querySelector('[data-act="rx-save"]').click(); await settle(5);
+    check('no reason → refused locally', () => (calls.length === 0 && /اكتب سبب التعديل/.test(card.textContent)) || J(calls));
+    ctx.document.getElementById('lrpt-rx-reason').value = 'المالك: خمسة أيام';
+    card.querySelector('[data-act="rx-save"]').click(); await settle(10);
+    check('save → setEmptyReturnRules({lead_days: 5}) (only what differs from the default) + the reason', () =>
+      (calls[0] && calls[0][0] === 'rules' && J(calls[0][1]) === J({ lead_days: 5 }) && calls[0][2] === 'المالك: خمسة أيام') || J(calls));
+    const card2 = root.querySelector('.lrpt-rx-card');
+    ctx.document.getElementById('lrpt-rx-subject').value = 'تمديد {{tx_ref}}';
+    ctx.document.getElementById('lrpt-rx-reason').value = 'نص المؤسسة';
+    card2.querySelector('[data-act="rx-tpl-save"]').click(); await settle(10);
+    check('the template → setReturnExtensionTemplate({subject, body}, reason)', () =>
+      (calls[1] && calls[1][0] === 'tpl' && calls[1][1].subject === 'تمديد {{tx_ref}}' && calls[1][1].body === 'السادة {{agent_name}}' && calls[1][2] === 'نص المؤسسة') || J(calls));
+    const root2 = ctx.document.createElement('div'); ctx.document.body.appendChild(root2);
+    await ctx.w.MarsaOps.views.attention_rules.render(root2, mkApi(ctx, { getStatusAgingRules: () => ok(Object.assign({}, data, { can_edit: false })),
+      getEmptyReturnRules: () => ok(Object.assign({}, rx, { can_edit: false })) }, ['clearance_staff'])); await settle(15);
+    check('a staff reader: the values, disabled inputs, no save buttons', () => {
+      const c = root2.querySelector('.lrpt-rx-card');
+      return (c && c.querySelector('#lrpt-rx-lead').disabled && !c.querySelector('[data-act="rx-save"]') && !c.querySelector('[data-act="rx-tpl-save"]')) || textOf(root2).slice(0, 200);
     });
   }
 

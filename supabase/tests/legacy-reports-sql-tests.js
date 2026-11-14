@@ -320,7 +320,7 @@ async function secFile() {
     return bad.length === 0 || bad.map(b => b.slice(0, 80)).join(' | ');
   });
   // later phases may follow this file (20261125000100 legacy_import: re-creates att_reasons / alert_causes / rpt_tx_match / audit_label_of)
-  const LATER_PHASES = ['20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql'];
+  const LATER_PHASES = ['20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -399,7 +399,7 @@ async function secPreflight() {
     // counted by their own suites)
     const r = await one(`SELECT count(*)::int n, count(*) FILTER (WHERE client_visible)::int v, count(*) FILTER (WHERE label_ar = '' OR label_en IS NULL)::int e
                            FROM public.status_labels WHERE NOT (domain = 'audit_label' AND code LIKE 'legacy_import.%')
-                            AND NOT (domain = 'audit_event' AND code = 'tx_approval') AND (domain IN ('attention_level',
+                            AND NOT (domain = 'audit_event' AND code IN ('tx_approval','return_extension')) AND (domain IN ('attention_level',
                              'attention_reason','tx_daftra_state','movement_date_field',
                              'return_scope','payment_date_field','fasah_match_status','audit_label','audit_event')
                               OR (domain = 'alert_kind' AND code IN ('status_stale','appointment_not_updated'))

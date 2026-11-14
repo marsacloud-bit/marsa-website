@@ -271,7 +271,7 @@ async function secFile() {
       && !/review_status = 'approved'[^;]*INSERT/.test(c) && /v_review NOT IN \('draft','pending'\)/.test(c)) || 'decisions';
   });
   // later phases may follow this file (20261123000100 legacy_daftra: re-creates the conversion lists)
-  const LATER_PHASES = ['20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql'];
+  const LATER_PHASES = ['20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -1032,7 +1032,7 @@ async function secRls() {
     const all = (await q(`SELECT 'public.' || relname n FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r'`)).map(x => x.n);
     const un = all.filter(x => !t.includes(x) && !keep.includes(x) && !['public.status_labels', 'public.schema_versions', 'public.organizations',
       'public.profiles', 'public.platform_admins', 'public.plans', 'public.customs_ports', 'public.daftra_mock_accounts'].includes(x));
-    return (T.every(x => t.includes('public.' + x) && g.includes('public.' + x + ':trg_no_delete')) && g.length === 44 && t.length === 83 + 2 /* + legacy_import_rows, legacy_import_runs (20261125000100) */ && un.length === 0) || J({ g: g.length, t: t.length, un });
+    return (T.every(x => t.includes('public.' + x) && g.includes('public.' + x + ':trg_no_delete')) && g.length === 44 && t.length === 83 + 2 + 1 /* + legacy_import_rows, legacy_import_runs (20261125000100), return_extension_requests (20261128000100) */ && un.length === 0) || J({ g: g.length, t: t.length, un });
   });
   await check('the trail: the 4 tables are audited (insert / update)', async () => {
     const r = await q(`SELECT DISTINCT table_name FROM public.audit_log WHERE table_name = ANY ($1)`, [T]);

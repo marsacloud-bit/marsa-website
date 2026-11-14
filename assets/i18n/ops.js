@@ -60,6 +60,7 @@
       alert_kind_empty_return_due: 'إرجاع حاوية مستحق', alert_kind_empty_return_overdue: 'إرجاع حاوية متأخر',
       alert_kind_exception_open: 'استثناء مفتوح', alert_kind_declaration_stalled: 'بيان جمركي متوقف',
       alert_kind_status_stale: 'معاملة متأخرة بلا تحديث', alert_kind_appointment_not_updated: 'موعد مضى دون تحديث الحركة',
+      alert_kind_empty_return_no_deadline: 'حاوية بلا موعد إرجاع', al_rx_prepare: 'تجهيز طلب تمديد', al_rx_open: 'متابعة طلب التمديد', al_rx_deadline: 'إدخال موعد الإرجاع',
 
       // ---- schedule (#schedule)
       sc_title: 'الجدول اليومي', sc_sub: 'مواعيد الموانئ ورحلات النقل لليوم أو للأسبوع، مع حالة كل منها.',
@@ -194,6 +195,7 @@
       alert_kind_empty_return_due: 'Empty return due', alert_kind_empty_return_overdue: 'Empty return overdue',
       alert_kind_exception_open: 'Open exception', alert_kind_declaration_stalled: 'Stalled declaration',
       alert_kind_status_stale: 'Transaction not updated', alert_kind_appointment_not_updated: 'Appointment passed, movement not updated',
+      alert_kind_empty_return_no_deadline: 'Container without a return deadline', al_rx_prepare: 'Prepare an extension request', al_rx_open: 'Follow the extension request', al_rx_deadline: 'Enter the return deadline',
 
       sc_title: 'Daily schedule', sc_sub: 'Port appointments and transport trips for the day or the week, with their status.',
       sc_today: 'Today', sc_week: 'Week', sc_prev: 'Previous', sc_next: 'Next', sc_jump: 'Back to today', sc_range: 'Period',

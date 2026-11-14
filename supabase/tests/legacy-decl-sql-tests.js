@@ -261,7 +261,7 @@ async function secFile() {
   await check('no personal data / legacy organization name copied from the legacy code (no e-mail, phone number, real org name)', () =>
     (!/@[a-z0-9-]+\.[a-z]/i.test(src.replace(/--.*$/gm, '')) && !/\b05[0-9]{8}\b/.test(src) && !/رأس الحكمة/.test(src)) || 'personal data');
   // later phases may follow this file (20261121000100 legacy_appt: re-creates extraction_field_keys / extraction_detail_ok / the conversion lists)
-  const LATER_PHASES = ['20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql'];
+  const LATER_PHASES = ['20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -920,7 +920,7 @@ async function secRls() {
     const all = (await q(`SELECT 'public.' || relname n FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r'`)).map(x => x.n);
     const un = all.filter(x => !t.includes(x) && !keep.includes(x) && !['public.status_labels', 'public.schema_versions', 'public.organizations',
       'public.profiles', 'public.platform_admins', 'public.plans', 'public.customs_ports', 'public.daftra_mock_accounts'].includes(x));
-    return (T.every(x => t.includes('public.' + x) && g.includes('public.' + x + ':trg_no_delete')) && g.length === 44 && t.length === 83 + 2 /* + legacy_import_rows, legacy_import_runs (20261125000100) */ && un.length === 0) || J({ g: g.length, t: t.length, un });
+    return (T.every(x => t.includes('public.' + x) && g.includes('public.' + x + ':trg_no_delete')) && g.length === 44 && t.length === 83 + 2 + 1 /* + legacy_import_rows, legacy_import_runs (20261125000100), return_extension_requests (20261128000100) */ && un.length === 0) || J({ g: g.length, t: t.length, un });
   });
   await check('the trail: the approval / items / HS rows are audited without the document content (descriptions, result)', async () => {
     const r = await q(`SELECT table_name, new_data FROM public.audit_log WHERE table_name IN ('declaration_items','hs_reference','declaration_approvals') LIMIT 50`);

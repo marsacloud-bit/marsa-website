@@ -9,6 +9,9 @@
    * The e-mail code login switch of the org (OFF by default) — shown with the platform switch of this site
      (MARSA_CONFIG.emailOtpLogin); both must be on for the login page to offer it.
    * A per-device switch for the response-time badge (MarsaShell.responseBadge, OFF by default).
+   * «مهلة إرجاع الحاويات» (20261128000100): how many days before the empty-return deadline the alert «اطلب تمديدًا من الوكيل
+     الملاحي» starts (lead_days, default 3) and the default extension days of a request (default 7) — owner + reason; the
+     extension request text (subject / body with the fixed {{placeholders}}, or the built-in Arabic + English text).
    Strings: 'lrpt'. Data → textContent / createElement only.
    ========================================================================== */
 (function () {
@@ -125,6 +128,7 @@
       body.appendChild(U.card(lt('rules_card'), kids, null, { cls: 'lrpt-rules-card' }));
       body.appendChild(otpCard(d, can));
       body.appendChild(deviceCard());
+      if (K.hasFn(api, 'getEmptyReturnRules')) body.appendChild(rxCard());
     }
     function otpCard(d, can) {
       var cfg = window.MARSA_CONFIG || {}, platform = cfg.emailOtpLogin === true, org = d.email_otp_login === true;
@@ -152,6 +156,86 @@
         kids.push(el('div', { class: 'form-group' }, [el('label', { class: 'form-label', for: 'lrpt-otp-reason', text: lt('rules_reason') }), reason]), err, b);
       }
       return U.card(lt('otp_title'), kids, null, { cls: 'lrpt-otp-card' });
+    }
+    // 20261128000100: the empty-return lead time + the default extension days + the extension request text
+    function rxCard() {
+      var holder = el('div', { class: 'lrpt-rx-holder' });
+      U.call(api, 'getEmptyReturnRules').then(function (r) {
+        if (!sc.alive()) return;
+        U.clear(holder);
+        if (r.error) { holder.appendChild(U.card(lt('rx_title'), [U.alertBox('warning', errText(r.error))], null, { cls: 'lrpt-rx-card' })); return; }
+        holder.appendChild(rxDraw(r.data || {}));
+      });
+      return holder;
+    }
+    function rxDraw(d) {
+      var rules = d.rules || {}, defs = d.defaults || {}, can = !!d.can_edit, tpl = d.template || {}, builtin = d.builtin || {};
+      var kids = [el('p', { class: 'text-sm text-muted', text: lt('rx_explain') })];
+      var lead = el('input', { class: 'form-control is-sm lrpt-days', type: 'text', inputmode: 'numeric', maxlength: 2, dir: 'ltr', name: 'rx.lead_days', id: 'lrpt-rx-lead',
+        value: rules.lead_days != null ? String(rules.lead_days) : '' });
+      var days = el('input', { class: 'form-control is-sm lrpt-days', type: 'text', inputmode: 'numeric', maxlength: 2, dir: 'ltr', name: 'rx.default_request_days', id: 'lrpt-rx-days',
+        value: rules.default_request_days != null ? String(rules.default_request_days) : '' });
+      lead.disabled = days.disabled = !can;
+      kids.push(el('div', { class: 'form-group' }, [el('label', { class: 'form-label', for: 'lrpt-rx-lead', text: lt('rx_lead') }), lead,
+        el('span', { class: 'form-hint', text: lt('rx_lead_hint', { d: defs.lead_days != null ? defs.lead_days : 3 }) })]));
+      kids.push(el('div', { class: 'form-group' }, [el('label', { class: 'form-label', for: 'lrpt-rx-days', text: lt('rx_days') }), days,
+        el('span', { class: 'form-hint', text: lt('rx_days_hint', { d: defs.default_request_days != null ? defs.default_request_days : 7 }) })]));
+      var subj = el('input', { class: 'form-control', type: 'text', maxlength: 300, dir: 'auto', id: 'lrpt-rx-subject', value: tpl.subject || '' });
+      var bodyT = el('textarea', { class: 'form-control', rows: 12, maxlength: 8000, dir: 'auto', id: 'lrpt-rx-body' }); bodyT.value = tpl.body || '';
+      subj.disabled = bodyT.disabled = !can;
+      kids.push(el('h4', { class: 'ops-sub-title', text: lt('rx_tpl') + ' — ' + lt(tpl.custom ? 'rx_tpl_custom' : 'rx_tpl_builtin') }));
+      kids.push(el('div', { class: 'form-group' }, [el('label', { class: 'form-label', for: 'lrpt-rx-subject', text: lt('rx_tpl_subject') }), subj]));
+      kids.push(el('div', { class: 'form-group' }, [el('label', { class: 'form-label', for: 'lrpt-rx-body', text: lt('rx_tpl_body') }), bodyT,
+        el('span', { class: 'form-hint', text: lt('rx_tpl_vars', { v: (d.placeholders || []).map(function (k) { return '{{' + k + '}}'; }).join(' ') }) })]));
+      if (can) {
+        var reason = el('textarea', { class: 'form-control', id: 'lrpt-rx-reason', rows: 2, maxlength: 500 });
+        var err = el('p', { class: 'rpt-form-error', role: 'alert', hidden: true });
+        var n30 = function (v) { var x = String(v == null ? '' : v).trim(); return /^\d{1,2}$/.test(x) && +x >= 1 && +x <= 30 ? +x : null; };
+        var done = function (r) {
+          if (r.error) { err.hidden = false; err.textContent = errText(r.error); return false; }
+          var h = card.parentNode;
+          if (h) { U.clear(h); h.appendChild(rxDraw(r.data || {})); }
+          return true;
+        };
+        var save = U.btn(lt('rx_save'), 'btn-primary', function () {
+          var l = n30(lead.value), dd = n30(days.value);
+          var msg = l == null || dd == null ? lt('rx_bad') : !String(reason.value || '').trim() ? lt('rules_reason_required') : null;
+          err.hidden = !msg; err.textContent = msg || '';
+          if (msg) return;
+          var o = {};
+          if (l !== +defs.lead_days) o.lead_days = l;
+          if (dd !== +defs.default_request_days) o.default_request_days = dd;
+          save.disabled = true;
+          U.call(api, 'setEmptyReturnRules', o, String(reason.value).trim()).then(function (r) {
+            save.disabled = false;
+            if (done(r)) U.toast(api, lt('rx_saved'), 'success');
+          });
+        }, { 'data-act': 'rx-save' });
+        var saveT = U.btn(lt('rx_tpl_save'), 'btn-secondary', function () {
+          var msg = !String(subj.value || '').trim() || !String(bodyT.value || '').trim() ? lt('rx_tpl_empty') : !String(reason.value || '').trim() ? lt('rules_reason_required') : null;
+          err.hidden = !msg; err.textContent = msg || '';
+          if (msg) return;
+          saveT.disabled = true;
+          U.call(api, 'setReturnExtensionTemplate', { subject: subj.value, body: bodyT.value }, String(reason.value).trim()).then(function (r) {
+            saveT.disabled = false;
+            if (done(r)) U.toast(api, lt('rx_tpl_saved'), 'success');
+          });
+        }, { 'data-act': 'rx-tpl-save' });
+        var resetT = U.btn(lt('rx_tpl_reset'), 'btn-ghost', function () {
+          if (!String(reason.value || '').trim()) { err.hidden = false; err.textContent = lt('rules_reason_required'); return; }
+          resetT.disabled = true;
+          U.call(api, 'setReturnExtensionTemplate', null, String(reason.value).trim()).then(function (r) {
+            resetT.disabled = false;
+            if (done(r)) U.toast(api, lt('rx_tpl_reset_done'), 'success');
+          });
+        }, { 'data-act': 'rx-tpl-reset' });
+        resetT.disabled = !tpl.custom;
+        kids.push(el('div', { class: 'form-group' }, [el('label', { class: 'form-label', for: 'lrpt-rx-reason', text: lt('rules_reason') }), reason]), err,
+          el('div', { class: 'rpt-form-actions' }, [save, saveT, resetT]));
+        if (builtin.subject && !tpl.custom) kids.push(el('p', { class: 'text-xs text-muted', text: lt('rx_tpl_builtin_note') }));
+      } else kids.push(el('p', { class: 'text-xs text-muted', text: lt('rules_owner_only') }));
+      var card = U.card(lt('rx_title'), kids, null, { cls: 'lrpt-rx-card' });
+      return card;
     }
     function deviceCard() {
       var SH = window.MarsaShell, box = el('input', { type: 'checkbox', id: 'lrpt-rt-badge' });

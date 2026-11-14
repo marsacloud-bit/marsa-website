@@ -696,7 +696,10 @@ const NOT_EXERCISED = ['accept_invitation', 'ack_alert', 'import_commit', 'porta
   'legacy_import_validate', 'legacy_import_validate[min]', 'legacy_import_void', 'legacy_import_void[min]',
   // tx draft approval (20261127000100): create_draft_transaction takes a doc batch id (the builder sends a transaction id);
   // isolation (other branch / org / client / anon) is asserted by tx-draft-sql-tests.js
-  'create_draft_transaction', 'create_draft_transaction[min]'];
+  'create_draft_transaction', 'create_draft_transaction[min]',
+  // return extension (20261128000100): these take an extension request id (the builder sends a transaction id → MRS_NOT_FOUND request);
+  // isolation (other branch / org / client / anon) is asserted by return-extension-sql-tests.js
+  'cancel_return_extension', 'decide_return_extension[min]', 'mark_return_extension_sent', 'update_return_extension[min]'];
 async function positiveControl() {
   section('8. positive control: the §1 argument builder with B\'s own staff');
   const fns = (await listRpcs()).filter(f => !PUBLIC_BY_DESIGN[f.proname] && !/^platform_/.test(f.proname));

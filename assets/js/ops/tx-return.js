@@ -11,6 +11,12 @@
      * the register (list_empty_return_proofs): status, container, delivery time, depot, confidence, notes;
      * «تأكيد إعادة الفارغ» (transport writers of the branch only, behind a confirm dialog) → verify_empty_return_proof, which
        writes the container return through the existing evidence path; «إلغاء الإثبات» with a reason → void_empty_return_proof.
+   * «طلب تمديد المهلة» (20261128000100, docs/online/LEGACY_APPT_AR.md §5b): the program PREPARES the extension request e-mail to
+     the shipping agent (prepare_return_extension: containers due / overdue, the agent of the B/L, its e-mail, Arabic + English
+     text); the user edits it, opens it in their own mail program («فتح في البريد», mailto:) or copies it, SENDS it themselves and
+     presses «تم الإرسال» (mark_return_extension_sent — the program sends nothing); the agent's answer («تسجيل رد الوكيل»,
+     decide_return_extension) moves the return deadline; «إلغاء الطلب» with a reason. #alerts opens this block through
+     MarsaOps.pendingFocus = {tx, section: 'empty_return', open: 'rx'}.
    * Strings: namespace 'appt' (assets/i18n/appt.js). Server data only via textContent / createElement. ES5, no library.
    ========================================================================== */
 (function () {
@@ -125,6 +131,55 @@
     return EIR_REJECT.indexOf(r) !== -1 ? r : 'not_empty_return_receipt';
   }
 
+  /* ---------- extension request (20261128000100): pure helpers ---------- */
+  var RX_STATUSES = ['draft', 'sent', 'approved', 'partially_approved', 'rejected', 'cancelled'];
+  var RX_ACTIVE = ['draft', 'sent'];
+  var RX_OUTCOMES = ['approved', 'partially_approved', 'rejected'];
+  var MAILTO_MAX = 1800;   // encoded characters: longer mailto: links are cut by some mail programs → open with the subject, copy the body
+  function rxActive(r) { return !!r && RX_ACTIVE.indexOf(r.status) !== -1; }
+  function isEmail(v) { var s = String(v == null ? '' : v).trim(); return s.length <= 160 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s); }
+  function crlf(s) { return String(s == null ? '' : s).replace(/\r\n|\r|\n/g, '\r\n'); }
+  // → { href, full } — the address keeps a literal @ (some mail programs do not decode %40 in the address); full false: the body did not fit (the link carries the subject only; the page copies the body)
+  function mailtoHref(to, subject, body, max) {
+    var lim = max || MAILTO_MAX;
+    var base = 'mailto:' + encodeURIComponent(String(to || '').trim()).replace(/%40/g, '@') + '?subject=' + encodeURIComponent(String(subject || '').replace(/[\r\n]+/g, ' '));
+    var full = base + '&body=' + encodeURIComponent(crlf(body));
+    return full.length <= lim ? { href: full, full: true } : { href: base, full: false };
+  }
+  function ymd(v) { var s = western(v).trim(); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : ''; }
+  // the new-request form → prepareReturnExtension options or {error}
+  function rxPreparePayload(v) {
+    v = v || {};
+    var o = {};
+    var ids = (v.containerIds || []).filter(Boolean);
+    if (!ids.length) return { error: 'rx_e_containers' };
+    if (!v.allDefault) o.containerIds = ids;
+    var d = western(v.days).trim(), u = western(v.until).trim();
+    if (u) { if (!ymd(u)) return { error: 'rx_e_until' }; o.requestedUntil = u; }
+    else if (d) { if (!/^\d{1,2}$/.test(d) || +d < 1 || +d > 60) return { error: 'rx_e_days' }; o.requestedDays = +d; }
+    var to = String(v.to || '').trim();
+    if (to) { if (!isEmail(to)) return { error: 'rx_e_email' }; o.toAddress = to.toLowerCase(); }
+    if (v.agentPartyId) o.agentPartyId = v.agentPartyId;
+    return o;
+  }
+  // the answer form → decideReturnExtension options or {error}
+  function rxDecidePayload(v, req) {
+    v = v || {}; req = req || {};
+    if (RX_OUTCOMES.indexOf(v.outcome) === -1) return { error: 'rx_e_outcome' };
+    var note = String(v.note || '').trim();
+    var o = { outcome: v.outcome };
+    if (v.outcome === 'rejected') { if (!note) return { error: 'rx_e_note' }; }
+    else {
+      var u = ymd(v.until);
+      if (!u) return { error: 'rx_e_new_date' };
+      if (req.current_deadline && u <= String(req.current_deadline).slice(0, 10)) return { error: 'rx_e_new_date_after' };
+      o.decidedUntil = u;
+    }
+    if (req.status === 'draft' && !note) return { error: 'rx_e_note_phone' };
+    if (note) o.note = note.slice(0, 1000);
+    return o;
+  }
+
   function call(api, name) {
     var A = api && (api.MarsaApi || api), f = A && A[name];
     var args = Array.prototype.slice.call(arguments, 2);
@@ -155,7 +210,8 @@
     var body = el('div', { class: 'app-card-body adm-card-body' }, el('p', { class: 'text-sm text-muted', text: T('loading') }));
     root.appendChild(el('section', { class: 'app-card adm-card ops-tx-card appt-er', id: 'tx-empty-return' }, [head, body]));
     var U = { proofs: [], readiness: null, containers: [], docs: {}, ai: false, open: {}, busy: false, msg: null, key: {}, error: null,
-      fileInp: null, mv: { ctr: '', at: '', depot: '', notes: '', unr: false } };
+      fileInp: null, mv: { ctr: '', at: '', depot: '', notes: '', unr: false },
+      rx: { available: false, items: [], open: null, form: null, agents: null, needAgent: false, act: {}, edit: {}, busy: false, focus: false } };
     function uuid() { return typeof api.newIdemKey === 'function' ? api.newIdemKey() : null; }
     function sha(file) { return A && A.util && A.util.sha256Hex ? Promise.resolve(A.util.sha256Hex(file)).catch(function () { return ''; }) : Promise.resolve(''); }
     function ltr(v) { return el('bdi', { dir: 'ltr', class: 'num', text: String(v == null ? '' : v) }); }
@@ -182,7 +238,7 @@
     function load() {
       return Promise.all([call(api, 'listEmptyReturnProofs', tx.id), call(api, 'listContainers', tx.id),
         canWrite && A && typeof A.aiAccess === 'function' ? call(api, 'aiAccess', api.orgId || undefined) : Promise.resolve({ data: null }),
-        call(api, 'listDocuments', { transactionId: tx.id })]).then(function (rs) {
+        call(api, 'listDocuments', { transactionId: tx.id }), call(api, 'listReturnExtensions', { transactionId: tx.id })]).then(function (rs) {
         U.error = rs[0].error || null;
         var d = rs[0].data || {};
         U.proofs = Array.isArray(d.proofs) ? d.proofs : [];
@@ -191,7 +247,21 @@
         U.ai = !!(rs[2] && rs[2].data && rs[2].data.can_use === true);
         U.docs = {};
         (!rs[3].error && Array.isArray(rs[3].data) ? rs[3].data : []).forEach(function (x) { if (x && !x.voided_at) U.docs[x.id] = x; });
+        // the extension block shows only when the server has 20261128000100 (MRS_UNAVAILABLE / a missing RPC: hidden)
+        U.rx.available = !rs[4].error;
+        U.rx.items = !rs[4].error && rs[4].data && Array.isArray(rs[4].data.items) ? rs[4].data.items : [];
+        var pf = OPS.pendingFocus;
+        if (pf && pf.tx === tx.id && pf.section === 'empty_return') {
+          OPS.pendingFocus = null;
+          if (U.rx.available && canWrite && !U.rx.items.some(rxActive)) U.rx.open = 'new';
+          U.rx.focus = true;
+        }
         paint();
+        if (U.rx.focus) {
+          U.rx.focus = false;
+          var node = body.querySelector ? body.querySelector('#tx-rx') : null;
+          if (node && typeof node.scrollIntoView === 'function') { try { node.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (x) { /* old browsers */ } }
+        }
       });
     }
     function after(text) {
@@ -205,6 +275,7 @@
       body.appendChild(el('p', { class: 'form-hint appt-er-rule', text: T('er_rule') }));
       if (U.msg) body.appendChild(el('div', { class: 'alert alert-' + U.msg.type + ' appt-alert', role: U.msg.type === 'danger' ? 'alert' : 'status' }, el('span', { text: U.msg.text })));
       body.appendChild(containersBox());
+      if (U.rx.available) body.appendChild(rxBox());
       if (canWrite) body.appendChild(uploadBox());
       body.appendChild(proofsBox());
     }
@@ -500,14 +571,311 @@
       return box;
     }
 
+    /* the extension request to the shipping agent (20261128000100): prepared here, sent by the user from their own mail program */
+    function rxLabel(st) {
+      var k = 'rxs_' + st, x = T(k);
+      if (api && typeof api.label === 'function') { try { var s = api.label('return_extension_status', st); if (s && s !== st) return s; } catch (e) { /* below */ } }
+      return x === k ? String(st) : x;
+    }
+    function rxTone(st) { return { draft: 'warning', sent: 'info', approved: 'success', partially_approved: 'success', rejected: 'danger', cancelled: 'muted' }[st] || 'muted'; }
+    function rxErr(text) { var p = el('p', { class: 'appt-error', role: 'alert' }); p.textContent = text || ''; p.hidden = !text; return p; }
+    function copyText(text) {
+      var nav = typeof navigator !== 'undefined' ? navigator : (typeof window !== 'undefined' ? window.navigator : null);
+      if (nav && nav.clipboard && typeof nav.clipboard.writeText === 'function') {
+        return Promise.resolve(nav.clipboard.writeText(String(text))).then(function () { return true; }, function () { return false; });
+      }
+      try {
+        var ta = document.createElement('textarea'); ta.value = String(text); ta.setAttribute('readonly', 'readonly');
+        ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta);
+        if (typeof ta.select === 'function') ta.select();
+        var okc = typeof document.execCommand === 'function' && document.execCommand('copy');
+        document.body.removeChild(ta);
+        return Promise.resolve(!!okc);
+      } catch (e) { return Promise.resolve(false); }
+    }
+    function rxOpenCtrs() {
+      var busy = {};
+      U.rx.items.filter(rxActive).forEach(function (r) { (r.container_ids || []).forEach(function (id) { busy[id] = true; }); });
+      return U.containers.filter(function (c) { return CLOSED_RETURN.indexOf(c.return_status || 'pending') === -1 && c.return_deadline && !busy[c.id]; });
+    }
+    function rxBox() {
+      var box = el('div', { class: 'appt-er-rx', id: 'tx-rx' }, el('h4', { class: 'docb-tx-h', text: T('rx_title') }));
+      box.appendChild(el('p', { class: 'form-hint', text: T('rx_rule') }));
+      var items = U.rx.items;
+      if (!items.length) box.appendChild(el('p', { class: 'text-sm text-muted', text: T('rx_none') }));
+      else {
+        var ul = el('ul', { class: 'appt-er-rx-list' });
+        items.forEach(function (r) { ul.appendChild(rxItem(r)); });
+        box.appendChild(ul);
+      }
+      var free = rxOpenCtrs();
+      if (canWrite) {
+        if (free.length) {
+          var nb = el('button', { class: 'btn btn-sm btn-primary', type: 'button', 'data-rx-new': '1', text: U.rx.open === 'new' ? T('rx_new_hide') : T('rx_new') });
+          nb.setAttribute('aria-expanded', U.rx.open === 'new' ? 'true' : 'false');
+          nb.addEventListener('click', function (e) { if (e && e.preventDefault) e.preventDefault(); U.rx.open = U.rx.open === 'new' ? null : 'new'; U.msg = null; paint(); });
+          box.appendChild(el('div', { class: 'appt-actions' }, nb));
+          if (U.rx.open === 'new') box.appendChild(rxNewForm(free));
+        } else if (!items.some(rxActive)) box.appendChild(el('p', { class: 'form-hint', text: T('rx_no_deadline') }));
+      }
+      return box;
+    }
+    function rxNewForm(free) {
+      var f = U.rx.form || (U.rx.form = { ids: free.map(function (c) { return c.id; }), days: '', until: '', to: '', agent: '' });
+      var box = el('div', { class: 'appt-er-rx-new' });
+      var list = el('div', { class: 'appt-er-rx-ctrs', role: 'group', 'aria-label': T('rx_f_containers') });
+      free.forEach(function (c) {
+        var cb = input('checkbox', 'appt-rx-c-' + c.id, { 'data-rx-ctr': c.id }); cb.checked = f.ids.indexOf(c.id) !== -1;
+        cb.addEventListener('change', function () {
+          f.ids = f.ids.filter(function (x) { return x !== c.id; });
+          if (cb.checked) f.ids.push(c.id);
+        });
+        list.appendChild(el('label', { class: 'appt-check', for: 'appt-rx-c-' + c.id }, [cb, ' ', ltr(c.container_no), el('span', { class: 'adm-sub', text: ' · ' + T('rx_deadline_of', { d: String(c.return_deadline).slice(0, 10) }) })]));
+      });
+      box.appendChild(el('div', { class: 'form-group' }, [el('span', { class: 'form-label', text: T('rx_f_containers') }), list]));
+      var days = input('number', 'appt-rx-days', { min: '1', max: '60', dir: 'ltr', inputmode: 'numeric' }); days.value = f.days;
+      var until = input('date', 'appt-rx-until', { dir: 'ltr' }); until.value = f.until;
+      var to = input('email', 'appt-rx-to', { dir: 'ltr', maxlength: '160', autocomplete: 'off' }); to.value = f.to;
+      [[days, 'days'], [until, 'until'], [to, 'to']].forEach(function (x) { x[0].addEventListener('input', function () { f[x[1]] = x[0].value; }); x[0].addEventListener('change', function () { f[x[1]] = x[0].value; }); });
+      var kids = [grp(T('rx_f_days'), days, T('rx_f_days_hint')), grp(T('rx_f_until'), until, T('rx_f_until_hint')), grp(T('rx_f_to'), to, T('rx_f_to_hint'))];
+      var agentSel = null;
+      if (U.rx.needAgent) {
+        agentSel = el('select', { class: 'form-control', id: 'appt-rx-agent' });
+        var o0 = el('option', { text: T('choose') }); o0.value = ''; agentSel.appendChild(o0);
+        (U.rx.agents || []).forEach(function (a) { var o = el('option', { text: a.name_ar || a.name_en || a.id }); o.value = a.id; o.selected = a.id === f.agent; agentSel.appendChild(o); });
+        agentSel.addEventListener('change', function () { f.agent = agentSel.value; });
+        kids.push(grp(T('rx_f_agent'), agentSel, T('rx_f_agent_hint')));
+      }
+      box.appendChild(el('div', { class: 'appt-grid' }, kids));
+      var err = rxErr(null);
+      var go = el('button', { class: 'btn btn-sm btn-primary', type: 'button', id: 'appt-rx-prepare', text: U.rx.busy ? T('rx_preparing') : T('rx_prepare') });
+      go.disabled = !!U.rx.busy;
+      go.addEventListener('click', function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        f.days = days.value; f.until = until.value; f.to = to.value;
+        var o = rxPreparePayload({ containerIds: f.ids, allDefault: false, days: days.value, until: until.value, to: to.value, agentPartyId: agentSel ? agentSel.value : null });
+        if (o.error) { err.textContent = T(o.error); err.hidden = false; return; }
+        if (U.rx.needAgent && !o.agentPartyId) { err.textContent = T('rx_e_agent'); err.hidden = false; return; }
+        var sig = JSON.stringify(o);
+        U.key.rx = U.key.rx && U.key.rx.sig === sig ? U.key.rx : { sig: sig, key: uuid() };
+        o.idemKey = U.key.rx.key;
+        U.rx.busy = true; go.disabled = true; err.hidden = true;
+        call(api, 'prepareReturnExtension', tx.id, o).then(function (r) {
+          U.rx.busy = false;
+          if (r.error) {
+            if (r.error.code === 'MRS_REQUIRED' && (r.error.field || r.error.detail) === 'bl_id') {
+              return call(api, 'listParties', { kind: 'shipping_agent' }).then(function (pr) {
+                U.rx.agents = !pr.error && Array.isArray(pr.data) ? pr.data : [];
+                U.rx.needAgent = true; U.key.rx = null;
+                message('warning', T('rx_need_agent')); paint();
+              });
+            }
+            go.disabled = false; err.textContent = errText(api, r.error); err.hidden = false; return;
+          }
+          U.key.rx = null; U.rx.form = null; U.rx.open = null; U.rx.needAgent = false;
+          var d = r.data || {};
+          U.rx.items = [d].concat(U.rx.items.filter(function (x) { return x.id !== d.id; }));
+          U.rx.edit[d.id] = true;
+          message(d.missing_email ? 'warning' : 'success', d.missing_email ? T('rx_prepared_no_email') : T('rx_prepared'));
+          paint();
+        });
+      });
+      box.appendChild(err);
+      box.appendChild(el('div', { class: 'appt-actions' }, go));
+      return box;
+    }
+    function rxItem(r) {
+      var li = el('li', { class: 'appt-er-rx-item is-' + r.status, 'data-rx': r.id });
+      var nos = (r.containers || []).map(function (c) { return c.container_no; });
+      li.appendChild(el('div', { class: 'appt-er-proof-head' }, [
+        el('span', { class: 'badge badge-sm badge-' + rxTone(r.status), text: rxLabel(r.status) }), ' ',
+        el('span', { text: T('rx_ctrs', { n: nos.length }) + ' ' }), ltr(nos.join(' · ')),
+        r.agent_name ? el('span', { class: 'adm-sub', text: ' · ' + r.agent_name }) : null]));
+      var dl = el('dl', { class: 'appt-dl' });
+      function row(k, node) { dl.appendChild(el('div', null, [el('dt', { text: T(k) }), el('dd', null, node)])); }
+      row('rx_p_period', el('span', { text: T('rx_period', { cur: String(r.current_deadline || '').slice(0, 10), until: String(r.requested_until || '').slice(0, 10), n: r.requested_days }) }));
+      row('rx_p_to', r.to_address ? ltr(r.to_address) : el('span', { class: 'text-muted', text: T('rx_no_email') }));
+      if (r.sent_at) row('rx_p_sent', el('span', { text: fmt(r.sent_at) + (r.sent_by_name ? ' — ' + r.sent_by_name : '') }));
+      if (r.decided_at) row('rx_p_decided', el('span', { text: (r.decided_until ? T('rx_new_deadline', { d: String(r.decided_until).slice(0, 10) }) : T('rx_deadline_kept')) + (r.decision_note ? ' — ' + r.decision_note : '') }));
+      if (r.cancelled_at) row('rx_p_cancelled', el('span', { text: fmt(r.cancelled_at) + (r.cancel_reason ? ' — ' + r.cancel_reason : '') }));
+      li.appendChild(dl);
+      if (!rxActive(r)) return li;
+      var draft = r.status === 'draft';
+      var ed = { to: null, subject: null, body: null, save: null };
+      if (draft && canWrite) {
+        var to = input('email', 'appt-rx-to-' + r.id, { dir: 'ltr', maxlength: '160' }); to.value = r.to_address || '';
+        var subj = input('text', 'appt-rx-subj-' + r.id, { maxlength: '300', dir: 'auto' }); subj.value = r.subject || '';
+        var bodyT = el('textarea', { class: 'form-control appt-rx-body', id: 'appt-rx-body-' + r.id, rows: '12', maxlength: '8000', dir: 'auto' }); bodyT.value = r.body || '';
+        ed.to = to; ed.subject = subj; ed.body = bodyT;
+        var kids = [grp(T('rx_f_to'), to, r.to_address ? null : T('rx_f_to_missing'))];
+        if (r.agent_party_id && !r.agent_email) {
+          var keep = input('checkbox', 'appt-rx-keep-' + r.id, null);
+          ed.save = keep;
+          kids.push(el('label', { class: 'appt-check', for: 'appt-rx-keep-' + r.id }, [keep, el('span', { text: ' ' + T('rx_save_agent_email', { name: r.agent_name || '' }) })]));
+        }
+        kids.push(grp(T('rx_f_subject'), subj), grp(T('rx_f_body'), bodyT, T('rx_f_body_hint')));
+        li.appendChild(el('div', { class: 'appt-er-rx-edit' }, kids));
+      } else {
+        li.appendChild(el('p', { class: 'appt-rx-subject text-sm', text: r.subject || '' }));
+        var pre = el('pre', { class: 'appt-rx-preview', dir: 'auto' }); pre.textContent = r.body || ''; li.appendChild(pre);
+      }
+      function cur() { return { to: ed.to ? String(ed.to.value || '').trim() : (r.to_address || ''), subject: ed.subject ? ed.subject.value : r.subject, body: ed.body ? ed.body.value : r.body }; }
+      var err = rxErr(null);
+      function showErr(text) { err.textContent = text; err.hidden = false; }
+      var acts = el('div', { class: 'appt-actions' });
+      // «فتح في البريد»: a real mailto: link (the user's own mail program); a long body is copied, the link carries the subject
+      var mail = el('a', { class: 'btn btn-sm btn-primary', 'data-rx-mail': r.id, text: T('rx_mail') });
+      function refreshMail() { var c = cur(); var m = mailtoHref(c.to, c.subject, c.body); mail.setAttribute('href', m.href); mail.setAttribute('data-full', m.full ? '1' : '0'); return m; }
+      refreshMail();
+      [ed.to, ed.subject, ed.body].forEach(function (n) { if (n) n.addEventListener('input', refreshMail); });
+      mail.addEventListener('click', function () {
+        var c = cur(), m = refreshMail();
+        if (!isEmail(c.to)) { showErr(T('rx_e_email')); }
+        if (!m.full) copyText(c.body).then(function (okc) { if (api.toast) api.toast(okc ? T('rx_long_copied') : T('rx_long_copy_failed'), okc ? 'warning' : 'danger'); });
+      });
+      acts.appendChild(mail);
+      acts.appendChild(el('button', { class: 'btn btn-sm btn-secondary', type: 'button', 'data-rx-copy': r.id, text: T('rx_copy'), onclick: function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        var c = cur();
+        copyText(T('rx_copy_fmt', { to: c.to || '—', subject: c.subject || '', body: c.body || '' })).then(function (okc) { if (api.toast) api.toast(okc ? T('rx_copied') : T('rx_copy_failed'), okc ? 'success' : 'danger'); });
+      } }));
+      if (canWrite) {
+        if (draft) {
+          acts.appendChild(el('button', { class: 'btn btn-sm btn-ghost', type: 'button', 'data-rx-save': r.id, text: T('rx_save'), onclick: function (e) {
+            if (e && e.preventDefault) e.preventDefault();
+            err.hidden = true;
+            saveDraft(r, ed, cur()).then(function (x) { if (x && x.error) showErr(x.error); else if (x) after(T('rx_saved')); });
+          } }));
+          acts.appendChild(el('button', { class: 'btn btn-sm btn-primary', type: 'button', 'data-rx-sent': r.id, text: T('rx_sent'), onclick: function (e) {
+            if (e && e.preventDefault) e.preventDefault();
+            err.hidden = true;
+            var c = cur();
+            if (!isEmail(c.to)) { showErr(T('rx_e_email_sent')); return; }
+            var ask = typeof api.confirm === 'function' ? api.confirm({ title: T('rx_sent_title'), text: T('rx_sent_text', { to: c.to }), okText: T('rx_sent_ok') }) : Promise.resolve(false);
+            Promise.resolve(ask).then(function (yes) {
+              if (!yes) return;
+              return saveDraft(r, ed, c).then(function (x) {
+                if (x && x.error) { showErr(x.error); return; }
+                return call(api, 'markReturnExtensionSent', r.id, null).then(function (m) {
+                  if (m.error) { showErr(errText(api, m.error)); return; }
+                  after(T('rx_marked_sent'));
+                });
+              });
+            });
+          } }));
+        }
+        acts.appendChild(el('button', { class: 'btn btn-sm btn-secondary', type: 'button', 'data-rx-decide': r.id, text: T('rx_decide'), onclick: function (e) {
+          if (e && e.preventDefault) e.preventDefault(); U.rx.act[r.id] = U.rx.act[r.id] === 'decide' ? null : 'decide'; paint();
+        } }));
+        acts.appendChild(el('button', { class: 'btn btn-sm btn-ghost appt-danger', type: 'button', 'data-rx-cancel': r.id, text: T('rx_cancel'), onclick: function (e) {
+          if (e && e.preventDefault) e.preventDefault(); U.rx.act[r.id] = U.rx.act[r.id] === 'cancel' ? null : 'cancel'; paint();
+        } }));
+      }
+      li.appendChild(err);
+      li.appendChild(acts);
+      if (draft) li.appendChild(el('p', { class: 'form-hint', text: T('rx_send_hint') }));
+      if (canWrite && U.rx.act[r.id] === 'decide') li.appendChild(rxDecideForm(r));
+      if (canWrite && U.rx.act[r.id] === 'cancel') li.appendChild(rxCancelForm(r));
+      return li;
+    }
+    // the edited draft → updateReturnExtension (only what changed) + the agent e-mail into the registry (behind a confirm)
+    // → Promise of null (nothing to save) | {ok} | {error: text}
+    function saveDraft(r, ed, c) {
+      if (!ed.to) return Promise.resolve(null);
+      var o = {};
+      if (c.to !== (r.to_address || '')) { if (c.to && !isEmail(c.to)) return Promise.resolve({ error: T('rx_e_email') }); o.toAddress = c.to ? c.to.toLowerCase() : null; }
+      if (c.subject !== r.subject) { if (!String(c.subject || '').trim()) return Promise.resolve({ error: T('rx_e_subject') }); o.subject = c.subject; }
+      if (c.body !== r.body) { if (!String(c.body || '').trim()) return Promise.resolve({ error: T('rx_e_body') }); o.body = c.body; }
+      var keep = ed.save && ed.save.checked && c.to && isEmail(c.to);
+      var first = Object.keys(o).length ? call(api, 'updateReturnExtension', r.id, o) : Promise.resolve({ data: r, error: null });
+      return first.then(function (u) {
+        if (u.error) return { error: errText(api, u.error) };
+        if (u.data) { r.to_address = u.data.to_address; r.subject = u.data.subject; r.body = u.data.body; }
+        if (!keep) return { ok: true };
+        var ask = typeof api.confirm === 'function' ? api.confirm({ title: T('rx_keep_title'), text: T('rx_keep_text', { name: r.agent_name || '', to: c.to }), okText: T('rx_keep_ok') }) : Promise.resolve(false);
+        return Promise.resolve(ask).then(function (yes) {
+          if (!yes) return { ok: true };
+          return call(api, 'saveParty', { id: r.agent_party_id, email: c.to.toLowerCase() }).then(function (pr) {
+            if (pr.error) return { error: T('rx_keep_failed', { e: errText(api, pr.error) }) };
+            r.agent_email = c.to.toLowerCase();
+            if (api.toast) api.toast(T('rx_kept', { name: r.agent_name || '' }), 'success');
+            return { ok: true };
+          });
+        });
+      });
+    }
+    function rxDecideForm(r) {
+      var box = el('div', { class: 'appt-er-rx-decide' });
+      var out = el('select', { class: 'form-control', id: 'appt-rx-out-' + r.id });
+      var o0 = el('option', { text: T('choose') }); o0.value = ''; out.appendChild(o0);
+      RX_OUTCOMES.forEach(function (k) { var o = el('option', { text: T('rxo_' + k) }); o.value = k; out.appendChild(o); });
+      var until = input('date', 'appt-rx-new-' + r.id, { dir: 'ltr' }); until.value = String(r.requested_until || '').slice(0, 10);
+      var note = input('text', 'appt-rx-note-' + r.id, { maxlength: '1000' });
+      box.appendChild(el('div', { class: 'appt-grid' }, [grp(T('rx_f_outcome'), out), grp(T('rx_f_new_date'), until, T('rx_f_new_date_hint')),
+        grp(T('rx_f_note'), note, r.status === 'draft' ? T('rx_f_note_phone') : null)]));
+      var err = rxErr(null);
+      var go = el('button', { class: 'btn btn-sm btn-primary', type: 'button', 'data-rx-decide-go': r.id, text: T('rx_decide_go') });
+      go.addEventListener('click', function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        var o = rxDecidePayload({ outcome: out.value, until: until.value, note: note.value }, r);
+        if (o.error) { err.textContent = T(o.error); err.hidden = false; return; }
+        var ask = typeof api.confirm === 'function' ? api.confirm({ title: T('rx_decide_title'),
+          text: o.outcome === 'rejected' ? T('rx_decide_text_rejected') : T('rx_decide_text', { d: o.decidedUntil }), okText: T('rx_decide_ok') }) : Promise.resolve(false);
+        Promise.resolve(ask).then(function (yes) {
+          if (!yes) return;
+          var sig = JSON.stringify(o);
+          U.key['rxd' + r.id] = U.key['rxd' + r.id] && U.key['rxd' + r.id].sig === sig ? U.key['rxd' + r.id] : { sig: sig, key: uuid() };
+          o.idemKey = U.key['rxd' + r.id].key;
+          go.disabled = true;
+          return call(api, 'decideReturnExtension', r.id, o).then(function (x) {
+            go.disabled = false;
+            if (x.error) { err.textContent = errText(api, x.error); err.hidden = false; return; }
+            U.key['rxd' + r.id] = null; U.rx.act[r.id] = null;
+            var d = x.data || {}, n = (d.updated || []).length, sk = (d.skipped || []).length;
+            var text = o.outcome === 'rejected' ? T('rx_decided_rejected') : T('rx_decided', { n: n, d: o.decidedUntil }) + (sk ? ' ' + T('rx_decided_skipped', { n: sk }) : '');
+            if (d.demurrage_hint) text += ' ' + T('rx_demurrage_hint');
+            after(text);
+          });
+        });
+      });
+      box.appendChild(err);
+      box.appendChild(el('div', { class: 'appt-actions' }, go));
+      return box;
+    }
+    function rxCancelForm(r) {
+      var box = el('div', { class: 'appt-er-rx-cancel' });
+      var why = input('text', 'appt-rx-why-' + r.id, { maxlength: '500' });
+      box.appendChild(grp(T('rx_f_cancel_reason'), why));
+      var err = rxErr(null);
+      var go = el('button', { class: 'btn btn-sm btn-ghost appt-danger', type: 'button', 'data-rx-cancel-go': r.id, text: T('rx_cancel_go') });
+      go.addEventListener('click', function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        var reason = String(why.value || '').trim();
+        if (!reason) { err.textContent = T('rx_e_reason'); err.hidden = false; return; }
+        go.disabled = true;
+        call(api, 'cancelReturnExtension', r.id, reason).then(function (x) {
+          go.disabled = false;
+          if (x.error) { err.textContent = errText(api, x.error); err.hidden = false; return; }
+          U.rx.act[r.id] = null;
+          after(T('rx_cancelled'));
+        });
+      });
+      box.appendChild(err);
+      box.appendChild(el('div', { class: 'appt-actions' }, go));
+      return box;
+    }
+
     return load();
   }
 
-  OPS.txReturn = { VERSION: 'appt-er-1', t: T,
+  OPS.txReturn = { VERSION: 'appt-er-2', t: T,
     pure: { PROOF_STATUSES: PROOF_STATUSES, MATCH_NOTES: MATCH_NOTES, EIR_REJECT: EIR_REJECT, mediaType: mediaType, fileProblem: fileProblem,
       dateTimeState: dateTimeState, riyadhLocal: riyadhLocal, notesOf: notesOf, confPct: confPct, confTone: confTone, openProof: openProof,
       verifyPayload: verifyPayload, manualPayload: manualPayload, extractionRow: extractionRow, eirReject: eirReject,
-      READ_FAIL_SAVES: READ_FAIL_SAVES, readFailSaves: readFailSaves } };
+      READ_FAIL_SAVES: READ_FAIL_SAVES, readFailSaves: readFailSaves,
+      // 20261128000100
+      RX_STATUSES: RX_STATUSES, RX_ACTIVE: RX_ACTIVE, RX_OUTCOMES: RX_OUTCOMES, MAILTO_MAX: MAILTO_MAX, rxActive: rxActive, isEmail: isEmail, crlf: crlf,
+      mailtoHref: mailtoHref, rxPreparePayload: rxPreparePayload, rxDecidePayload: rxDecidePayload } };
   var MINE = [{ id: 'empty_return', order: 56, render: renderReturn }];
   var ids = MINE.map(function (s) { return s.id; });
   for (var i = OPS.txSections.length - 1; i >= 0; i--) {

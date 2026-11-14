@@ -1108,7 +1108,7 @@ async function secOpsCatalog() {
                         'alert_kind','alert_severity','alert_status') GROUP BY 1`);
     const m = Object.fromEntries(r.map(x => [x.domain, x.n]));
     return (m.requirement_status === 4 && m.appointment_status === 6 && m.trip_status === 5 && m.cost_basis === 3
-      && m.exception_kind === 10 && m.exception_source === 4 && m.exception_status === 4 && m.alert_kind === 7 + 2 /* + status_stale, appointment_not_updated (20261124000100) */
+      && m.exception_kind === 10 && m.exception_source === 4 && m.exception_status === 4 && m.alert_kind === 7 + 2 + 1 /* + status_stale, appointment_not_updated (20261124000100), empty_return_no_deadline (20261128000100) */
       && m.alert_severity === 3 && m.alert_status === 3) || JSON.stringify(m);
   });
   await check('pg_cron absent locally: no schedule attempted, migration loaded', async () =>
