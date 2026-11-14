@@ -740,7 +740,7 @@ async function secSupa() {
     const c = calls.find(x => x.from === 'document_matches');
     const ops = J(c && c.ops);
     const d = r.data;
-    return (c && /transactions\(ref\)/.test(ops) && !/"rows/.test(ops) && ops.includes(J(['eq', 'org_id', ORG])) && ops.includes(J(['eq', 'transaction_id', TX_JED]))
+    return (c && /transactions!document_matches_tx_fk\(ref\)/.test(ops) && !/"rows/.test(ops) && ops.includes(J(['eq', 'org_id', ORG])) && ops.includes(J(['eq', 'transaction_id', TX_JED]))
       && ops.includes(J(['is', 'voided_at', null])) && ops.includes(J(['limit', 10])) && ops.includes('"ascending":false')
       && d[0].transaction_ref === 'MRS-2026-000001' && J(d[0].counts) === J({ match: 3, mismatch: 0, partial: 1, missing: 1 }) && d[0].status === 'reviewed'
       && !('transactions' in d[0]) && d[1].transaction_ref === null && d[1].status === 'voided') || J({ ops, d });

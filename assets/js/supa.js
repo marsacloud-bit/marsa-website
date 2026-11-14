@@ -2687,7 +2687,7 @@
       if (r.error) return r;
       var oid = r.data;
       return matchSelect(function (c, cols) {
-        var q = c.from('document_matches').select(cols + ',transactions(ref)').eq('org_id', oid)
+        var q = c.from('document_matches').select(cols + ',transactions!document_matches_tx_fk(ref)').eq('org_id', oid)
           .order('created_at', { ascending: false }).limit(limit);
         if (o.transactionId) q = q.eq('transaction_id', o.transactionId);
         if (!o.includeVoided) q = q.is('voided_at', null);
@@ -2701,7 +2701,7 @@
   function getDocumentMatch(id) {
     if (!configured) return demoOnly();
     if (!isUuid(id)) return Promise.resolve(fail('MRS_INVALID', 'document_match'));
-    return matchSelect(function (c, cols) { return c.from('document_matches').select(cols + ',rows,transactions(ref)').eq('id', id).maybeSingle(); })
+    return matchSelect(function (c, cols) { return c.from('document_matches').select(cols + ',rows,transactions!document_matches_tx_fk(ref)').eq('id', id).maybeSingle(); })
       .then(function (r) { return r.error ? r : (r.data ? ok(matchRow(r.data)) : fail('MRS_NOT_FOUND', 'document_match')); });
   }
   function matchRow(m) {
