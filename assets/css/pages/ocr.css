@@ -768,3 +768,14 @@ html[dir="ltr"] .ocr-mx-cell.is-calm.is-warn { box-shadow: inset 4px 0 0 #B7791F
 #ocr-match-progress { margin-block: 12px 4px; }
 @media (prefers-reduced-motion: reduce) { .ocr-dots i { animation: none; opacity: .7; } }
 @media print { .ocr-dots { display: none; } }
+
+/* quick reading (ocr.js + ocr-match.js, 2026-11-14): «قراءة سريعة» switch + hint, result badge, «اقرأ المستند كاملًا» */
+.ocr-quick { margin-block: 10px 2px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; background: #F6F9FC; }
+.ocr-quick .check { font-weight: 700; color: var(--navy-dark); overflow-wrap: anywhere; }
+.ocr-quick .check input { accent-color: var(--teal); }
+.ocr-quick-hint { margin: 4px 0 0; padding-inline-start: 28px; overflow-wrap: anywhere; }
+.ocr-match-quick { margin-block: 10px 14px; }
+.ocr-match-slot-status .ocr-quick-badge { margin-inline-start: 6px; vertical-align: middle; }
+.ocr-quick-full { margin-inline-start: 6px; }
+.ocr-match-slot-status .ocr-quick-full { display: inline-flex; margin-block-start: 4px; }
+@media print { .ocr-quick, .ocr-quick-full { display: none !important; } }

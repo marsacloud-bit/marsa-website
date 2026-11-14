@@ -11,7 +11,9 @@
 //   file: {media_type: image/jpeg | image/png | image/webp | image/gif | application/pdf, data_b64}, transaction_id?, lang?,
 //   prompt_version?: 'ai-doc-v3' (20261119000100: + doc_type packing_list, extended keys, containers; the same file already
 //   read with v3 and saved is returned without a Claude call or a charge — reused: true; 20261121000100: + doc_type
-//   appointment_ticket (needs transaction_id) / empty_return_receipt (≤ 8 MB); a wrong document → 422 wrong_document_type)}
+//   appointment_ticket (needs transaction_id) / empty_return_receipt (≤ 8 MB); a wrong document → 422 wrong_document_type),
+//   reading_mode?: 'full' (default) | 'quick' (2026-11-14, v3 shipping documents / auto: the key facts and a compact item
+//   table only — extract.js QUICK_KEYS; the answer says reading_mode 'quick')}
 //   Images up to 5 MB, PDFs up to 10 MB (decoded); the media type must match the file's magic bytes. The body is read
 //   with a byte limit (also when chunked, without content-length).
 // - Usage: a service client calls public.ai_reserve(org, user, 'doc_extract', held estimate) (enabled + consent, daily

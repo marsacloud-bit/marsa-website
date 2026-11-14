@@ -2208,6 +2208,7 @@ async function secFrontEnd() {
         progressBox: { hidden: true }, inflight: 0, max: 0, pending: {}, shown: [], said: [], finished: [],
         renderQueue() {}, setProgress() {}, announce(m) { c.said.push(m); }, showResult(id) { c.shown.push(id); },
         engineMode: () => mode, $: id => ({ value: id === 'ocr-doc-type' ? 'auto' : 'ara+eng' }), isPdf: () => false,
+        quickOn: () => true,   // quick reading (2026-11-14): the switch is on by default
         sha256: f => Promise.resolve('h-' + f.name),
         finishAiJob(jb, r) { jb.status = 'done'; jb.text = r.text; c.finished.push(jb.id); }, finishJob(jb, p) { jb.status = 'done'; jb.text = p[0].text; c.finished.push(jb.id); } };
       const run = jb => { c.inflight++; c.max = Math.max(c.max, c.inflight);
@@ -2233,7 +2234,7 @@ async function secFrontEnd() {
     a.pending.j4.res({ text: 't4' }); await flush(); a.pending.j5.res({ text: 't5' }); await flush();
     if (!(started === 'j1,j2,j3' && after1 === 4 && a.max === 3 && J(a.shown) === J(['j2']) && a.running === false && a.progressBox.hidden === true
       && a.jobs[0].text === 't1' && a.jobs[1].text === 't2' && a.jobs[2].status === 'error' && a.jobs[2].error === 'بطء' && a.jobs[3].text === 't4'
-      && a.jobs.every(x => x.sha256 === 'h-' + x.name && x.mode === 'ai'))) res.push('ai ' + J({ started, after1, max: a.max, shown: a.shown, jobs: a.jobs }));
+      && a.jobs.every(x => x.sha256 === 'h-' + x.name && x.mode === 'ai' && x.readingMode === 'quick'))) res.push('ai ' + J({ started, after1, max: a.max, shown: a.shown, jobs: a.jobs }));
     // a known quota of 2: never more than 2 in flight; at 0 with nothing in flight the next job is still sent (the server answers daily_cap)
     const q = mkCtx('ai', 2);
     q.runQueue(); await flush();

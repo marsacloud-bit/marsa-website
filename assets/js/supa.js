@@ -2468,6 +2468,8 @@
   var AI_PAY_TYPES = ['payment_proof', 'appointment_invoice'];
   var AI_MAX_PAY_BYTES = 4 * 1024 * 1024;
   var AI_PROMPT_V3 = 'ai-doc-v3';
+  // quick reading (extract.js QUICK_TYPES): the key facts + a compact item table, faster
+  var AI_QUICK_TYPES = ['bill_of_lading', 'commercial_invoice', 'packing_list', 'customs_declaration', 'supplier_invoice', 'auto'];
   var AI_MAX_BYTES = 10 * 1024 * 1024;          // PDF
   var AI_MAX_IMAGE_BYTES = 5 * 1024 * 1024;     // image (the API's per-image limit)
   function aiOrg(orgIdArg) { return orgIdArg ? Promise.resolve(ok(orgIdArg)) : orgId(); }
@@ -2500,7 +2502,8 @@
     });
   }
   // o = { orgId?, docType: bill_of_lading|commercial_invoice|customs_declaration|supplier_invoice|auto (+ packing_list with v3),
-  //       file: { media_type, data_b64 }, transactionId?, lang?, promptVersion?: 'ai-doc-v3' }
+  //       file: { media_type, data_b64 }, transactionId?, lang?, promptVersion?: 'ai-doc-v3',
+  //       readingMode?: 'quick' (v3 shipping documents / auto: the key fields + compact items; the answer says reading_mode) }
   // → { usage_id, engine, model, prompt_version, doc_type, detected_type, kind, fields [{name, value, confidence 0..1, page, valid}],
   //     extracted_fields, line_items, warnings [{source, code, text, field}], mean_confidence (0..100), raw_text, usage }
   //   (20261121000100: docType appointment_ticket → + appointment {booking_ref, operator_ticket_no, operator_name, appointment_at
@@ -2527,6 +2530,8 @@
       var body = { org_id: r.data, doc_type: docType, file: { media_type: f.media_type, data_b64: f.data_b64 },
         lang: o.lang === 'en' ? 'en' : 'ar' };
       if (v3) body.prompt_version = AI_PROMPT_V3;
+      // quick reading (2026-11-14): sent only for 'quick' on a v3 shipping document / auto (a full request is unchanged)
+      if (v3 && o.readingMode === 'quick' && AI_QUICK_TYPES.indexOf(docType) !== -1) body.reading_mode = 'quick';
       if (o.transactionId) body.transaction_id = o.transactionId;
       return ready().then(function (c) {
         return c.functions.invoke('ai-extract', { body: body }).then(function (res) {

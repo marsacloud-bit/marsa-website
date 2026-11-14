@@ -106,6 +106,21 @@
     // customs declaration stays typed: it has its own hints (declared value as total, the B/L exactly as printed, every
     // container) that 'auto' would not send.
     function aiRequestType(t) { return t === 'customs_declaration' ? 'customs_declaration' : 'auto'; }
+    // «القراءة السريعة» (2026-11-14): the AI reads only the key facts + a compact item table (extract.js QUICK_KEYS),
+    // default ON. One preference for the single reader and the matching section (ocr-match.js reads the same key);
+    // localStorage is a convenience only (try/catch: a blocked storage = ON).
+    var QUICK_PREF = 'marsa.ocr.quick';
+    // the field keys a quick reading can return (extract.js QUICK_BASE + QUICK_DECL): an expected key outside this list
+    // is not flagged «لم يُقرأ» on a quick result
+    var QUICK_FIELD_KEYS = ['shipper', 'supplier_name', 'consignee', 'consignee_name', 'buyer_name', 'notify_party',
+      'bl_number', 'invoice_number', 'invoice_date', 'declaration_number', 'declaration_date', 'packing_list_number', 'packing_list_date',
+      'vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'container_numbers', 'seal_numbers', 'packages_count', 'package_type',
+      'gross_weight', 'net_weight', 'hs_codes', 'goods_description', 'currency', 'subtotal', 'total', 'incoterms', 'country_of_origin',
+      'declaration_type', 'declaration_date_hijri', 'importer_name_ar'];
+    function quickPref() { try { return window.localStorage.getItem(QUICK_PREF) !== '0'; } catch (e) { return true; } }
+    function setQuickPref(on) { try { window.localStorage.setItem(QUICK_PREF, on ? '1' : '0'); } catch (e) { /* storage blocked */ } }
+    function quickOn() { var c = $('ocr-quick'); return c ? !!c.checked : quickPref(); }
+    function isQuickJob(j) { return !!(j && j.ai && j.ai.quick); }
     var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     var I18N = window.MarsaI18n || null;
     function T(key, vars) {
@@ -849,8 +864,10 @@
       return fileB64(j.file).then(function (b64) {
         startAiTicker(j);
         return activeOrg().then(function (oid) {
-          return API.aiExtract({ orgId: oid || undefined, docType: aiRequestType(j.docType), promptVersion: AI_PROMPT,
-            file: { media_type: mt, data_b64: b64 }, lang: I18N && I18N.lang ? I18N.lang() : 'ar' });
+          var q = { orgId: oid || undefined, docType: aiRequestType(j.docType), promptVersion: AI_PROMPT,
+            file: { media_type: mt, data_b64: b64 }, lang: I18N && I18N.lang ? I18N.lang() : 'ar' };
+          if (j.readingMode === 'quick') q.readingMode = 'quick';
+          return API.aiExtract(q);
         });
       }).then(function (r) {
         stopAiTicker(j);
@@ -914,7 +931,11 @@
         });
       }
       if (sr && Array.isArray(sr.line_items)) j.items = sr.line_items.map(function (x) { return Object.assign({}, x); });
-      j.ai = { usageId: res.usage_id, model: res.model || ENGINE_AI, warnings: (res.warnings || []).slice(0, 60),
+      // quick reading: the badge says it — its server mark (quick_reading) is not listed with the warnings
+      var quick = res.reading_mode === 'quick';
+      j.forceFull = false;
+      j.ai = { usageId: res.usage_id, model: res.model || ENGINE_AI, quick: quick,
+        warnings: (res.warnings || []).filter(function (w) { return !(w && w.source === 'server' && w.code === 'quick_reading'); }).slice(0, 60),
         costUsd: res.usage && res.usage.cost_usd != null ? Number(res.usage.cost_usd) : null,
         typeFrom: j.docType !== before ? before : null, reused: !!res.reused,
         detail: res.ai_detail && typeof res.ai_detail === 'object' && !res.reused ? res.ai_detail : null };
@@ -945,8 +966,19 @@
       }
       var note = $('ocr-ai-note');
       if (note) note.hidden = !(show && $('ocr-engine-ai') && $('ocr-engine-ai').checked);
+      var qw = $('ocr-quick-wrap');
+      if (qw) qw.hidden = !(show && $('ocr-engine-ai') && $('ocr-engine-ai').checked);
       showAiRemaining();
     }
+    (function () {
+      var c = $('ocr-quick');
+      if (!c) return;
+      c.checked = quickPref();
+      c.addEventListener('change', function () {
+        setQuickPref(c.checked);
+        var m = $('ocr-match-quick'); if (m) m.checked = c.checked;    // the matching section shares the choice
+      });
+    })();
     qsa('input[name="ocr-engine"]').forEach(function (r) {
       r.addEventListener('change', function () { if (r.checked) userEngine = r.value === 'tesseract' ? 'tesseract' : 'ai'; syncEngineUi(); });
     });
@@ -1000,6 +1032,8 @@
         j.saved = null;     // a re-read is a new extraction (new machine output)
         j.docType = $('ocr-doc-type').value; j.langs = $('ocr-langs').value;
         j.mode = mode; j.ai = null;
+        // quick reading: the switch (default ON), unless «اقرأ المستند كاملًا» asked for this file in full
+        j.readingMode = mode === 'ai' && !j.forceFull && quickOn() ? 'quick' : 'full';
         active.push(j);
         renderQueue();
         setProgress(j, 0, 'تحضير الملف…', true);
@@ -1227,6 +1261,17 @@
       else if (j.qrOther) box.appendChild(badge('badge-warning', 'رمز QR غير مطابق لصيغة الفاتورة الإلكترونية'));
       if (j.saved) box.appendChild(badge('badge-success', j.saved.where === 'server' ? 'محفوظ على الخادم' : 'محفوظ على هذا الجهاز'));
       if (j.ai && j.ai.reused) box.appendChild(badge('badge-teal', T('ai_reused')));
+      // quick reading: the badge + «اقرأ المستند كاملًا» (the same file, read in full; not offered for a saved reading)
+      if (isQuickJob(j)) {
+        box.appendChild(badge('badge-warning ocr-quick-badge', T('quick_badge')));
+        if (j.file && !j.saved && !j.ai.reused && aiAvailable()) {
+          var fb = el('button', 'btn btn-ghost btn-sm ocr-quick-full', T('quick_full_btn'));
+          fb.type = 'button';
+          fb.disabled = running;
+          fb.addEventListener('click', function () { rereadFull(j); });
+          box.appendChild(fb);
+        }
+      }
       // the AI found another kind of document than the one picked: the type (and the sections) follow it
       if (j.ai && j.ai.typeFrom && j.ai.typeFrom !== j.docType) box.appendChild(badge('badge-warning', T('ai_type_set', { from: docTypeLabel(j.ai.typeFrom), to: docTypeLabel(j.docType) })));
       // the weak-reading alert (fields v2) says more and replaces this one
@@ -1359,6 +1404,11 @@
       plan.push({ id: 'other', keys: rest });
       return plan.filter(function (s) { return s.keys.length; });
     }
+    // the expected keys of the layout; a quick reading only those it can return
+    function needKeys(j) {
+      var need = fxLayout(j).need;
+      return isQuickJob(j) ? need.filter(function (k) { return QUICK_FIELD_KEYS.indexOf(k) !== -1; }) : need;
+    }
     function aiWarnFor(j, key) {
       var aw = j.ai && j.ai.warnings ? j.ai.warnings : [];
       for (var i = 0; i < aw.length; i++) if (aw[i] && aw[i].field === key && aw[i].text) return String(aw[i].text).slice(0, 140);
@@ -1367,7 +1417,7 @@
     // level: 'error' (red pulse) | 'review' (amber) | 'missing' (dashed «لم يُقرأ») | ''
     function fieldState(def, j, r) {
       var f = j.fields[def.key];
-      if (!r.value) return fxLayout(j).need.indexOf(def.key) !== -1 ? { level: 'missing', reason: T('fx_r_missing') } : { level: '', reason: '' };
+      if (!r.value) return needKeys(j).indexOf(def.key) !== -1 ? { level: 'missing', reason: T('fx_r_missing') } : { level: '', reason: '' };
       if (r.error || r.warn) return { level: 'error', reason: T(FX_REASON[def.kind] || 'fx_r_check') };
       if (f && f.source === 'ai') {
         var aw = aiWarnFor(j, def.key);
@@ -1553,7 +1603,7 @@
         lc.parentNode.insertBefore(fxWeak, lc.nextSibling);
       }
       fxWeak.textContent = '';
-      var need = fxLayout(j).need, empty = need.filter(function (k) { return !hasVal(j, k); }).length;
+      var need = needKeys(j), empty = need.filter(function (k) { return !hasVal(j, k); }).length;
       var lowConf = j.confidence != null && j.confidence < 80;
       var mostEmpty = need.length > 0 && empty / need.length > 0.5;
       // a bill of lading read as an invoice: B/L data found, invoice data not
@@ -1613,6 +1663,16 @@
       if (!edited) { startAiReread(j); return; }
       ask({ title: T('fx_weak_ai_btn'), text: T('fx_weak_confirm'), okText: T('fx_weak_ai_btn'), danger: true })
         .then(function (yes) { if (yes) startAiReread(j); });
+    }
+    // quick result → the same file read in full (asks first when the fields or the items were edited)
+    function rereadFull(j) {
+      if (running || !j || !j.file || !$('ocr-engine-ai')) return;
+      var edited = Object.keys(j.fields || {}).some(function (k) { return j.fields[k] && j.fields[k].source === 'manual'; })
+        || JSON.stringify(j.items || []) !== JSON.stringify(j.machineItems || []);
+      var go = function () { j.forceFull = true; startAiReread(j); announce(T('quick_full_started')); };
+      if (!edited) { go(); return; }
+      ask({ title: T('quick_full_btn'), text: T('quick_full_confirm'), okText: T('quick_full_btn'), danger: true })
+        .then(function (yes) { if (yes) go(); });
     }
     function startAiReread(j) {
       if (running || !j || !j.file) return;

@@ -381,6 +381,25 @@ async function secReadings() {
       { prompt_version: 'ai-doc-v3', containers: Array.from({ length: 301 }, () => ({ container_number: 'MSCU1234565' })) }].map(t));
     return (good === true && (await t(null)) === true && bads.every(x => x === false) && out.kind === 'packing_list') || J({ good, bads });
   });
+  await check('quick reading (reading_mode quick, 2026-11-14): postProcess output (compact items, quick mark in warnings) passes extraction_detail_ok / items_ok / fields_ok and saves as a reading — no SQL change', async () => {
+    const data = t => ({ doc_type: t, detected_documents: [t],
+      fields: [{ name: 'bl_number', value: 'QBL1', confidence: 0.9, page: 1, document: t }, { name: 'consignee', value: 'TEST TRADING CO', confidence: 0.9, page: 1, document: t },
+        { name: 'invoice_number', value: 'INV-1', confidence: 0.9, page: 1, document: t }, { name: 'total', value: '100.00', confidence: 0.9, page: 1, document: t },
+        { name: 'declaration_number', value: '123456', confidence: 0.9, page: 1, document: t }, { name: 'hs_codes', value: '61091000', confidence: 0.9, page: 1, document: t }],
+      line_items: [{ description: 'T-SHIRTS COTTON', hs_code: '61091000', quantity: 10, unit: 'PCS', amount: 100 }],
+      containers: [{ container_number: 'MSCU1234565', size_type: '40HC', seal_number: 'S1' }],
+      declaration: { declaration_type_evidence: null, bl_candidates: [], bl_rtl_affected: false }, warnings: [] });
+    const out = [];
+    for (const t of ['bill_of_lading', 'commercial_invoice', 'packing_list', 'customs_declaration', 'auto']) {
+      const r = XJS.postProcess(XJS.parseMessage({ stop_reason: 'end_turn', model: 'claude-opus-5-5', usage: {}, content: [{ type: 'text', text: J(data(t === 'auto' ? 'commercial_invoice' : t)) }] },
+        'ai-doc-v3', t).data, t, 'ai-doc-v3', 'quick');
+      const x = await one(`SELECT app.extraction_detail_ok($1) d, app.extraction_items_ok($2) i, app.extraction_fields_ok($3) f`, [J(r.ai_detail), J(r.line_items), J(r.extracted_fields)]);
+      const id = await ext({ kind: r.kind, detail: r.ai_detail, fields: r.extracted_fields, items: r.line_items });
+      out.push({ t, ok: x.d === true && x.i === true && x.f === true && !!id && r.reading_mode === 'quick' && XJS.isQuickDetail(r.ai_detail)
+        && r.line_items.every(it => Object.keys(it).every(k => XJS.QUICK_ITEM_KEYS.indexOf(k) !== -1)) });
+    }
+    return out.every(o => o.ok) || J(out);
+  });
   await check('API insert: ai_detail without an AI reading (no ai_usage_id) → MRS_INVALID ai_detail', async () =>
     (await code(() => as('jed', `INSERT INTO public.document_extractions (org_id, doc_type, source_name, source_sha256, engine, languages, raw_text, created_by, ai_detail)
       VALUES ($1, 'bill_of_lading', 'x.pdf', $2, 'tesseract.js@5.1.1', 'eng', 'x', $3, $4)`, [A, sha(), U.jed, J(det('bill_of_lading'))]))) === 'MRS_INVALID ai_detail');

@@ -74,6 +74,18 @@
     // get the extended keys — seals, notify party, booking, places, freight, CBM, shipping line, the declaration keys — which
     // the per-document sheets list; the match engine (doc-match.js) compares its own keys only, unchanged)
     var PROMPT = { invoice: 'ai-doc-v3', bl: 'ai-doc-v3', declaration: 'ai-doc-v3', packing: 'ai-doc-v3' };
+    // «القراءة السريعة» (2026-11-14): every slot read with reading_mode 'quick' while the switch is on (default ON; the
+    // same preference as the single reader, ocr.js). The comparison is unchanged: every key doc-match compares is a quick
+    // key, and the items are compared on description / HS / quantity / amount (the compact columns).
+    var QUICK_PREF = 'marsa.ocr.quick';
+    function quickPref() { try { return window.localStorage.getItem(QUICK_PREF) !== '0'; } catch (e) { return true; } }
+    function setQuickPref(on) { try { window.localStorage.setItem(QUICK_PREF, on ? '1' : '0'); } catch (e) { /* storage blocked */ } }
+    function quickOn() { var c = document.getElementById('ocr-match-quick'); return c ? !!c.checked : quickPref(); }
+    function isQuickRes(res) { return !!(res && res.reading_mode === 'quick'); }
+    function ask(o) {
+      if (Shell && typeof Shell.confirm === 'function') return Promise.resolve(Shell.confirm(o)).then(function (v) { return !!v; });
+      return Promise.resolve(window.confirm(o.text || o.title));
+    }
     var PAIR_DOCS = E.PAIRS && E.PAIRS.inv_pack ? E.PAIRS : { inv_bl: ['invoice', 'bl'], inv_decl: ['invoice', 'declaration'], bl_decl: ['bl', 'declaration'],
       inv_pack: ['invoice', 'packing'], bl_pack: ['bl', 'packing'], decl_pack: ['declaration', 'packing'] };
     var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -261,6 +273,16 @@
         }
         if (s.res.reused) stEl.appendChild(el('span', 'ocr-match-slot-conf', ' · ' + T('m_reused_free')));
         if (s.res.mean_confidence != null) stEl.appendChild(el('span', 'ocr-match-slot-conf', ' · ' + T('ai_conf', { n: Math.round(Number(s.res.mean_confidence)) })));
+        if (isQuickRes(s.res)) {
+          stEl.appendChild(el('span', 'badge badge-sm badge-warning ocr-quick-badge', T('quick_badge')));
+          // the same file read in full (not for a reading already saved, a reused one or one brought from the single reader)
+          if (s.file && !s.bridged && !s.res.reused && !S.saved.extractions[k] && !S.running) {
+            var fb = el('button', 'btn btn-ghost btn-sm ocr-quick-full', T('quick_full_btn'));
+            fb.type = 'button';
+            fb.setAttribute('data-full', k);
+            stEl.appendChild(fb);
+          }
+        }
       }
       var pct = s.status === 'sending' ? 3 : s.status === 'reading' ? Math.round(s.pct || 5) : s.status === 'done' ? 100 : 0;
       // a slot being read: three dots fading in and out one after another; the one bar is the total under the slots
@@ -346,6 +368,7 @@
         }, 400);
         var q = { orgId: orgId || undefined, docType: DOC_TYPE[k], file: { media_type: s.mime, data_b64: b64 }, lang: lang() };
         if (PROMPT[k]) q.promptVersion = PROMPT[k];
+        if (q.promptVersion === 'ai-doc-v3' && !s.forceFull && quickOn()) q.readingMode = 'quick';
         return API.aiExtract(q);
       }).then(function (r) {
         if (!r || r.error || !r.data) throw (r && r.error) || new Error(T('m_err_generic'));
@@ -353,6 +376,7 @@
         if (AI.remaining != null && !r.data.reused) { AI.remaining = Math.max(0, AI.remaining - 1); showRemaining(); }
         stop();
         takeReading(k, r.data);
+        s.forceFull = false;
         s.status = 'done'; renderSlot(k);
         return true;
       }).catch(function (e) {
@@ -374,6 +398,33 @@
       s.items = Array.isArray(res.line_items) ? res.line_items.slice(0, 500) : [];
     }
     $('ocr-match-run').addEventListener('click', run);
+    // «اقرأ المستند كاملًا» on a quick slot: asks first when a value of that document was corrected, then reads it again
+    // in full (the other slots stay as read; the report is recomputed when the answer arrives)
+    $('ocr-match-slots').addEventListener('click', function (e) {
+      var b = e.target && e.target.closest ? e.target.closest('[data-full]') : null;
+      if (!b) return;
+      var k = b.getAttribute('data-full');
+      if (SLOTS.indexOf(k) === -1) return;
+      readFull(k);
+    });
+    function readFull(k) {
+      var s = S.slots[k];
+      if (S.running || !s.file || !isQuickRes(s.res)) return;
+      var edited = Object.keys(s.fields || {}).some(function (x) { return s.fields[x] && s.fields[x].corrected; });
+      var go = function () { s.forceFull = true; s.status = 'ready'; renderSlot(k); syncRun(); run(); };
+      if (!edited) { go(); return; }
+      ask({ title: T('quick_full_btn'), text: T('quick_full_confirm'), okText: T('quick_full_btn'), danger: true })
+        .then(function (yes) { if (yes) go(); });
+    }
+    (function () {
+      var c = $('ocr-match-quick');
+      if (!c) return;
+      c.checked = quickPref();
+      c.addEventListener('change', function () {
+        setQuickPref(c.checked);
+        var o = $('ocr-quick'); if (o) o.checked = c.checked;     // the single reader shares the choice
+      });
+    })();
     function run() {
       if (S.running || !(S.slots.invoice.file && S.slots.bl.file)) return;
       if (!(ONLINE && STAFF && AI.enabled)) { showError(T('m_err_access')); return; }
@@ -782,6 +833,7 @@
         (res && res.warnings || []).slice(0, 60).forEach(function (w) {
           if (!w || typeof w.text !== 'string') return;
           if (w.code === 'doc_type_mismatch') return;                 // shown localized on the slot and in the alerts
+          if (w.source === 'server' && w.code === 'quick_reading') return;   // the slot's «قراءة سريعة» badge says it
           var li = el('li');
           li.appendChild(el('strong', null, docName(k) + ': '));
           li.appendChild(el('span', null, (w.field ? fieldLabel(w.field) + ' — ' : '') + warnText(w)));

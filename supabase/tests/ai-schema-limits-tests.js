@@ -30,6 +30,13 @@ const TYPES = ['auto', 'bill_of_lading', 'commercial_invoice', 'customs_declarat
     if (n > 16) throw new Error(n + ' unions');
   });
 }));
+// quick reading (reading_mode 'quick', 2026-11-14): the compact schemas of the v3 shipping types / auto
+['auto', 'bill_of_lading', 'commercial_invoice', 'customs_declaration', 'supplier_invoice', 'packing_list'].forEach(t => {
+  check('ai-doc-v3 ' + t + ' quick: at most 16 union-typed parameters', () => {
+    const n = unions(X.outputSchema(t, 'ai-doc-v3', 'quick'));
+    if (n > 16) throw new Error(n + ' unions');
+  });
+});
 check('v3 shipping: fields[].document is a plain required string enum (adds no union-typed parameter)', () => {
   ['auto', 'bill_of_lading', 'commercial_invoice', 'customs_declaration', 'supplier_invoice', 'packing_list'].forEach(t => {
     const it = X.outputSchema(t, 'ai-doc-v3').properties.fields.items;

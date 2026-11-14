@@ -199,6 +199,11 @@
                   <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18h.01"/></svg>
                   <span><span data-i18n="ocr.ai_note">عند اختيار القراءة بالذكاء الاصطناعي يُرسل الملف إلى خادم مرسى ثم إلى شركة Anthropic (مزوّد نموذج Claude) لمعالجته وإرجاع البيانات. لا تستخدمها لمستند لا يجوز مشاركته مع مزوّد خارجي. الحد: 10 ميغابايت للملف، وصيغ JPG وPNG وWEBP وGIF وPDF.</span> <span id="ocr-ai-remaining"></span></span>
                 </div>
+                <!-- quick reading (2026-11-14): one preference shared with the matching section (ocr.js / ocr-match.js) -->
+                <div class="ocr-quick" id="ocr-quick-wrap" hidden>
+                  <label class="check"><input type="checkbox" id="ocr-quick" checked aria-describedby="ocr-quick-hint"> <span data-i18n="ocr.quick_label">قراءة سريعة (البيانات المهمة فقط — أسرع)</span></label>
+                  <p class="form-hint ocr-quick-hint" id="ocr-quick-hint" data-i18n="ocr.quick_hint">تُقرأ: الأطراف (الشاحن/المورد والمرسل إليه/المشتري)، أرقام المستندات وتواريخها، السفينة والموانئ، الحاويات والأختام، الطرود والأوزان، رموز HS، العملة والإجمالي، والأصناف مختصرة (الوصف، HS، الكمية، الوحدة، المبلغ). ألغِ التحديد لقراءة المستند كاملًا.</p>
+                </div>
               </fieldset>
               <fieldset class="fieldset ocr-options">
                 <legend class="form-label">تحسين الصورة قبل القراءة</legend>
@@ -456,6 +461,11 @@
           <div class="alert alert-warning" id="ocr-match-note" role="note">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18h.01"/></svg>
             <span><span data-i18n="ocr.m_note">تُرسل الملفات إلى خادم مرسى ثم إلى شركة Anthropic (مزوّد نموذج Claude) لقراءتها. كل مستند قراءة مستقلة: المطابقة تستهلك قراءتين، وحتى أربع قراءات مع البيان الجمركي وبيان التعبئة، من حصة مؤسستك اليومية (الملف المقروء والمحفوظ سابقًا لا يُحتسب مرة أخرى). الحد: 5 ميغابايت للصورة و10 ميغابايت لملف PDF؛ JPG وPNG وWEBP وGIF وPDF.</span> <span id="ocr-match-remaining"></span></span>
+          </div>
+          <!-- quick reading (2026-11-14): the same preference as the single reader -->
+          <div class="ocr-quick ocr-match-quick">
+            <label class="check"><input type="checkbox" id="ocr-match-quick" checked aria-describedby="ocr-match-quick-hint"> <span data-i18n="ocr.quick_label">قراءة سريعة (البيانات المهمة فقط — أسرع)</span></label>
+            <p class="form-hint ocr-quick-hint" id="ocr-match-quick-hint" data-i18n="ocr.quick_hint">تُقرأ: الأطراف (الشاحن/المورد والمرسل إليه/المشتري)، أرقام المستندات وتواريخها، السفينة والموانئ، الحاويات والأختام، الطرود والأوزان، رموز HS، العملة والإجمالي، والأصناف مختصرة (الوصف، HS، الكمية، الوحدة، المبلغ). ألغِ التحديد لقراءة المستند كاملًا.</p>
           </div>
 
           <!-- four slots: invoice + B/L (required), customs declaration + packing list (optional) -->

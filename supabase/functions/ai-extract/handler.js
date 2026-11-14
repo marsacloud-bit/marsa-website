@@ -26,6 +26,9 @@
   that reading is returned (reused: true), nothing reserved, no Claude call, no charge; also any other live reading of
   the same file (OCR / v2) in the scope a save would collide with (document_extractions_dedupe_uidx: same transaction,
   or unlinked) → returned as itself (its own engine, reused: true), since a new reading could not be saved there] →
+  [quick reading (reading_mode 'quick', 2026-11-14): answered by any saved v3 reading of the file; a full request is
+  never answered by a saved quick one (its ai_detail warnings carry the quick_reading mark), the hold uses the quick
+  max_tokens and the answer says reading_mode 'quick'] →
   [v3 only: ai_bind_source — the SHA-256 of the bytes sent to Claude bound to the reservation; a v3 reading can only be
   saved under it] → Claude → ai_settle (always, once). Payment documents (20261122000100: doc_type appointment_invoice /
   payment_proof, v3, ≤ 4 MB): never answered from a stored reading (they are not saved as readings); the body carries
@@ -116,7 +119,11 @@
       if (!r || r.error || !Array.isArray(r.data)) return null;
       // 20261121000100: an appointment card / EIR read is only answered with a stored reading of the same kind
       const kind = X.isOps && X.isOps(v.doc_type) ? X.KIND_OF[v.doc_type] : null;
-      const live = r.data.filter(x => x && x.id && (!kind || x.doc_type === kind));
+      // quick reading (2026-11-14): a quick request may be answered by any reading (a full one is a superset); a full
+      // request never by a saved quick reading (ai_detail marked by QUICK_WARNING) — it is read in full
+      const quickReq = v.reading_mode === 'quick';
+      const isQuickRow = x => !!(X.isQuickDetail && x.ai_detail && X.isQuickDetail(x.ai_detail));
+      const live = r.data.filter(x => x && x.id && (!kind || x.doc_type === kind) && (quickReq || !isQuickRow(x)));
       const rows = live.filter(x => x.engine === X.ENGINE && x.ai_detail && x.ai_detail.prompt_version === X.PROMPT_VERSION_V3 && x.ai_usage_id);
       const pick = f => rows.find(f) || null;
       const v3 = v.transaction_id
@@ -131,13 +138,14 @@
   function reusedBody(row, X) {
     const det = row.ai_detail || {};
     const isV3 = row.engine === X.ENGINE && det.prompt_version === X.PROMPT_VERSION_V3;
+    const quick = isV3 && !!(X.isQuickDetail && X.isQuickDetail(det));
     const meta = {};
     (Array.isArray(det.fields) ? det.fields : []).forEach(f => { if (f && typeof f.name === 'string') meta[f.name] = f; });
     const ex = row.extracted_fields && typeof row.extracted_fields === 'object' ? row.extracted_fields : {};
     const fields = Object.keys(ex).filter(k => typeof ex[k] === 'string').map(k => ({ name: k, value: ex[k],
       confidence: meta[k] && Number.isFinite(meta[k].confidence) ? meta[k].confidence : 0, page: meta[k] ? meta[k].page || null : null,
       valid: meta[k] ? meta[k].valid !== false : true }));
-    return {
+    const body = {
       usage_id: row.ai_usage_id || null, engine: row.engine || null, model: row.engine === X.ENGINE ? X.MODEL : null,
       prompt_version: isV3 ? X.PROMPT_VERSION_V3 : (row.engine === X.ENGINE ? X.PROMPT_VERSION : null),
       doc_type: det.doc_type || row.doc_type, detected_type: det.detected_type || row.doc_type, kind: row.doc_type,
@@ -151,6 +159,9 @@
       ai_detail: det, source_sha256: row.source_sha256, reused: true, extraction_id: row.id, review_status: row.review_status,
       usage: { input_tokens: 0, output_tokens: 0, cost_usd: 0 }
     };
+    // a saved quick reading says so (a full one carries no reading_mode, as before)
+    if (quick) body.reading_mode = 'quick';
+    return body;
   }
 
   async function handleRequest(req, deps) {
@@ -234,7 +245,7 @@
     /* -------------------------------------------------------------- reserve */
     const svc = d.serviceClient();
     const res = await svc.rpc('ai_reserve', { p_org: v.org_id, p_user: user.id, p_purpose: 'doc_extract',
-      p_est_usd: X.estimateHoldUsd(v.media_type, v.bytes, v.pages, X.maxTokensFor(v.doc_type, v.prompt_version)) });
+      p_est_usd: X.estimateHoldUsd(v.media_type, v.bytes, v.pages, X.maxTokensFor(v.doc_type, v.prompt_version, v.reading_mode)) });
     if (res.error || typeof res.data !== 'string') {
       const c = mrs(res.error);
       if (c === 'MRS_AI_DISABLED') return fail('ai_disabled', 403, origin);
@@ -311,7 +322,7 @@
         settle = { input: parsed.usage.input_tokens, output: parsed.usage.output_tokens, model: parsed.model,
           attempts: parsed.usage.attempts, status: parsed.ok ? 'ok' : (parsed.code === 'refused' ? 'refused' : 'error') };
         if (parsed.ok) {
-          try { out = X.postProcess(parsed.data, v.doc_type, v.prompt_version); }
+          try { out = X.postProcess(parsed.data, v.doc_type, v.prompt_version, v.reading_mode); }
           catch (e) { settle.status = 'error'; errCode = 'internal'; errStatus = 500; log('ai-extract: post-processing failed'); }
         } else if (parsed.code === 'refused') { errCode = 'refused'; errStatus = 422; }
         else if (parsed.code === 'truncated') { errCode = 'truncated'; errStatus = 422; }
@@ -355,6 +366,7 @@
       body.empty_return = out.empty_return || null;   // v3 EIR (20261121000100), else null
       body.payment = out.payment || null;             // v3 payment document (20261122000100), else null
       body.reused = false; body.extraction_id = null;
+      if (out.reading_mode === 'quick') body.reading_mode = 'quick';   // quick reading (2026-11-14); a full one: absent, as before
     }
     return json(body, 200, origin);
   }

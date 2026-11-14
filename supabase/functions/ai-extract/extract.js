@@ -202,6 +202,51 @@
     appointment_ticket: APPT_KEYS.concat(['container_numbers', 'bl_number', 'declaration_number']),
     empty_return_receipt: ['container_numbers'].concat(EIR_KEYS)
   });
+  /*
+    «القراءة السريعة» — quick reading (2026-11-14, owner request: read only the facts the comparison needs, not the whole
+    page). Opt-in per request: body.reading_mode 'quick' (v3 shipping documents + auto only; never the card / EIR /
+    payment readings); absent or 'full' = the reading above, byte for byte. Measured: time ≈ output tokens / ~145 tok/s
+    and an ~85-line invoice spends most of its ~13k output tokens on the 14-column line table, so a quick reading asks for:
+      - the fields of QUICK_KEYS[doc type] only (QUICK_BASE ∩ KEYS_FOR_V3[type]; on a declaration also its type, Hijri
+        date and the Arabic importer name — the client name on a Fasah form). There is no B/L date or item-count key in
+        app.extraction_field_keys(): none is invented;
+      - line_items in a compact shape (QUICK_ITEM_KEYS: description ≤ 60 chars, hs_code, quantity, unit, amount), identical
+        description + HS rows merged, at most QUICK_MAX_ITEMS rows (beyond that merged further by HS code so the rows still
+        add up to the printed total — doc-match compares the items sum with subtotal / total and groups by HS6);
+      - containers with number, size / type and seal only (QUICK_CONTAINER_KEYS; the server fills the other columns null);
+      - a short focused instruction, effort 'low' (EFFORT_QUICK) and max_tokens MAX_TOKENS_QUICK. Trade-off: less thinking
+        = faster and cheaper, but fewer self-checks on a hard scan (totals, RTL B/L order); the server checks are the same,
+        and «اقرأ المستند كاملًا» re-reads one file in full. Betas / fallbacks (server-side fallback) are unchanged.
+    The answer carries reading_mode 'quick'; the saved detail is marked by the server warning QUICK_WARNING (code
+    'quick_reading', first in warnings): app.extraction_detail_ok allows no new ai_detail key, so the mark lives in the
+    warnings list it already accepts (no SQL change). Reuse: a quick request may be answered by any saved v3 reading of
+    the file (a full one is a superset); a full request never by a quick one (handler.js findReading).
+  */
+  const READING_MODES = Object.freeze(['full', 'quick']);
+  const QUICK_TYPES = Object.freeze(['bill_of_lading', 'commercial_invoice', 'packing_list', 'customs_declaration', 'supplier_invoice', 'auto']);
+  const QUICK_BASE = Object.freeze(['shipper', 'supplier_name', 'consignee', 'consignee_name', 'buyer_name', 'notify_party',
+    'bl_number', 'invoice_number', 'invoice_date', 'declaration_number', 'declaration_date', 'packing_list_number', 'packing_list_date',
+    'vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'container_numbers', 'seal_numbers', 'packages_count', 'package_type',
+    'gross_weight', 'net_weight', 'hs_codes', 'goods_description', 'currency', 'subtotal', 'total', 'incoterms', 'country_of_origin']);
+  const QUICK_DECL = Object.freeze(['declaration_type', 'declaration_date_hijri', 'importer_name_ar']);
+  const QUICK_KEYS = Object.freeze(QUICK_TYPES.reduce((o, t) => {
+    o[t] = Object.freeze(KEYS_FOR_V3[t].filter(k => QUICK_BASE.indexOf(k) !== -1 || ((t === 'customs_declaration' || t === 'auto') && QUICK_DECL.indexOf(k) !== -1)));
+    return o;
+  }, {}));
+  const QUICK_ITEM_KEYS = Object.freeze(['description', 'hs_code', 'quantity', 'unit', 'amount']);
+  const QUICK_CONTAINER_KEYS = Object.freeze(['container_number', 'size_type', 'seal_number']);
+  const QUICK_MAX_ITEMS = 40;
+  const QUICK_DESC_MAX = 60;
+  const MAX_TOKENS_QUICK = 10000;
+  const EFFORT_QUICK = 'low';
+  const QUICK_WARNING = Object.freeze({ source: 'server', code: 'quick_reading',
+    text: 'Quick reading: only the key fields and a compact item table (description, HS, quantity, unit, amount) were read.', field: null });
+  function isQuick(mode, docType, version) { return mode === 'quick' && isV3(version) && QUICK_TYPES.indexOf(docType) !== -1; }
+  // a saved ai_detail / a response's warnings → was it a quick reading (the QUICK_WARNING mark)
+  function isQuickDetail(detail) {
+    const w = detail && typeof detail === 'object' && Array.isArray(detail.warnings) ? detail.warnings : [];
+    return w.some(x => x && x.source === 'server' && x.code === QUICK_WARNING.code);
+  }
   const APPT_SECTION_KEYS = Object.freeze(['location', 'bl_number', 'declaration_number', 'container_number', 'cargo_type', 'purpose']);
   // v3 line items (legacy invoice items + packing items) and per-container rows
   const ITEM_KEYS_V3 = Object.freeze(['description', 'hs_code', 'quantity', 'unit_price', 'amount', 'unit', 'scientific_name',
@@ -342,7 +387,7 @@
   ].join('\n');
 
   // v3: the legacy reading rules (buildDocumentExtractionPrompt_) on top of the v2 system prompt
-  const SYSTEM_V3 = [SYSTEM,
+  const SYSTEM_V3_CLASSIFY = [
     'Classify the document by its content only, never by the file name or by the slot the user uploaded it into; packing_list is',
     'a packing list / packing slip / weight list. A PDF may hold several documents (for example a bill of lading, an invoice and a',
     'packing list): list the type of every complete document found in detected_documents, set doc_type to the main one, and fill the',
@@ -350,16 +395,36 @@
     'Every fields entry names in document the type of the document it is printed on. When the file holds several documents, give a',
     'field once PER document that prints it, each with that document\'s type (for example the gross weight of the bill of lading AND',
     'the gross weight of the packing list, even when they differ: never merge, average or choose between them). For a single',
-    'document, document is the same as doc_type.',
+    'document, document is the same as doc_type.'
+  ];
+  const SYSTEM_V3 = [SYSTEM].concat(SYSTEM_V3_CLASSIFY, [
     'containers: one row per container printed, with its seal number, size / type (e.g. 40HC, 20GP), packages and net / gross weight in kg',
     'when printed for that container (otherwise an empty string for text, null for numbers). seal_numbers lists every seal number,',
     'one per entry. In line_items too, a text column that is not printed is an empty string and a number column is null.',
     'line_items: the goods table. hs_code there is the supplier\'s code as printed (reference only, not a Saudi tariff decision). Keep',
     'the scientific / Latin name in scientific_name, not in the description. Weights in kg, numbers without thousands separators.',
     'A shipping line name is not a local shipping agent. consignee_name is the name only, without the address block.'
+  ]).join('\n');
+  // quick reading: the same classification rules, the compact containers / line items
+  const SYSTEM_V3_QUICK = [SYSTEM].concat(SYSTEM_V3_CLASSIFY, [
+    'containers: one row per container printed, with its number, size / type (e.g. 40HC, 20GP) and seal number only (an empty string',
+    'when not printed). seal_numbers lists every seal number, one per entry.',
+    'line_items: a compact goods table (description, hs_code, quantity, unit, amount only; a text column that is not printed is an',
+    'empty string and a number column is null). hs_code is the supplier\'s code as printed. Numbers without thousands separators.',
+    'A shipping line name is not a local shipping agent. consignee_name is the name only, without the address block.'
+  ]).join('\n');
+  // the focused instruction of a quick reading (buildRequest)
+  const QUICK_RULES = [
+    'QUICK READING: look ONLY for the facts listed below and ignore everything else on the page (terms and conditions, addresses,',
+    'bank details, remarks, stamps, marks and numbers columns). Write no free text: only the JSON, with at most a few short warnings.',
+    'line_items: one compact row per goods line: description (short, at most ' + QUICK_DESC_MAX + ' characters), hs_code, quantity, unit,',
+    'amount (the line value). Merge rows with the same description and HS code into one row (add up quantity and amount). Give at',
+    'most ' + QUICK_MAX_ITEMS + ' rows: when more remain, merge further by HS code (add up quantity and amount) so the rows still add up',
+    'to the printed total. subtotal / total: the values printed on the document as described in their hints below (never added up from the rows).',
+    'containers: one row per container (number, size / type, seal).'
   ].join('\n');
   // v3 customs declaration (20261120000100): legacy buildDeclarationPrompt_ + detectDeclarationTypeFromBlobR11_ in the same call
-  const DECL_RULES = [
+  const DECL_LINES = [
     'This is read as a Saudi customs declaration (Fasah). declaration_type comes from the title of the form only: «بيان استيراد» is',
     'import, «بيان تصدير» is export, «بيان تصفية» is clearance; copy the title words you used into declaration.declaration_type_evidence',
     '(null when the title does not name the type, and then leave declaration_type out). Never infer the type from the client, the port',
@@ -371,7 +436,13 @@
     'suspect the order was affected. Never replace or correct the printed number.',
     'line_items are the declared items: hs_code = the tariff code printed on the declaration, description = the Arabic item description',
     'as printed, quantity, unit, amount = the item value, origin_country, net / gross weight in kg.'
-  ].join('\n');
+  ];
+  const DECL_RULES = DECL_LINES.join('\n');
+  // quick reading: the same declaration rules, the compact declared items
+  const DECL_RULES_QUICK = DECL_LINES.slice(0, -2).concat([
+    'line_items are the declared items: hs_code = the tariff code printed on the declaration, description = the Arabic item description',
+    '(short), quantity, unit, amount = the item value.'
+  ]).join('\n');
   // 20261121000100: the operational readings (legacy buildAppointmentPromptR112_ / readEmptyReturnProofWithAiR12110_)
   const SYSTEM_OPS = [SYSTEM,
     'This request reads a port operations document: a port appointment card (a TAS appointment confirmation ticket) or a receipt',
@@ -441,11 +512,13 @@
     return data;
   }
   function isV3(version) { return version === PROMPT_VERSION_V3; }
-  function keysFor(docType, version) {
+  // mode 'quick' (v3 shipping types) → QUICK_KEYS; anything else → the full key list (unchanged)
+  function keysFor(docType, version, mode) {
+    if (isQuick(mode, docType, version)) return QUICK_KEYS[docType];
     return isV3(version) ? (KEYS_FOR_V3[docType] || ALL_KEYS_V3) : (KEYS_FOR[docType] || ALL_KEYS);
   }
-  function outputSchema(docType, version) {
-    if (isV3(version)) return outputSchemaV3(docType);
+  function outputSchema(docType, version, mode) {
+    if (isV3(version)) return outputSchemaV3(docType, mode);
     const keys = (KEYS_FOR[docType] || ALL_KEYS).slice();
     return {
       type: 'object',
@@ -554,15 +627,21 @@
     return sc;
   }
 
-  function outputSchemaV3(docType) {
+  function outputSchemaV3(docType, mode) {
     if (isOps(docType)) return outputSchemaOps(docType);
     if (isPay(docType)) return outputSchemaPay(docType);
-    const keys = (KEYS_FOR_V3[docType] || ALL_KEYS_V3).slice();
+    const quick = isQuick(mode, docType, PROMPT_VERSION_V3);
+    const keys = (quick ? QUICK_KEYS[docType] : (KEYS_FOR_V3[docType] || ALL_KEYS_V3)).slice();
+    const itemKeys = quick ? QUICK_ITEM_KEYS : ITEM_KEYS_V3;
     const itemProps = { description: { type: 'string' } };
     // the API compiles at most 16 union-typed (nullable) parameters per schema: the text columns of line_items and
     // containers are plain strings ('' = not printed, turned back into null by blankToNull before the shape check);
     // only the numeric columns stay nullable
-    ITEM_KEYS_V3.slice(1).forEach(k => { itemProps[k] = ITEM_NUM_V3.indexOf(k) !== -1 ? nullable('number') : { type: 'string' }; });
+    itemKeys.slice(1).forEach(k => { itemProps[k] = ITEM_NUM_V3.indexOf(k) !== -1 ? nullable('number') : { type: 'string' }; });
+    const containerProps = quick
+      ? { container_number: { type: 'string' }, size_type: { type: 'string' }, seal_number: { type: 'string' } }
+      : { container_number: { type: 'string' }, seal_number: { type: 'string' }, size_type: { type: 'string' },
+        packages_count: nullable('number'), net_weight: nullable('number'), gross_weight: nullable('number') };
     const sc = {
       type: 'object',
       additionalProperties: false,
@@ -588,18 +667,15 @@
         },
         line_items: {
           type: 'array',
-          items: { type: 'object', additionalProperties: false, required: ITEM_KEYS_V3.slice(), properties: itemProps }
+          items: { type: 'object', additionalProperties: false, required: itemKeys.slice(), properties: itemProps }
         },
         containers: {
           type: 'array',
           items: {
             type: 'object',
             additionalProperties: false,
-            required: CONTAINER_KEYS.slice(),
-            properties: {
-              container_number: { type: 'string' }, seal_number: { type: 'string' }, size_type: { type: 'string' },
-              packages_count: nullable('number'), net_weight: nullable('number'), gross_weight: nullable('number')
-            }
+            required: (quick ? QUICK_CONTAINER_KEYS : CONTAINER_KEYS).slice(),
+            properties: containerProps
           }
         },
         warnings: { type: 'array', items: { type: 'string' } }
@@ -662,13 +738,17 @@
   // fixed code. prompt_version: 'ai-doc-v2' (default, also when absent) | 'ai-doc-v3' (packing_list + the extended keys)
   function validateRequest(body) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AiError('bad_request', 400);
-    const allowed = ['org_id', 'doc_type', 'file', 'transaction_id', 'lang', 'prompt_version'];
+    const allowed = ['org_id', 'doc_type', 'file', 'transaction_id', 'lang', 'prompt_version', 'reading_mode'];
     if (Object.keys(body).some(k => allowed.indexOf(k) === -1)) throw new AiError('bad_request', 400);
     if (typeof body.org_id !== 'string' || !UUID_RE.test(body.org_id)) throw new AiError('bad_request', 400);
     const version = body.prompt_version == null ? PROMPT_VERSION : body.prompt_version;
     if (PROMPT_VERSIONS.indexOf(version) === -1) throw new AiError('bad_request', 400);
     const docType = body.doc_type == null ? 'auto' : body.doc_type;
     if ((isV3(version) ? DOC_TYPES_V3 : DOC_TYPES).indexOf(docType) === -1) throw new AiError('bad_request', 400);
+    // quick reading: 'quick' only for a v3 shipping document / auto; absent → 'full' (the reading as before)
+    const mode = body.reading_mode == null ? 'full' : body.reading_mode;
+    if (READING_MODES.indexOf(mode) === -1) throw new AiError('bad_request', 400);
+    if (mode === 'quick' && !isQuick(mode, docType, version)) throw new AiError('bad_request', 400);
     let tx = null;
     if (body.transaction_id != null) {
       if (typeof body.transaction_id !== 'string' || !UUID_RE.test(body.transaction_id)) throw new AiError('bad_request', 400);
@@ -692,7 +772,7 @@
     if (isPay(docType) && bytes > MAX_PAY_BYTES) throw new AiError('too_large', 413);
     const pages = f.media_type === 'application/pdf' ? pdfPageCount(f.data_b64) : 1;
     return { org_id: body.org_id.toLowerCase(), doc_type: docType, media_type: f.media_type, data_b64: f.data_b64, bytes, pages,
-      transaction_id: tx, lang, prompt_version: version };
+      transaction_id: tx, lang, prompt_version: version, reading_mode: mode };
   }
 
   // page objects of a PDF (`/Type /Page`, not `/Pages`) — for the hold estimate only; 0 when the pages sit in compressed
@@ -705,8 +785,10 @@
     } catch (e) { return 0; }
   }
 
-  // max_tokens of a request: 16000 for the v3 operational / payment readings, 32000 for every shipping-document read
-  function maxTokensFor(docType, version) {
+  // max_tokens of a request: 16000 for the v3 operational / payment readings, 32000 for every shipping-document read,
+  // MAX_TOKENS_QUICK for a quick reading
+  function maxTokensFor(docType, version, mode) {
+    if (isQuick(mode, docType, version)) return MAX_TOKENS_QUICK;
     return isV3(version) && (isOps(docType) || isPay(docType)) ? MAX_TOKENS : MAX_TOKENS_DOC;
   }
 
@@ -718,6 +800,7 @@
     const v3 = isV3(v.prompt_version);
     const pay = v3 && isPay(v.doc_type);
     if (pay) return buildRequestPay(v, fileBlock);
+    if (isQuick(v.reading_mode, v.doc_type, v.prompt_version)) return buildRequestQuick(v, fileBlock);
     const keys = keysFor(v.doc_type, v.prompt_version);
     const ops = isOps(v.doc_type);
     const typeLine = ops
@@ -742,6 +825,31 @@
       fallbacks: FALLBACKS,
       output_config: { effort: EFFORT, format: { type: 'json_schema', schema: outputSchema(v.doc_type, v.prompt_version) } },
       system: ops ? SYSTEM_OPS : (v3 ? SYSTEM_V3 : SYSTEM),
+      messages: [{ role: 'user', content: [fileBlock, { type: 'text', text }] }]
+    };
+  }
+
+  // quick reading: the same SDK call shape (model, betas, fallbacks, json_schema) with the quick keys / schema, the focused
+  // instruction, effort EFFORT_QUICK and max_tokens MAX_TOKENS_QUICK
+  function buildRequestQuick(v, fileBlock) {
+    const keys = QUICK_KEYS[v.doc_type];
+    const text = [
+      v.doc_type === 'auto'
+        ? 'Document type: unknown — set doc_type to what the document is (other when none fits).'
+        : 'Document type (as chosen by the user): ' + v.doc_type + '. Set doc_type to what the document actually is.',
+      QUICK_RULES,
+      'Facts to look for (leave out what is not printed):',
+      keys.map(k => '- ' + k + ': ' + hintFor(v.doc_type, k, true)).join('\n'),
+      isDeclType(v.doc_type) ? DECL_RULES_QUICK : null,
+      'Write warnings in ' + (v.lang === 'en' ? 'English' : 'Arabic') + '.'
+    ].filter(x => x !== null).join('\n');
+    return {
+      model: MODEL,
+      max_tokens: MAX_TOKENS_QUICK,
+      betas: BETAS.slice(),
+      fallbacks: FALLBACKS,
+      output_config: { effort: EFFORT_QUICK, format: { type: 'json_schema', schema: outputSchemaV3(v.doc_type, 'quick') } },
+      system: SYSTEM_V3_QUICK,
       messages: [{ role: 'user', content: [fileBlock, { type: 'text', text }] }]
     };
   }
@@ -1681,14 +1789,18 @@
 
   // model output → the response of ai-extract (and the extraction row): validated, normalized, warnings added.
   // version 'ai-doc-v3' → the v3 keys, packing_list, the wider line items and containers (+ result.containers).
-  function postProcess(data, requestedType, version) {
+  // mode 'quick' (v3 shipping types): only QUICK_KEYS are kept, line items keep the compact columns (QUICK_ITEM_KEYS),
+  // the result says reading_mode 'quick' and QUICK_WARNING leads the warnings (the mark saved in ai_detail)
+  function postProcess(data, requestedType, version, mode) {
     const v3 = isV3(version);
     if (v3 && isOps(requestedType)) return postProcessOps(data, requestedType);
     if (v3 && isPay(requestedType)) return postProcessPay(data, requestedType);
-    const allowed = keysFor(requestedType, version);
+    const quick = isQuick(mode, requestedType, version);
+    const allowed = keysFor(requestedType, version, mode);
     const KEYS = v3 ? ALL_KEYS_V3 : ALL_KEYS;
     const warnings = [];
     const W = (source, code, text, field) => warnings.push({ source, code, text: clean(text, 300), field: field || null });
+    if (quick) warnings.push(Object.assign({}, QUICK_WARNING));
     (data.warnings || []).slice(0, 30).forEach(w => { const t = clean(w, 300); if (t) W('model', 'model_note', t); });
 
     const DT = v3 ? DETECTED_TYPES_V3 : DETECTED_TYPES;
@@ -1775,7 +1887,12 @@
       const hs = it.hs_code == null ? '' : clean(it.hs_code, 40);
       if (hs) row.hs_code = hs;
       ['quantity', 'unit_price', 'amount'].forEach(k => { if (Number.isFinite(it[k])) row[k] = it[k]; });
-      if (v3) {
+      if (quick) {
+        // the compact columns only (description / hs_code / quantity / amount above, + the unit)
+        delete row.unit_price;
+        const u = it.unit == null ? '' : clean(it.unit, 40);
+        if (u) row.unit = u;
+      } else if (v3) {
         ['net_weight', 'gross_weight', 'packages'].forEach(k => { if (Number.isFinite(it[k]) && it[k] >= 0) row[k] = num3(it[k]); });
         [['unit', 40], ['scientific_name', 300], ['origin_country', 80], ['notes', 500]].forEach(([k, n]) => {
           const t = it[k] == null ? '' : clean(it[k], n);
@@ -1820,6 +1937,7 @@
     };
     if (v3) {
       result.prompt_version = PROMPT_VERSION_V3;
+      if (quick) result.reading_mode = 'quick';
       result.containers = containers;
       result.detected_documents = detectedDocs;
       // a combined file: the values of every document it holds (response only — app.extraction_detail_ok does not allow
@@ -1853,7 +1971,8 @@
   // the machine output as readable text (document_extractions.raw_text of an AI reading)
   function renderText(r) {
     const v3 = r.prompt_version === PROMPT_VERSION_V3;
-    const lines = ['[' + ENGINE + ' · ' + (v3 ? PROMPT_VERSION_V3 : PROMPT_VERSION) + '] ' + r.doc_type];
+    const quick = v3 && r.reading_mode === 'quick';
+    const lines = ['[' + ENGINE + ' · ' + (v3 ? PROMPT_VERSION_V3 : PROMPT_VERSION) + (quick ? ' · quick' : '') + '] ' + r.doc_type];
     r.fields.forEach(f => lines.push(f.name + ': ' + f.value + '  (' + Math.round(f.confidence * 100) + '%' + (f.page ? ', p.' + f.page : '') + (f.valid ? '' : ', check') + ')'));
     if (v3 && r.containers && r.containers.length) {
       lines.push('', 'containers:');
@@ -1883,7 +2002,7 @@
     }
     if (r.line_items.length) {
       lines.push('', 'line_items:');
-      r.line_items.forEach((it, i) => lines.push((i + 1) + '. ' + (v3 ? ITEM_KEYS_V3 : ITEM_KEYS).map(k => it[k] == null ? '' : String(it[k])).join(' | ')));
+      r.line_items.forEach((it, i) => lines.push((i + 1) + '. ' + (quick ? QUICK_ITEM_KEYS : (v3 ? ITEM_KEYS_V3 : ITEM_KEYS)).map(k => it[k] == null ? '' : String(it[k])).join(' | ')));
     }
     if (r.warnings.length) {
       lines.push('', 'warnings:');
@@ -1938,6 +2057,9 @@
     DETECTED_TYPES, KIND_OF, ALL_KEYS, KEYS_FOR, MATCH_KEYS, INCOTERMS, MAX_WEIGHT_KG, MAX_PACKAGES, SYSTEM,
     PROMPT_VERSION_V3, PROMPT_VERSIONS, DOC_TYPES_V3, DETECTED_TYPES_V3, V3_KEYS, ALL_KEYS_V3, KEYS_FOR_V3, ITEM_KEYS_V3,
     CONTAINER_KEYS, SYSTEM_V3, identityName, keysFor, isSeal,
+    // quick reading (2026-11-14)
+    READING_MODES, QUICK_TYPES, QUICK_BASE, QUICK_DECL, QUICK_KEYS, QUICK_ITEM_KEYS, QUICK_CONTAINER_KEYS, QUICK_MAX_ITEMS, MAX_TOKENS_QUICK, EFFORT_QUICK,
+    QUICK_WARNING, SYSTEM_V3_QUICK, isQuick, isQuickDetail,
     AiError, outputSchema, validateRequest, buildRequest, callClaude, parseMessage, usageOf, postProcess, renderText,
     estimateHoldUsd, classifyCallError, pdfPageCount, isValidContainer, iso6346CheckDigit, isSaudiVat, isHs, isIsoDate,
     measure, incotermCode,
