@@ -379,8 +379,9 @@ check('Fasah stage labels wherever statuses appear: rpt.js + portal.js (ar + en)
 check('approval only behind the confirm dialog, with the version and an idempotency key', () =>
   (/askConfirm\(\{ title: T\('cf_title'\)[\s\S]*?S\.idem = approveKey\(S\.idem, rv\.version, o, uuid\);[\s\S]*?API\.approveDeclarationExtraction\(rv\.extraction_id, rv\.transaction_id, o\)/.test(SRC)
     && (SRC.match(/approveDeclarationExtraction\(/g) || []).length === 1) || 'approve');
-check('the Fasah export logs first (report fasah_sheet, filter transaction_id only) and builds the file only on success', () =>
-  /call\(api, 'logReportExport', \{ report: 'fasah_sheet', format: format, filters: \{ transaction_id: model\.txId \}, row_count: n/.test(FSH)
+check('the Fasah export logs first (report fasah_sheet, filter transaction_id only — {} for a readings draft) and builds the file only on success', () =>
+  /var filters = model\.txId \? \{ transaction_id: model\.txId \} : \{\};/.test(FSH)
+    && /call\(api, 'logReportExport', \{ report: 'fasah_sheet', format: format, filters: filters, row_count: n/.test(FSH)
     && FSH.indexOf("if (r.error) {", FSH.indexOf("'logReportExport'")) < FSH.indexOf('X.download(', FSH.indexOf("'logReportExport'")) || 'export order');
 check('docs: LEGACY_DECL_AR.md names the UI files', () => { const d = rd('docs/online/LEGACY_DECL_AR.md'); return ['assets/js/decl-review.js', 'assets/js/hs-picker.js', 'assets/js/ops/tx-decl.js', 'assets/js/ops/fasah-sheet.js'].every(f => d.includes(f)) || 'docs'; });
 
@@ -719,6 +720,187 @@ async function txAndSheetFlow() {
   }
 }
 
+/* ================================================================ «كشف إدخال فسح» from the readings (2026-11-14) */
+// synthetic readings only (fictional parties / numbers); the engine answer is the report's own: MarsaDocMatch strict
+const RD_BL = { bl_number: 'SYNBL0001', shipper: 'BLUE HARBOUR FOODS LTD', consignee: 'NAJD SAMPLE TRADING CO', vessel: 'SAMPLE STAR', voyage: '101E',
+  port_of_loading: 'PORT ALPHA', port_of_discharge: 'JEDDAH', freight_terms: 'FREIGHT PREPAID', goods_description: 'FROZEN FISH FILLET', packages_count: '1200',
+  package_type: 'CARTONS', gross_weight: '13000', net_weight: '12000', measurement_cbm: '30', temperature_c: '-18', container_numbers: 'TSTU7710023', seal_numbers: 'SL-9001' };
+const RD_INV = { invoice_number: 'INV-77', invoice_date: '2026-10-01', supplier_name: 'BLUE HARBOUR FOODS LTD', buyer_name: 'NAJD SAMPLE TRADING CO', currency: 'usd',
+  total: '24000', country_of_origin: 'SAMPLELAND', export_country: 'SAMPLELAND', incoterms: 'CFR', payment_terms: 'TT 30 DAYS', gross_weight: '13000', packages_count: '1200' };
+const RD_PK = { packing_list_number: 'PL-77', packing_list_date: '2026-10-01', packages_count: '1200', package_type: 'CARTONS', gross_weight: '13500', net_weight: '12000', container_numbers: 'TSTU7710023' };
+const RD_ITEMS = [{ description: 'FROZEN FISH FILLET', hs_code: '030489', quantity: 12000, unit: 'KG', unit_price: 2, amount: 24000, origin_country: 'SAMPLELAND', scientific_name: 'Sample spp' }];
+const RD_CT = [{ container_number: 'TSTU7710023', seal_number: 'SL-9001', size_type: '40RF', packages_count: 1200, gross_weight: 13000, net_weight: 12000 }];
+const fld = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, { value: v }]));
+function rdResult(withPk) {
+  const inp = { bl: { fields: fld(RD_BL), items: [] }, invoice: { fields: fld(RD_INV), items: RD_ITEMS } };
+  if (withPk) inp.packing = { fields: fld(RD_PK), items: [] };
+  return DM.compare(inp, { mode: 'strict' });
+}
+function rdSrc(o) {
+  o = o || {};
+  const docs = { bl: { fields: Object.assign({}, RD_BL, o.bl || {}), items: [], containers: o.noCt ? [] : RD_CT, label: 'bl.pdf', detected: 'bill_of_lading' },
+    invoice: { fields: Object.assign({}, RD_INV, o.inv || {}), items: RD_ITEMS, containers: [], label: o.invLabel || 'inv.pdf', detected: o.invDetected || 'commercial_invoice' } };
+  if (o.pk) docs.packing = { fields: RD_PK, items: [{ description: 'FROZEN FISH FILLET', packages: 1200, quantity: 12000, unit: 'KG', gross_weight: 13500, net_weight: 12000, container_number: 'TSTU7710023' }], label: 'pl.pdf', detected: 'packing_list', parentDetected: o.pkParent };
+  return { docs, result: rdResult(!!o.pk), now: new Date('2026-11-14T09:05:00Z'), lang: o.lang || 'ar', exceptions: o.exceptions, t: k => I18N.t('decl.' + k) };
+}
+section('Fasah sheet from the readings (buildReadingsModel)');
+{
+  const m = F.buildReadingsModel(rdSrc({ pk: true }));
+  const sec = id => m.sections.filter(s => s.id === id)[0];
+  const pv = (s, k) => (s.pairs.concat(...(s.groups || []).map(g => g.pairs)).filter(p => p[0] === k)[0] || [])[1];
+  check('ready draft: strip = «مسودة — قبل إنشاء المعاملة», importer (consignee), B/L no., prepared at in Riyadh time', () =>
+    (m.ready && m.draft && m.txId === null && J(m.strip.map(p => p[0])) === J(['s_tx', 's_importer', 's_bl', 's_prepared']) && m.strip[0][1] === 'مسودة — قبل إنشاء المعاملة'
+      && m.strip[1][1] === 'NAJD SAMPLE TRADING CO' && m.strip[2][1] === 'SYNBL0001' && m.strip[3][1] === '2026-11-14 12:05') || J(m.strip));
+  check('sections in the reference order: 1 B/L (pairs + «الكميات والأوزان كما وردت في البوليصة» + containers & seals), 2 invoice (+ items), 3 packing list', () =>
+    (J(m.sections.map(s => s.id)) === J(['bl', 'invoice', 'packing']) && sec('bl').titleKey === 'rsec_bl' && sec('bl').groups[0].titleKey === 'rg_bl_qty'
+      && pv(sec('bl'), 'f_vessel_voyage') === 'SAMPLE STAR / 101E' && pv(sec('bl'), 'f_temp') === '-18' && pv(sec('bl'), 'f_cbm') === '30' && pv(sec('bl'), 'rf_consignee') === 'NAJD SAMPLE TRADING CO'
+      && sec('bl').tables[0].id === 'rd_containers' && J(sec('bl').tables[0].cols.map(c => c.key)) === J(['container_no', 'seal_no', 'size_type', 'packages', 'rgross', 'net'])
+      && sec('bl').tables[0].rows[0].seal_no === 'SL-9001' && sec('bl').tables[0].rows[0].size_type === '40RF') || J(m.sections.map(s => s.id)));
+  check('invoice: seller / buyer / currency name / total / incoterms / payment terms; items in the reference columns', () =>
+    (pv(sec('invoice'), 'f_currency') === 'USD — دولار أمريكي' && pv(sec('invoice'), 'f_seller') === 'BLUE HARBOUR FOODS LTD' && pv(sec('invoice'), 'f_total') === '24000'
+      && pv(sec('invoice'), 'f_payment_terms') === 'TT 30 DAYS' && J(sec('invoice').tables[0].cols.map(c => c.key)) === J(['description', 'supplier_hs_code', 'quantity', 'unit', 'unit_price', 'total', 'origin_country', 'scientific_name'])
+      && sec('invoice').tables[0].rows[0].supplier_hs_code === '030489' && sec('invoice').tables[0].rows[0].total === 24000) || J(sec('invoice')));
+  check('a value the reading did not return stays empty (rendered «—»): B/L notify party not listed, invoice export country blank when absent', () => {
+    const m2 = F.buildReadingsModel(rdSrc({ inv: { export_country: '' } }));
+    return (pv(m2.sections[1], 'f_export_country') === '' && !m2.sections[0].pairs.some(p => p[0] === 'f_notify') && m2.sections.length === 2) || J(m2.sections[1].pairs);
+  });
+  const R = rdResult(true);
+  check('common values = the report\'s engine rows, same statuses (strict): match → ok, mismatch → diff, info on one document → single, missing → review; columns of the documents used', () => {
+    const g = m.common.filter(r => r.key === 'gross_weight')[0], c = m.common.filter(r => r.key === 'consignee')[0];
+    return (m.common.length === R.rows.length && g && g.engine === 'mismatch' && g.status === 'diff' && g.packing === '13500' && c && c.status === 'ok'
+      && J(m.docCols) === J(['bl', 'invoice', 'packing']) && c.label === 'المرسل إليه / المستورد'
+      && m.common.filter(r => r.key === 'invoice_number')[0].engine === 'info' && m.common.filter(r => r.key === 'invoice_number')[0].status === 'single'
+      && m.common.some(r => r.engine === 'missing') && m.common.filter(r => r.engine === 'missing').every(r => r.status === (r.bl || r.invoice || r.packing ? 'review' : 'missing'))
+      && m.common.every(r => r.engine !== 'missing' || r.status !== 'single')) || J(m.common);
+  });
+  check('conflicts table: the report\'s exceptions as given (st → kind), else its mismatch / partial / critical missing rows', () => {
+    const m2 = F.buildReadingsModel(rdSrc({ pk: true, exceptions: [{ st: 'invalid', label: 'أرقام الحاويات', values: { bl: 'TSTU7710024' }, note: 'x' }, { st: 'partial', label: 'L', values: {}, note: '' }] }));
+    return (J(m2.alerts.map(a => a.kind)) === J(['invalid', 'review']) && m2.alerts[0].bl === 'TSTU7710024'
+      && m.alerts.some(a => a.kind === 'conflict' && a.packing === '13500')) || J([m2.alerts, m.alerts]);
+  });
+  check('a correction (a changed reading value) flows into the sheet and the common values', () => {
+    const src = rdSrc({ pk: true, bl: { gross_weight: '13500' } });
+    src.result = DM.compare({ bl: { fields: fld(Object.assign({}, RD_BL, { gross_weight: '13500' })), items: [] }, invoice: { fields: fld(RD_INV), items: RD_ITEMS }, packing: { fields: fld(RD_PK), items: [] } }, { mode: 'strict' });
+    const m2 = F.buildReadingsModel(src);
+    return (m2.sections[0].groups[0].pairs.filter(p => p[0] === 'rf_gross')[0][1] === '13500' && m2.common.filter(r => r.key === 'gross_weight')[0].bl === '13500') || J(m2.common);
+  });
+  check('containers: from container_numbers + seal_numbers when the reading has no rows; a corrected container list rebuilds the rows', () => {
+    const a = F.containerRows({ fields: { container_numbers: 'TSTU7710023, MSKU1234565', seal_numbers: 'S1, S2' }, containers: [] });
+    const b = F.containerRows({ fields: { container_numbers: 'MSKU1234565' }, containers: RD_CT });
+    return (J(a.map(x => [x.container_no, x.seal_no])) === J([['TSTU7710023', 'S1'], ['MSKU1234565', 'S2']]) && b.length === 1 && b[0].container_no === 'MSKU1234565') || J([a, b]);
+  });
+  check('readingExcluded: a Fasah entry sheet (file name / title) → fasah_sheet; detected type other → other; a B/L → null', () =>
+    (F.readingExcluded({ fileName: 'كشف-إدخال-فسح-000001-20261101.pdf' }) === 'fasah_sheet' && F.readingExcluded({ label: 'x', fields: { goods_description: 'ورقة معلومات الإدخال في منصة فسح' } }) === 'fasah_sheet'
+      && F.readingExcluded({ label: 'FASAH entry sheet.pdf' }) === 'fasah_sheet' && F.readingExcluded({ label: 'a.pdf', detected: 'other' }) === 'other'
+      && F.readingExcluded({ label: 'a.pdf — packing', detected: 'packing_list', parentDetected: 'other' }) === 'other' && F.readingExcluded({ label: 'bl.pdf', detected: 'bill_of_lading' }) === null) || 'excluded');
+  check('a combined Fasah sheet in the invoice slot: no sheet (not ready), the reason kept for the note; a packing part of an \'other\' file is left out only', () => {
+    const a = F.buildReadingsModel(rdSrc({ invLabel: 'كشف إدخال فسح 000001.pdf — فاتورة تجارية' }));
+    const b = F.buildReadingsModel(rdSrc({ pk: true, pkParent: 'other' }));
+    return (a.ready === false && J(a.missing) === J(['invoice']) && a.excluded[0].reason === 'fasah_sheet' && a.excluded[0].doc === 'invoice'
+      && b.ready && J(b.sections.map(s => s.id)) === J(['bl', 'invoice']) && J(b.docCols) === J(['bl', 'invoice']) && b.excluded[0].doc === 'packing') || J([a, b.excluded]);
+  });
+  check('file name كشف-إدخال-فسح-مسودة-{yyyymmdd-hhmm} (Riyadh); flatRows / xlsxSpec carry the groups and the document columns', () => {
+    const t = k => I18N.t('decl.' + k);
+    const rows = F.flatRows(m, t), spec = F.xlsxSpec(m, t, 'ar');
+    const bytes = XLSX.build(spec);
+    const common = spec.sheets.filter(x => x.name === 'مراجعة سريعة للقيم المشتركة')[0];
+    return (m.fileBase === 'كشف-إدخال-فسح-مسودة-20261114-1205' && F.fileName(m.fileSeq, new Date('2026-11-14T09:05:00Z'), 'csv') === 'كشف-إدخال-فسح-مسودة-20261114-1205.csv'
+      && rows.some(r => r.section === 'الكميات والأوزان كما وردت في البوليصة' && r.field === 'درجة الحرارة' && r.value === '-18')
+      && rows.some(r => r.section === 'الحاويات والأختام') && common && J(common.columns.map(c => c.key)) === J(['field', 'bl', 'invoice', 'packing', 'result'])
+      && spec.meta[0][1] === 'مسودة — قبل إنشاء المعاملة' && spec.meta[2][1] === t('rd_foot_note') && bytes.length > 1000
+      && F.rowCount(m) === rows.length) || J([m.fileBase, F.rowCount(m), rows.length, common && common.columns]);
+  });
+  check('the transaction sheet is unchanged by the adapter (no docCols / groups → the four document columns)', () => J(F.docCols({})) === J(['bl', 'invoice', 'packing', 'declaration']) || 'docCols');
+  check('i18n: the draft keys in Arabic and English (decl + ocr.mx_fsh_*)', () => {
+    const keys = ['rd_draft', 'rd_lead', 'rd_foot_note', 'rd_need', 'rd_need_original', 'rd_excluded_fasah_sheet', 'rd_excluded_other', 'rsec_bl', 'rsec_invoice', 'rsec_packing', 'rsec_declaration',
+      'rg_bl_qty', 'rf_consignee', 'rf_pk_total', 'rf_gross', 'fc_rgross', 'fc_rgross_weight_kg', 'ftab_rd_containers', 'ftab_rd_packing_items', 'ak_invalid', 'ak_review', 'cs_review'];
+    const ocr = rd('assets/i18n/ocr.js');
+    return (keys.every(has) && (ocr.match(/mx_fsh_title: '/g) || []).length === 2 && (ocr.match(/mx_fsh_tag: '/g) || []).length === 2
+      && dicts.ar['decl.rd_foot_note'] === 'هذه الورقة مخصصة لتسريع ودقة إدخال المعاملة الجديدة في منصة فسح قبل إنشاء البيان، ولا تغني عن مراجعة المستندات الأصلية.') || keys.filter(k => !has(k));
+  });
+  check('en: the draft strip / sections in English', () => {
+    LANG = 'en';
+    try { const e = F.buildReadingsModel(rdSrc({ lang: 'en' })); return (e.strip[0][1] === 'Draft — before the transaction is created' && e.sections[1].pairs.filter(p => p[0] === 'f_currency')[0][1] === 'USD — US dollar') || J(e.strip); }
+    finally { LANG = 'ar'; }
+  });
+}
+section('Fasah sheet from the readings — page wiring (ocr.html, ocr-match.js, ocr.js)');
+{
+  const OCRH = rd('ocr.html'), MX = rd('assets/js/ocr-match.js'), OCRJ = rd('assets/js/ocr.js'), SW = rd('sw.js');
+  const pos = f => OCRH.indexOf('src="' + f + '"');
+  check('ocr.html: rpt/xlsx.js → rpt/export.js → ops/fasah-sheet.js after doc-match.js and before ocr-match.js; decl.css + i18n/decl.js loaded; all precached in sw.js', () =>
+    (pos('assets/js/doc-match.js') < pos('assets/js/rpt/xlsx.js') && pos('assets/js/rpt/xlsx.js') < pos('assets/js/rpt/export.js') && pos('assets/js/rpt/export.js') < pos('assets/js/ops/fasah-sheet.js')
+      && pos('assets/js/ops/fasah-sheet.js') < pos('assets/js/ocr-match.js') && pos('assets/js/rpt/xlsx.js') > 0 && /href="assets\/css\/pages\/decl\.css"/.test(OCRH) && pos('assets/i18n/decl.js') > 0
+      && ['assets/js/rpt/xlsx.js', 'assets/js/rpt/export.js', 'assets/js/ops/fasah-sheet.js', 'assets/css/pages/decl.css', 'assets/i18n/decl.js'].every(f => SW.includes("'" + f + "'"))) || 'ocr.html');
+  check('ocr.html: the collapsible «كشف إدخال فسح» block (hidden until both are read) after the exceptions and before the per-document sheets', () => {
+    const a = OCRH.indexOf('id="ocr-mx-exc"'), b = OCRH.indexOf('id="ocr-fsh-block"'), c = OCRH.indexOf('id="ocr-mx-sheets-block"');
+    return (a > 0 && a < b && b < c && /<details class="ocr-match-details ocr-fsh-block" id="ocr-fsh-block" open hidden>/.test(OCRH) && /id="ocr-fsh-body"/.test(OCRH)) || [a, b, c];
+  });
+  check('ocr-match.js: rendered with every report render (corrections flow in) from the same engine result + exceptions; needs the invoice AND the B/L', () =>
+    (/renderExceptions\(\);\n      renderFasah\(\);\n      renderSheets\(\);/.test(MX) && /F\.renderDraft\(body, \{\n        docs: fasahDocs\(\), result: R,/.test(MX)
+      && /exceptions: X2\.rows\.map/.test(MX) && /!S\.slots\.invoice\.res \|\| !S\.slots\.bl\.res/.test(MX) && /fields: plainFields\(s\)/.test(MX)) || 'ocr-match.js');
+  check('ocr.js: a part of a combined file carries the whole file\'s detected type (an \'other\' file never makes the sheet); ocr-match keeps the file name', () =>
+    (/source_detected_type: typeof res\.detected_type === 'string' \? res\.detected_type : null/.test(OCRJ) && /parentDetected: typeof res\.source_detected_type === 'string'/.test(MX)
+      && /s\.fileName = String\(x\.fileName/.test(MX)) || 'ocr.js');
+  check('decl.css: the readings draft is left out of the matching report\'s own print; the draft prints 3 pairs per row', () => {
+    const css = rd('assets/css/pages/decl.css');
+    return (/body\.ocr-print-match \.ocr-fsh-block \{ display: none !important; \}/.test(css) && /\.fsh-draft \.fsh-grid \{ grid-template-columns: repeat\(3, minmax\(0, 1fr\)\); \}/.test(css)) || 'css';
+  });
+}
+async function draftFlow() {
+  section('DOM: the readings draft (renderDraft) — export logged first, print copy, failed log');
+  const { document } = makeDom();
+  const calls = [], downloads = [];
+  let logErr = null;
+  const A = { logReportExport: p => { calls.push(['log', p]); return logErr ? err(logErr) : ok({ id: 'l' }); }, errorMessage: e => e.code };
+  const listeners = {};
+  const w3 = { MarsaI18n: I18N, document, MarsaXlsx: XLSX,
+    print: () => { calls.push(['print', !!document.body.querySelector('.fsh-overlay .fsh-draft'), document.body.classList.contains('fsh-open')]); },
+    addEventListener: (t, f) => { (listeners[t] = listeners[t] || []).push(f); }, removeEventListener: (t, f) => { listeners[t] = (listeners[t] || []).filter(x => x !== f); },
+    MarsaExport: { download: (b, n) => { calls.push(['file', n]); downloads.push(n); return n; }, toCsv: (cols, rows) => '﻿' + rows.length } };
+  w3.window = w3;
+  const c3 = { window: w3, document, Intl, Date, Math, String, Object, Array, JSON, Number, parseInt, isFinite, isNaN, Promise, setTimeout, clearTimeout, encodeURIComponent, Blob: function (p, o) { this.p = p; this.o = o; } };
+  vm.createContext(c3);
+  vm.runInContext(DICT, c3); vm.runInContext(FSH, c3);
+  const host = document.createElement('div'); document.body.appendChild(host);
+  const src = rdSrc({ pk: true }); delete src.t;
+  const m = w3.MarsaFasahSheet.renderDraft(host, src, { api: A, orgId: ORG, docName: k => 'D:' + k });
+  check('rendered inline: lead, print / Excel / CSV, the strip and the 3 numbered sections, common values, conflicts, the draft foot note', () =>
+    (m.ready && host.querySelectorAll('[data-fsh-export]').length === 3 && host.querySelectorAll('.fsh-sec').length === 5 && /1 — معلومات البوليصة/.test(host.textContent)
+      && /2 — معلومات الفاتورة التجارية/.test(host.textContent) && /3 — معلومات بيان التعبئة/.test(host.textContent) && /الكميات والأوزان كما وردت في البوليصة/.test(host.textContent)
+      && /الحاويات والأختام/.test(host.textContent) && /مسودة — قبل إنشاء المعاملة/.test(host.textContent) && /يوجد اختلاف/.test(host.textContent)
+      && /قبل إنشاء البيان، ولا تغني عن مراجعة المستندات الأصلية/.test(host.textContent) && !/البيان الجمركي<|col_declaration/.test(host.textContent)) || host.textContent.slice(0, 400));
+  btnByText(host, /^Excel$/).click(); await settle(10);
+  const log1 = calls.filter(x => x[0] === 'log')[0];
+  check('Excel: logged FIRST (fasah_sheet, xlsx, filters {} — no transaction yet, row_count, org), then كشف-إدخال-فسح-مسودة-…xlsx', () =>
+    (log1 && calls.indexOf(log1) < calls.findIndex(x => x[0] === 'file') && log1[1].report === 'fasah_sheet' && log1[1].format === 'xlsx' && J(log1[1].filters) === J({})
+      && log1[1].row_count === F.rowCount(m) && log1[1].orgId === ORG && /^كشف-إدخال-فسح-مسودة-\d{8}-\d{4}\.xlsx$/.test(downloads[0] || '')) || J(calls));
+  btnByText(host, /^CSV$/).click(); await settle(10);
+  btnByText(host, /طباعة/).click(); await settle(10);
+  const pr = calls.filter(x => x[0] === 'print')[0];
+  check('CSV then print: each logged with its format; print shows a copy of the sheet in the overlay (body.fsh-open) — the print CSS of decl.css', () =>
+    (calls.filter(x => x[0] === 'log').map(x => x[1].format).join() === 'xlsx,csv,print' && /^كشف-إدخال-فسح-مسودة-\d{8}-\d{4}\.csv$/.test(downloads[1] || '')
+      && pr && pr[1] === true && pr[2] === true) || J(calls));
+  (listeners.afterprint || []).slice().forEach(f => f());
+  check('afterprint removes the print copy', () => (!document.body.querySelector('.fsh-overlay') && !document.body.classList.contains('fsh-open')) || 'still open');
+  logErr = 'MRS_FORBIDDEN';
+  const nPrint = calls.filter(x => x[0] === 'print').length;
+  btnByText(host, /^Excel$/).click(); await settle(10);
+  btnByText(host, /طباعة/).click(); await settle(10);
+  check('a failed log: no file and no print, the error is shown', () =>
+    (downloads.length === 2 && calls.filter(x => x[0] === 'print').length === nPrint && /تعذّر التصدير/.test(host.querySelector('.fsh-status').textContent)) || J(calls.slice(-3)));
+  const host2 = document.createElement('div'); document.body.appendChild(host2);
+  const src2 = rdSrc({ invLabel: 'كشف-إدخال-فسح-000001-20261101.pdf' }); delete src2.t;
+  const m2 = w3.MarsaFasahSheet.renderDraft(host2, src2, { api: A, docName: k => 'D:' + k });
+  check('a Fasah entry sheet read as the invoice: a note says it was not used, no sheet and no buttons', () =>
+    (!m2.ready && host2.querySelectorAll('.fsh-sec').length === 0 && host2.querySelectorAll('[data-fsh-export]').length === 0
+      && /كشف-إدخال-فسح-000001-20261101\.pdf/.test(host2.textContent) && /يبدو كشف إدخال فسح جاهزًا وليس D:invoice/.test(host2.textContent) && /اقرأ المستند الأصلي \(D:invoice\)/.test(host2.textContent)) || host2.textContent);
+  const host3 = document.createElement('div'); document.body.appendChild(host3);
+  const src3 = rdSrc(); delete src3.t; delete src3.docs.invoice;
+  const m3 = w3.MarsaFasahSheet.renderDraft(host3, src3, { api: A, docName: k => 'D:' + k });
+  check('only the B/L read: «لم يُقرأ بعد: …» (no sheet)', () => (!m3.ready && /لم يُقرأ بعد: D:invoice/.test(host3.textContent) && !host3.querySelector('.fsh-sec')) || host3.textContent);
+}
+
 section('browser fixes — static wiring');
 {
   const src = rd('assets/js/decl-review.js');
@@ -732,6 +914,7 @@ section('browser fixes — static wiring');
   await reviewFlow();
   await uploadFlow();
   await txAndSheetFlow();
+  await draftFlow();
   console.log('\n' + (fail ? 'FAILED' : 'OK') + ': ' + pass + ' passed, ' + fail + ' failed');
   if (fail) { fails.forEach(f => console.log('  - ' + f)); process.exit(1); }
 })();

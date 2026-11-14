@@ -14,6 +14,15 @@
      CSV (MarsaExport.toCsv). Every export is logged FIRST through logReportExport({report: 'fasah_sheet',
      filters: {transaction_id}}) — never the row data — and the file is built only when the log succeeded.
      File name: كشف-إدخال-فسح-{seq}-{yyyymmdd-hhmm} (Asia/Riyadh).
+   * Readings draft (2026-11-14, owner: the sheet is the OUTPUT the program makes from the B/L + the commercial invoice,
+     read together as the first step): buildReadingsModel turns the readings of the matching report (ocr-match.js:
+     B/L / invoice / packing list / declaration fields + items + containers, the engine result of the report in strict
+     mode and its exceptions) into the SAME model shape, so render / flatRows / xlsxSpec / the export are shared.
+     No transaction yet: strip «مسودة — قبل إنشاء المعاملة», filters {} in the export log (log_report_export accepts a
+     fasah_sheet export with no filter key), file كشف-إدخال-فسح-مسودة-{yyyymmdd-hhmm}. A reading that is itself a Fasah
+     entry sheet (title / file name) or whose detected type is 'other' never produces the sheet (readingExcluded, a note
+     says so). renderDraft(host, src, opts) draws it inline (toolbar + sheet); print = a copy of the sheet in the
+     .fsh-overlay, so the print CSS of decl.css applies unchanged.
    * Read-only: nothing is written except the export log. Strings: namespace 'decl' (assets/i18n/decl.js).
    * Data only via textContent / createElement. ES5, no library.
    ========================================================================== */
@@ -229,13 +238,176 @@
     };
   }
 
+  /* ------------------------------------------------------------------
+     Readings draft: the matching report's readings → the same model (no transaction yet)
+     ------------------------------------------------------------------ */
+  var DOCS = ['bl', 'invoice', 'packing', 'declaration'];
+  var DRAFT_SEQ = 'مسودة';   // كشف-إدخال-فسح-مسودة-{yyyymmdd-hhmm} in both languages (the file names are Arabic)
+  // the document columns of the common values / alerts tables: a readings draft shows the documents it used
+  function docCols(m) { return m && Array.isArray(m.docCols) ? m.docCols : DOCS; }
+  var AK_CLS = { missing: 'missing', conflict: 'diff', invalid: 'diff', review: 'review' };
+  // a Fasah entry sheet (the owner's «كشف إدخال فسح» / «ورقة معلومات الإدخال في منصة فسح», our own file name too)
+  var FASAH_RE = /كشف\s*[-_ ]?\s*[إا]دخال\s*[-_ ]?\s*فسح|ورقة\s+معلومات\s+ال[إا]دخال|fasah\s*[-_ ]?\s*entry\s*[-_ ]?\s*(info(rmation)?\s*)?sheet/i;
+  /* a reading that must not produce the sheet: 'fasah_sheet' (it IS a Fasah entry sheet: the file name / a value says so)
+     or 'other' (the reading's detected type is not a B/L / invoice / packing list / declaration). null = usable.
+     d = { label?, fileName?, detected?, parentDetected?, fields? {key: value} } */
+  function readingExcluded(d) {
+    if (!d || typeof d !== 'object') return null;
+    var names = [d.label, d.fileName].map(function (x) { return str(x).replace(/[-_.]+/g, ' '); });
+    var vals = [];
+    var f = d.fields && typeof d.fields === 'object' ? d.fields : {};
+    Object.keys(f).forEach(function (k) { if (typeof f[k] === 'string') vals.push(f[k]); });
+    if (names.concat(vals).some(function (x) { return FASAH_RE.test(x); })) return 'fasah_sheet';
+    if (d.detected === 'other' || d.parentDetected === 'other') return 'other';
+    return null;
+  }
+  function first(f, keys) {
+    for (var i = 0; i < keys.length; i++) { var v = f && f[keys[i]]; if (!blank(v)) return str(v).trim(); }
+    return '';
+  }
+  // container numbers printed in one field (ISO 6346 shaped first, else split on separators)
+  function codesOf(v) {
+    var s = western(v).toUpperCase();
+    var iso = s.match(/[A-Z]{3}[UJZ]\s?-?\s?\d{6}\s?-?\s?\d/g);
+    if (iso && iso.length) return iso.map(ctrNo);
+    return s.split(/[,;،|\/\n]+|\s{2,}/).map(function (x) { return x.trim(); }).filter(Boolean);
+  }
+  function sealsOf(v) { return western(v).split(/[,;،|\/\n\s]+/).map(function (x) { return x.trim(); }).filter(Boolean); }
+  // per-container rows: the reading's containers rows; the container_numbers / seal_numbers fields when there are none, or
+  // when the (corrected) field lists other containers — the row data is kept for a container that is on both
+  function containerRows(d) {
+    var f = d.fields || {}, rows = list(d.containers).filter(function (c) { return c && typeof c === 'object' && !blank(c.container_number); });
+    var fromRows = rows.map(function (c) {
+      return { container_no: str(c.container_number), seal_no: blank(c.seal_number) ? '' : str(c.seal_number), size_type: blank(c.size_type) ? '' : str(c.size_type),
+        packages: c.packages_count == null ? '' : c.packages_count, rgross: c.gross_weight == null ? '' : c.gross_weight, net: c.net_weight == null ? '' : c.net_weight };
+    });
+    var nums = blank(f.container_numbers) ? [] : codesOf(f.container_numbers);
+    if (!nums.length) return fromRows;
+    var have = setOf(fromRows.map(function (r) { return r.container_no; })).join(','), want = setOf(nums).join(',');
+    if (fromRows.length && have === want) return fromRows;
+    var seals = blank(f.seal_numbers) ? [] : sealsOf(f.seal_numbers);
+    return nums.map(function (n, i) {
+      var hit = fromRows.filter(function (r) { return ctrNo(r.container_no) === ctrNo(n); })[0];
+      if (hit) return hit;
+      return { container_no: n, seal_no: seals.length === nums.length ? seals[i] : (nums.length === 1 ? seals.join(', ') : ''), size_type: '', packages: '', rgross: '', net: '' };
+    });
+  }
+  function itemRows(items, kind) {
+    return list(items).filter(function (x) { return x && typeof x === 'object'; }).slice(0, 500).map(function (x) {
+      if (kind === 'packing') {
+        return { description: x.description, packages: x.packages, quantity: x.quantity, unit: x.unit, rgross_weight_kg: x.gross_weight != null ? x.gross_weight : x.gross_weight_kg,
+          net_weight_kg: x.net_weight != null ? x.net_weight : x.net_weight_kg, container_no: x.container_number || x.container_no, seal_no: x.seal_number || x.seal_no };
+      }
+      return { description: x.description, supplier_hs_code: x.hs_code != null ? x.hs_code : x.supplier_hs_code, quantity: x.quantity, unit: x.unit,
+        unit_price: x.unit_price, total: x.amount != null ? x.amount : x.total, origin_country: x.origin_country || x.country_of_origin, scientific_name: x.scientific_name };
+    });
+  }
+  var ENGINE_CS = { match: 'ok', mismatch: 'diff', partial: 'review', info: 'review' };
+  var EXC_KIND = { mismatch: 'conflict', invalid: 'invalid', missing: 'missing', partial: 'review' };
+  /* src = { docs: { bl|invoice|packing|declaration: { fields {key: value}, items [], containers [], label?, fileName?, detected?,
+             parentDetected? } }, result: the report's MarsaDocMatch.compare answer (strict), exceptions?: [{ st, label, values, note }]
+             (the report's exceptions table), now?, lang?, t?(key) }
+     → { ready: false, missing [docs], excluded [{doc, reason, label}] }
+     | the buildModel shape + { ready: true, draft: true, docCols, footKey, fileSeq, excluded } */
+  function buildReadingsModel(src) {
+    src = src || {};
+    var lang = src.lang === 'en' ? 'en' : 'ar';
+    var t = typeof src.t === 'function' ? src.t : defaultT;
+    var docs = src.docs && typeof src.docs === 'object' ? src.docs : {}, R = src.result && typeof src.result === 'object' ? src.result : { rows: [] };
+    var use = {}, excluded = [];
+    DOCS.forEach(function (k) {
+      var d = docs[k];
+      if (!d || typeof d !== 'object') return;
+      var why = readingExcluded(d);
+      if (why) excluded.push({ doc: k, reason: why, label: str(d.label || d.fileName) });
+      else use[k] = { fields: d.fields && typeof d.fields === 'object' ? d.fields : {}, items: list(d.items), containers: list(d.containers) };
+    });
+    if (!use.bl || !use.invoice) {
+      return { ready: false, excluded: excluded, missing: ['bl', 'invoice'].filter(function (k) { return !use[k]; }) };
+    }
+    var b = use.bl.fields, iv = use.invoice.fields, pk = use.packing ? use.packing.fields : null, de = use.declaration ? use.declaration.fields : null;
+    var prepared = riyadhStamp(src.now || new Date());
+    function P(key, v, ltr) { return [key, blank(v) ? '' : str(v).trim(), !!ltr]; }
+    var importer = first(b, ['consignee_name', 'consignee']) || first(iv, ['buyer_name', 'consignee_name', 'consignee']);
+    var blNo = first(b, ['bl_number']);
+    var draftText = t('rd_draft');
+    var strip = [P('s_tx', draftText), P('s_importer', importer), P('s_bl', blNo, 1), P('s_prepared', prepared.text, 1)];
+    // containers: the B/L's own rows, else the packing list's / the invoice's
+    var ctr = containerRows(use.bl);
+    if (!ctr.length && use.packing) ctr = containerRows(use.packing);
+    if (!ctr.length) ctr = containerRows(use.invoice);
+    // «الوزن الإجمالي» as on the reference sheet (rf_gross / fc_rgross*; the transaction sheet keeps «الوزن القائم»)
+    var CT = [{ key: 'container_no', type: 'code' }, { key: 'seal_no', type: 'code' }, { key: 'size_type', type: 'code' }, { key: 'packages', type: 'number' },
+      { key: 'rgross', type: 'number' }, { key: 'net', type: 'number' }];
+    var IT = [{ key: 'description', type: 'text' }, { key: 'supplier_hs_code', type: 'code' }, { key: 'quantity', type: 'number' }, { key: 'unit', type: 'text' },
+      { key: 'unit_price', type: 'number' }, { key: 'total', type: 'number' }, { key: 'origin_country', type: 'text' }, { key: 'scientific_name', type: 'text' }];
+    var PT = [{ key: 'description', type: 'text' }, { key: 'packages', type: 'number' }, { key: 'quantity', type: 'number' }, { key: 'unit', type: 'text' },
+      { key: 'rgross_weight_kg', type: 'number' }, { key: 'net_weight_kg', type: 'number' }, { key: 'container_no', type: 'code' }, { key: 'seal_no', type: 'code' }];
+    var vv = [first(b, ['vessel']), first(b, ['voyage'])].filter(function (x) { return !blank(x); }).join(' / ');
+    var blPairs = [P('f_bl_number', blNo, 1), P('f_shipper', first(b, ['shipper'])), P('rf_consignee', first(b, ['consignee_name', 'consignee'])),
+      P('f_vessel_voyage', vv, 1), P('f_pol', first(b, ['port_of_loading'])), P('f_pod', first(b, ['port_of_discharge'])),
+      P('f_freight_terms', first(b, ['freight_terms'])), P('f_goods', first(b, ['goods_description']))];
+    // printed on the B/L but not on the reference sheet: listed only when the reading returned them
+    [['f_notify', 'notify_party'], ['f_shipping_line', 'shipping_line'], ['f_booking', 'booking_number', 1], ['f_place_receipt', 'place_of_receipt'],
+      ['f_place_delivery', 'place_of_delivery']].forEach(function (x) { var v = first(b, [x[1]]); if (v) blPairs.splice(blPairs.length - 1, 0, P(x[0], v, x[2])); });
+    var sections = [
+      { id: 'bl', titleKey: 'rsec_bl', pairs: blPairs,
+        groups: [{ titleKey: 'rg_bl_qty', pairs: [P('f_packages', first(b, ['packages_count']), 1), P('f_package_type', first(b, ['package_type'])),
+          P('rf_gross', first(b, ['gross_weight']), 1), P('f_net', first(b, ['net_weight']), 1), P('f_cbm', first(b, ['measurement_cbm']), 1), P('f_temp', first(b, ['temperature_c']), 1)] }],
+        tables: [{ id: 'rd_containers', cols: CT, rows: ctr }] },
+      { id: 'invoice', titleKey: 'rsec_invoice', pairs: [P('f_invoice_no', first(iv, ['invoice_number']), 1), P('f_invoice_date', first(iv, ['invoice_date']), 1),
+        P('f_seller', first(iv, ['supplier_name', 'shipper'])), P('f_buyer', first(iv, ['buyer_name', 'consignee_name', 'consignee'])),
+        P('f_currency', currencyName(first(iv, ['currency']), lang), 1), P('f_total', first(iv, ['total', 'subtotal']), 1),
+        P('f_origin', first(iv, ['country_of_origin'])), P('f_export_country', first(iv, ['export_country'])), P('f_incoterms', first(iv, ['incoterms']), 1),
+        P('f_payment_terms', first(iv, ['payment_terms', 'payment_method']))], tables: [{ id: 'invoice_items', cols: IT, rows: itemRows(use.invoice.items) }] }
+    ];
+    if (pk) {
+      sections.push({ id: 'packing', titleKey: 'rsec_packing', pairs: [P('f_packing_no', first(pk, ['packing_list_number']), 1), P('f_packing_date', first(pk, ['packing_list_date']), 1),
+        P('rf_pk_total', first(pk, ['packages_count']), 1), P('f_package_type', first(pk, ['package_type'])), P('rf_gross', first(pk, ['gross_weight']), 1),
+        P('f_net', first(pk, ['net_weight']), 1)], tables: [{ id: 'rd_packing_items', cols: PT, rows: itemRows(use.packing.items, 'packing') }] });
+    }
+    if (de) {
+      sections.push({ id: 'declaration', titleKey: 'rsec_declaration', pairs: [P('f_decl_no', first(de, ['declaration_number']), 1), P('f_decl_type', first(de, ['declaration_type'])),
+        P('f_decl_date', first(de, ['declaration_date']), 1), P('f_decl_hijri', first(de, ['declaration_date_hijri']), 1)], tables: [] });
+    }
+    var cols = DOCS.filter(function (k) { return !!use[k] && list(R.documents).indexOf(k) !== -1; });
+    if (cols.indexOf('bl') === -1 || cols.indexOf('invoice') === -1) cols = DOCS.filter(function (k) { return !!use[k]; });
+    // common values: the report's own rows (same statuses: match → متطابق, mismatch → يوجد اختلاف, partial / missing →
+    // مراجعة سريعة, info on one document → متوفر في مستند واحد)
+    var common = list(R.rows).filter(function (r) { return r && r.key; }).map(function (r) {
+      var o = { key: r.key, label: str(lang === 'en' ? r.label_en || r.label_ar : r.label_ar || r.label_en), engine: r.status };
+      var n = 0;
+      DOCS.forEach(function (c) { var x = r.values ? r.values[c] : null; o[c] = cols.indexOf(c) !== -1 && !blank(x) ? str(x) : ''; if (o[c]) n++; });
+      // info (for the record: a value on one document only) → «متوفر في مستند واحد»; missing (an expected document lacks
+      // the value — the report flags it «ناقص») → «مراجعة سريعة», never the neutral «متوفر في مستند واحد»
+      o.status = r.status === 'info' && n <= 1 ? (n ? 'single' : 'missing') : r.status === 'missing' ? (n ? 'review' : 'missing')
+        : ENGINE_CS[r.status] || (n === 0 ? 'missing' : n === 1 ? 'single' : 'review');
+      return o;
+    });
+    // conflicts and missing fields: the report's exceptions (or, without them, its mismatch / partial / critical missing rows)
+    var ex = Array.isArray(src.exceptions) ? src.exceptions : list(R.rows).filter(function (r) {
+      return r && (r.status === 'mismatch' || r.status === 'partial' || (r.status === 'missing' && r.critical));
+    }).map(function (r) { return { st: r.status, label: lang === 'en' ? r.label_en : r.label_ar, values: r.values, note: lang === 'en' ? r.detail_en : r.detail_ar }; });
+    var alerts = ex.filter(function (x) { return x && EXC_KIND[x.st]; }).map(function (x) {
+      var a = { kind: EXC_KIND[x.st], field: '', label: str(x.label), note: str(x.note) };
+      DOCS.forEach(function (c) { var y = x.values ? x.values[c] : null; a[c] = cols.indexOf(c) !== -1 && !blank(y) ? str(y) : ''; });
+      return a;
+    });
+    return {
+      ready: true, draft: true, seq: '', txId: null, prepared: prepared, fileSeq: DRAFT_SEQ, fileBase: fileName(DRAFT_SEQ, src.now || new Date()),
+      strip: strip, sections: sections, common: common, alerts: alerts, hasData: true, docCols: cols, footKey: 'rd_foot_note', excluded: excluded,
+      counts: { containers: ctr.length, invoice: sections[1].tables[0].rows.length, packing: pk ? sections[2].tables[0].rows.length : 0, declaration: 0 }
+    };
+  }
+
   // the model → rows of [section, field, value] (the main sheet / the CSV) with the tables flattened after their section
   function flatRows(m, t) {
     var out = [];
     m.strip.forEach(function (p) { out.push({ section: t('sec_summary'), field: t(p[0]), value: p[1] }); });
     m.sections.forEach(function (s) {
-      var title = t('fsec_' + s.id);
+      var title = t(s.titleKey || 'fsec_' + s.id);
       s.pairs.forEach(function (p) { out.push({ section: title, field: t(p[0]), value: p[1] }); });
+      (s.groups || []).forEach(function (gr) { gr.pairs.forEach(function (p) { out.push({ section: t(gr.titleKey), field: t(p[0]), value: p[1] }); }); });
       s.tables.forEach(function (tb) {
         tb.rows.forEach(function (r, i) {
           out.push({ section: t('ftab_' + tb.id), field: '#' + (i + 1), value: tb.cols.map(function (c) {
@@ -245,12 +417,13 @@
       });
     });
     m.common.forEach(function (r) {
-      out.push({ section: t('sec_common'), field: t('cm_' + r.key), value: ['bl', 'invoice', 'packing', 'declaration'].map(function (c) {
+      out.push({ section: t('sec_common'), field: r.label || t('cm_' + r.key), value: docCols(m).map(function (c) {
         return blank(r[c]) ? null : t('col_' + c) + ': ' + r[c];
       }).filter(Boolean).join(' | ') + ' → ' + t('cs_' + r.status) });
     });
     m.alerts.forEach(function (a) {
-      out.push({ section: t('sec_alerts'), field: t('ak_' + a.kind) + ': ' + t(a.field), value: [a.bl, a.invoice, a.packing, a.note].filter(function (x) { return !blank(x); }).join(' | ') });
+      out.push({ section: t('sec_alerts'), field: t('ak_' + a.kind) + ': ' + (a.label || t(a.field)), value: (m.draft ? docCols(m).map(function (c) { return blank(a[c]) ? null : t('col_' + c) + ': ' + a[c]; })
+        : [a.bl, a.invoice, a.packing]).concat([a.note]).filter(function (x) { return !blank(x); }).join(' | ') });
     });
     return out;
   }
@@ -265,26 +438,38 @@
           return o;
         }), totals: null };
     }
-    var main = flatRows({ strip: m.strip, sections: m.sections.map(function (s) { return { id: s.id, pairs: s.pairs, tables: [] }; }), common: [], alerts: [] }, t);
+    var main = flatRows({ strip: m.strip, sections: m.sections.map(function (s) { return { id: s.id, titleKey: s.titleKey, pairs: s.pairs, groups: s.groups, tables: [] }; }), common: [], alerts: [] }, t);
+    var DC = docCols(m), AC = m.draft ? DC : ['bl', 'invoice', 'packing'];
     var sheets = [{ name: t('sheet_main'), rtl: lang !== 'en', columns: [{ key: 'section', label: t('col_section'), type: 'text', width: 26 },
       { key: 'field', label: t('col_field'), type: 'text', width: 28 }, { key: 'value', label: t('col_value'), type: 'text', width: 50 }], rows: main, totals: null }];
     m.sections.forEach(function (s) { s.tables.forEach(function (tb) { sheets.push(typed(tb)); }); });
-    sheets.push({ name: t('sec_common'), rtl: lang !== 'en', columns: [{ key: 'field', label: t('col_field'), type: 'text', width: 24 },
-      { key: 'bl', label: t('col_bl'), type: 'text', width: 26 }, { key: 'invoice', label: t('col_invoice'), type: 'text', width: 26 },
-      { key: 'packing', label: t('col_packing'), type: 'text', width: 26 }, { key: 'declaration', label: t('col_declaration'), type: 'text', width: 26 },
-      { key: 'result', label: t('col_result'), type: 'text', width: 18 }],
-      rows: m.common.map(function (r) { return { field: t('cm_' + r.key), bl: r.bl, invoice: r.invoice + (r.lines ? ' / ' + r.lines : ''), packing: r.packing, declaration: r.declaration, result: t('cs_' + r.status) }; }), totals: null });
+    sheets.push({ name: t('sec_common'), rtl: lang !== 'en', columns: [{ key: 'field', label: t('col_field'), type: 'text', width: 24 }]
+      .concat(DC.map(function (c) { return { key: c, label: t('col_' + c), type: 'text', width: 26 }; }))
+      .concat([{ key: 'result', label: t('col_result'), type: 'text', width: 18 }]),
+      rows: m.common.map(function (r) {
+        var o = { field: r.label || t('cm_' + r.key), result: t('cs_' + r.status) };
+        DC.forEach(function (c) { o[c] = c === 'invoice' ? r.invoice + (r.lines ? ' / ' + r.lines : '') : r[c]; });
+        return o;
+      }), totals: null });
     sheets.push({ name: t('sec_alerts'), rtl: lang !== 'en', columns: [{ key: 'kind', label: t('col_kind'), type: 'text', width: 16 },
-      { key: 'field', label: t('col_field'), type: 'text', width: 26 }, { key: 'bl', label: t('col_bl'), type: 'text', width: 22 },
-      { key: 'invoice', label: t('col_invoice'), type: 'text', width: 22 }, { key: 'packing', label: t('col_packing'), type: 'text', width: 22 },
-      { key: 'note', label: t('col_note'), type: 'text', width: 30 }],
-      rows: m.alerts.map(function (a) { return { kind: t('ak_' + a.kind), field: t(a.field), bl: a.bl, invoice: a.invoice, packing: a.packing, note: a.note }; }), totals: null });
+      { key: 'field', label: t('col_field'), type: 'text', width: 26 }]
+      .concat(AC.map(function (c) { return { key: c, label: t('col_' + c), type: 'text', width: 22 }; }))
+      .concat([{ key: 'note', label: t('col_note'), type: 'text', width: 30 }]),
+      rows: m.alerts.map(function (a) {
+        var o = { kind: t('ak_' + a.kind), field: a.label || t(a.field), note: a.note };
+        AC.forEach(function (c) { o[c] = a[c]; });
+        return o;
+      }), totals: null });
     return { title: t('sheet_title'), generatedAt: new Date(), sheets: sheets,
-      meta: [[t('s_tx'), m.seq], [t('s_prepared'), m.prepared.text], [t('meta_note'), t('foot_note')]], metaName: t('sheet_meta') };
+      meta: [[t('s_tx'), m.draft ? m.strip[0][1] : m.seq], [t('s_prepared'), m.prepared.text], [t('meta_note'), t(m.footKey || 'foot_note')]], metaName: t('sheet_meta') };
   }
   function rowCount(m) {
     var n = m.strip.length + m.common.length + m.alerts.length;
-    m.sections.forEach(function (s) { n += s.pairs.length; s.tables.forEach(function (tb) { n += tb.rows.length; }); });
+    m.sections.forEach(function (s) {
+      n += s.pairs.length;
+      (s.groups || []).forEach(function (g) { n += g.pairs.length; });
+      s.tables.forEach(function (tb) { n += tb.rows.length; });
+    });
     return n;
   }
 
@@ -303,6 +488,38 @@
     if (typeof f !== 'function') return Promise.resolve({ data: null, error: { code: 'MRS_UNAVAILABLE', message: name } });
     return Promise.resolve().then(function () { return f.apply(A, args); })
       .then(function (r) { return r || { data: null, error: null }; }, function (e) { return { data: null, error: { message: String(e && e.message || e) } }; });
+  }
+  /* every export: logged FIRST through logReportExport({report: 'fasah_sheet', format, filters, row_count}) — never the
+     row data — and the file is built only when the log succeeded. filters: {transaction_id} for a transaction's sheet,
+     {} for a readings draft (no transaction yet; log_report_export accepts no filter key).
+     o = { api, model, format: 'print'|'xlsx'|'csv', t, lang, status (element), orgId?, print?() } → Promise<boolean> */
+  function exportSheet(o) {
+    var api = o.api, model = o.model, format = o.format, t = o.t, lang = o.lang, status = o.status;
+    if (!model) return Promise.resolve(false);
+    var A = api && (api.MarsaApi || api);
+    var n = rowCount(model);
+    var filters = model.txId ? { transaction_id: model.txId } : {};
+    status.textContent = t('exporting');
+    return call(api, 'logReportExport', { report: 'fasah_sheet', format: format, filters: filters, row_count: n, orgId: o.orgId || api && api.orgId || undefined })
+      .then(function (r) {
+        if (r.error) { status.textContent = t('export_failed') + ' ' + (api && api.errText ? api.errText(r.error) : (A && A.errorMessage ? A.errorMessage(r.error) : r.error.message || '')); return false; }
+        var X = root.MarsaExport, XL = root.MarsaXlsx, seq = model.draft ? model.fileSeq : (model.seq || model.txId);
+        try {
+          if (format === 'print') { status.textContent = ''; if (typeof o.print === 'function') o.print(); else if (typeof root.print === 'function') root.print(); return true; }
+          if (!X || typeof X.download !== 'function') throw new Error('download');
+          if (format === 'xlsx') {
+            if (!XL || typeof XL.blob !== 'function') throw new Error('xlsx');
+            X.download(XL.blob(xlsxSpec(model, t, lang)), fileName(seq, new Date(), 'xlsx'));
+          } else {
+            var rows = flatRows(model, t);
+            var csv = X.toCsv([{ key: 'section', label: t('col_section'), type: 'text' }, { key: 'field', label: t('col_field'), type: 'text' },
+              { key: 'value', label: t('col_value'), type: 'text' }], rows, null);
+            X.download(new Blob([csv], { type: 'text/csv;charset=utf-8' }), fileName(seq, new Date(), 'csv'));
+          }
+          status.textContent = t('exported', { n: n });
+          return true;
+        } catch (e) { status.textContent = t('export_failed'); return false; }
+      });
   }
   var current = null;
   function close() {
@@ -335,31 +552,7 @@
     var back = doc.activeElement;
     var closeB = btn(t('close'), 'btn-ghost', close);
     var model = null;
-    function exp(format) {
-      if (!model) return;
-      var A = api && (api.MarsaApi || api);
-      var n = rowCount(model);
-      status.textContent = t('exporting');
-      call(api, 'logReportExport', { report: 'fasah_sheet', format: format, filters: { transaction_id: model.txId }, row_count: n, orgId: api && api.orgId || undefined })
-        .then(function (r) {
-          if (r.error) { status.textContent = t('export_failed') + ' ' + (api && api.errText ? api.errText(r.error) : (A && A.errorMessage ? A.errorMessage(r.error) : r.error.message || '')); return; }
-          var X = root.MarsaExport, XL = root.MarsaXlsx;
-          try {
-            if (format === 'print') { status.textContent = ''; if (typeof root.print === 'function') root.print(); return; }
-            if (!X || typeof X.download !== 'function') throw new Error('download');
-            if (format === 'xlsx') {
-              if (!XL || typeof XL.blob !== 'function') throw new Error('xlsx');
-              X.download(XL.blob(xlsxSpec(model, t, lang)), fileName(model.seq || model.txId, new Date(), 'xlsx'));
-            } else {
-              var rows = flatRows(model, t);
-              var csv = X.toCsv([{ key: 'section', label: t('col_section'), type: 'text' }, { key: 'field', label: t('col_field'), type: 'text' },
-                { key: 'value', label: t('col_value'), type: 'text' }], rows, null);
-              X.download(new Blob([csv], { type: 'text/csv;charset=utf-8' }), fileName(model.seq || model.txId, new Date(), 'csv'));
-            }
-            status.textContent = t('exported', { n: n });
-          } catch (e) { status.textContent = t('export_failed'); }
-        });
-    }
+    function exp(format) { exportSheet({ api: api, model: model, format: format, t: t, lang: lang, status: status }); }
     var pB = btn(t('print'), 'btn-primary', function () { exp('print'); }), xB = btn(t('excel'), 'btn-secondary', function () { exp('xlsx'); }),
       cB = btn(t('csv'), 'btn-ghost', function () { exp('csv'); });
     [pB, xB, cB].forEach(function (b) { b.disabled = true; acts.appendChild(b); });
@@ -424,14 +617,21 @@
     m.sections.forEach(function (s, i) {
       var sec = el('section', 'fsh-sec');
       var head = el('div', 'fsh-sec-title');
-      head.appendChild(el('span', null, (i + 1) + ' — ' + t('fsec_' + s.id)));
-      head.appendChild(el('small', null, t('fsub_' + s.id)));
+      head.appendChild(el('span', null, (i + 1) + ' — ' + t(s.titleKey || 'fsec_' + s.id)));
+      head.appendChild(el('small', null, t(s.subKey || 'fsub_' + s.id)));
       sec.appendChild(head);
       if (s.pairs.length) {
         var g = el('dl', 'fsh-grid');
         s.pairs.forEach(function (p) { var d = el('div', 'fsh-cell' + (p[0] === 'f_goods' ? ' is-full' : '')); d.appendChild(el('dt', null, t(p[0]))); var dd = el('dd'); dd.appendChild(v(p[1], p[2])); d.appendChild(dd); g.appendChild(d); });
         sec.appendChild(g);
       }
+      // readings draft: a titled group of pairs (e.g. «الكميات والأوزان كما وردت في البوليصة»)
+      (s.groups || []).forEach(function (gr) {
+        sec.appendChild(el('h3', 'fsh-sub', t(gr.titleKey)));
+        var g2 = el('dl', 'fsh-grid');
+        gr.pairs.forEach(function (p) { var d = el('div', 'fsh-cell'); d.appendChild(el('dt', null, t(p[0]))); var dd = el('dd'); dd.appendChild(v(p[1], p[2])); d.appendChild(dd); g2.appendChild(d); });
+        sec.appendChild(g2);
+      });
       s.tables.forEach(function (tb) {
         sec.appendChild(el('h3', 'fsh-sub', t('ftab_' + tb.id) + ' (' + tb.rows.length + ')'));
         sec.appendChild(table(tb.cols.map(function (c) { return { key: c.key, label: t('fc_' + c.key), ltr: c.type !== 'text' }; }), tb.rows, t('rows_empty')));
@@ -440,24 +640,113 @@
     });
     var cs = el('section', 'fsh-sec fsh-common');
     var ch = el('div', 'fsh-sec-title'); ch.appendChild(el('span', null, t('sec_common'))); ch.appendChild(el('small', null, t('common_sub'))); cs.appendChild(ch);
-    cs.appendChild(table([{ key: 'k', label: t('col_field'), render: function (td, r) { td.textContent = t('cm_' + r.key); } },
-      { key: 'bl', label: t('col_bl') }, { key: 'invoice', label: t('col_invoice'), render: function (td, r) { td.appendChild(v(r.invoice + (r.lines ? ' / ' + t('lines_sum') + ' ' + r.lines : ''))); } },
-      { key: 'packing', label: t('col_packing') }, { key: 'declaration', label: t('col_declaration') },
-      { key: 's', label: t('col_result'), render: function (td, r) { td.appendChild(el('span', 'fsh-result is-' + r.status, t('cs_' + r.status))); } }], m.common, t('rows_empty')));
+    var DC = docCols(m);
+    cs.appendChild(table([{ key: 'k', label: t('col_field'), render: function (td, r) { td.textContent = r.label || t('cm_' + r.key); } }]
+      .concat(DC.map(function (c) {
+        return c === 'invoice' ? { key: 'invoice', label: t('col_invoice'), render: function (td, r) { td.appendChild(v(r.invoice + (r.lines ? ' / ' + t('lines_sum') + ' ' + r.lines : ''))); } }
+          : { key: c, label: t('col_' + c) };
+      }))
+      .concat([{ key: 's', label: t('col_result'), render: function (td, r) { td.appendChild(el('span', 'fsh-result is-' + r.status, t('cs_' + r.status))); } }]), m.common, t('rows_empty')));
     sheet.appendChild(cs);
     var as = el('section', 'fsh-sec fsh-alerts');
     var ah = el('div', 'fsh-sec-title'); ah.appendChild(el('span', null, t('sec_alerts'))); ah.appendChild(el('small', null, t('alerts_sub'))); as.appendChild(ah);
-    as.appendChild(table([{ key: 'kind', label: t('col_kind'), render: function (td, a) { td.appendChild(el('span', 'fsh-result is-' + (a.kind === 'missing' ? 'missing' : 'diff'), t('ak_' + a.kind))); } },
-      { key: 'field', label: t('col_field'), render: function (td, a) { td.textContent = t(a.field); } },
-      { key: 'bl', label: t('col_bl'), ltr: true }, { key: 'invoice', label: t('col_invoice'), ltr: true }, { key: 'packing', label: t('col_packing'), ltr: true },
-      { key: 'note', label: t('col_note') }], m.alerts, t('alerts_none')));
+    as.appendChild(table([{ key: 'kind', label: t('col_kind'), render: function (td, a) { td.appendChild(el('span', 'fsh-result is-' + (AK_CLS[a.kind] || 'diff'), t('ak_' + a.kind))); } },
+      { key: 'field', label: t('col_field'), render: function (td, a) { td.textContent = a.label || t(a.field); } }]
+      .concat((m.draft ? DC : ['bl', 'invoice', 'packing']).map(function (c) { return { key: c, label: t('col_' + c), ltr: !m.draft }; }))
+      .concat([{ key: 'note', label: t('col_note') }]), m.alerts, t('alerts_none')));
     sheet.appendChild(as);
-    sheet.appendChild(el('p', 'fsh-foot text-sm text-muted', t('foot_note')));
+    sheet.appendChild(el('p', 'fsh-foot text-sm text-muted', t(m.footKey || 'foot_note')));
+  }
+
+  /* ------------------------------------------------------------------
+     UI: the readings draft inline (ocr.html matching report) + print through the overlay
+     ------------------------------------------------------------------ */
+  // renderDraft(host, src, opts?) → the model (or the not-ready answer). src = buildReadingsModel's input;
+  // opts = { api, orgId?, t?(key, vars), docName?(k) }. Rebuilt on every call (the report re-renders after each correction).
+  function renderDraft(host, src, opts) {
+    opts = opts || {};
+    src = src || {};
+    var doc = host.ownerDocument || (typeof document !== 'undefined' ? document : root.document);
+    var t = typeof opts.t === 'function' ? opts.t : defaultT, lang = src.lang === 'en' ? 'en' : 'ar';
+    var docName = typeof opts.docName === 'function' ? opts.docName : function (k) { return t('col_' + k); };
+    function el(tag, cls, text) { var n = doc.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+    function v(text, ltr) { var b = el('bdi', ltr ? 'num' : null, blank(text) ? NONE : String(text)); b.dir = ltr ? 'ltr' : 'auto'; return b; }
+    var m = buildReadingsModel({ docs: src.docs, result: src.result, exceptions: src.exceptions, now: src.now, lang: lang, t: t });
+    host.textContent = '';
+    (m.excluded || []).forEach(function (x) {
+      var n = el('div', 'alert alert-warning fsh-note', t('rd_excluded_' + x.reason, { file: x.label || docName(x.doc), doc: docName(x.doc) }));
+      n.setAttribute('role', 'note'); n.dir = 'auto'; host.appendChild(n);
+    });
+    if (!m.ready) {
+      // a slot filled by a reading that was left out asks for the original document, not «not read yet»
+      var out = (m.excluded || []).map(function (x) { return x.doc; });
+      var key = m.missing.every(function (k) { return out.indexOf(k) !== -1; }) ? 'rd_need_original' : 'rd_need';
+      host.appendChild(el('p', 'text-sm text-muted fsh-note', t(key, { docs: m.missing.map(docName).join(lang === 'en' ? ', ' : '، ') })));
+      return m;
+    }
+    var bar = el('div', 'fsh-draft-bar');
+    bar.appendChild(el('p', 'text-sm text-muted fsh-draft-lead', t('rd_lead')));
+    var acts = el('div', 'fsh-actions');
+    var status = el('p', 'fsh-status text-sm'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+    var sheet = el('div', 'fsh-sheet fsh-draft');
+    sheet.dir = lang === 'en' ? 'ltr' : 'rtl'; sheet.lang = lang;
+    render(sheet, m, t, el, v);
+    function go(format) {
+      return exportSheet({ api: opts.api, model: m, format: format, t: t, lang: lang, status: status, orgId: opts.orgId,
+        print: function () { printSheet(sheet, t, lang); } });
+    }
+    [['print', 'btn-primary', 'print'], ['excel', 'btn-secondary', 'xlsx'], ['csv', 'btn-ghost', 'csv']].forEach(function (x) {
+      var b = el('button', 'btn btn-sm ' + x[1], t(x[0])); b.type = 'button';
+      b.setAttribute('data-fsh-export', x[2]);
+      b.addEventListener('click', function (e) { if (e && e.preventDefault) e.preventDefault(); go(x[2]); });
+      acts.appendChild(b);
+    });
+    bar.appendChild(acts);
+    host.appendChild(bar);
+    host.appendChild(status);
+    host.appendChild(sheet);
+    m.exportAs = go;
+    return m;
+  }
+  // print / PDF: a copy of the sheet in the overlay (body.fsh-open → decl.css prints the overlay only, A4); removed after
+  // the print (afterprint), by its close button or Escape
+  function printSheet(sheet, t, lang) {
+    close();
+    var doc = sheet.ownerDocument || root.document;
+    function el(tag, cls, text) { var n = doc.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+    var node = el('div', 'fsh-overlay fsh-print-copy');
+    node.setAttribute('role', 'dialog'); node.setAttribute('aria-modal', 'true'); node.setAttribute('aria-labelledby', 'fsh-title');
+    node.dir = lang === 'en' ? 'ltr' : 'rtl'; node.lang = lang;
+    var bar = el('div', 'fsh-toolbar');
+    var h = el('h2', 'fsh-title', t('sheet_title')); h.id = 'fsh-title';
+    bar.appendChild(h);
+    var acts = el('div', 'fsh-actions');
+    var cl = el('button', 'btn btn-sm btn-ghost', t('close')); cl.type = 'button';
+    cl.addEventListener('click', function () { close(); });
+    acts.appendChild(cl);
+    bar.appendChild(acts);
+    node.appendChild(bar);
+    node.appendChild(sheet.cloneNode(true));
+    var back = doc.activeElement;
+    doc.body.appendChild(node);
+    doc.body.classList.add('fsh-open');
+    var onKey = function (e) { if (e && e.key === 'Escape') close(); };
+    doc.addEventListener('keydown', onKey);
+    current = { node: node, onKey: onKey, back: back, doc: doc };
+    var mine = current;
+    var done = function () {
+      if (typeof root.removeEventListener === 'function') root.removeEventListener('afterprint', done);
+      if (current === mine) close();
+    };
+    if (typeof root.addEventListener === 'function') root.addEventListener('afterprint', done);
+    try { cl.focus(); } catch (e) { /* noop */ }
+    try { if (typeof root.print === 'function') root.print(); } catch (e) { /* blocked: the close button stays */ }
+    return node;
   }
 
   root.MarsaFasahSheet = {
-    VERSION: 'fasah-sheet-1', open: open, close: close,
-    pure: { numEquivalent: numEquivalent, currencyName: currencyName, fileName: fileName, riyadhStamp: riyadhStamp, buildModel: buildModel,
+    VERSION: 'fasah-sheet-2', open: open, close: close, renderDraft: renderDraft, printSheet: printSheet, exportSheet: exportSheet,
+    pure: { buildReadingsModel: buildReadingsModel, readingExcluded: readingExcluded, containerRows: containerRows, docCols: docCols, numEquivalent: numEquivalent, currencyName: currencyName, fileName: fileName, riyadhStamp: riyadhStamp, buildModel: buildModel,
       commonRow: commonRow, flatRows: flatRows, xlsxSpec: xlsxSpec, rowCount: rowCount, searchKey: searchKey, toNum: toNum, CURRENCIES: CURRENCIES }
   };
 })(typeof window !== 'undefined' ? window : this);

@@ -571,6 +571,11 @@
                 </div>
                 <p class="text-sm text-muted ocr-mx-more" id="ocr-mx-exc-more" hidden></p>
               </div>
+              <!-- «كشف إدخال فسح»: generated from the B/L + invoice readings (ops/fasah-sheet.js renderDraft via ocr-match.js) -->
+              <details class="ocr-match-details ocr-fsh-block" id="ocr-fsh-block" open hidden>
+                <summary><span data-i18n="ocr.mx_fsh_title">كشف إدخال فسح</span> <span class="ocr-fsh-tag" data-i18n="ocr.mx_fsh_tag">مُنشأ آليًا — مسودة</span></summary>
+                <div class="ocr-fsh-body" id="ocr-fsh-body"></div>
+              </details>
               <!-- match v2: one read-only sheet per document read (every field the reading returned) -->
               <div class="ocr-mx-block ocr-mx-sheets-block" id="ocr-mx-sheets-block">
                 <h4 class="ocr-mx-h" data-i18n="ocr.mx_sheets_title">بيانات المستندات</h4>
@@ -842,6 +847,9 @@
   <script src="assets/js/ocr-parse.js" defer></script>
   <script src="assets/js/ocr.js" defer></script>
   <script src="assets/js/doc-match.js" defer></script>
+  <script src="assets/js/rpt/xlsx.js" defer></script>
+  <script src="assets/js/rpt/export.js" defer></script>
+  <script src="assets/js/ops/fasah-sheet.js" defer></script>
   <script src="assets/js/ocr-match.js" defer></script>
   <script src="assets/js/hs-picker.js" defer></script>
   <script src="assets/js/doc-batch.js" defer></script>

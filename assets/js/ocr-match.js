@@ -111,7 +111,7 @@
       return s;
     }
     // a slot filled by compareReadings (readings of the single reader): label, part of a combined file, saved-row getter
-    function unbridge(s) { s.label = ''; s.part = false; s.savedRef = null; s.onSaved = null; s.bridged = false; }
+    function unbridge(s) { s.label = ''; s.fileName = ''; s.part = false; s.savedRef = null; s.onSaved = null; s.bridged = false; }
     S = fresh();
 
     /* ---------------------------------------------------------------
@@ -580,6 +580,7 @@
       if (ship) al.appendChild(shipmentBanner(ship));
       if (!(patch && patchTable())) renderTable();
       renderExceptions();
+      renderFasah();
       renderSheets();
       renderItems();
       renderWarnings();
@@ -1126,6 +1127,38 @@
       return w;
     }
 
+    /* «كشف إدخال فسح» (2026-11-14, owner: the program PRODUCES the sheet from the B/L + the commercial invoice read
+       together): MarsaFasahSheet.renderDraft (ops/fasah-sheet.js) from the readings of this report — the current
+       (corrected) values, items and container rows, the SAME engine result (strict) for the common values and the
+       exceptions table rows for the conflicts. Shown once the invoice and the B/L were both read; rebuilt with every
+       render (a correction in the comparison table flows in). A reading that is itself a Fasah entry sheet or of an
+       unknown type ('other') is left out, with a note. Exports logged first (fasah_sheet, filters {}). */
+    function fasahDocs() {
+      var R = S.result, out = {};
+      SHEET_ORDER.forEach(function (k) {
+        var s = S.slots[k], res = s.res;
+        if (!res || R.documents.indexOf(k) === -1) return;
+        out[k] = { fields: plainFields(s), items: (s.items || []).slice(0, 500), containers: Array.isArray(res.containers) ? res.containers.slice(0, 300) : [],
+          label: slotLabel(k), fileName: s.fileName || (s.file ? s.file.name : ''),
+          detected: typeof res.detected_type === 'string' ? res.detected_type : '',
+          parentDetected: typeof res.source_detected_type === 'string' ? res.source_detected_type : '' };
+      });
+      return out;
+    }
+    function renderFasah() {
+      var blk = $('ocr-fsh-block'), body = $('ocr-fsh-body'), F = window.MarsaFasahSheet;
+      if (!blk || !body) return;
+      var R = S.result;
+      if (!R || !F || typeof F.renderDraft !== 'function' || !S.slots.invoice.res || !S.slots.bl.res
+        || R.documents.indexOf('invoice') === -1 || R.documents.indexOf('bl') === -1) { body.textContent = ''; blk.hidden = true; return; }
+      var X2 = exceptionRows();
+      var m = F.renderDraft(body, {
+        docs: fasahDocs(), result: R, lang: lang(), now: new Date(),
+        exceptions: X2.rows.map(function (x) { return { st: x.st, label: x.label, values: x.values, note: x.note }; })
+      }, { api: API, orgId: S.orgId || undefined, docName: docName });
+      blk.hidden = false;
+      blk.classList.toggle('is-ready', !!(m && m.ready));
+    }
     /* exceptions: mismatch / partial / missing key field rows + invalid values; a row leads to its field */
     function exceptionRows() {
       var R = S.result, out = [], more = 0;
@@ -2170,6 +2203,7 @@
         s.status = 'done'; s.res = res; s.fields = fields; s.orig = orig;
         s.items = Array.isArray(x.items) ? x.items.slice(0, 500) : [];
         s.label = String(x.label || x.fileName || (file && file.name) || docName(k)).slice(0, 300);
+        s.fileName = String(x.fileName || (file && file.name) || '').slice(0, 300);
         s.part = !!x.part; s.savedRef = x.saved || null; s.onSaved = typeof x.onSaved === 'function' ? x.onSaved : null; s.bridged = true;
       });
       S.bridge = { notes: (Array.isArray(opts.notes) ? opts.notes : []).filter(function (t) { return typeof t === 'string' && t; }).slice(0, 10)

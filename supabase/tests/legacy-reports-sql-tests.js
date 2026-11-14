@@ -890,6 +890,15 @@ async function secExport() {
     return (!!a.id && row.row_count === 140 && row.filters.system_only === 40 && row.filters.months.length === 30
       && J(e) === J(['MRS_INVALID filters', 'MRS_INVALID filters', 'MRS_INVALID filters'])) || J({ a, row, e });
   });
+  // 2026-11-14: «كشف إدخال فسح» from the readings (ocr.html matching report, ops/fasah-sheet.js renderDraft) has no transaction
+  // yet: it is logged with filters {} — accepted as is (no migration); a portal user is still refused
+  await check('fasah_sheet with filters {} (readings draft, no transaction yet) is logged by staff with no filter recorded; portal → refused', async () => {
+    const a = await log('jed', { report: 'fasah_sheet', format: 'csv', filters: {}, row_count: 48 });
+    const b = await log('jed', { report: 'fasah_sheet', format: 'print', filters: {}, row_count: 48 });
+    const p = await code(() => log('portal', { report: 'fasah_sheet', format: 'xlsx', filters: {}, row_count: 1 }));
+    const row = await one(`SELECT report, format, filters, row_count FROM public.report_exports WHERE id = $1`, [a.id]);
+    return (!!a.id && !!b.id && row.report === 'fasah_sheet' && J(row.filters) === '{}' && row.row_count === 48 && /^MRS_(FORBIDDEN|NOT_FOUND)/.test(p)) || J({ row, p });
+  });
   await check('list_report_exports shows the new kinds to the auditor', async () => {
     const r = await rpc('sup', `SELECT public.list_report_exports($1, $2) r`, [A, { report: 'fasah_recon' }]);
     return r.total >= 1 || J(r);

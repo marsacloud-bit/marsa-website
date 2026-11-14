@@ -50,6 +50,13 @@ function makeDom() {
     }
     removeChild(n) { this.children = this.children.filter(c => c !== n); n.parentNode = null; byIdCache = null; return n; }
     remove() { if (this.parentNode) this.parentNode.removeChild(this); }
+    // a deep copy without listeners (the Fasah sheet's print copy, ops/fasah-sheet.js printSheet)
+    cloneNode(deep) {
+      const c = new Node(this.tagName === '#TEXT' ? '#text' : this.tagName);
+      c.attrs = Object.assign({}, this.attrs); c.className = this.className; c._text = this._text; c.hidden = this.hidden; c.dir = this.dir; c.lang = this.lang;
+      if (deep) this.children.forEach(k => c.appendChild(k.cloneNode(true)));
+      return c;
+    }
     insertBefore(n, ref) {
       if (!ref) return this.appendChild(n);
       if (n.parentNode) n.parentNode.removeChild(n);

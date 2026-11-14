@@ -1168,7 +1168,9 @@
         items: kind === itemsKind ? (j.machineItems || []).map(function (x) { return Object.assign({}, x); }) : [],
         res: { fields: rows, warnings: warnings, mean_confidence: n ? Math.round(sum / n * 1000) / 10 : null, line_items: [],
           containers: kind === main && Array.isArray(res.containers) ? res.containers : [], usage_id: res.usage_id || null,
-          doc_type: kind, detected_type: kind, kind: kind, part: true },
+          doc_type: kind, detected_type: kind, kind: kind, part: true,
+          // the whole file's own type: «كشف إدخال فسح» (ops/fasah-sheet.js) leaves out the parts of a file read as 'other'
+          source_detected_type: typeof res.detected_type === 'string' ? res.detected_type : null },
         file: j.file || null, sha256: j.sha256 || '' };
     }
     // the comparison of a set of jobs: { entries, notes, used: [{slot, label}] } or null (fewer than 2 slots)

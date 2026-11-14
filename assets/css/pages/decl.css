@@ -96,6 +96,7 @@ body.fsh-open { overflow: hidden; }
 .fsh-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
 .fsh-strip-item { border: 1px solid #D8E2EC; border-radius: 8px; padding: 8px 10px; background: #EEF5FB; display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
 .fsh-strip-item b { font-size: var(--fs-xs); color: #17365D; }
+.fsh-strip-item > bdi { justify-self: start; }   /* a left-to-right value stays on the reading-start side of its box */
 .fsh-sec { border: 1px solid #D8E2EC; border-radius: 10px; padding: 10px 12px; min-width: 0; break-inside: avoid-page; }
 .fsh-sec-title { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px; background: #CFE2F3; color: #17365D;
   margin: -10px -12px 10px; padding: 8px 12px; border-radius: 10px 10px 0 0; font-weight: 800; }
@@ -108,15 +109,30 @@ body.fsh-open { overflow: hidden; }
 .fsh-cell dd { margin: 0; overflow-wrap: anywhere; }
 .fsh-table-wrap { max-width: 100%; overflow: auto; }
 .fsh-table { min-width: 560px; font-size: var(--fs-xs); }
-.fsh-table th { background: #17365D; color: #fff; }
+.fsh-table th { background: #17365D; color: #fff; text-align: center; }
+/* a code / number cell stays a table cell (a page-wide .num { display: inline-block } would pull the row out of the grid) */
+.fsh-table td.num { display: table-cell; text-align: center; }
 .fsh-result { display: inline-block; padding: 2px 8px; border-radius: 999px; font-weight: 800; font-size: 11px; background: #EEF2F6; color: #334155; }
 .fsh-result.is-ok { background: #E6F6EE; color: #0D6B44; }
 .fsh-result.is-diff { background: #FDECEE; color: #A0252E; }
 .fsh-result.is-missing { background: #FFF6E0; color: #8A5E04; }
+.fsh-result.is-review { background: #FFF4DC; color: #8A5E04; }
 .fsh-foot { margin: 0; }
+
+/* readings draft inline in the matching report (ocr.html #ocr-fsh-block, ops/fasah-sheet.js renderDraft) */
+.ocr-fsh-block { min-width: 0; }
+.ocr-fsh-block > summary { cursor: pointer; }
+.ocr-fsh-tag { display: inline-block; margin-inline-start: 6px; padding: 1px 8px; border-radius: 999px; background: #EEF5FB; color: #17365D; font-size: 11px; font-weight: 700; }
+.ocr-fsh-body { display: grid; gap: 10px; margin-top: 10px; min-width: 0; }
+.ocr-fsh-body > * { min-width: 0; }
+.fsh-note { margin: 0; }
+.fsh-draft-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.fsh-draft-lead { margin: 0; flex: 1 1 260px; min-width: 0; }
+.fsh-sheet.fsh-draft { max-width: none; margin: 0; }
 
 @media (max-width: 480px) {
   .decl-grid, .decl-dl { grid-template-columns: 1fr; }
+  .fsh-grid { grid-template-columns: 1fr; }
   .hsp-search { flex-wrap: wrap; }
   .fsh-overlay { padding: 0 12px 20px; }
 }
@@ -134,5 +150,9 @@ body.fsh-open { overflow: hidden; }
   .fsh-table thead { display: table-header-group; }
   .fsh-table tr { break-inside: avoid; page-break-inside: avoid; }
   .fsh-sec, .fsh-strip-item, .fsh-sec-title, .fsh-table th, .fsh-result { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .fsh-draft .fsh-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .fsh-print-copy .fsh-toolbar { justify-content: center; }
+  /* the matching report's own print leaves the draft out (it has its own «طباعة / PDF») */
+  body.ocr-print-match .ocr-fsh-block { display: none !important; }
   @page { size: A4 landscape; margin: 8mm; }
 }
