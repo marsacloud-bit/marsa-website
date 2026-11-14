@@ -708,7 +708,7 @@ async function txFlows() {
   check('deadline-only save is offered only for a container not yet returned', () => (!!host.querySelector('[data-deadline="' + C1 + '"]') && !host.querySelector('[data-deadline="' + C2 + '"]')) || 'deadline');
   D.getElementById('appt-er-dl-' + C1).value = '2026-11-25';
   host.querySelector('[data-deadline="' + C1 + '"]').click(); await settle(10);
-  check('deadline save → saveEmptyReturnDeadline(container, date)', () => rc.some(c => c[0] === 'deadline' && c[1] === C1 && c[2] === '2026-11-25') || J(rc));
+  check('deadline save → saveEmptyReturnDeadline(container, date) → page refresh (the extension request section and the alerts follow the deadline)', () => (rc.some(c => c[0] === 'deadline' && c[1] === C1 && c[2] === '2026-11-25') && R1.log.refresh === 1) || J([rc, R1.log]));
   // EIR reading → pending proof only
   D.getElementById('appt-er-file').files = [F('eir2.pdf')];
   D.getElementById('appt-er-read').click(); await settle(60);
@@ -717,7 +717,7 @@ async function txFlows() {
     (rc.some(c => c[0] === 'ai' && c[1] === 'empty_return_receipt' && c[2] === 'ai-doc-v3' && c[3] === TX) && rc.some(c => c[0] === 'upload' && c[1] === 'empty_return_receipt' && c[2] === 'eir2.pdf')
       && rc.some(c => c[0] === 'ext' && c[1] === 'empty_return_receipt' && c[2] === 'doc-eir2.pdf') && cr.length === 1
       && J(cr[0][2]) === J({ documentId: 'doc-eir2.pdf', source: 'ai', idemKey: 'key-1', extractionId: 'ext-eir' }) && !rc.some(c => c[0] === 'verify')
-      && /بانتظار تأكيد موظف/.test(R1.log.toasts[R1.log.toasts.length - 1][1]) && R1.log.refresh === 1) || J([rc, R1.log]));
+      && /بانتظار تأكيد موظف/.test(R1.log.toasts[R1.log.toasts.length - 1][1]) && R1.log.refresh === 2) || J([rc, R1.log]));
   // a failed AI reading: the file is kept and an «unreadable» proof recorded (legacy «تعذر القراءة»), never verified
   const hostF = D.createElement('div'); D.body.appendChild(hostF);
   const RAF = Object.assign({}, RA, { aiExtract: o => { rc.push(['aiF']); return Promise.resolve({ data: null, error: { code: 'MRS_AI_FAILED', message: 'x' } }); } });

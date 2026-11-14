@@ -299,7 +299,8 @@
               b.disabled = false;
               if (r.error) { message('danger', errText(api, r.error)); paint(); return; }
               c.return_deadline = d.value || null;
-              if (api.toast) api.toast(d.value ? T('er_deadline_saved', { no: c.container_no }) : T('er_deadline_cleared', { no: c.container_no }), 'success');
+              // reload: the extension request section and the alerts depend on the deadline
+              after(d.value ? T('er_deadline_saved', { no: c.container_no }) : T('er_deadline_cleared', { no: c.container_no }));
             });
           });
           dl = el('div', { class: 'appt-er-dl' }, [d, b]);
@@ -751,7 +752,7 @@
             err.hidden = true;
             var c = cur();
             if (!isEmail(c.to)) { showErr(T('rx_e_email_sent')); return; }
-            var ask = typeof api.confirm === 'function' ? api.confirm({ title: T('rx_sent_title'), text: T('rx_sent_text', { to: c.to }), okText: T('rx_sent_ok') }) : Promise.resolve(false);
+            var ask = typeof api.confirm === 'function' ? api.confirm({ title: T('rx_sent_title'), text: T('rx_sent_text', { to: '\u2066' + c.to + '\u2069' }), okText: T('rx_sent_ok') }) : Promise.resolve(false);
             Promise.resolve(ask).then(function (yes) {
               if (!yes) return;
               return saveDraft(r, ed, c).then(function (x) {
@@ -792,7 +793,7 @@
         if (u.error) return { error: errText(api, u.error) };
         if (u.data) { r.to_address = u.data.to_address; r.subject = u.data.subject; r.body = u.data.body; }
         if (!keep) return { ok: true };
-        var ask = typeof api.confirm === 'function' ? api.confirm({ title: T('rx_keep_title'), text: T('rx_keep_text', { name: r.agent_name || '', to: c.to }), okText: T('rx_keep_ok') }) : Promise.resolve(false);
+        var ask = typeof api.confirm === 'function' ? api.confirm({ title: T('rx_keep_title'), text: T('rx_keep_text', { name: r.agent_name || '', to: '\u2066' + c.to + '\u2069' }), okText: T('rx_keep_ok') }) : Promise.resolve(false);
         return Promise.resolve(ask).then(function (yes) {
           if (!yes) return { ok: true };
           return call(api, 'saveParty', { id: r.agent_party_id, email: c.to.toLowerCase() }).then(function (pr) {
