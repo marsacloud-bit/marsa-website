@@ -746,6 +746,13 @@ function rdSrc(o) {
 section('Fasah sheet from the readings (buildReadingsModel)');
 {
   const m = F.buildReadingsModel(rdSrc({ pk: true }));
+  check('draft sheet (owner check 2026-11-14): invoice unit price derived as total ÷ quantity, origin from the invoice, columns empty on every row hidden', () => {
+    const mq = F.buildReadingsModel({ docs: { bl: { fields: { bl_number: 'B1', consignee: 'X' }, items: [], containers: [{ container_number: 'TSTU7710023', seal_number: '1', size_type: '40HC' }] },
+      invoice: { fields: { invoice_number: 'I1', country_of_origin: 'TURKEY' }, items: [{ description: 'A', quantity: 1700, amount: 5610 }, { description: 'B', quantity: 280, amount: 1086.4 }] } }, result: { rows: [] } });
+    const it = mq.sections[1].tables[0], ct = mq.sections[0].tables[0];
+    return (it.cols.map(c => c.key).join() === 'description,quantity,unit_price,total,origin_country' && it.rows[0].unit_price === '3.3' && it.rows[1].unit_price === '3.88'
+      && it.rows.every(r => r.origin_country === 'TURKEY') && ct.cols.map(c => c.key).join() === 'container_no,seal_no,size_type') || JSON.stringify([it.cols, it.rows, ct.cols]);
+  });
   const sec = id => m.sections.filter(s => s.id === id)[0];
   const pv = (s, k) => (s.pairs.concat(...(s.groups || []).map(g => g.pairs)).filter(p => p[0] === k)[0] || [])[1];
   check('ready draft: strip = «مسودة — قبل إنشاء المعاملة», importer (consignee), B/L no., prepared at in Riyadh time', () =>

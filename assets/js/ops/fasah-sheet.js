@@ -302,6 +302,28 @@
         unit_price: x.unit_price, total: x.amount != null ? x.amount : x.total, origin_country: x.origin_country || x.country_of_origin, scientific_name: x.scientific_name };
     });
   }
+  // owner check 2026-11-14: a quick reading has no unit price / origin per line — the unit price is derived (total ÷ quantity,
+  // an average when sizes with different prices were merged) and the origin is the invoice's own country of origin
+  function numOf(v) { var n = parseFloat(String(v == null ? '' : v).replace(/[,\s]/g, '')); return isFinite(n) ? n : null; }
+  function fillInvoiceItems(rows, origin) {
+    return rows.map(function (r) {
+      var q = numOf(r.quantity), tot = numOf(r.total);
+      if (blank(r.unit_price) && q && q > 0 && tot != null) r.unit_price = String(Math.round(tot / q * 10000) / 10000);
+      if (blank(r.origin_country) && !blank(origin)) r.origin_country = str(origin);
+      return r;
+    });
+  }
+  // a column empty on every row of a table is not shown (nor exported) on the draft sheet
+  function dropEmptyCols(sections) {
+    sections.forEach(function (sec) {
+      (sec.tables || []).forEach(function (tb) {
+        if (!tb.rows || !tb.rows.length) return;
+        var keep = tb.cols.filter(function (c, i) { return i === 0 || tb.rows.some(function (r) { return !blank(r[c.key]); }); });
+        if (keep.length) tb.cols = keep;
+      });
+    });
+    return sections;
+  }
   var ENGINE_CS = { match: 'ok', mismatch: 'diff', partial: 'review', info: 'review' };
   var EXC_KIND = { mismatch: 'conflict', invalid: 'invalid', missing: 'missing', partial: 'review' };
   /* src = { docs: { bl|invoice|packing|declaration: { fields {key: value}, items [], containers [], label?, fileName?, detected?,
@@ -359,7 +381,7 @@
         P('f_seller', first(iv, ['supplier_name', 'shipper'])), P('f_buyer', first(iv, ['buyer_name', 'consignee_name', 'consignee'])),
         P('f_currency', currencyName(first(iv, ['currency']), lang), 1), P('f_total', first(iv, ['total', 'subtotal']), 1),
         P('f_origin', first(iv, ['country_of_origin'])), P('f_export_country', first(iv, ['export_country'])), P('f_incoterms', first(iv, ['incoterms']), 1),
-        P('f_payment_terms', first(iv, ['payment_terms', 'payment_method']))], tables: [{ id: 'invoice_items', cols: IT, rows: itemRows(use.invoice.items) }] }
+        P('f_payment_terms', first(iv, ['payment_terms', 'payment_method']))], tables: [{ id: 'invoice_items', cols: IT, rows: fillInvoiceItems(itemRows(use.invoice.items), first(iv, ['country_of_origin'])) }] }
     ];
     if (pk) {
       sections.push({ id: 'packing', titleKey: 'rsec_packing', pairs: [P('f_packing_no', first(pk, ['packing_list_number']), 1), P('f_packing_date', first(pk, ['packing_list_date']), 1),
@@ -395,7 +417,7 @@
     });
     return {
       ready: true, draft: true, seq: '', txId: null, prepared: prepared, fileSeq: DRAFT_SEQ, fileBase: fileName(DRAFT_SEQ, src.now || new Date()),
-      strip: strip, sections: sections, common: common, alerts: alerts, hasData: true, docCols: cols, footKey: 'rd_foot_note', excluded: excluded,
+      strip: strip, sections: dropEmptyCols(sections), common: common, alerts: alerts, hasData: true, docCols: cols, footKey: 'rd_foot_note', excluded: excluded,
       counts: { containers: ctr.length, invoice: sections[1].tables[0].rows.length, packing: pk ? sections[2].tables[0].rows.length : 0, declaration: 0 }
     };
   }
