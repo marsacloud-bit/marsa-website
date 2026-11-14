@@ -255,6 +255,21 @@ html[dir="ltr"] .ocr-match-row.is-info > th { box-shadow: inset 4px 0 0 #14A3A8;
 
 .ocr-match-export { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-block-start: 16px; }
 .ocr-match-recent-block .ocr-history-tools { justify-content: space-between; }
+/* draft transaction from the report (ocr-match.js, 20261127000100) */
+.ocr-mx-draft { margin-block-start: 20px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface, #fff); }
+.ocr-mx-draft[hidden] { display: none; }
+.ocr-mx-draft-title { margin: 0 0 6px; font-size: var(--fs-md, 1rem); color: var(--navy-dark); }
+.ocr-mx-draft-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin-block: 12px; }
+.ocr-mx-draft-form .check, .ocr-mx-draft-form .text-xs { grid-column: 1 / -1; }
+.ocr-mx-draft-roro { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
+.ocr-mx-draft-roro[hidden], .ocr-mx-draft-form [hidden] { display: none; }
+.ocr-mx-draft-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block-start: 12px; }
+.ocr-mx-draft-done { margin: 0; font-weight: 600; }
+.ocr-mx-save-link { font-weight: 600; }
+@media (max-width: 600px) {
+  .ocr-mx-draft-form, .ocr-mx-draft-roro { grid-template-columns: minmax(0, 1fr); }
+  .ocr-mx-draft-actions .btn { flex: 1 1 100%; }
+}
 .ocr-match-recent-block .ocr-history-tools h3 { margin: 0; }
 .ocr-match-recent-block[hidden] { display: none; }
 

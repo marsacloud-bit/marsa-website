@@ -86,6 +86,11 @@
   function uploadLink(txId) { return 'ocr.html#decl-tx=' + encodeURIComponent(String(txId || '')); }
   function reviewLink(extId, txId) { return 'ocr.html#decl=' + encodeURIComponent(String(extId || '')) + '&tx=' + encodeURIComponent(String(txId || '')); }
   function txLink(txId) { return 'admin.html#tx/' + encodeURIComponent(String(txId || '')); }
+  // the three-way match of a draft transaction after its declaration approval (ocr-match.js #match-tx, 20261127000100)
+  function matchTxLink(txId, extId) {
+    var ok = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    return 'ocr.html#match-tx=' + encodeURIComponent(String(txId || '')) + (ok.test(String(extId || '')) ? '&decl=' + encodeURIComponent(String(extId)) : '');
+  }
   function batchLink(id) { return 'ocr.html#batch=' + encodeURIComponent(String(id || '')); }
 
   // the Hijri field → { state: 'empty'|'invalid'|'unsupported'|'nonexistent'|'ok', hijri, greg }
@@ -376,7 +381,7 @@
     TYPES: TYPES, STATUSES: STATUSES, FASAH_STAGES: FASAH_STAGES, CONFLICTS: CONFLICTS, MISSING: MISSING, TX_FIELDS: TX_FIELDS, REPLACEABLE: REPLACEABLE,
     WARNINGS: WARNINGS, AI_WARNINGS: AI_WARNINGS, CTR_KEYS: CTR_KEYS, ITEM_COLS: ITEM_COLS, ITEM_KEYS: ITEM_KEYS, ERR_KEYS: ERR_KEYS,
     isUuid: isUuid, parseNum: parseNum, normContainer: normContainer, normHs: normHs, normDeclNo: normDeclNo, parseHash: parseHash,
-    uploadLink: uploadLink, reviewLink: reviewLink, txLink: txLink, batchLink: batchLink, hijriState: hijriState,
+    uploadLink: uploadLink, reviewLink: reviewLink, txLink: txLink, matchTxLink: matchTxLink, batchLink: batchLink, hijriState: hijriState,
     formFromDraft: formFromDraft, txContainerSet: txContainerSet, containerPreview: containerPreview, blView: blView,
     localMissing: localMissing, validateForm: validateForm, buildPayload: buildPayload, approveKey: approveKey, planOf: planOf,
     effectiveConflicts: effectiveConflicts, hardBlock: hardBlock, otherTxSet: otherTxSet,
@@ -1178,7 +1183,15 @@
       else li(T('r_daftra'));
       box.appendChild(ul);
       var bar = el('div', 'decl-actions');
-      var a = el('a', 'btn btn-sm btn-primary', T('open_tx')); a.href = txLink(S.route.tx);
+      // a DRAFT transaction (20261127000100): the next step is the match of this declaration with the invoice + B/L
+      // (ocr.html#match-tx, three-way) and then «اعتماد المعاملة» on the transaction page
+      var draft = !!(S.tx && S.tx.id === S.route.tx && S.tx.is_draft);
+      if (draft) {
+        box.appendChild(alertBox('info', T('approved_draft_next')));
+        var mt = el('a', 'btn btn-sm btn-primary', T('match_tx')); mt.href = matchTxLink(S.route.tx, S.result && S.result.extraction_id);
+        bar.appendChild(mt);
+      }
+      var a = el('a', 'btn btn-sm ' + (draft ? 'btn-secondary' : 'btn-primary'), T('open_tx')); a.href = txLink(S.route.tx);
       bar.appendChild(a);
       if (r.batchId) { var b = el('a', 'btn btn-sm btn-ghost', T('m_batch_link')); b.href = batchLink(r.batchId); bar.appendChild(b); }
       box.appendChild(bar);

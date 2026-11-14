@@ -98,6 +98,9 @@
       MRS_DECL_STALE: 'تغيّرت المعاملة أو قراءة البيان بعد فتحك للمراجعة. أعد تحميل المراجعة ثم تحقق من القيم قبل الاعتماد.',
       MRS_DECL_BL_MISMATCH: 'رقم البوليصة في البيان لا يطابق بوليصة المعاملة. راجع الرقم، أو أكد صراحةً أن البيان يخص هذه المعاملة (يبقى رقم البوليصة الأصلي دون تغيير).',
       MRS_DECL_NUMBER_CONFLICT: 'للمعاملة بيان جمركي نشط برقم آخر. ألغِ البيان الحالي أو استبدله أولًا ثم اعتمد القراءة.',
+      // 20261127000100: draft transaction + approval
+      MRS_TX_NOT_DRAFT: 'هذه المعاملة ليست مسودة (اعتُمدت من قبل أو أُنشئت معاملةً عادية)، فلا تحتاج إلى اعتماد.',
+      MRS_TX_MATCH_MISMATCH: 'نتيجة المطابقة فيها اختلافات أو بيانات ناقصة ({f}). راجعها، ثم أكّد الاعتماد واكتب ملاحظة تشرح السبب.',
       MRS_DECL_ALREADY_APPROVED: 'اعتُمدت قراءة البيان هذه من قبل. لتعديل البيان استخدم «تصحيح البيان» في المعاملة.',
       // legacy step 5 (20261121000100): appointment card drafts, empty-return proofs, TASTO carrier order
       MRS_APPT_DRAFT_EXISTS: 'للمعاملة مسودة بطاقات مواعيد مفتوحة. افتحها واستكملها بدل إنشاء مسودة جديدة (لا حاجة لإعادة القراءة).',
@@ -509,7 +512,13 @@
       'MRS_REQUIRED:documents': 'أضف مستندًا مقروءًا واحدًا على الأقل إلى الحزمة قبل الاعتماد.',
       'MRS_REQUIRED:draft': 'احفظ المسودة بعد مراجعتها قبل الاعتماد.',
       'MRS_REQUIRED:client_id': 'اختر العميل (المستورد) قبل إنشاء معاملة جديدة من المسودة.',
-      'MRS_REQUIRED:branch_id': 'اختر الفرع الذي تتبع له حزمة المستندات.'
+      'MRS_REQUIRED:branch_id': 'اختر الفرع الذي تتبع له حزمة المستندات.',
+      // 20261127000100: draft transaction + approval
+      'MRS_REQUIRED:bl_number': 'رقم البوليصة مطلوب لإنشاء معاملة بحرية أو جوية. صحّحه في التقرير أو أعد قراءة البوليصة.',
+      'MRS_REQUIRED:containers': 'المعاملة البحرية تحتاج حاوية واحدة على الأقل من البوليصة. أضف أرقام الحاويات أو اختر Ro-Ro.',
+      'MRS_REQUIRED:declaration_approval': 'اعتمد قراءة البيان الجمركي أولًا، ثم طابقه مع الفاتورة والبوليصة قبل اعتماد المعاملة.',
+      'MRS_REQUIRED:match_id': 'احفظ مطابقة البيان مع الفاتورة والبوليصة أولًا، ثم اعتمد المعاملة.',
+      'MRS_INVALID:match_id': 'المطابقة المختارة لا تصلح للاعتماد: يجب أن تكون مطابقة ثلاثية محفوظة لهذه المعاملة على قراءة البيان المعتمدة، وغير ملغاة.'
     },
     banner: {
       staging: 'بيئة تجريبية (Staging) — البيانات للاختبار فقط'
@@ -1694,10 +1703,22 @@
     // legacy step 1 (20261117000100) columns (declaration_notes, cancel_reason, cancelled_by: withInternal(), staff only)
     'port_code,terminal_party_id,cargo_unit_type,chassis_no,vehicle_plate_no,transaction_type,transport_mode,transport_party_id,' +
     'transport_order_no,transport_order_date,cancelled_at';   // notes, financial_status: withInternal() (G5 column grant)
+  // 20261127000100: the draft flag + approval time (column-granted). A database without that migration (42703 / PGRST204 on
+  // is_draft) is read once more with TX_COLS only (no is_draft: every transaction is active)
+  var TX_DRAFT_COLS = ',is_draft,approved_at';
+  function txNoDraftCol(res) {
+    var e = res && res.error, raw = e && e.raw;
+    return !!(e && raw && (raw.code === '42703' || raw.code === 'PGRST204') && /is_draft|approved_at/.test(String(raw.message || '') + String(raw.details || '')));
+  }
+  function txSelect(run) {
+    return online(function (c) { return run(c, TX_COLS + TX_DRAFT_COLS); }).then(function (res) {
+      return txNoDraftCol(res) ? online(function (c) { return run(c, TX_COLS); }) : res;
+    });
+  }
   function listTransactions(o) {
     o = o || {};
-    return online(function (c) {
-      var q = c.from('transactions').select(TX_COLS + ',clients(name_ar),branches(code,name_ar)', { count: 'exact' })
+    return txSelect(function (c, cols) {
+      var q = c.from('transactions').select(cols + ',clients(name_ar),branches(code,name_ar)', { count: 'exact' })
         .order('created_at', { ascending: false });
       if (o.orgId) q = q.eq('org_id', o.orgId);
       if (o.status) q = q.eq('operational_status', o.status);
@@ -1720,8 +1741,8 @@
     });
   }
   function getTransaction(id) {
-    return online(function (c) {
-      return c.from('transactions').select(TX_COLS + ',clients(id,name_ar,client_type),branches(code,name_ar),containers(*)').eq('id', id).maybeSingle();
+    return txSelect(function (c, cols) {
+      return c.from('transactions').select(cols + ',clients(id,name_ar,client_type),branches(code,name_ar),containers(*)').eq('id', id).maybeSingle();
     }).then(function (r) { return withInternal('transactions', r); });
   }
   function createTransaction(row) {   // ref/status are set by the server
@@ -1855,6 +1876,44 @@
     if (o.confirmClient) p.confirm_client = true;
     return idemRpc('approve_doc_batch', o.idemKey, function (k) { return { p_batch: batchId, p_payload: withKey(p, k) }; });
   }
+  /* draft transaction + approval (20261127000100, docs/online/LEGACY_DOCS_AR.md + LEGACY_DECL_AR.md): the B/L + invoice
+     readings of the ocr.html matching report become a DRAFT transaction; after the declaration is approved and a three-way
+     match is saved, the staff approve it. */
+  // o = { version (required: the batch.version read), newTransaction {clientId, operation?, mode?}, cargoUnitType? ('container' |
+  //       'roro'), chassisNo? (Ro-Ro: required), vehiclePlateNo?, shippingAgentId?, confirmClient?, idemKey? } → the approveDocBatch result + { transaction_id, ref,
+  //       is_draft: true, cargo_unit_type, mode, operation }   (MRS_REQUIRED bl_number / containers, MRS_DUPLICATE_TX …)
+  function createDraftTransaction(batchId, o) {
+    o = o || {};
+    if (!isUuid(batchId)) return Promise.resolve(fail('MRS_REQUIRED', 'doc_batch'));
+    if (typeof o.version !== 'number') return Promise.resolve(fail('MRS_REQUIRED', 'version'));
+    var nt = o.newTransaction || {};
+    if (!isUuid(nt.clientId)) return Promise.resolve(fail('MRS_REQUIRED', 'client_id'));
+    var p = { version: o.version, new_transaction: { client_id: nt.clientId } };
+    if (nt.operation) p.new_transaction.operation = nt.operation;
+    if (nt.mode) p.new_transaction.mode = nt.mode;
+    if (o.cargoUnitType) p.cargo_unit_type = o.cargoUnitType;
+    if (o.chassisNo) p.chassis_no = String(o.chassisNo);
+    if (o.vehiclePlateNo) p.vehicle_plate_no = String(o.vehiclePlateNo);
+    if (o.shippingAgentId) p.shipping_agent_id = o.shippingAgentId;
+    if (o.confirmClient) p.confirm_client = true;
+    return idemRpc('create_draft_transaction', o.idemKey, function (k) { return { p_batch: batchId, p_payload: withKey(p, k) }; });
+  }
+  // o = { matchId (a saved three-way match of the transaction), confirmMismatch?, note?, idemKey? } → { transaction_id, ref,
+  //   is_draft: false, approved_at, approved_by, approved_by_name, approval_match_id, approval_note, confirmed_mismatch, … }
+  function approveTransaction(txId, o) {
+    o = o || {};
+    if (!isUuid(txId)) return Promise.resolve(fail('MRS_REQUIRED', 'transaction'));
+    if (!isUuid(o.matchId)) return Promise.resolve(fail('MRS_REQUIRED', 'match_id'));
+    if (o.note != null && String(o.note).length > 1000) return Promise.resolve(fail('MRS_TOO_LONG', 'note'));
+    var p = { match_id: o.matchId };
+    if (o.confirmMismatch) p.confirm_mismatch = true;
+    if (o.note != null && String(o.note).trim()) p.note = String(o.note);
+    return idemRpc('approve_transaction', o.idemKey, function (k) { return { p_tx: txId, p_payload: withKey(p, k) }; });
+  }
+  // → { transaction_id, ref, is_draft, approved_at, approved_by, approved_by_name, approval_match_id, approval_note, cancelled,
+  //     operational_status, has_declaration, declaration_approval {id, extraction_id, declaration_id, approved_at, bl_status} | null,
+  //     last_three_way_match {id, created_at, overall, engine_version, declaration_extraction_id, status, counts} | null }
+  function getTransactionApproval(txId) { return rpc('get_transaction_approval', { p_tx: txId }); }
   // → { transaction_id, shipment_data | null, invoice_items [..], packing_items [..], batches [batch summary] }
   function getTransactionShipment(txId) { return rpc('get_transaction_shipment', { p_tx: txId }); }
   /* legacy step 4 (20261120000100, docs/online/LEGACY_DECL_AR.md): customs declaration reading → staff approval, HS reference.
@@ -4439,6 +4498,7 @@
     mergeDocBatch: mergeDocBatch, saveDocBatchDraft: saveDocBatchDraft, getDocBatch: getDocBatch,
     listPendingDocBatches: listPendingDocBatches, discardDocBatch: discardDocBatch, archiveDocBatch: archiveDocBatch,
     approveDocBatch: approveDocBatch, getTransactionShipment: getTransactionShipment, matchClientV2: matchClientV2,
+    createDraftTransaction: createDraftTransaction, approveTransaction: approveTransaction, getTransactionApproval: getTransactionApproval,
     confirmClientMatch: confirmClientMatch, rejectClientAlias: rejectClientAlias, seedShippingAgents: seedShippingAgents,
     matchShippingAgent: matchShippingAgent,
     // legacy step 4 (20261120000100)

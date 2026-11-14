@@ -651,6 +651,7 @@
                   <select class="form-control" id="ocr-match-tx"><option value="" data-i18n="ocr.m_tx_none">حفظ بدون معاملة</option></select>
                 </div>
                 <label class="check"><input type="checkbox" id="ocr-match-attach" checked> <span data-i18n="ocr.m_attach">إرفاق الملفات الأصلية بمستندات المعاملة</span></label>
+                <label class="check" id="ocr-match-batch-wrap" hidden><input type="checkbox" id="ocr-match-batch"> <span data-i18n="ocr.mx_tx_import">نقل بيانات البوليصة والفاتورة إلى المعاملة المختارة (الحاويات وبيانات فسح والبنود)</span></label>
               </div>
               <div class="alert mt-2" id="ocr-match-save-msg" role="status" tabindex="-1" hidden><span id="ocr-match-save-msg-text"></span></div>
               <div class="alert alert-warning mt-2" id="ocr-match-save-block" role="note" hidden><span id="ocr-match-save-block-text"></span></div>
@@ -664,6 +665,8 @@
                 <button type="button" class="btn btn-ghost btn-sm" id="ocr-match-xlsx" data-i18n="ocr.m_xlsx">تصدير Excel</button>
                 <button type="button" class="btn btn-ghost btn-sm" id="ocr-match-json" data-i18n="ocr.m_json">JSON</button>
               </div>
+              <!-- draft transaction from this report (ocr-match.js, 20261127000100): built by script, values via textContent -->
+              <div class="ocr-mx-draft" id="ocr-mx-draft" aria-live="polite" hidden></div>
             </div>
           </div>
 

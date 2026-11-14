@@ -356,7 +356,7 @@
       lbl_client_type_individual: 'Individual', lbl_client_type_business: 'Business',
       lbl_source_web: 'Website', lbl_source_portal: 'Client portal', lbl_source_bulk: 'Bulk upload', lbl_source_staff: 'Staff',
       lbl_contact_pref_phone: 'Phone call', lbl_contact_pref_whatsapp: 'WhatsApp', lbl_contact_pref_email: 'E-mail',
-      lbl_event_type_created: 'Transaction created', lbl_event_type_request_converted: 'Converted from request',
+      lbl_event_type_created: 'Transaction created', lbl_event_type_request_converted: 'Converted from request', lbl_event_type_tx_approval: 'Transaction approved',
       lbl_event_type_operational_status: 'Operational status', lbl_event_type_financial_status: 'Financial status',
       lbl_event_type_container_return: 'Container return', lbl_event_type_document: 'Document', lbl_event_type_note: 'Note',
       lbl_event_type_tracking_token: 'Tracking code issued',

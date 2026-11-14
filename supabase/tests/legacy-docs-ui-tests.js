@@ -802,6 +802,139 @@ async function txDocsRender() {
   check('nothing approved yet → a plain note', () => /لم تُعتمد بيانات شحنة/.test(host3.textContent) || host3.textContent);
 }
 
+/* ================================================================ draft transaction (20261127000100) */
+section('draft transaction from the report + #match-tx + approval (20261127000100): pure helpers');
+const dctx = { window: { MarsaI18n: I18N }, document: { readyState: 'complete', getElementById: () => null, addEventListener() {} },
+  Intl, Date, Math, String, Object, Array, JSON, Number, parseInt, isFinite, isNaN, Promise, setTimeout, clearTimeout, encodeURIComponent, RegExp };
+dctx.window.window = dctx.window; dctx.window.document = dctx.document;
+vm.createContext(dctx);
+vm.runInContext(rd('assets/i18n/decl.js'), dctx, { filename: 'decl.js' });
+vm.runInContext(rd('assets/js/ocr-match.js'), dctx, { filename: 'ocr-match.js' });
+vm.runInContext(rd('assets/js/ops/fasah-sheet.js'), dctx, { filename: 'fasah-sheet.js' });
+vm.runInContext(rd('assets/js/ops/tx-draft.js'), dctx, { filename: 'tx-draft.js' });
+const XP = dctx.window.MarsaOcrMatchPure, FS = dctx.window.MarsaFasahSheet, TD = dctx.window.MarsaOps && dctx.window.MarsaOps.txDraft;
+check('ocr-match.js exposes MarsaOcrMatchPure without a DOM; tx-draft.js registers draft_approval (order 4, top)', () => {
+  const s2 = (dctx.window.MarsaOps.txSections || []).filter(x => x.id === 'draft_approval');
+  return !!(XP && typeof XP.draftNext === 'function' && TD && TD.VERSION === 'txd-1' && s2.length === 1 && s2[0].order === 4 && s2[0].placement === 'top') || 'missing';
+});
+eq('parseMatchTx: #match-tx=<tx>, with &decl, upper case → lower; anything else → null',
+  [XP.parseMatchTx('#match-tx=' + U1), XP.parseMatchTx('match-tx=' + U1.toUpperCase() + '&decl=' + U2), XP.parseMatchTx('#match-tx=x'),
+    XP.parseMatchTx('#tx=' + U1), XP.parseMatchTx('#match-tx=' + U1 + '&decl=bad'), XP.parseMatchTx('')],
+  [{ tx: U1, decl: null }, { tx: U1, decl: U2 }, null, null, null, null]);
+eq('matchTxLink (ocr-match) = matchLink (tx-draft) = matchTxLink (decl-review)', [XP.matchTxLink(U1, U2), TD.pure.matchLink(U1, U2), XP.matchTxLink(U1, 'x')],
+  ['ocr.html#match-tx=' + U1 + '&decl=' + U2, 'ocr.html#match-tx=' + U1 + '&decl=' + U2, 'ocr.html#match-tx=' + U1]);
+check('decl-review.js links a draft\'s approved declaration to the match (matchTxLink exported, used only when tx.is_draft)', () => {
+  const d = rd('assets/js/decl-review.js');
+  return (/matchTxLink: matchTxLink/.test(d) && /S\.tx\.is_draft/.test(d) && /'ocr\.html#match-tx='/.test(d)) || 'decl-review';
+});
+eq('pickReadings: the newest live reading per kind; voided / unknown / declaration readings skipped',
+  (function () {
+    const r = XP.pickReadings([{ id: U3, doc_type: 'commercial_invoice', voided_at: 'x' }, { id: U1, doc_type: 'commercial_invoice' }, { id: U2, doc_type: 'commercial_invoice' },
+      { id: U2, doc_type: 'bill_of_lading' }, { id: U3, doc_type: 'customs_declaration' }, { id: 'bad', doc_type: 'packing_list' }, { id: U3, doc_type: 'other' }]);
+    return Object.keys(r).sort().map(k => k + ':' + r[k].id);
+  })(), ['bl:' + U2, 'invoice:' + U1]);
+check('readingOf: extracted + reviewed values (reviewed wins, numbers as text), items, a saved ref reused (never saved twice)', () => {
+  const e = XP.readingOf({ id: U1, doc_type: 'bill_of_lading', transaction_id: U2, source_name: 'bl.pdf', extracted_fields: { bl_number: 'ABC1', gross_weight: 1200, Bad: 'x', empty: '' },
+    reviewed_fields: { bl_number: 'ABC2' }, line_items: [{ description: 'x' }] }, 'bl');
+  return (e.slot === 'bl' && e.fields.bl_number.value === 'ABC2' && e.fields.gross_weight.value === '1200' && !e.fields.Bad && !e.fields.empty
+    && e.res.fields.length === 2 && e.res.reused === true && e.res.extraction_id === U1 && e.saved.id === U1 && e.saved.transaction_id === U2
+    && e.items.length === 1 && e.label === 'bl.pdf') || J(e);
+});
+eq('draftNext: readings → batch → attach (each slot) → draft → create | approve → match → done',
+  [XP.draftNext({}), XP.draftNext({ readingsSaved: true }), XP.draftNext({ readingsSaved: true, batchId: U1, slots: ['bl', 'invoice'], attached: { bl: true } }),
+    XP.draftNext({ readingsSaved: true, batchId: U1, slots: ['bl'], attached: { bl: true } }),
+    XP.draftNext({ readingsSaved: true, batchId: U1, slots: ['bl'], attached: { bl: true }, draftSaved: true }),
+    XP.draftNext({ readingsSaved: true, batchId: U1, slots: ['bl'], attached: { bl: true }, draftSaved: true, target: 'existing' }),
+    XP.draftNext({ txId: U2 }), XP.draftNext({ txId: U2, matchId: U3 })],
+  ['readings', 'batch', 'attach', 'draft', 'create', 'approve', 'match', 'done']);
+eq('draftPayload: version / client / Ro-Ro chassis required; defaults import / sea; plate trimmed; confirm + key passed',
+  [XP.draftPayload({}).error, XP.draftPayload({ version: 2 }).error, XP.draftPayload({ version: 2, clientId: U1, roro: true, chassis: ' ' }).error,
+    XP.draftPayload({ version: 2, clientId: U1, mode: 'rail', operation: 'x' }).o,
+    XP.draftPayload({ version: 3, clientId: U1, mode: 'air', operation: 'export', roro: true, chassis: ' JTD123 ', plate: ' ABC 1 ', confirmClient: true, idemKey: U3 }).o],
+  ['version', 'client', 'chassis', { version: 2, newTransaction: { clientId: U1, operation: 'import', mode: 'sea' } },
+    { version: 3, newTransaction: { clientId: U1, operation: 'export', mode: 'air' }, cargoUnitType: 'roro', chassisNo: 'JTD123', vehiclePlateNo: 'ABC 1', confirmClient: true, idemKey: U3 }]);
+check('draftKey: the same request keeps its key (a retry replays), another client / unit gets a new one', () => {
+  let n = 0; const gen = () => 'k' + (++n);
+  const o1 = XP.draftPayload({ version: 1, clientId: U1 }).o, o2 = XP.draftPayload({ version: 2, clientId: U1 }).o, o3 = XP.draftPayload({ version: 1, clientId: U2 }).o;
+  const a = XP.draftKey(null, o1, gen), b = XP.draftKey(a, o2, gen), c = XP.draftKey(b, o3, gen);
+  return (a.key === 'k1' && b.key === 'k1' && c.key === 'k2') || J({ a, b, c });
+});
+eq('importerName: the B/L consignee (first line, «CONSIGNEE:» dropped), else the invoice buyer',
+  [XP.importerName({ consignee: 'CONSIGNEE: TEST TRADING CO.\nP.O. BOX 1' }, { buyer_name: 'X' }), XP.importerName({}, { buyer_name: 'Buyer Co' }),
+    XP.importerName({ consignee_name: 'شركة الاختبار' }, {}), XP.importerName({}, {})],
+  ['TEST TRADING CO.', 'Buyer Co', 'شركة الاختبار', '']);
+check('fasah-sheet readings draft with src.tx: strip «مسودة معاملة MRS-…», txId set (export log filters {transaction_id}); without: «مسودة — قبل إنشاء المعاملة»', () => {
+  const docs = { bl: { fields: { bl_number: 'ABC1', consignee: 'X' }, items: [], containers: [] }, invoice: { fields: { invoice_number: 'I1' }, items: [], containers: [] } };
+  const t = (k, v) => { let x = dctx.window.MarsaI18n.t('decl.' + k, v); return x === 'decl.' + k ? k : x; };
+  const a = FS.pure.buildReadingsModel({ docs, result: { rows: [] }, t, tx: { id: U1.toUpperCase(), ref: 'MRS-2026-000123' } });
+  const b = FS.pure.buildReadingsModel({ docs, result: { rows: [] }, t });
+  const c = FS.pure.buildReadingsModel({ docs, result: { rows: [] }, t, tx: { id: 'bad', ref: 'X' } });
+  return (a.ready && a.strip[0][1] === 'مسودة معاملة MRS-2026-000123' && a.txId === U1 && a.draft === true && b.txId === null
+    && b.strip[0][1] === 'مسودة — قبل إنشاء المعاملة' && c.txId === null) || J({ a: [a.strip[0], a.txId], b: [b.strip[0], b.txId], c: c.txId });
+});
+check('fasah-sheet export: filters {transaction_id} whenever the model has a txId (the draft transaction included)', () =>
+  /var filters = model\.txId \? \{ transaction_id: model\.txId \} : \{\};/.test(rd('assets/js/ops/fasah-sheet.js')) || 'filters');
+eq('tx-draft draftView: never a draft → hidden; draft without declaration → await_decl; declaration approved → await_match; match on another reading ignored',
+  [TD.pure.draftView({ is_draft: false }).show, TD.pure.draftView({ is_draft: false, approved_at: 'x' }).stage, TD.pure.draftView({ is_draft: true }).stage,
+    TD.pure.draftView({ is_draft: true, declaration_approval: { extraction_id: U1 } }).stage,
+    TD.pure.draftView({ is_draft: true, declaration_approval: { extraction_id: U1 }, last_three_way_match: { id: U2, declaration_extraction_id: U3, overall: 'match', counts: {} } }).stage],
+  [false, 'approved', 'await_decl', 'await_match', 'await_match']);
+check('tx-draft draftView: a clean match can be approved without confirmation; review / mismatch / missing need confirm + note', () => {
+  const base = { is_draft: true, declaration_approval: { extraction_id: U1 } };
+  const clean = TD.pure.draftView(Object.assign({ last_three_way_match: { id: U2, declaration_extraction_id: U1, overall: 'match', counts: { match: 5 } } }, base));
+  const miss = TD.pure.draftView(Object.assign({ last_three_way_match: { id: U2, declaration_extraction_id: U1, overall: 'match', counts: { match: 4, missing: 1 } } }, base));
+  const rev = TD.pure.draftView(Object.assign({ last_three_way_match: { id: U2, declaration_extraction_id: U1, overall: 'review', counts: { match: 4, partial: 1 } } }, base));
+  return (clean.stage === 'ready' && clean.canApprove && !clean.needConfirm && miss.needConfirm && rev.needConfirm) || J({ clean, miss, rev });
+});
+eq('tx-draft approvePayload: no match / no confirm / no note refused; a clean match → {matchId}; a confirmed mismatch → {matchId, confirmMismatch, note}',
+  (function () {
+    const ready = TD.pure.draftView({ is_draft: true, declaration_approval: { extraction_id: U1 }, last_three_way_match: { id: U2, declaration_extraction_id: U1, overall: 'review', counts: {} } });
+    const clean = TD.pure.draftView({ is_draft: true, declaration_approval: { extraction_id: U1 }, last_three_way_match: { id: U2, declaration_extraction_id: U1, overall: 'match', counts: {} } });
+    return [TD.pure.approvePayload(TD.pure.draftView({ is_draft: true }), {}).error, TD.pure.approvePayload(ready, { note: 'x' }).error,
+      TD.pure.approvePayload(ready, { confirm: true, note: '  ' }).error, TD.pure.approvePayload(clean, {}).o,
+      TD.pure.approvePayload(ready, { confirm: true, note: ' ok ', idemKey: U3 }).o];
+  })(), ['match', 'confirm', 'note', { matchId: U2 }, { matchId: U2, confirmMismatch: true, note: 'ok', idemKey: U3 }]);
+check('strings: every txd_* / mx_draft_* / mx_mt_* key exists in ar and en (decl, ocr)', () => {
+  const ocrD = { ar: {}, en: {} };
+  const c2 = { window: { MarsaI18n: { register(ns, d) { ['ar', 'en'].forEach(l => Object.assign(ocrD[l], d[l] || {})); } } } };
+  vm.createContext(c2); vm.runInContext(rd('assets/i18n/ocr.js'), c2);
+  const usedOcr = [...new Set((rd('assets/js/ocr-match.js').match(/T\('(mx_(?:draft|mt|tx)_[a-z_]+)'/g) || []).map(x => x.slice(3, -1)))];
+  const usedDecl = [...new Set((rd('assets/js/ops/tx-draft.js').match(/T\('(txd_[a-z_]+)'/g) || []).map(x => x.slice(3, -1)))];
+  const missO = usedOcr.filter(k => !/_$/.test(k) && (ocrD.ar[k] == null || ocrD.en[k] == null));   // a key ending in _ is a dynamic family (checked below)
+  const declD = { ar: {}, en: {} };
+  const c3 = { window: { MarsaI18n: { register(ns, d) { ['ar', 'en'].forEach(l => Object.assign(declD[l], d[l] || {})); } } } };
+  vm.createContext(c3); vm.runInContext(rd('assets/i18n/decl.js'), c3);
+  const fam = ['txd_badge_approved', 'txd_badge_await_decl', 'txd_badge_await_match', 'txd_lead_await_decl', 'txd_lead_await_match', 'txd_lead_ready',
+    'txd_overall_match', 'txd_overall_review', 'txd_overall_mismatch', 'txd_err_match', 'txd_err_confirm', 'txd_err_note', 'match_tx', 'approved_draft_next', 'rd_draft_tx'];
+  const missD = usedDecl.concat(fam).filter(k => !/_$/.test(k) && (declD.ar[k] == null || declD.en[k] == null));
+  const fam2 = ['mx_draft_match_suggested', 'mx_draft_match_review', 'mx_draft_match_conflict', 'mx_draft_match_none', 'mx_draft_mode_sea', 'mx_draft_mode_air',
+    'mx_draft_mode_land', 'mx_draft_need_client', 'mx_draft_need_chassis', 'mx_draft_need_version'].filter(k => ocrD.ar[k] == null || ocrD.en[k] == null);
+  return (usedOcr.length > 20 && missO.length === 0 && missD.length === 0 && fam2.length === 0) || J({ missO, missD, fam2 });
+});
+check('wiring: admin.html loads tx-draft.js after tx-appt.js and before admin.js; sw.js precaches it (VERSION untouched by this check); ocr.html has the draft box + the import checkbox', () => {
+  const h = rd('admin.html'), sw = rd('sw.js'), o = rd('ocr.html');
+  const i1 = h.indexOf('assets/js/ops/tx-appt.js'), i2 = h.indexOf('assets/js/ops/tx-draft.js'), i3 = h.indexOf('assets/js/admin.js');
+  return (i1 > 0 && i2 > i1 && i3 > i2 && sw.includes("'assets/js/ops/tx-draft.js'") && /id="ocr-mx-draft"/.test(o) && /id="ocr-match-batch"/.test(o)
+    && /id="ocr-match-batch-wrap"[^>]*hidden/.test(o)) || 'wiring';
+});
+check('ocr-match.js / tx-draft.js: ES5, no innerHTML, values through textContent; the draft chain calls the server in order', () => {
+  const a = rd('assets/js/ocr-match.js'), b = rd('assets/js/ops/tx-draft.js');
+  const es6 = /=>|\blet\s|\bconst\s|`/;
+  const order = ['saveReadings(D.slots', 'API.createDocBatch(', 'API.attachDocBatchDocument(', 'API.mergeDocBatch(', 'API.saveDocBatchDraft(', 'API.createDraftTransaction(', 'API.approveDocBatch(', 'saveMatchRow(D.txId'];
+  const idx = order.map(x => a.indexOf(x));
+  return (!es6.test(b) && !/innerHTML/.test(a + b) && idx.every((x, i) => x > 0 && (i === 0 || x > idx[i - 1])) && /approveTransaction/.test(b)) || J({ idx });
+});
+check('tx-legacy withDraftStep: the «مسودة» pre-step only while a draft; admin.js list + detail show the draft chip from is_draft', () => {
+  const c4 = { window: { MarsaI18n: I18N }, Intl, Date, Math, String, Object, Array, JSON, Number, parseInt, isFinite, isNaN, Promise, setTimeout, clearTimeout, encodeURIComponent };
+  c4.window.window = c4.window;
+  vm.createContext(c4); vm.runInContext(rd('assets/js/ops/tx-legacy.js'), c4);
+  const W = c4.window.MarsaOps.legacyTx.pure.withDraftStep;
+  const st = [{ code: 'new', state: 'current' }];
+  const ad = rd('assets/js/admin.js');
+  return (W(st, true).length === 2 && W(st, true)[0].state === 'draft' && W(st, false).length === 1 && /x\.is_draft && !x\.cancelled_at/.test(ad)
+    && /t\.is_draft && !cancelled/.test(ad) && /tx_approval: 'اعتماد المعاملة'/.test(ad)) || 'stepper / chip';
+});
+
 /* ================================================================ async: pool */
 (async function () {
   section('pool (parallel reading, 3 at a time)');

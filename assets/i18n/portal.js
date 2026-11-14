@@ -167,7 +167,7 @@
       signOutAllDone: 'تم تسجيل الخروج هنا وإلغاء جلسات الأجهزة الأخرى؛ قد يبقى جهاز آخر متصلًا حتى تنتهي جلسته الحالية (ساعة على الأكثر).',
 
       /* ---- codes ---- */
-      'ev.created': 'إنشاء المعاملة', 'ev.request_converted': 'تحويل الطلب إلى معاملة', 'ev.operational_status': 'تغيّر المرحلة التشغيلية',
+      'ev.created': 'إنشاء المعاملة', 'ev.tx_approval': 'اعتماد المعاملة', 'ev.request_converted': 'تحويل الطلب إلى معاملة', 'ev.operational_status': 'تغيّر المرحلة التشغيلية',
       'ev.financial_status': 'تحديث الحالة المالية', 'ev.container_return': 'إرجاع حاوية', 'ev.document': 'مستند', 'ev.note': 'ملاحظة',
       'ev.tracking_token': 'إصدار رمز تتبع', 'ev.appointment': 'تأكيد موعد الميناء',
       'appt.withdrawn': 'أُلغي موعد الميناء أو تغيّر', 'appt.completed': 'تم موعد الميناء',
@@ -337,7 +337,7 @@
       signOutDone: 'You are signed out.',
       signOutAllDone: 'You are signed out here and the sessions on your other devices were revoked; another device may stay connected until its current session ends (one hour at most).',
 
-      'ev.created': 'Transaction created', 'ev.request_converted': 'Request converted to a transaction', 'ev.operational_status': 'Operational stage changed',
+      'ev.created': 'Transaction created', 'ev.tx_approval': 'Transaction approved', 'ev.request_converted': 'Request converted to a transaction', 'ev.operational_status': 'Operational stage changed',
       'ev.financial_status': 'Financial status updated', 'ev.container_return': 'Container return', 'ev.document': 'Document', 'ev.note': 'Note',
       'ev.tracking_token': 'Tracking code issued', 'ev.appointment': 'Port appointment confirmed',
       'appt.withdrawn': 'Port appointment cancelled or changed', 'appt.completed': 'Port appointment took place',

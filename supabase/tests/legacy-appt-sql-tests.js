@@ -299,7 +299,7 @@ async function secFile() {
     (!/set_transaction_status\s*\(/i.test(src.replace(/--.*$/gm, '').replace(/'under_billing'/g, '')) && /'bypasses_empty_return', false/.test(src)
       && /SELECT true\n\$\$/.test(src) && !/CREATE OR REPLACE FUNCTION public\.set_transaction_status/.test(src)) || 'decisions');
   // later phases may follow this file (20261122000100 legacy_pay: re-creates the conversion lists)
-  const LATER_PHASES = ['20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql'];
+  const LATER_PHASES = ['20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');

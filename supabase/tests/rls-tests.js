@@ -765,7 +765,7 @@ async function main() {
   });
   await check('anon has no USAGE on schema app', async () =>
     (await q(`SELECT has_schema_privilege('anon', 'app', 'USAGE') u`))[0].u === false);
-  await check('authenticated can execute only the 191 documented public RPCs', async () => {
+  await check('authenticated can execute only the 194 documented public RPCs', async () => {
     const r = await q(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                         WHERE n.nspname = 'public' AND has_function_privilege('authenticated', p.oid, 'EXECUTE') ORDER BY 1`);
     const exp = ['admin_list_members', 'admin_set_member_active', 'convert_request_to_transaction', 'import_commit', 'issue_tracking_token', 'my_context', 'public_track',
@@ -815,6 +815,8 @@ async function main() {
       'confirm_client_match', 'reject_client_alias', 'seed_shipping_agents', 'match_shipping_agent',
       // legacy decl (20261120000100): declaration review / approval, the transaction declaration, the HS reference search
       'get_declaration_review', 'approve_declaration_extraction', 'get_transaction_declaration', 'search_hs_reference',
+      // tx draft approval (20261127000100): draft transaction from a doc batch, approval after the declaration, the read side
+      'create_draft_transaction', 'approve_transaction', 'get_transaction_approval',
       // legacy appt (20261121000100): appointment card drafts, empty-return proofs, the TASTO carrier order, the readiness banner
       'appointment_card_state', 'save_appointment_draft', 'get_appointment_draft', 'cancel_appointment_draft', 'move_appointment_draft',
       'approve_appointment_draft', 'create_empty_return_proof', 'verify_empty_return_proof', 'void_empty_return_proof',
@@ -843,7 +845,7 @@ async function main() {
       'legacy_import_commit', 'legacy_import_void', 'legacy_import_get_run', 'legacy_import_list_runs', 'legacy_import_list_rows',
       'legacy_import_skip_rows', 'legacy_import_queue_daftra', 'legacy_import_daftra_candidates'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 297) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 300) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');

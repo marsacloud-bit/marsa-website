@@ -323,7 +323,7 @@ async function secFile() {
      && !/INSERT INTO public\.(empty_return_proofs|billing_intents|client_charges)/.test(src) && !/net\.http|functions\.invoke/.test(src)
      && /'suggested'/.test(src) && /'review_status', 'pending'/.test(src)) || 'approval');
   // later phases may follow this file (20261126000100 doc_match_packing: document_matches.packing_extraction_id; no import object)
-  const LATER_PHASES = ['20261126000100_doc_match_packing.sql'];
+  const LATER_PHASES = ['20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');

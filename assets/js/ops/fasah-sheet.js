@@ -19,7 +19,9 @@
      B/L / invoice / packing list / declaration fields + items + containers, the engine result of the report in strict
      mode and its exceptions) into the SAME model shape, so render / flatRows / xlsxSpec / the export are shared.
      No transaction yet: strip «مسودة — قبل إنشاء المعاملة», filters {} in the export log (log_report_export accepts a
-     fasah_sheet export with no filter key), file كشف-إدخال-فسح-مسودة-{yyyymmdd-hhmm}. A reading that is itself a Fasah
+     fasah_sheet export with no filter key), file كشف-إدخال-فسح-مسودة-{yyyymmdd-hhmm}. Once «إنشاء مسودة معاملة» made a
+     draft transaction from these readings (20261127000100), src.tx = {id, ref}: strip «مسودة معاملة MRS-…» and the
+     export log sends filters {transaction_id}. A reading that is itself a Fasah
      entry sheet (title / file name) or whose detected type is 'other' never produces the sheet (readingExcluded, a note
      says so). renderDraft(host, src, opts) draws it inline (toolbar + sheet); print = a copy of the sheet in the
      .fsh-overlay, so the print CSS of decl.css applies unchanged.
@@ -328,7 +330,7 @@
   var EXC_KIND = { mismatch: 'conflict', invalid: 'invalid', missing: 'missing', partial: 'review' };
   /* src = { docs: { bl|invoice|packing|declaration: { fields {key: value}, items [], containers [], label?, fileName?, detected?,
              parentDetected? } }, result: the report's MarsaDocMatch.compare answer (strict), exceptions?: [{ st, label, values, note }]
-             (the report's exceptions table), now?, lang?, t?(key) }
+             (the report's exceptions table), now?, lang?, t?(key), tx?: {id, ref} (the draft transaction made from them) }
      → { ready: false, missing [docs], excluded [{doc, reason, label}] }
      | the buildModel shape + { ready: true, draft: true, docCols, footKey, fileSeq, excluded } */
   function buildReadingsModel(src) {
@@ -352,7 +354,9 @@
     function P(key, v, ltr) { return [key, blank(v) ? '' : str(v).trim(), !!ltr]; }
     var importer = first(b, ['consignee_name', 'consignee']) || first(iv, ['buyer_name', 'consignee_name', 'consignee']);
     var blNo = first(b, ['bl_number']);
-    var draftText = t('rd_draft');
+    // a draft transaction was created from these readings (20261127000100): «مسودة معاملة MRS-…», the export log names it
+    var dtx = src.tx && typeof src.tx === 'object' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(src.tx.id || '')) ? src.tx : null;
+    var draftText = dtx ? t('rd_draft_tx', { ref: str(dtx.ref || '') }) : t('rd_draft');
     var strip = [P('s_tx', draftText), P('s_importer', importer), P('s_bl', blNo, 1), P('s_prepared', prepared.text, 1)];
     // containers: the B/L's own rows, else the packing list's / the invoice's
     var ctr = containerRows(use.bl);
@@ -416,7 +420,8 @@
       return a;
     });
     return {
-      ready: true, draft: true, seq: '', txId: null, prepared: prepared, fileSeq: DRAFT_SEQ, fileBase: fileName(DRAFT_SEQ, src.now || new Date()),
+      ready: true, draft: true, seq: dtx ? str(dtx.ref || '') : '', txId: dtx ? String(dtx.id).toLowerCase() : null, prepared: prepared,
+      fileSeq: DRAFT_SEQ, fileBase: fileName(DRAFT_SEQ, src.now || new Date()),
       strip: strip, sections: dropEmptyCols(sections), common: common, alerts: alerts, hasData: true, docCols: cols, footKey: 'rd_foot_note', excluded: excluded,
       counts: { containers: ctr.length, invoice: sections[1].tables[0].rows.length, packing: pk ? sections[2].tables[0].rows.length : 0, declaration: 0 }
     };
@@ -693,7 +698,7 @@
     var docName = typeof opts.docName === 'function' ? opts.docName : function (k) { return t('col_' + k); };
     function el(tag, cls, text) { var n = doc.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
     function v(text, ltr) { var b = el('bdi', ltr ? 'num' : null, blank(text) ? NONE : String(text)); b.dir = ltr ? 'ltr' : 'auto'; return b; }
-    var m = buildReadingsModel({ docs: src.docs, result: src.result, exceptions: src.exceptions, now: src.now, lang: lang, t: t });
+    var m = buildReadingsModel({ docs: src.docs, result: src.result, exceptions: src.exceptions, now: src.now, lang: lang, t: t, tx: src.tx });
     host.textContent = '';
     (m.excluded || []).forEach(function (x) {
       var n = el('div', 'alert alert-warning fsh-note', t('rd_excluded_' + x.reason, { file: x.label || docName(x.doc), doc: docName(x.doc) }));

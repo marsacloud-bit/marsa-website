@@ -198,7 +198,7 @@ async function secFile() {
   // later phases may follow this file (20261115000100 convert_in_place, 20261116000100 doc_match); none may sort before it unnoticed
   const LATER_PHASES = ['20261115000100_convert_in_place.sql', '20261116000100_doc_match.sql', '20261117000100_legacy_core.sql',
     '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql',
-    '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql'];
+    '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql'];
   await check('this file is present; only the listed later phases follow it', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -2410,10 +2410,10 @@ async function secFrontEnd() {
       && /var stopped = cancelRequested;/.test(ocr) && /if \(!stopped && typeof autoCompare === 'function'\) autoCompare\(todo\);/.test(ocr)
       && /renderCompareBox\(j\);/.test(ocr) && /id="ocr-compare-box"[^>]*hidden/.test(html) && /id="ocr-compare-btn"/.test(html)) || J({ j1: !!j1.byDocument, j2: j2.byDocument });
   });
-  await check('ocr-match.js: window.MarsaOcrMatch.compareReadings (no AI call: no aiExtract / quota in it), only with AI access, 2+ slots; save blocked for parts of a combined file, reuses rows the reader saved', () => {
+  await check('ocr-match.js: window.MarsaOcrMatch.compareReadings (no AI call: no aiExtract / quota in it), only with AI access (or readings already saved on a transaction: #match-tx, 20261127000100), 2+ slots; save blocked for parts of a combined file, reuses rows the reader saved', () => {
     const a = mx.indexOf('    function compareReadings('), b = mx.indexOf('    function canCompare(');
     const body = a > 0 && b > a ? mx.slice(a, b) : '';
-    return (!!body && !/aiExtract|AI\.remaining/.test(body) && /if \(!\(ONLINE && STAFF && AI\.enabled\) \|\| S\.running \|\| S\.saving\) return false;/.test(body)
+    return (!!body && !/aiExtract|AI\.remaining/.test(body) && /if \(!\(ONLINE && STAFF && \(AI\.enabled \|\| opts\.saved === true\)\) \|\| S\.running \|\| S\.saving\) return false;/.test(body)
       && /if \(n < 2\) return false;/.test(body) && /window\.MarsaOcrMatch = \{ version: E\.VERSION, compareReadings: compareReadings, available: canCompare \};/.test(mx)
       && /if \(parts\.length\) return T\('mx_save_block_part'/.test(mx) && /\$\('ocr-match-save-btn'\)\.disabled = done \|\| S\.saving \|\| !!block;/.test(mx)
       && /var ref = savedOf\(k\);\n      if \(ref\) \{/.test(mx) && /S\.slots\[k\]\.onSaved\(r\.data\)/.test(mx) && /id="ocr-match-save-block"/.test(html)

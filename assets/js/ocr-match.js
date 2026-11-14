@@ -40,6 +40,109 @@
     else fn();
   }
 
+  /* ---------------------------------------------------------------
+     Pure helpers of the draft transaction (20261127000100) → window.MarsaOcrMatchPure (supabase/tests/legacy-docs-ui-tests.js)
+     --------------------------------------------------------------- */
+  var PURE = (function () {
+    var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    function isUuid(s) { return UUID.test(String(s || '')); }
+    var KIND_SLOT = { commercial_invoice: 'invoice', bill_of_lading: 'bl', packing_list: 'packing', customs_declaration: 'declaration' };
+    var BATCH_SLOT = { bl: 'bill_of_lading', invoice: 'commercial_invoice', packing: 'packing_list' };
+    // ocr.html#match-tx=<tx>[&decl=<extraction>] → { tx, decl | null } | null
+    function parseMatchTx(h) {
+      var s = String(h || '').replace(/^#/, '');
+      var m = /^match-tx=([0-9a-f-]{36})(?:&decl=([0-9a-f-]{36}))?$/i.exec(s);
+      if (!m || !isUuid(m[1]) || (m[2] && !isUuid(m[2]))) return null;
+      return { tx: m[1].toLowerCase(), decl: m[2] ? m[2].toLowerCase() : null };
+    }
+    function matchTxLink(tx, decl) {
+      return 'ocr.html#match-tx=' + encodeURIComponent(String(tx || '')) + (isUuid(decl) ? '&decl=' + encodeURIComponent(String(decl)) : '');
+    }
+    // the readings of a transaction (newest first, as listExtractions returns them) → { invoice, bl, packing } (the latest live one
+    // of each kind; the declaration comes from the declaration approval, never from this list)
+    function pickReadings(list) {
+      var out = {};
+      (Array.isArray(list) ? list : []).forEach(function (r) {
+        if (!r || r.voided_at || !isUuid(r.id)) return;
+        var k = KIND_SLOT[r.doc_type];
+        if (!k || k === 'declaration' || out[k]) return;
+        out[k] = r;
+      });
+      return out;
+    }
+    // a saved extraction row → a compareReadings entry (its values = the reading + the reviewer's corrections; the row is
+    // reused when the match is saved, never saved twice)
+    function readingOf(row, slot) {
+      row = row || {};
+      var vals = {}, fields = {}, list = [];
+      [row.extracted_fields, row.reviewed_fields].forEach(function (o) {
+        if (!o || typeof o !== 'object') return;
+        Object.keys(o).forEach(function (k) {
+          var v = o[k];
+          if (typeof v === 'number' && isFinite(v)) v = String(v);
+          if (typeof v === 'string' && v.trim() && /^[a-z_]{2,40}$/.test(k)) vals[k] = v.slice(0, 2000);
+        });
+      });
+      Object.keys(vals).forEach(function (k) { fields[k] = { value: vals[k], score: null }; list.push({ name: k, value: vals[k] }); });
+      var name = String(row.source_name || '').slice(0, 300);
+      return {
+        slot: slot, label: name, fileName: name, fields: fields,
+        items: Array.isArray(row.line_items) ? row.line_items.slice(0, 500) : [],
+        res: { fields: list, line_items: [], containers: [], doc_type: row.doc_type, detected_type: row.doc_type, kind: row.doc_type,
+          extraction_id: row.id, reused: true, transaction_id: row.transaction_id || null, mean_confidence: row.mean_confidence == null ? null : Number(row.mean_confidence) },
+        saved: { id: row.id, doc_type: row.doc_type, transaction_id: row.transaction_id || null, document_id: row.document_id || null }
+      };
+    }
+    // the next step of the «إنشاء مسودة معاملة» / «ربط بمعاملة + نقل البيانات» chain. Every finished step is kept in the
+    // state, so a retry after a failure continues where it stopped: readings → batch → attach (each slot) → draft (merge +
+    // save) → create (new draft transaction) | approve (existing transaction) → match → done
+    function draftNext(st) {
+      st = st || {};
+      if (isUuid(st.txId) && st.matchId) return 'done';
+      if (isUuid(st.txId)) return 'match';
+      if (!st.readingsSaved) return 'readings';
+      if (!isUuid(st.batchId)) return 'batch';
+      var need = Array.isArray(st.slots) ? st.slots : [];
+      for (var i = 0; i < need.length; i++) if (!(st.attached && st.attached[need[i]])) return 'attach';
+      if (!st.draftSaved) return 'draft';
+      return st.target === 'existing' ? 'approve' : 'create';
+    }
+    // the panel → createDraftTransaction options { o } | { error: 'version' | 'client' | 'chassis' }
+    function draftPayload(st) {
+      st = st || {};
+      if (typeof st.version !== 'number' || !isFinite(st.version)) return { error: 'version' };
+      if (!isUuid(st.clientId)) return { error: 'client' };
+      var o = { version: st.version, newTransaction: { clientId: st.clientId, operation: st.operation === 'export' ? 'export' : 'import',
+        mode: ['sea', 'air', 'land'].indexOf(st.mode) !== -1 ? st.mode : 'sea' } };
+      if (st.roro) {
+        var ch = String(st.chassis || '').trim();
+        if (!ch) return { error: 'chassis' };
+        o.cargoUnitType = 'roro'; o.chassisNo = ch.slice(0, 40);
+        var pl = String(st.plate || '').trim();
+        if (pl) o.vehiclePlateNo = pl.slice(0, 20);
+      }
+      if (st.confirmClient) o.confirmClient = true;
+      if (st.idemKey) o.idemKey = st.idemKey;
+      return { o: o };
+    }
+    // one key per request signature: a retry of the same request replays, a changed one (other client / mode …) is new
+    function draftKey(prev, o, gen) {
+      var sig = JSON.stringify([o && o.newTransaction || null, o && o.cargoUnitType || null, o && o.chassisNo || null, o && o.vehiclePlateNo || null, !!(o && o.confirmClient)]);
+      if (prev && prev.sig === sig && prev.key) return prev;
+      return { sig: sig, key: typeof gen === 'function' ? gen() : null };
+    }
+    // the importer name to match against the clients: the B/L consignee, else the invoice buyer (first line, ≤ 300)
+    function importerName(bl, inv) {
+      var f = function (o, keys) { for (var i = 0; i < keys.length; i++) { var v = o && o[keys[i]]; if (typeof v === 'string' && v.trim()) return v; } return ''; };
+      var v = f(bl, ['consignee_name', 'consignee']) || f(inv, ['buyer_name', 'buyer', 'consignee_name', 'consignee']);
+      v = String(v).split(/\r?\n/)[0].replace(/^\s*(consignee|buyer|to)\s*[:：]\s*/i, '').trim();
+      return v.slice(0, 300);
+    }
+    return { BATCH_SLOT: BATCH_SLOT, isUuid: isUuid, parseMatchTx: parseMatchTx, matchTxLink: matchTxLink, pickReadings: pickReadings,
+      readingOf: readingOf, draftNext: draftNext, draftPayload: draftPayload, draftKey: draftKey, importerName: importerName };
+  })();
+  window.MarsaOcrMatchPure = PURE;
+
   ready(function () {
     var section = document.getElementById('ocr-match-section');
     var E = window.MarsaDocMatch;
@@ -1154,6 +1257,7 @@
       var X2 = exceptionRows();
       var m = F.renderDraft(body, {
         docs: fasahDocs(), result: R, lang: lang(), now: new Date(),
+        tx: S.draft && S.draft.txId ? { id: S.draft.txId, ref: S.draft.ref || '' } : (S.matchTx || null),
         exceptions: X2.rows.map(function (x) { return { st: x.st, label: x.label, values: x.values, note: x.note }; })
       }, { api: API, orgId: S.orgId || undefined, docName: docName });
       blk.hidden = false;
@@ -1439,6 +1543,8 @@
       var box = $('ocr-match-save-msg');
       box.className = 'alert mt-2 alert-' + (type === 'error' ? 'danger' : type === 'success' ? 'success' : type === 'warning' ? 'warning' : 'info');
       $('ocr-match-save-msg-text').textContent = text || '';
+      // a link added after the text (setSaveLink) belongs to the previous message
+      Array.prototype.slice.call(box.childNodes).forEach(function (n) { if (n.id !== 'ocr-match-save-msg-text') box.removeChild(n); });
       box.hidden = !text;
     }
     // the saved row of a reading the single reader already saved ({id, doc_type, transaction_id, document_id}) or null
@@ -1480,8 +1586,16 @@
       $('ocr-match-save-label').textContent = done ? T('m_saved_label') : T('m_save');
       $('ocr-match-save-btn').disabled = done || S.saving || !!block;
       var anyExt = Object.keys(S.saved.extractions).length > 0;
-      $('ocr-match-tx').disabled = $('ocr-match-tx-q').disabled = $('ocr-match-tx-search').disabled = done || anyExt;
+      var locked = done || anyExt || !!S.matchTx || !!(S.draft && S.draft.batchId);
+      $('ocr-match-tx').disabled = $('ocr-match-tx-q').disabled = $('ocr-match-tx-search').disabled = locked;
       $('ocr-match-attach').disabled = done || anyExt;
+      var bw = $('ocr-match-batch-wrap'), bc = $('ocr-match-batch');
+      if (bw && bc) {
+        // «نقل بيانات البوليصة والفاتورة إلى المعاملة»: a doc batch approved into the chosen transaction (no declaration in it)
+        bw.hidden = !(has('approveDocBatch') && draftApi()) || !!S.matchTx || !!(S.result && S.slots.declaration.res && S.result.documents.indexOf('declaration') !== -1);
+        bc.disabled = done || locked && !(S.draft && S.draft.target === 'existing' && !S.draft.txId);
+      }
+      renderDraftPanel();
     }
     function plainFields(s) {
       var o = {};
@@ -1576,21 +1690,9 @@
       if (!S.idem) S.idem = API && API.util && API.util.uuid ? API.util.uuid() : 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
       return S.idem;
     }
-    $('ocr-match-save-btn').addEventListener('click', save);
-    function save() {
-      if (!S.result || S.saving) return;
-      if (!(ONLINE && STAFF)) { setSaveMsg('error', T('m_err_access')); return; }
-      if (!has('saveExtraction') || !has('saveDocumentMatch')) { setSaveMsg('error', T('m_save_unavailable')); return; }
-      var docs = S.result.documents.filter(function (k) { return S.slots[k].res; });
-      var block = saveBlock();
-      if (block) { renderSaveState(); return; }
-      if (docs.indexOf('invoice') === -1 || docs.indexOf('bl') === -1) { setSaveMsg('error', T('m_err_need_two')); return; }
-      if (docs.some(function (k) { return !savedOf(k) && !/^[0-9a-f]{64}$/.test(S.slots[k].sha256 || ''); })) { setSaveMsg('error', T('m_err_hash')); return; }
-      S.saving = true; renderSaveState();
-      setSaveMsg('info', T('m_saving'));
-      var txId = $('ocr-match-tx').value || '';
-      var attach = !!(txId && $('ocr-match-attach').checked && has('attachExtractionDocument'));
-      var notes = [];
+    // the readings of the report, saved (or reused) one by one; txId '' = not linked; attach = the original files go to the
+    // transaction documents. A retry continues where it stopped (S.saved.extractions).
+    function saveReadings(docs, txId, attach, notes) {
       var chain = Promise.resolve();
       docs.forEach(function (k) {
         chain = chain.then(function () {
@@ -1608,7 +1710,7 @@
             if (r.error) { var e = r.error; e.doc = k; throw e; }
             var reused = !!r.reused;
             S.saved.extractions[k] = { id: r.data.id, row: r.data, reused: reused, snap: slotCorrected(k) ? null : fieldsSnap(k) };
-            if (reused) notes.push(T('m_note_reused', { doc: docName(k) }));
+            if (reused && !S.matchTx) notes.push(T('m_note_reused', { doc: docName(k) }));   // #match-tx: every reading is a saved one
             // a reading of the single reader saved here: that reader knows it now (its own save becomes a review)
             else if (S.slots[k].onSaved) { try { S.slots[k].onSaved(r.data); } catch (x) { /* noop */ } }
             renderSaveState();
@@ -1647,38 +1749,62 @@
           });
         });
       });
-      chain.then(function () {
-        if (S.saved.match && S.saved.match.id) return null;
-        return API.saveDocumentMatch({
-          orgId: S.orgId || undefined, transactionId: txId || null,
-          invoiceExtractionId: S.saved.extractions.invoice.id, blExtractionId: S.saved.extractions.bl.id,
-          declarationExtractionId: S.saved.extractions.declaration ? S.saved.extractions.declaration.id : null,
-          packingExtractionId: S.saved.extractions.packing ? S.saved.extractions.packing.id : null,
-          mode: S.result.mode, engineVersion: S.result.version, overall: S.result.overall, counts: S.result.counts,
-          rows: payloadRows(), reviewedRows: reviewedRows(), note: savedNote(), idempotencyKey: idemKey()
-        }).then(function (r) {
-          if (r.error) throw r.error;
-          S.saved.match = { id: r.data && r.data.id, status: (r.data && r.data.status) || 'saved', created_at: r.data && r.data.created_at };
-          var prev = S.saved.prevMatch;
-          var after = Promise.resolve();
-          if (prev && prev !== S.saved.match.id && has('voidDocumentMatch')) {
-            after = API.voidDocumentMatch(prev, T('m_void_superseded', { id: String(S.saved.match.id || '').slice(0, 8) })).then(function (v) {
-              if (v.error && !(v.error.code === 'MRS_MATCH_VOIDED')) notes.push(T('m_note_prev_void_failed', { id: String(prev).slice(0, 8), msg: errMsg(v.error) }));
-              else { S.saved.prevMatch = null; notes.push(T('m_note_prev_voided', { id: String(prev).slice(0, 8) })); }
-            });
-          }
-          return after.then(function () {
-            if (!(S.approved && has('reviewDocumentMatch'))) return null;
-            return API.reviewDocumentMatch(S.saved.match.id, reviewedRows(), savedNote()).then(function (v) {
-              if (v.error) notes.push(T('m_note_review_match_failed', { msg: errMsg(v.error) }));
-              else S.saved.match.status = (v.data && v.data.status) || 'reviewed';
-            });
+      return chain;
+    }
+    // the match row (once per result: a retry keeps S.saved.match); txId = the transaction it is saved on (or '')
+    function saveMatchRow(txId, notes) {
+      if (S.saved.match && S.saved.match.id) return Promise.resolve(null);
+      return API.saveDocumentMatch({
+        orgId: S.orgId || undefined, transactionId: txId || null,
+        invoiceExtractionId: S.saved.extractions.invoice.id, blExtractionId: S.saved.extractions.bl.id,
+        declarationExtractionId: S.saved.extractions.declaration ? S.saved.extractions.declaration.id : null,
+        packingExtractionId: S.saved.extractions.packing ? S.saved.extractions.packing.id : null,
+        mode: S.result.mode, engineVersion: S.result.version, overall: S.result.overall, counts: S.result.counts,
+        rows: payloadRows(), reviewedRows: reviewedRows(), note: savedNote(), idempotencyKey: idemKey()
+      }).then(function (r) {
+        if (r.error) throw r.error;
+        S.saved.match = { id: r.data && r.data.id, status: (r.data && r.data.status) || 'saved', created_at: r.data && r.data.created_at };
+        var prev = S.saved.prevMatch;
+        var after = Promise.resolve();
+        if (prev && prev !== S.saved.match.id && has('voidDocumentMatch')) {
+          after = API.voidDocumentMatch(prev, T('m_void_superseded', { id: String(S.saved.match.id || '').slice(0, 8) })).then(function (v) {
+            if (v.error && !(v.error.code === 'MRS_MATCH_VOIDED')) notes.push(T('m_note_prev_void_failed', { id: String(prev).slice(0, 8), msg: errMsg(v.error) }));
+            else { S.saved.prevMatch = null; notes.push(T('m_note_prev_voided', { id: String(prev).slice(0, 8) })); }
+          });
+        }
+        return after.then(function () {
+          if (!(S.approved && has('reviewDocumentMatch'))) return null;
+          return API.reviewDocumentMatch(S.saved.match.id, reviewedRows(), savedNote()).then(function (v) {
+            if (v.error) notes.push(T('m_note_review_match_failed', { msg: errMsg(v.error) }));
+            else S.saved.match.status = (v.data && v.data.status) || 'reviewed';
           });
         });
-      }).then(function () {
+      });
+    }
+    $('ocr-match-save-btn').addEventListener('click', save);
+    function save() {
+      if (!S.result || S.saving) return;
+      if (!(ONLINE && STAFF)) { setSaveMsg('error', T('m_err_access')); return; }
+      if (!has('saveExtraction') || !has('saveDocumentMatch')) { setSaveMsg('error', T('m_save_unavailable')); return; }
+      var docs = S.result.documents.filter(function (k) { return S.slots[k].res; });
+      var block = saveBlock();
+      if (block) { renderSaveState(); return; }
+      if (docs.indexOf('invoice') === -1 || docs.indexOf('bl') === -1) { setSaveMsg('error', T('m_err_need_two')); return; }
+      if (docs.some(function (k) { return !savedOf(k) && !/^[0-9a-f]{64}$/.test(S.slots[k].sha256 || ''); })) { setSaveMsg('error', T('m_err_hash')); return; }
+      var txId = $('ocr-match-tx').value || '';
+      // «ربط بمعاملة» + «نقل البيانات»: the B/L + invoice data go into that transaction through an approved doc batch, then the match
+      var bc = $('ocr-match-batch'), bw = $('ocr-match-batch-wrap');
+      if (txId && bc && bc.checked && bw && !bw.hidden && !(S.saved.match && S.saved.match.id)) { runDraft('existing', txId); return; }
+      S.saving = true; renderSaveState();
+      setSaveMsg('info', T('m_saving'));
+      var attach = !!(txId && $('ocr-match-attach').checked && has('attachExtractionDocument'));
+      var notes = [];
+      saveReadings(docs, txId, attach, notes).then(function () { return saveMatchRow(txId, notes); }).then(function () {
         var ids = S.result.documents.filter(function (k) { return S.saved.extractions[k]; })
           .map(function (k) { return docName(k) + ': ' + String(S.saved.extractions[k].id).slice(0, 8); }).join('، ');
         setSaveMsg(notes.length ? 'warning' : 'success', T('m_saved', { id: String(S.saved.match.id || '').slice(0, 8), docs: ids }) + (notes.length ? ' ' + notes.join(' ') : ''));
+        // #match-tx: the three-way match is the last step before «اعتماد المعاملة» on the transaction page
+        if (S.matchTx && S.result.mode === 'three_way') setSaveLink('admin.html#tx/' + encodeURIComponent(S.matchTx.id), T('mx_mt_approve_link'));
         toast(T('m_saved_toast'), 'success');
         renderReview();
         loadRecent();
@@ -1688,6 +1814,383 @@
         try { $('ocr-match-save-msg').focus(); } catch (x) { /* noop */ }
       }).then(function () { S.saving = false; renderSaveState(); });
     }
+
+    /* ---------------------------------------------------------------
+       Draft transaction from the report (20261127000100, docs/online/LEGACY_DOCS_AR.md): «إنشاء مسودة معاملة» turns the
+       B/L + invoice (+ packing list) readings into a DRAFT transaction — the readings saved (unlinked), a doc batch made
+       from them, merged by the server and saved, then MarsaApi.createDraftTransaction (approve_doc_batch inside: client,
+       B/L, containers, بيانات فسح, items), then the match saved on the new transaction. «ربط بمعاملة» + «نقل البيانات»
+       does the same into an existing transaction (approveDocBatch). Each step is kept in S.draft: a retry continues.
+       --------------------------------------------------------------- */
+    var P = PURE;
+    function draftDocs() { return ['bl', 'invoice', 'packing'].filter(function (k) { return S.result && S.result.documents.indexOf(k) !== -1 && S.slots[k].res; }); }
+    function draftState() {
+      if (!S.draft) S.draft = { attached: {}, keys: {}, open: false, match: null, branches: null, operation: 'import', mode: 'sea', roro: false,
+        chassis: '', plate: '', clientSel: '', newName: '', confirmClient: false, origDone: {} };
+      return S.draft;
+    }
+    function genKey() { return API && API.util && typeof API.util.uuid === 'function' ? API.util.uuid() : null; }
+    function draftApi() { return ['createDraftTransaction', 'createDocBatch', 'attachDocBatchDocument', 'mergeDocBatch', 'saveDocBatchDraft', 'getDocBatch'].every(has); }
+    // why no draft can be made from this report: 'hide' (nothing to offer) | a message | null (it can)
+    function draftBlock() {
+      var R = S.result;
+      if (!R || !(ONLINE && STAFF) || !draftApi() || S.matchTx) return 'hide';
+      if (S.slots.declaration.res && R.documents.indexOf('declaration') !== -1) return T('mx_draft_block_decl');
+      var b = saveBlock();
+      if (b) return b;
+      if (S.saved.match && S.saved.match.id && !(S.draft && S.draft.txId)) return T('mx_draft_block_saved');
+      return null;
+    }
+    function errorCount() {
+      if (!S.result) return 0;
+      try { return exceptionRows().rows.filter(isError).length; } catch (e) { return 0; }
+    }
+    function field(label, ctl, id) {
+      var g = el('div', 'form-group');
+      var l = el('label', 'form-label', label); if (id) l.htmlFor = id;
+      g.appendChild(l); g.appendChild(ctl);
+      return g;
+    }
+    function opt(sel, value, text, on) { var o = el('option', null, text); o.value = value; if (on) o.selected = true; sel.appendChild(o); return o; }
+    function renderDraftPanel() {
+      var box = $('ocr-mx-draft');
+      if (!box) return;
+      var D = S.draft, block = draftBlock();
+      box.textContent = '';
+      if (block === 'hide' && !(D && D.txId)) { box.hidden = true; return; }
+      box.hidden = false;
+      box.appendChild(el('h4', 'ocr-mx-draft-title', T('mx_draft_title')));
+      if (D && D.txId) {
+        var p = el('p', 'ocr-mx-draft-done');
+        p.appendChild(document.createTextNode(T(D.target === 'existing' ? 'mx_draft_linked' : 'mx_draft_done', { ref: D.ref || '' }) + ' '));
+        var a = el('a', null, T('mx_draft_open')); a.href = 'admin.html#tx/' + encodeURIComponent(D.txId);
+        p.appendChild(a);
+        box.appendChild(p);
+        if (D.target !== 'existing') box.appendChild(el('p', 'text-sm text-muted', T('mx_draft_next')));
+        return;
+      }
+      box.appendChild(el('p', 'text-sm text-muted', T('mx_draft_lead')));
+      if (block) { var w = el('div', 'alert alert-warning', block); w.setAttribute('role', 'note'); box.appendChild(w); return; }
+      if (!D || !D.open) {
+        var b = el('button', 'btn btn-secondary', T('mx_draft_btn')); b.type = 'button'; b.id = 'ocr-mx-draft-btn';
+        b.disabled = !!S.saving;
+        b.addEventListener('click', openDraft);
+        box.appendChild(b);
+        return;
+      }
+      var form = el('div', 'form ocr-mx-draft-form');
+      // the client (importer): the consignee matched against the clients, or a new client with that name
+      var cs = el('select', 'form-control'); cs.id = 'ocr-mx-client';
+      var cands = D.match && Array.isArray(D.match.candidates) ? D.match.candidates : [];
+      cands.slice(0, 10).forEach(function (c) {
+        opt(cs, c.client_id, (L(c, 'name') || c.name_ar || c.name_en || '') + ' (' + Math.round(Number(c.confidence) || 0) + '%)', D.clientSel === c.client_id);
+      });
+      if (D.clientId && !cands.some(function (c) { return c.client_id === D.clientId; })) opt(cs, D.clientId, D.newName || T('mx_draft_client_new_made'), D.clientSel === D.clientId);
+      opt(cs, '__new', T('mx_draft_client_new'), D.clientSel === '__new' || !D.clientSel);
+      cs.addEventListener('change', function () { D.clientSel = cs.value; nameWrap.hidden = cs.value !== '__new'; });
+      form.appendChild(field(T('mx_draft_client'), cs, 'ocr-mx-client'));
+      if (D.match && D.match.state) form.appendChild(el('p', 'text-xs text-muted', T('mx_draft_match_' + D.match.state, { name: D.matchName || '' })));
+      var nm = el('input', 'form-control'); nm.id = 'ocr-mx-client-name'; nm.type = 'text'; nm.maxLength = 160; nm.value = D.newName || ''; nm.dir = 'auto';
+      nm.addEventListener('input', function () { D.newName = nm.value; });
+      var nameWrap = field(T('mx_draft_client_name'), nm, 'ocr-mx-client-name');
+      nameWrap.hidden = !(D.clientSel === '__new' || !D.clientSel);
+      form.appendChild(nameWrap);
+      var cc = el('label', 'check'), cb = el('input'); cb.type = 'checkbox'; cb.id = 'ocr-mx-client-confirm'; cb.checked = !!D.confirmClient;
+      cb.addEventListener('change', function () { D.confirmClient = cb.checked; });
+      cc.appendChild(cb); cc.appendChild(el('span', null, ' ' + T('mx_draft_client_confirm')));
+      form.appendChild(cc);
+      // operation / mode
+      var os = el('select', 'form-control'); os.id = 'ocr-mx-op';
+      opt(os, 'import', T('mx_draft_op_import'), D.operation !== 'export'); opt(os, 'export', T('mx_draft_op_export'), D.operation === 'export');
+      os.addEventListener('change', function () { D.operation = os.value; });
+      form.appendChild(field(T('mx_draft_op'), os, 'ocr-mx-op'));
+      var ms = el('select', 'form-control'); ms.id = 'ocr-mx-mode';
+      ['sea', 'air', 'land'].forEach(function (m) { opt(ms, m, T('mx_draft_mode_' + m), (D.mode || 'sea') === m); });
+      ms.addEventListener('change', function () { D.mode = ms.value; });
+      form.appendChild(field(T('mx_draft_mode'), ms, 'ocr-mx-mode'));
+      // Ro-Ro: a vehicle (chassis required, plate optional), no containers
+      var rl = el('label', 'check'), rb = el('input'); rb.type = 'checkbox'; rb.id = 'ocr-mx-roro'; rb.checked = !!D.roro;
+      rl.appendChild(rb); rl.appendChild(el('span', null, ' ' + T('mx_draft_roro')));
+      form.appendChild(rl);
+      var ch = el('input', 'form-control'); ch.id = 'ocr-mx-chassis'; ch.type = 'text'; ch.maxLength = 40; ch.dir = 'ltr'; ch.value = D.chassis || '';
+      ch.addEventListener('input', function () { D.chassis = ch.value; });
+      var pl = el('input', 'form-control'); pl.id = 'ocr-mx-plate'; pl.type = 'text'; pl.maxLength = 20; pl.dir = 'ltr'; pl.value = D.plate || '';
+      pl.addEventListener('input', function () { D.plate = pl.value; });
+      var roroBox = el('div', 'ocr-mx-draft-roro');
+      roroBox.appendChild(field(T('mx_draft_chassis'), ch, 'ocr-mx-chassis'));
+      roroBox.appendChild(field(T('mx_draft_plate'), pl, 'ocr-mx-plate'));
+      roroBox.hidden = !D.roro;
+      rb.addEventListener('change', function () { D.roro = rb.checked; roroBox.hidden = !rb.checked; });
+      form.appendChild(roroBox);
+      // the branch, only when the organization has several and the server asked for it
+      if (D.needBranch && Array.isArray(D.branches) && D.branches.length > 1) {
+        var bs = el('select', 'form-control'); bs.id = 'ocr-mx-branch';
+        D.branches.forEach(function (x) { opt(bs, x.id, x.name_ar || x.code || String(x.id).slice(0, 8), D.branchId === x.id); });
+        if (!D.branchId) D.branchId = D.branches[0].id;
+        bs.addEventListener('change', function () { D.branchId = bs.value; });
+        form.appendChild(field(T('mx_draft_branch'), bs, 'ocr-mx-branch'));
+      }
+      box.appendChild(form);
+      // the errors of the report, once more before the draft is made
+      var n = errorCount();
+      var sum = el('div', 'alert ' + (n ? 'alert-warning' : 'alert-success') + ' ocr-mx-draft-sum', n ? T('mx_draft_errors', { n: n }) : T('mx_draft_no_errors'));
+      sum.setAttribute('role', 'note');
+      box.appendChild(sum);
+      if (D.error) { var er = el('div', 'alert alert-danger', D.error); er.setAttribute('role', 'alert'); box.appendChild(er); }
+      var acts = el('div', 'ocr-mx-draft-actions');
+      var go = el('button', 'btn btn-primary', D.batchId ? T('mx_draft_retry') : T('mx_draft_confirm')); go.type = 'button'; go.id = 'ocr-mx-draft-go';
+      go.disabled = !!S.saving;
+      go.addEventListener('click', confirmDraft);
+      var cancel = el('button', 'btn btn-ghost', T('mx_draft_cancel')); cancel.type = 'button';
+      cancel.disabled = !!S.saving;
+      cancel.addEventListener('click', function () { D.open = false; D.error = ''; renderDraftPanel(); });
+      acts.appendChild(go); acts.appendChild(cancel);
+      box.appendChild(acts);
+    }
+    function openDraft() {
+      var D = draftState();
+      D.open = true; D.error = '';
+      var bl = plainFields(S.slots.bl), inv = plainFields(S.slots.invoice);
+      D.matchName = P.importerName(bl, inv);
+      if (!D.newName) D.newName = D.matchName;
+      renderDraftPanel();
+      var orgP = S.orgId ? Promise.resolve(S.orgId) : activeOrg();
+      orgP.then(function (oid) {
+        if (oid && !S.orgId) S.orgId = oid;
+        var jobs = [];
+        if (D.matchName && has('matchClientV2') && !D.match) {
+          jobs.push(API.matchClientV2({ orgId: oid || undefined, name: D.matchName }).then(function (r) {
+            if (!r || r.error || !r.data) return;
+            var MV = window.MarsaDocBatch && window.MarsaDocBatch.pure && window.MarsaDocBatch.pure.matchView;
+            D.match = typeof MV === 'function' ? MV(r.data) : { candidates: r.data.candidates || [], preselect: r.data.suggested && r.data.best ? r.data.best.client_id : null, state: 'none' };
+            if (!D.clientSel) D.clientSel = D.match.preselect || (D.match.state === 'review' && D.match.candidates[0] ? D.match.candidates[0].client_id : '__new');
+          }, function () { /* the staff choose by hand */ }));
+        }
+        if (has('listBranches') && !D.branches) {
+          jobs.push(API.listBranches(oid || undefined).then(function (r) {
+            D.branches = r && !r.error && Array.isArray(r.data) ? r.data.filter(function (x) { return x.is_active !== false; }) : [];
+          }, function () { D.branches = []; }));
+        }
+        return Promise.all(jobs);
+      }).then(function () { if (S.draft === D && D.open) renderDraftPanel(); });
+    }
+    function confirmDraft() {
+      var D = draftState();
+      D.error = '';
+      if (!D.clientSel || D.clientSel === '__new') {
+        if (String(D.newName || '').trim().length < 2) { D.error = T('mx_draft_need_client'); renderDraftPanel(); return; }
+      }
+      if (D.roro && !String(D.chassis || '').trim()) { D.error = T('mx_draft_need_chassis'); renderDraftPanel(); return; }
+      runDraft('new', null);
+    }
+    // the client of a new draft: the chosen one, or a new client created with the importer's name
+    function ensureClient(D) {
+      if (D.target !== 'new') return Promise.resolve();
+      if (D.clientSel && D.clientSel !== '__new') { D.clientId = D.clientSel; return Promise.resolve(); }
+      if (P.isUuid(D.clientId)) return Promise.resolve();
+      if (!has('createClient')) return Promise.reject({ message: T('mx_draft_need_client') });
+      var name = String(D.newName || '').trim().slice(0, 160);
+      var row = { org_id: S.orgId, client_type: 'business', name_ar: name };
+      if (/[A-Za-z]/.test(name) && !/[؀-ۿ]/.test(name)) row.name_en = name;
+      return API.createClient(row).then(function (r) {
+        if (r.error) throw r.error;
+        D.clientId = r.data.id; D.clientSel = r.data.id;
+      });
+    }
+    function readingRow(k) { var x = S.saved.extractions[k]; return x && x.row ? x.row : null; }
+    function doStep(D, next, notes) {
+      if (next === 'readings') {
+        return saveReadings(D.slots, '', false, notes).then(function () {
+          D.slots.forEach(function (k) {
+            var row = readingRow(k), tx = row && row.transaction_id;
+            if (tx && (D.target === 'new' || tx !== D.existingTx)) throw { message: T('mx_draft_err_linked', { doc: docName(k) }) };
+          });
+          D.readingsSaved = true;
+        });
+      }
+      if (next === 'batch') {
+        if (!D.keys.batch) D.keys.batch = genKey();
+        var o = { orgId: S.orgId || undefined, idempotencyKey: D.keys.batch || undefined };
+        if (D.target === 'existing') o.transactionId = D.existingTx;
+        else if (D.branchId) o.branchId = D.branchId;
+        return API.createDocBatch(o).then(function (r) {
+          if (r.error) {
+            if (r.error.code === 'MRS_REQUIRED' && r.error.field === 'branch_id') { D.needBranch = true; D.keys.batch = null; throw { message: T('mx_draft_need_branch') }; }
+            throw r.error;
+          }
+          D.batchId = r.data.id; D.version = r.data.version;
+        });
+      }
+      if (next === 'attach') {
+        var k = D.slots.filter(function (x) { return !D.attached[x]; })[0];
+        return API.attachDocBatchDocument(D.batchId, S.saved.extractions[k].id, P.BATCH_SLOT[k]).then(function (r) {
+          if (r.error) { r.error.doc = k; throw r.error; }
+          D.attached[k] = true;
+          if (r.data && r.data.batch && typeof r.data.batch.version === 'number') D.version = r.data.batch.version;
+        });
+      }
+      if (next === 'draft') {
+        // the server merges the attached readings (their corrections included); the merged draft is saved as the batch draft
+        return API.mergeDocBatch(D.batchId).then(function (m) {
+          if (m.error) throw m.error;
+          return API.getDocBatch(D.batchId).then(function (g) {
+            if (g.error) throw g.error;
+            return API.saveDocBatchDraft(D.batchId, { version: g.data.version, draft: m.data.draft });
+          });
+        }).then(function (r) {
+          if (r.error) throw r.error;
+          D.version = r.data.version; D.draftSaved = true;
+        });
+      }
+      if (next === 'create') {
+        var pp = P.draftPayload({ version: D.version, clientId: D.clientId, operation: D.operation, mode: D.mode, roro: D.roro, chassis: D.chassis,
+          plate: D.plate, confirmClient: D.confirmClient });
+        if (pp.error) return Promise.reject({ message: T('mx_draft_need_' + pp.error) });
+        D.createKey = P.draftKey(D.createKey, pp.o, genKey);
+        if (D.createKey.key) pp.o.idemKey = D.createKey.key;
+        return API.createDraftTransaction(D.batchId, pp.o).then(function (r) {
+          if (r.error) {
+            if (r.error.code === 'MRS_DOC_BATCH_STALE') D.draftSaved = false;
+            throw r.error;
+          }
+          D.txId = r.data.transaction_id; D.ref = r.data.ref || '';
+        });
+      }
+      if (next === 'approve') {
+        if (!D.keys.approve) D.keys.approve = genKey();
+        return API.approveDocBatch(D.batchId, { version: D.version, transactionId: D.existingTx, idemKey: D.keys.approve || undefined }).then(function (r) {
+          if (r.error) { if (r.error.code === 'MRS_DOC_BATCH_STALE') { D.draftSaved = false; D.keys.approve = null; } throw r.error; }
+          D.txId = D.existingTx; D.ref = r.data.ref || '';
+        });
+      }
+      if (next === 'match') {
+        return saveMatchRow(D.txId, notes).then(function () { D.matchId = S.saved.match && S.saved.match.id; });
+      }
+      return Promise.reject({ message: T('m_err_generic') });
+    }
+    // the original files to the transaction's documents (when «إرفاق الملفات الأصلية» is ticked); a failure is a note
+    function attachOriginals(D, notes) {
+      if (!($('ocr-match-attach').checked && has('attachExtractionDocument'))) return Promise.resolve();
+      var chain = Promise.resolve();
+      D.slots.forEach(function (k) {
+        var s = S.slots[k], row = readingRow(k);
+        if (!s.file || D.origDone[k] || (row && row.document_id)) return;
+        chain = chain.then(function () {
+          return API.attachExtractionDocument(S.saved.extractions[k].id, { file: s.file, transactionId: D.txId, kind: DOC_TYPE[k] }).then(function (a) {
+            if (a && a.error) notes.push(T('m_note_attach_failed', { doc: docName(k), msg: errMsg(a.error) }));
+            else D.origDone[k] = true;
+          });
+        });
+      });
+      return chain;
+    }
+    // MRS_DUPLICATE_TX: the live transaction(s) with the same B/L + unit, to open instead (nothing was written)
+    function duplicateText(e) {
+      var base = T('mx_draft_dup');
+      if (!has('checkTxDuplicates')) return Promise.resolve(base);
+      var blRow = S.result.rows.filter(function (x) { return x.key === 'bl_number'; })[0];
+      var ctRow = S.result.rows.filter(function (x) { return x.key === 'container_numbers'; })[0];
+      var blNo = blRow ? (blRow.values.bl || blRow.values.invoice) : null;
+      var ctr = ctRow && Array.isArray(ctRow.values.bl) ? ctRow.values.bl : [];
+      if (!blNo) return Promise.resolve(base);
+      return API.checkTxDuplicates({ orgId: S.orgId || undefined, blNumber: String(blNo), containers: ctr.map(String) }).then(function (r) {
+        var refs = r && !r.error && r.data && Array.isArray(r.data.duplicates)
+          ? r.data.duplicates.map(function (d) { return d.ref; }).filter(Boolean) : [];
+        return refs.length ? T('mx_draft_dup_refs', { refs: refs.filter(function (x, i) { return refs.indexOf(x) === i; }).join('، ') }) : base;
+      }, function () { return base; });
+    }
+    function runDraft(target, txId) {
+      if (S.saving || !S.result) return;
+      var D = draftState();
+      if (D.txId) return;
+      D.target = target;
+      if (target === 'existing') D.existingTx = txId;
+      D.slots = draftDocs();
+      D.error = '';
+      var notes = [];
+      S.saving = true; renderSaveState();
+      setSaveMsg('info', T(target === 'existing' ? 'mx_draft_working_tx' : 'mx_draft_working'));
+      function step() {
+        var next = P.draftNext(D);
+        if (next === 'done') return Promise.resolve();
+        return doStep(D, next, notes).then(step);
+      }
+      var orgP = S.orgId ? Promise.resolve(S.orgId) : activeOrg().then(function (o) { S.orgId = o || null; return o; });
+      orgP.then(function () { return ensureClient(D); }).then(step).then(function () { return attachOriginals(D, notes); }).then(function () {
+        D.open = false;
+        setSaveMsg(notes.length ? 'warning' : 'success', T(target === 'existing' ? 'mx_draft_linked' : 'mx_draft_done', { ref: D.ref || '' }) + (notes.length ? ' ' + notes.join(' ') : ''));
+        setSaveLink('admin.html#tx/' + encodeURIComponent(D.txId), T('mx_draft_open'));
+        toast(T(target === 'existing' ? 'mx_draft_linked_toast' : 'mx_draft_done_toast', { ref: D.ref || '' }), 'success');
+        renderFasah();
+        renderReview();
+        loadRecent();
+      }).catch(function (e) {
+        var where = e && e.doc ? docName(e.doc) + ': ' : '';
+        var p = e && e.code === 'MRS_DUPLICATE_TX' ? duplicateText(e) : Promise.resolve(where + errMsg(e));
+        return p.then(function (msg) {
+          D.error = T('mx_draft_failed', { msg: msg });
+          setSaveMsg('error', D.error);
+          if (target === 'existing') toast(D.error, 'error');
+          try { $('ocr-match-save-msg').focus(); } catch (x) { /* noop */ }
+        });
+      }).then(function () { S.saving = false; renderSaveState(); });
+    }
+    function setSaveLink(href, label) {
+      var box = $('ocr-match-save-msg');
+      if (!box) return;
+      var a = el('a', 'ocr-mx-save-link', label);
+      a.href = href;
+      box.appendChild(document.createTextNode(' '));
+      box.appendChild(a);
+    }
+
+    /* ---------------------------------------------------------------
+       #match-tx=<tx>[&decl=<extraction>] (20261127000100): the invoice + B/L (+ packing list) readings of a transaction and
+       its approved customs declaration reading, compared again here (strict), saved as a three-way match on that
+       transaction (all readings are already linked to it). Then «اعتماد المعاملة» on the transaction page.
+       --------------------------------------------------------------- */
+    var mtSeq = 0;
+    function openMatchTx(route) {
+      if (!route || !(ONLINE && STAFF) || !has('listExtractions') || !has('getExtraction')) return;
+      var seq = ++mtSeq;
+      section.hidden = false;
+      showError('');
+      var apprP = has('getTransactionApproval') ? API.getTransactionApproval(route.tx) : Promise.resolve({ data: {}, error: null });
+      apprP.then(function (a) {
+        if (a.error) throw a.error;
+        var info = a.data || {};
+        // the approved declaration reading wins over a stale &decl= link (approve_transaction only accepts a match on it)
+        var declId = (info.declaration_approval && P.isUuid(info.declaration_approval.extraction_id) && info.declaration_approval.extraction_id) || route.decl || null;
+        if (!declId) throw { message: T('mx_mt_need_decl') };
+        return API.listExtractions({ transactionId: route.tx, limit: 100 }).then(function (l) {
+          if (l.error) throw l.error;
+          var pick = P.pickReadings(l.data);
+          if (!pick.invoice || !pick.bl) throw { message: T('mx_mt_need_docs') };
+          var ids = [['invoice', pick.invoice.id], ['bl', pick.bl.id], ['declaration', declId]];
+          if (pick.packing) ids.push(['packing', pick.packing.id]);
+          return Promise.all(ids.map(function (x) {
+            return API.getExtraction(x[1]).then(function (r) { if (r.error) throw r.error; return P.readingOf(r.data, x[0]); });
+          })).then(function (entries) { return { entries: entries, info: info }; });
+        });
+      }).then(function (x) {
+        if (seq !== mtSeq) return;
+        if (!compareReadings(x.entries, { saved: true })) throw { message: T('mx_mt_busy') };
+        S.matchTx = { id: route.tx, ref: x.info.ref || '' };
+        resetTx();
+        var sel = $('ocr-match-tx');
+        var o = el('option', null, x.info.ref || route.tx); o.value = route.tx; sel.appendChild(o); sel.value = route.tx;
+        render();
+        setSaveMsg('info', T('mx_mt_loaded', { ref: x.info.ref || '' }));
+      }).catch(function (e) {
+        if (seq !== mtSeq) return;
+        showError(T('mx_mt_failed', { msg: errMsg(e) }));
+      });
+    }
+    function routeHash() {
+      var r = P.parseMatchTx(window.location.hash);
+      if (r && !(S.matchTx && S.matchTx.id === r.tx && S.result)) openMatchTx(r);
+    }
+    window.addEventListener('hashchange', routeHash);
 
     /* transaction picker */
     $('ocr-match-tx-search').addEventListener('click', searchTx);
@@ -2165,7 +2668,8 @@
        --------------------------------------------------------------- */
     function compareReadings(list, opts) {
       opts = opts && typeof opts === 'object' ? opts : {};
-      if (!(ONLINE && STAFF && AI.enabled) || S.running || S.saving) return false;
+      // opts.saved: readings already saved on a transaction (#match-tx) — no AI call is made, so the AI switch is not needed
+      if (!(ONLINE && STAFF && (AI.enabled || opts.saved === true)) || S.running || S.saving) return false;
       var picked = {}, n = 0;
       (Array.isArray(list) ? list : []).forEach(function (x) {
         if (!x || typeof x !== 'object' || SLOTS.indexOf(x.slot) === -1 || picked[x.slot] || !x.fields || typeof x.fields !== 'object') return;
@@ -2247,7 +2751,7 @@
     function boot() {
       return initRole().then(function (st) { STAFF = st; return initAi(); });
     }
-    boot();
+    boot().then(routeHash, routeHash);
     // org switcher: access and quota follow the active org; a result already read keeps the org it was read in
     window.addEventListener('marsa:orgchange', function () {
       if (!ONLINE) return;

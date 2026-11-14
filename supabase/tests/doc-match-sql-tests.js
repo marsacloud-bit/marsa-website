@@ -210,7 +210,7 @@ async function secFile() {
       && !/sk-ant|api\.anthropic\.com/i.test(src)) || 'body';
   });
   // later phases may follow this file (20261117000100 legacy_core: re-creates convert_delete_tables with party_ports)
-  const LATER_PHASES = ['20261117000100_legacy_core.sql', '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql'];
+  const LATER_PHASES = ['20261117000100_legacy_core.sql', '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql'];
   await check('this file is present; only the listed later phases follow it', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -870,15 +870,19 @@ async function secPackFile() {
       && /FUNCTION public\.review_document_match\(p_id uuid, p_reviewed_rows jsonb, p_note text\) RETURNS jsonb/.test(src)
       && /FUNCTION public\.void_document_match\(p_id uuid, p_reason text\) RETURNS jsonb/.test(src)) || 'body';
   });
-  await check('this file is the latest migration', () => migFiles()[migFiles().length - 1] === PMIG || 'latest: ' + migFiles().pop());
-  await check('all_migrations.sql holds this file verbatim (appended last, in order) + a header line', () => {
+  // later phases may follow this file (20261127000100 tx_draft_approval: transactions.approval_match_id → document_matches; no match object changed)
+  const PLATER = ['20261127000100_tx_draft_approval.sql'];
+  await check('this file is the latest migration (or only listed later phases follow it)', () =>
+    migFiles().filter(f => f > PMIG).every(f => PLATER.includes(f)) || 'latest: ' + migFiles().pop());
+  await check('all_migrations.sql holds this file verbatim (followed only by the listed later phases, in order) + a header line', () => {
     const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
     const marker = '-- ===== migrations/' + PMIG + ' =====\n';
     const i = all.indexOf(marker);
     const next = all.indexOf('\n-- ===== migrations/', i + marker.length);
     const body = all.slice(i + marker.length, next < 0 ? undefined : next);
     const order = (all.match(/^-- ===== migrations\/(\S+) =====$/gm) || []).map(l => l.split('/')[1].split(' ')[0]);
-    return (i > 0 && next < 0 && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
+    const after = next < 0 ? [] : (all.slice(next).match(/^-- ===== migrations\/(\S+) =====$/gm) || []).map(l => l.split('/')[1].split(' ')[0]);
+    return (i > 0 && after.every(f => PLATER.includes(f)) && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
       && all.slice(0, all.indexOf('DO $guard$')).includes('health_check() = 20261125000100') && all.slice(0, all.indexOf('DO $guard$')).includes(PMIG)
       && J(order) === J(migFiles())) || 'not appended verbatim / no header line / order';
   });

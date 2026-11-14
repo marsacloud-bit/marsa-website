@@ -102,7 +102,7 @@
     service: { clearance: 'تخليص جمركي متكامل', aci: 'البيان المسبق ومنصة فسح', hs: 'تصنيف HS Code', inspection: 'متابعة المعاينة والإفراج', door: 'تخليص وتوصيل', freight: 'شحن دولي مع التخليص', export: 'تخليص صادرات', consult: 'استشارة جمركية' },
     subject: { quote: 'طلب عرض سعر', aci: 'البيان المسبق ومنصة فسح', saber: 'شهادة سابر', hs: 'تصنيف HS Code', duties: 'الرسوم والضريبة', tracking: 'متابعة شحنة', export: 'التصدير والشحن', partnership: 'شراكات', complaint: 'شكوى أو اقتراح', other: 'موضوع آخر' },
     container_type: { '20ft': '20 قدم', '40ft': '40 قدم', '40hc': '40 قدم عالية', '45ft': '45 قدم', '20rf': '20 قدم مبردة', '40rf': '40 قدم مبردة', LCL: 'شحنة جزئية LCL', other: 'أخرى' },
-    event_type: { created: 'إنشاء المعاملة', request_converted: 'تحويل من طلب خدمة', operational_status: 'تغيير الحالة التشغيلية', financial_status: 'تغيير الحالة المالية', container_return: 'حالة إرجاع حاوية', document: 'مستند', note: 'ملاحظة', tracking_token: 'إصدار رمز تتبع',
+    event_type: { tx_approval: 'اعتماد المعاملة', created: 'إنشاء المعاملة', request_converted: 'تحويل من طلب خدمة', operational_status: 'تغيير الحالة التشغيلية', financial_status: 'تغيير الحالة المالية', container_return: 'حالة إرجاع حاوية', document: 'مستند', note: 'ملاحظة', tracking_token: 'إصدار رمز تتبع',
       // G3 (transaction children)
       declaration: 'البيان الجمركي', bill_of_lading: 'بوليصة الشحن', bl: 'بوليصة الشحن', container: 'حاوية', container_state: 'الحالة التشغيلية للحاوية', appointment: 'موعد الميناء', trip: 'رحلة نقل', exception: 'استثناء تشغيلي', override: 'تجاوز قاعدة المستندات', docs_override: 'تجاوز قاعدة المستندات',
       // G4 (finance events never carry amounts: payload {op, entity, id, …ids})
@@ -1985,6 +1985,7 @@
   // legacy step 2 (assets/js/ops/tx-legacy.js): null when the module did not load
   function legacyTx() { var X = OPS.legacyTx; return X && typeof X.txFields === 'function' ? X : null; }
   function cancelledText() { var s = opsLabel('transaction_state', 'cancelled'); return s && s !== 'cancelled' ? s : (legacyTx() ? legacyTx().t('cancelled') : 'ملغاة'); }
+  function draftText() { return legacyTx() ? legacyTx().t('lc_draft') : (isEn() ? 'Draft' : 'مسودة'); }
   // a cancelled transaction (cancelled_at) shows «ملغاة» instead of its operational stage ('closed')
   function txStateNode(x) { return x && x.cancelled_at ? pillNode('danger', cancelledText()) : badgeNode('operational_status', x.operational_status); }
   function renderTransactions() {
@@ -2010,7 +2011,9 @@
         { id: 'ref', label: t('col_ref'), value: function (x) { return x.ref; }, cell: function (x) {
           return [refCell(x.ref, '#tx/' + x.id),
             x.transaction_type === 're_export' ? [' ', pillNode('warning', opsLabel('transaction_type', 're_export'))] : null,
-            x.cargo_unit_type === 'roro' ? [' ', pillNode('info', 'Ro-Ro')] : null];
+            x.cargo_unit_type === 'roro' ? [' ', pillNode('info', 'Ro-Ro')] : null,
+            // 20261127000100: a draft transaction (made from the B/L + invoice readings, not approved yet)
+            x.is_draft && !x.cancelled_at ? [' ', pillNode('warning', draftText())] : null];
         } },
         { id: 'client', label: t('col_client'), value: function (x) { return x.clients && x.clients.name_ar; }, cell: function (x) { return x.clients && x.clients.name_ar; } }
       ];
@@ -2027,7 +2030,7 @@
         key: 'transactions', rows: r.data || [], total: r.count, error: r.error, serverSearch: true,
         placeholder: t('ph_transactions'), empty: t('empty_transactions'), tools: tools, columns: cols,
         href: function (x) { return '#tx/' + x.id; },
-        text: function (x) { return [x.ref, x.bl_number, x.declaration_no, x.chassis_no, x.clients && x.clients.name_ar, x.branches && x.branches.name_ar, x.port_of_discharge, lbl('operational_status', x.operational_status), x.cancelled_at ? cancelledText() : ''].join(' '); }
+        text: function (x) { return [x.ref, x.bl_number, x.declaration_no, x.chassis_no, x.clients && x.clients.name_ar, x.branches && x.branches.name_ar, x.port_of_discharge, lbl('operational_status', x.operational_status), x.cancelled_at ? cancelledText() : '', x.is_draft ? draftText() : ''].join(' '); }
       }));
       return out;
     });
@@ -2057,7 +2060,7 @@
           actions += '<button class="btn btn-sm btn-ghost" type="button" data-act="tx-edit" data-id="' + esc(t.id) + '">تعديل البيانات</button>';
           actions += '<button class="btn btn-sm btn-ghost" type="button" data-act="tx-token" data-id="' + esc(t.id) + '">إصدار رمز تتبع</button>';
         }
-        var html = head('معاملة ' + ltr(t.ref) + (cancelled ? ' ' + pillHtml('danger', cancelledText()) : '') +
+        var html = head('معاملة ' + ltr(t.ref) + (cancelled ? ' ' + pillHtml('danger', cancelledText()) : '') + (t.is_draft && !cancelled ? ' ' + pillHtml('warning', draftText()) : '') +
             (t.transaction_type === 're_export' ? ' ' + pillHtml('warning', opsLabel('transaction_type', 're_export')) : ''),
           esc(t.clients ? t.clients.name_ar : '') + (t.branches ? ' · ' + esc(t.branches.name_ar) : '') + ' · أُنشئت ' + fmtDate(t.created_at),
           actions, '#transactions');

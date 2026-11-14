@@ -693,7 +693,10 @@ const NOT_EXERCISED = ['accept_invitation', 'ack_alert', 'import_commit', 'porta
   'legacy_import_commit', 'legacy_import_commit[min]', 'legacy_import_daftra_candidates', 'legacy_import_daftra_candidates[min]',
   'legacy_import_get_run', 'legacy_import_list_rows', 'legacy_import_list_rows[min]', 'legacy_import_queue_daftra', 'legacy_import_set_options',
   'legacy_import_set_options[min]', 'legacy_import_skip_rows', 'legacy_import_skip_rows[min]', 'legacy_import_stage', 'legacy_import_stage[min]',
-  'legacy_import_validate', 'legacy_import_validate[min]', 'legacy_import_void', 'legacy_import_void[min]'];
+  'legacy_import_validate', 'legacy_import_validate[min]', 'legacy_import_void', 'legacy_import_void[min]',
+  // tx draft approval (20261127000100): create_draft_transaction takes a doc batch id (the builder sends a transaction id);
+  // isolation (other branch / org / client / anon) is asserted by tx-draft-sql-tests.js
+  'create_draft_transaction', 'create_draft_transaction[min]'];
 async function positiveControl() {
   section('8. positive control: the §1 argument builder with B\'s own staff');
   const fns = (await listRpcs()).filter(f => !PUBLIC_BY_DESIGN[f.proname] && !/^platform_/.test(f.proname));

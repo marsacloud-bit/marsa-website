@@ -77,6 +77,7 @@
         k_terminal: 'مشغّل المحطة', k_mode: 'طريقة النقل', k_order: 'أمر النقل', k_transport_party: 'شركة النقل', k_decl_notes: 'ملاحظات البيان',
         roro_card: 'المركبة (Ro-Ro)', roro_card_hint: 'معاملة Ro-Ro لا تحمل حاويات ولا يلزمها إرجاع فارغ.',
         // stepper
+        lc_draft: 'مسودة', lc_draft_title: 'معاملة مسودة: تُعتمد بعد البيان الجمركي ومطابقته مع الفاتورة والبوليصة',
         lc_title: 'مراحل المعاملة', lc_auto: 'تلقائي', lc_na: 'لا تنطبق', lc_na_title: 'لا تنطبق على معاملة Ro-Ro', lc_reached: 'منذ {d}', lc_failed: 'تعذّر تحميل المراحل: {e}',
         lc_next: 'المرحلة التالية: {s}', lc_next_manual: 'تُنقل يدويًا من بطاقة «الحالة»؛ لا تتقدم تلقائيًا.',
         lc_next_auto: 'تتقدم تلقائيًا عند الإجراء المناسب، ويمكن نقلها يدويًا من بطاقة «الحالة».',
@@ -184,6 +185,7 @@
         k_type: 'Transaction type', k_unit: 'Cargo unit', k_chassis: 'Chassis number', k_plate: 'Vehicle plate', k_port: 'Customs port',
         k_terminal: 'Terminal operator', k_mode: 'Transport mode', k_order: 'Transport order', k_transport_party: 'Transport company', k_decl_notes: 'Declaration notes',
         roro_card: 'Vehicle (Ro-Ro)', roro_card_hint: 'A Ro-Ro transaction carries no containers and needs no empty return.',
+        lc_draft: 'Draft', lc_draft_title: 'Draft transaction: approved after the customs declaration and its match with the invoice and the B/L',
         lc_title: 'Transaction stages', lc_auto: 'Automatic', lc_na: 'N/A', lc_na_title: 'Does not apply to a Ro-Ro transaction', lc_reached: 'since {d}', lc_failed: 'The stages could not be loaded: {e}',
         lc_next: 'Next stage: {s}', lc_next_manual: 'Moved by hand from the "Status" card; never automatic.',
         lc_next_auto: 'Moves automatically on the matching action, or by hand from the "Status" card.',
@@ -758,8 +760,17 @@
     kids.push(el('p', { class: 'mb-0 text-sm', text: T('cancelled_frozen') }));
     return el('div', { class: 'alert alert-danger lx-cancelled', role: 'status' }, el('div', null, kids));
   }
+  // a draft transaction (20261127000100): the «مسودة» pre-step before the 10 stages, until «اعتماد المعاملة»
+  function withDraftStep(stages, isDraft) {
+    var list = Array.isArray(stages) ? stages.slice() : [];
+    if (!isDraft) return list;
+    return [{ code: 'draft', label_ar: 'مسودة', label_en: 'Draft', state: 'draft' }].concat(list);
+  }
   function stageList(el, stages, cancelled) {
     return el('ol', { class: 'adm-stages lx-stepper' + (cancelled ? ' is-cancelled' : ''), 'aria-label': T('lc_title') }, stages.map(function (s) {
+      if (s.state === 'draft') {
+        return el('li', { class: 'is-current lx-draft-step', title: T('lc_draft_title') }, el('span', null, [T('lc_draft')]));
+      }
       var cls = s.state === 'done' ? 'is-done' : s.state === 'current' ? 'is-current' : s.state === 'skipped' ? 'is-skipped' : '';
       var label = (isEn() && s.label_en) || s.label_ar || s.code;
       var title = [label, s.state === 'skipped' ? T('lc_na_title') : null, s.reached_at ? T('lc_reached', { d: s.reached_at_text }) : null, s.auto ? T('lc_auto') + (s.cause ? ' — ' + T('cause_' + s.cause) : '') : null].filter(Boolean).join(' · ');
@@ -785,7 +796,7 @@
       } else {
         var d = r.data;
         d.stages.forEach(function (s) { if (s.reached_at) s.reached_at_text = fmtDate(api, s.reached_at, true); });
-        wrap.appendChild(stageList(el, d.stages, !!d.cancelled));
+        wrap.appendChild(stageList(el, withDraftStep(d.stages, !!tx.is_draft && !d.cancelled), !!d.cancelled));
         var notes = [];
         if (!d.cancelled) {
           if (d.next) {
@@ -1051,11 +1062,11 @@
   OPS.legacyTx = {
     VERSION: 'lx-ui-1',
     t: T, label: lab, isCancelled: function (tx) { return !!(tx && tx.cancelled_at); },
-    txFields: txFields, dupCheck: dupCheck, dupPanel: dupPanel, stepper: stepper, cancelDialog: cancelDialog,
+    txFields: txFields, dupCheck: dupCheck, dupPanel: dupPanel, stepper: stepper, withDraftStep: withDraftStep, cancelDialog: cancelDialog,
     detailRows: detailRows, hijriInfo: hijriInfo, gregorianToHijri: gregorianToHijri, portName: portName,
     pure: { legacyPatch: legacyPatch, dupMessages: dupMessages, cancelBlock: cancelBlock, cancelErrText: cancelErrText,
       movementPayload: movementPayload, hijriInfo: hijriInfo, normPhone: normPhone, normChassis: normChassis, normOrderNo: normOrderNo,
-      nextManual: nextManual }
+      nextManual: nextManual, withDraftStep: withDraftStep }
   };
   var MINE = [{ id: 'movements', order: 55, render: renderMovements }];
   var ids = MINE.map(function (s) { return s.id; });
