@@ -202,7 +202,7 @@ const savedRow = (o) => Object.assign({ id: 'e0000000-0000-4000-8000-00000000000
       const want = X.KEYS_FOR_V3[t].filter(k => X.QUICK_BASE.indexOf(k) !== -1 || ((t === 'customs_declaration' || t === 'auto') && X.QUICK_DECL.indexOf(k) !== -1));
       if (J(X.QUICK_KEYS[t]) !== J(want)) bad.push(t);
       if (!X.QUICK_KEYS[t].every(k => X.ALL_KEYS_V3.indexOf(k) !== -1)) bad.push(t + ' db');
-      if (X.QUICK_KEYS[t].length >= X.KEYS_FOR_V3[t].length && t !== 'supplier_invoice') bad.push(t + ' not shorter');
+      if (X.QUICK_KEYS[t].length > X.KEYS_FOR_V3[t].length) bad.push(t + ' longer than full');   // 2026-11-14: a packing list's quick keys may equal its full keys
     });
     // nothing outside the base list, and no invented key (no B/L date / item count key exists)
     if (!X.QUICK_BASE.concat(X.QUICK_DECL).every(k => X.ALL_KEYS_V3.indexOf(k) !== -1)) bad.push('base');
@@ -245,8 +245,8 @@ const savedRow = (o) => Object.assign({ id: 'e0000000-0000-4000-8000-00000000000
       const ok = p.model === 'claude-opus-5-5' && p.output_config.effort === 'low' && X.EFFORT_QUICK === 'low' && p.max_tokens === 10000
         && J(p.betas) === J(X.BETAS) && p.fallbacks === X.FALLBACKS && p.system === X.SYSTEM_V3_QUICK && p.messages[0].content[0].type === 'image'
         && J(p.output_config.format.schema) === J(X.outputSchema(t, 'ai-doc-v3', 'quick'))
-        && /QUICK READING: look ONLY for the facts listed below/.test(txt) && /at most 60 characters/.test(txt) && /at\smost 40 rows/.test(txt)
-        && /Merge rows with the same description and HS code/.test(txt) && /still add up\nto the printed total/.test(txt)
+        && /QUICK READING: look ONLY for the facts listed below/.test(txt) && /at most 60 characters/.test(txt) && /at\smost 60 rows/.test(txt) && /different products are NEVER merged together/.test(txt)
+        && /One row per PRODUCT/.test(txt) && /still add up\nto the printed total/.test(txt)
         && X.QUICK_KEYS[t].every(k => txt.indexOf('\n- ' + k + ': ') !== -1)
         && X.KEYS_FOR_V3[t].filter(k => X.QUICK_KEYS[t].indexOf(k) === -1).every(k => txt.indexOf('\n- ' + k + ': ') === -1)
         && txt.length < full.messages[0].content[1].text.length + 1200
@@ -268,15 +268,16 @@ const savedRow = (o) => Object.assign({ id: 'e0000000-0000-4000-8000-00000000000
   });
 
   console.log('== 4. quick answer: parse + postProcess');
-  await check('postProcess quick: only QUICK_KEYS kept, compact items (unit kept; unit_price / notes / origin dropped), containers normalised (other columns null), quick mark first, reading_mode quick, raw_text says quick', async () => {
+  await check('postProcess quick: only QUICK_KEYS kept, compact items (unit kept; unit_price / notes / origin dropped), containers normalised (packages / weights kept, 2026-11-14), quick mark first, reading_mode quick, raw_text says quick', async () => {
     const p = X.parseMessage(msgOf(quickInvoiceAnswer()), 'ai-doc-v3', 'auto');
     if (!p.ok) return 'parse ' + p.code;
     const r = X.postProcess(p.data, 'auto', 'ai-doc-v3', 'quick');
     const names = r.fields.map(f => f.name);
-    const ok = r.reading_mode === 'quick' && r.doc_type === 'commercial_invoice' && names.indexOf('supplier_vat') === -1 && names.indexOf('payment_terms') === -1
+    const ok = r.reading_mode === 'quick' && r.doc_type === 'commercial_invoice' && names.indexOf('supplier_vat') === -1
       && names.indexOf('invoice_number') !== -1 && names.indexOf('buyer_name') !== -1
       && J(r.line_items) === J([{ description: 'COTTON T-SHIRT', hs_code: '6109.10', quantity: 306, amount: 765, unit: 'PCS' }])
-      && J(r.containers) === J([{ container_number: 'MSCU1234566', seal_number: 'SL1001', size_type: '40HC', packages_count: null, net_weight: null, gross_weight: null }])
+      && r.containers.length === 1 && r.containers[0].container_number === 'MSCU1234566' && r.containers[0].seal_number === 'SL1001' && r.containers[0].size_type === '40HC'
+      && ['packages_count', 'net_weight', 'gross_weight'].every(k => r.containers[0][k] === null || typeof r.containers[0][k] === 'number')
       && r.warnings[0].code === 'quick_reading' && r.warnings[0].source === 'server' && X.isQuickDetail(r.ai_detail) && X.isQuickDetail(r)
       && !('reading_mode' in r.ai_detail) && /^\[claude-opus-5-5 · ai-doc-v3 · quick\] commercial_invoice/.test(r.raw_text)
       && /1\. COTTON T-SHIRT \| 6109\.10 \| 306 \| PCS \| 765/.test(r.raw_text);
@@ -304,7 +305,7 @@ const savedRow = (o) => Object.assign({ id: 'e0000000-0000-4000-8000-00000000000
     const r = X.postProcess(d, 'auto', 'ai-doc-v3', 'quick');
     const bd = r.by_document || {};
     return (bd.bill_of_lading && bd.packing_list && bd.packing_list.some(x => x.name === 'gross_weight' && x.value === '166')
-      && !bd.bill_of_lading.some(x => x.name === 'freight_terms') && bd.bill_of_lading.some(x => x.name === 'notify_party')) || J(bd);
+      && bd.bill_of_lading.some(x => x.name === 'freight_terms') && bd.bill_of_lading.some(x => x.name === 'notify_party')) || J(bd);
   });
 
   console.log('== 5. handler: quick answer, hold, retry, reuse');

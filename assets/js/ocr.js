@@ -116,6 +116,7 @@
       'bl_number', 'invoice_number', 'invoice_date', 'declaration_number', 'declaration_date', 'packing_list_number', 'packing_list_date',
       'vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'container_numbers', 'seal_numbers', 'packages_count', 'package_type',
       'gross_weight', 'net_weight', 'hs_codes', 'goods_description', 'currency', 'subtotal', 'total', 'incoterms', 'country_of_origin',
+      'freight_terms', 'payment_terms', 'export_country', 'measurement_cbm',
       'declaration_type', 'declaration_date_hijri', 'importer_name_ar'];
     function quickPref() { try { return window.localStorage.getItem(QUICK_PREF) !== '0'; } catch (e) { return true; } }
     function setQuickPref(on) { try { window.localStorage.setItem(QUICK_PREF, on ? '1' : '0'); } catch (e) { /* storage blocked */ } }

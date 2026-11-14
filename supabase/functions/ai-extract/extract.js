@@ -213,7 +213,7 @@
       - line_items in a compact shape (QUICK_ITEM_KEYS: description ≤ 60 chars, hs_code, quantity, unit, amount), identical
         description + HS rows merged, at most QUICK_MAX_ITEMS rows (beyond that merged further by HS code so the rows still
         add up to the printed total — doc-match compares the items sum with subtotal / total and groups by HS6);
-      - containers with number, size / type and seal only (QUICK_CONTAINER_KEYS; the server fills the other columns null);
+      - containers with number, size / type, seal, packages and gross / net weight (QUICK_CONTAINER_KEYS, owner check 2026-11-14);
       - a short focused instruction, effort 'low' (EFFORT_QUICK) and max_tokens MAX_TOKENS_QUICK. Trade-off: less thinking
         = faster and cheaper, but fewer self-checks on a hard scan (totals, RTL B/L order); the server checks are the same,
         and «اقرأ المستند كاملًا» re-reads one file in full. Betas / fallbacks (server-side fallback) are unchanged.
@@ -227,15 +227,17 @@
   const QUICK_BASE = Object.freeze(['shipper', 'supplier_name', 'consignee', 'consignee_name', 'buyer_name', 'notify_party',
     'bl_number', 'invoice_number', 'invoice_date', 'declaration_number', 'declaration_date', 'packing_list_number', 'packing_list_date',
     'vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'container_numbers', 'seal_numbers', 'packages_count', 'package_type',
-    'gross_weight', 'net_weight', 'hs_codes', 'goods_description', 'currency', 'subtotal', 'total', 'incoterms', 'country_of_origin']);
+    'gross_weight', 'net_weight', 'hs_codes', 'goods_description', 'currency', 'subtotal', 'total', 'incoterms', 'country_of_origin',
+    // owner check 2026-11-14 (the Fasah entry sheet shows them): freight / payment terms, export country, volume
+    'freight_terms', 'payment_terms', 'export_country', 'measurement_cbm']);
   const QUICK_DECL = Object.freeze(['declaration_type', 'declaration_date_hijri', 'importer_name_ar']);
   const QUICK_KEYS = Object.freeze(QUICK_TYPES.reduce((o, t) => {
     o[t] = Object.freeze(KEYS_FOR_V3[t].filter(k => QUICK_BASE.indexOf(k) !== -1 || ((t === 'customs_declaration' || t === 'auto') && QUICK_DECL.indexOf(k) !== -1)));
     return o;
   }, {}));
   const QUICK_ITEM_KEYS = Object.freeze(['description', 'hs_code', 'quantity', 'unit', 'amount']);
-  const QUICK_CONTAINER_KEYS = Object.freeze(['container_number', 'size_type', 'seal_number']);
-  const QUICK_MAX_ITEMS = 40;
+  const QUICK_CONTAINER_KEYS = Object.freeze(['container_number', 'size_type', 'seal_number', 'packages_count', 'gross_weight', 'net_weight']);
+  const QUICK_MAX_ITEMS = 60;
   const QUICK_DESC_MAX = 60;
   const MAX_TOKENS_QUICK = 10000;
   const EFFORT_QUICK = 'low';
@@ -418,10 +420,12 @@
     'QUICK READING: look ONLY for the facts listed below and ignore everything else on the page (terms and conditions, addresses,',
     'bank details, remarks, stamps, marks and numbers columns). Write no free text: only the JSON, with at most a few short warnings.',
     'line_items: one compact row per goods line: description (short, at most ' + QUICK_DESC_MAX + ' characters), hs_code, quantity, unit,',
-    'amount (the line value). Merge rows with the same description and HS code into one row (add up quantity and amount). Give at',
-    'most ' + QUICK_MAX_ITEMS + ' rows: when more remain, merge further by HS code (add up quantity and amount) so the rows still add up',
+    'amount (the line value). One row per PRODUCT: rows of the same product that differ only by size, colour or side (S / M / L,',
+    'left / right) are merged into one row (add up quantity and amount); different products are NEVER merged together, even when they',
+    'share an HS code or have no HS code. Give at most ' + QUICK_MAX_ITEMS + ' rows: only when more products remain, merge the smallest',
+    'ones by HS code (add up quantity and amount) so the rows still add up',
     'to the printed total. subtotal / total: the values printed on the document as described in their hints below (never added up from the rows).',
-    'containers: one row per container (number, size / type, seal).'
+    'containers: one row per container (number, size / type, seal, and its packages / gross / net weight in kg when printed for it).'
   ].join('\n');
   // v3 customs declaration (20261120000100): legacy buildDeclarationPrompt_ + detectDeclarationTypeFromBlobR11_ in the same call
   const DECL_LINES = [
@@ -639,7 +643,8 @@
     // only the numeric columns stay nullable
     itemKeys.slice(1).forEach(k => { itemProps[k] = ITEM_NUM_V3.indexOf(k) !== -1 ? nullable('number') : { type: 'string' }; });
     const containerProps = quick
-      ? { container_number: { type: 'string' }, size_type: { type: 'string' }, seal_number: { type: 'string' } }
+      ? { container_number: { type: 'string' }, size_type: { type: 'string' }, seal_number: { type: 'string' },
+        packages_count: nullable('number'), gross_weight: nullable('number'), net_weight: nullable('number') }
       : { container_number: { type: 'string' }, seal_number: { type: 'string' }, size_type: { type: 'string' },
         packages_count: nullable('number'), net_weight: nullable('number'), gross_weight: nullable('number') };
     const sc = {
