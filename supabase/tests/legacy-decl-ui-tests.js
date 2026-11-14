@@ -750,21 +750,42 @@ section('Fasah sheet from the readings (buildReadingsModel)');
     const mq = F.buildReadingsModel({ docs: { bl: { fields: { bl_number: 'B1', consignee: 'X' }, items: [], containers: [{ container_number: 'TSTU7710023', seal_number: '1', size_type: '40HC' }] },
       invoice: { fields: { invoice_number: 'I1', country_of_origin: 'TURKEY' }, items: [{ description: 'A', quantity: 1700, amount: 5610 }, { description: 'B', quantity: 280, amount: 1086.4 }] } }, result: { rows: [] } });
     const it = mq.sections[1].tables[0], ct = mq.sections[0].tables[0];
+    // owner reference 2026-11-14: only the invoice items hide their empty columns; the containers table keeps all 6 («—»)
     return (it.cols.map(c => c.key).join() === 'description,quantity,unit_price,total,origin_country' && it.rows[0].unit_price === '3.3' && it.rows[1].unit_price === '3.88'
-      && it.rows.every(r => r.origin_country === 'TURKEY') && ct.cols.map(c => c.key).join() === 'container_no,seal_no,size_type') || JSON.stringify([it.cols, it.rows, ct.cols]);
+      && it.rows.every(r => r.origin_country === 'TURKEY') && ct.cols.map(c => c.key).join() === 'container_no,seal_no,size_type,packages,rgross,net') || JSON.stringify([it.cols, it.rows, ct.cols]);
   });
   const sec = id => m.sections.filter(s => s.id === id)[0];
   const pv = (s, k) => (s.pairs.concat(...(s.groups || []).map(g => g.pairs)).filter(p => p[0] === k)[0] || [])[1];
-  check('ready draft: strip = «مسودة — قبل إنشاء المعاملة», importer (consignee), B/L no., prepared at in Riyadh time', () =>
+  check('ready draft: strip = «مسودة — قبل إنشاء المعاملة», importer (consignee), B/L no., prepared at like the reference (Arabic-Indic, yyyy/m/d، h:mm:ss ص/م, Riyadh)', () =>
     (m.ready && m.draft && m.txId === null && J(m.strip.map(p => p[0])) === J(['s_tx', 's_importer', 's_bl', 's_prepared']) && m.strip[0][1] === 'مسودة — قبل إنشاء المعاملة'
-      && m.strip[1][1] === 'NAJD SAMPLE TRADING CO' && m.strip[2][1] === 'SYNBL0001' && m.strip[3][1] === '2026-11-14 12:05') || J(m.strip));
+      && m.strip[1][1] === 'NAJD SAMPLE TRADING CO' && m.strip[2][1] === 'SYNBL0001' && m.strip[3][1] === '٢٠٢٦/١١/١٤، ١٢:٠٥:٠٠ م'
+      && F.preparedText(new Date('2026-11-08T18:31:16Z'), 'ar') === '٢٠٢٦/١١/٨، ٩:٣١:١٦ م' && F.preparedText(new Date('2026-11-08T03:04:05Z'), 'ar') === '٢٠٢٦/١١/٨، ٦:٠٤:٠٥ ص'
+      && m.fileBase === 'كشف-إدخال-فسح-مسودة-20261114-1205') || J(m.strip));
+  check('strip importer: the linked transaction\'s client (Arabic name) wins; else the B/L consignee name without its address', () => {
+    const a = F.buildReadingsModel(Object.assign(rdSrc(), { t: (k, v) => I18N.t('decl.' + k, v), tx: { id: '11111111-2222-4333-8444-555555555555', ref: 'MRS-2026-000009', client: 'شركة نجد التجريبية' } }));
+    const b = F.buildReadingsModel(rdSrc({ bl: { consignee: 'CONSIGNEE: NAJD SAMPLE TRADING CO\nP.O. BOX 1, RIYADH' } }));
+    return (a.strip[0][1] === 'مسودة معاملة MRS-2026-000009' && a.strip[1][1] === 'شركة نجد التجريبية' && b.strip[1][1] === 'NAJD SAMPLE TRADING CO'
+      && b.sections[0].pairs.filter(p => p[0] === 'rf_consignee')[0][1] === 'NAJD SAMPLE TRADING CO') || J([a.strip, b.strip]);
+  });
+  check('B/L: exactly the reference pairs in order (no notify party / shipping line / booking / places even when read); goods on its own row', () => {
+    const m2 = F.buildReadingsModel(rdSrc({ bl: { notify_party: 'N', shipping_line: 'L', booking_number: 'B', place_of_receipt: 'R', place_of_delivery: 'D' } }));
+    const s0 = m2.sections[0];
+    return (J(s0.pairs.map(p => p[0])) === J(['f_bl_number', 'f_shipper', 'rf_consignee', 'f_vessel_voyage', 'f_pol', 'f_pod', 'f_freight_terms', 'f_goods'])
+      && s0.pairs[7].brk === true && J(s0.groups[0].pairs.map(p => p[0])) === J(['f_packages', 'f_package_type', 'rf_gross', 'rf_net', 'f_cbm', 'f_temp'])) || J(s0.pairs);
+  });
   check('sections in the reference order: 1 B/L (pairs + «الكميات والأوزان كما وردت في البوليصة» + containers & seals), 2 invoice (+ items), 3 packing list', () =>
     (J(m.sections.map(s => s.id)) === J(['bl', 'invoice', 'packing']) && sec('bl').titleKey === 'rsec_bl' && sec('bl').groups[0].titleKey === 'rg_bl_qty'
       && pv(sec('bl'), 'f_vessel_voyage') === 'SAMPLE STAR / 101E' && pv(sec('bl'), 'f_temp') === '-18' && pv(sec('bl'), 'f_cbm') === '30' && pv(sec('bl'), 'rf_consignee') === 'NAJD SAMPLE TRADING CO'
       && sec('bl').tables[0].id === 'rd_containers' && J(sec('bl').tables[0].cols.map(c => c.key)) === J(['container_no', 'seal_no', 'size_type', 'packages', 'rgross', 'net'])
       && sec('bl').tables[0].rows[0].seal_no === 'SL-9001' && sec('bl').tables[0].rows[0].size_type === '40RF') || J(m.sections.map(s => s.id)));
   check('invoice: seller / buyer / currency name / total / incoterms / payment terms; items in the reference columns', () =>
-    (pv(sec('invoice'), 'f_currency') === 'USD — دولار أمريكي' && pv(sec('invoice'), 'f_seller') === 'BLUE HARBOUR FOODS LTD' && pv(sec('invoice'), 'f_total') === '24000'
+    (pv(sec('invoice'), 'f_currency') === 'دولار أمريكي — USD' && pv(sec('invoice'), 'f_incoterms') === 'CFR JEDDAH'
+      && J(sec('invoice').pairs.map(p => p[0])) === J(['f_invoice_no', 'f_invoice_date', 'f_seller', 'f_buyer', 'f_currency', 'f_total', 'f_origin', 'f_export_country', 'f_incoterms', 'f_payment_terms'])
+      && J(sec('packing').pairs.map(p => p[0])) === J(['f_packing_no', 'rf_pk_date', 'rf_pk_total', 'f_package_type', 'rf_gross', 'rf_net'])
+      && J(sec('packing').tables[0].cols.map(c => c.key)) === J(['description', 'packages', 'quantity', 'unit', 'rgross_weight_kg', 'net_weight_kg', 'container_no', 'seal_no'])
+      && F.incotermsPlace({ incoterms: 'FOB' }, { port_of_loading: 'PORT ALPHA, SAMPLELAND' }) === 'FOB PORT ALPHA, SAMPLELAND'
+      && F.incotermsPlace({ incoterms: 'CIF DAMMAM' }, { port_of_discharge: 'JEDDAH' }) === 'CIF DAMMAM' && F.incotermsPlace({}, {}) === ''
+      && pv(sec('invoice'), 'f_seller') === 'BLUE HARBOUR FOODS LTD' && pv(sec('invoice'), 'f_total') === '24000'
       && pv(sec('invoice'), 'f_payment_terms') === 'TT 30 DAYS' && J(sec('invoice').tables[0].cols.map(c => c.key)) === J(['description', 'supplier_hs_code', 'quantity', 'unit', 'unit_price', 'total', 'origin_country', 'scientific_name'])
       && sec('invoice').tables[0].rows[0].supplier_hs_code === '030489' && sec('invoice').tables[0].rows[0].total === 24000) || J(sec('invoice')));
   check('a value the reading did not return stays empty (rendered «—»): B/L notify party not listed, invoice export country blank when absent', () => {
@@ -772,18 +793,46 @@ section('Fasah sheet from the readings (buildReadingsModel)');
     return (pv(m2.sections[1], 'f_export_country') === '' && !m2.sections[0].pairs.some(p => p[0] === 'f_notify') && m2.sections.length === 2) || J(m2.sections[1].pairs);
   });
   const R = rdResult(true);
-  check('common values = the report\'s engine rows, same statuses (strict): match → ok, mismatch → diff, info on one document → single, missing → review; columns of the documents used', () => {
-    const g = m.common.filter(r => r.key === 'gross_weight')[0], c = m.common.filter(r => r.key === 'consignee')[0];
-    return (m.common.length === R.rows.length && g && g.engine === 'mismatch' && g.status === 'diff' && g.packing === '13500' && c && c.status === 'ok'
-      && J(m.docCols) === J(['bl', 'invoice', 'packing']) && c.label === 'المرسل إليه / المستورد'
-      && m.common.filter(r => r.key === 'invoice_number')[0].engine === 'info' && m.common.filter(r => r.key === 'invoice_number')[0].status === 'single'
-      && m.common.some(r => r.engine === 'missing') && m.common.filter(r => r.engine === 'missing').every(r => r.status === (r.bl || r.invoice || r.packing ? 'review' : 'missing'))
-      && m.common.every(r => r.engine !== 'missing' || r.status !== 'single')) || J(m.common);
+  check('common values: EXACTLY the 5 reference rows, statuses from the SAME strict engine rows (match → مطابق, mismatch → يوجد اختلاف, else مراجعة سريعة)', () => {
+    const g = m.common.filter(r => r.key === 'gross_weight')[0], c = m.common.filter(r => r.key === 'consignee')[0], gd = m.common.filter(r => r.key === 'goods_description')[0];
+    const eng = k => R.rows.filter(r => r.key === k)[0];
+    const t = k => I18N.t('decl.' + k);
+    return (J(m.common.map(r => r.key)) === J(['consignee', 'packages_count', 'gross_weight', 'net_weight', 'goods_description'])
+      && J(m.common.map(r => r.label)) === J(['المستورد / المشتري', 'عدد الطرود', 'الوزن الإجمالي كجم', 'الوزن الصافي كجم', 'نوع / وصف البضاعة'])
+      && g.engine === eng('gross_weight').status && g.engine === 'mismatch' && g.status === 'diff' && g.packing === '13500' && c.status === 'ok'
+      && gd.engine === eng('goods_description').status && gd.status === 'review' && m.common.every(r => ['ok', 'diff', 'review'].indexOf(r.status) !== -1)
+      && J(m.docCols) === J(['bl', 'invoice', 'packing']) && t('rcs_ok') === 'مطابق' && t('rcs_diff') === 'يوجد اختلاف' && t('rcs_review') === 'مراجعة سريعة'
+      && J(F.buildReadingsModel(rdSrc()).docCols) === J(['bl', 'invoice'])) || J(m.common);
   });
-  check('conflicts table: the report\'s exceptions as given (st → kind), else its mismatch / partial / critical missing rows', () => {
-    const m2 = F.buildReadingsModel(rdSrc({ pk: true, exceptions: [{ st: 'invalid', label: 'أرقام الحاويات', values: { bl: 'TSTU7710024' }, note: 'x' }, { st: 'partial', label: 'L', values: {}, note: '' }] }));
-    return (J(m2.alerts.map(a => a.kind)) === J(['invalid', 'review']) && m2.alerts[0].bl === 'TSTU7710024'
-      && m.alerts.some(a => a.kind === 'conflict' && a.packing === '13500')) || J([m2.alerts, m.alerts]);
+  check('conflicts: the common rows that differ / lack a value + the critical numbers that differ / are invalid; a quick-review-only row stays out (as on the reference)', () => {
+    const m2 = F.buildReadingsModel(rdSrc({ pk: true, exceptions: [{ st: 'invalid', key: 'container_numbers', label: 'أرقام الحاويات', values: { bl: 'TSTU7710024' }, note: 'x' },
+      { st: 'partial', label: 'L', values: {}, note: '' }, { st: 'invalid', key: 'hs_codes', label: 'HS', values: {}, note: 'y' }] }));
+    const ga = m.alerts.filter(a => a.key === 'gross_weight')[0];
+    const t = k => I18N.t('decl.' + k);
+    // a strict mismatch on the B/L number (a critical number) is listed with the engine's values
+    const src3 = rdSrc({ pk: true, inv: { bl_number: 'SYNBL9999' } });
+    src3.result = DM.compare({ bl: { fields: fld(RD_BL), items: [] }, invoice: { fields: fld(Object.assign({}, RD_INV, { bl_number: 'SYNBL9999' })), items: RD_ITEMS }, packing: { fields: fld(RD_PK), items: [] } }, { mode: 'strict' });
+    const m3 = F.buildReadingsModel(src3), blA = m3.alerts.filter(a => a.key === 'bl_number')[0];
+    // a quick-review row (partial) is not a conflict
+    const m4 = F.buildReadingsModel(Object.assign(rdSrc(), { result: { documents: ['bl', 'invoice'], rows: [{ key: 'goods_description', status: 'partial', values: { bl: 'A', invoice: 'A B' } }] } }));
+    return (ga && ga.kind === 'conflict' && ga.label === 'الوزن الإجمالي' && ga.note === 'يوجد اختلاف يحتاج مراجعة الموظف.' && ga.bl === '13000' && ga.packing === '13500'
+      && m.alerts.every(a => a.kind !== 'review')
+      && J(m2.alerts.filter(a => a.kind === 'invalid').map(a => [a.key, a.bl, a.note])) === J([['container_numbers', 'TSTU7710024', 'x']])
+      && blA && blA.kind === 'conflict' && blA.invoice === 'SYNBL9999' && blA.label === 'رقم البوليصة'
+      && m4.common.filter(r => r.key === 'goods_description')[0].status === 'review' && !m4.alerts.some(a => a.key === 'goods_description')
+      && t('rak_conflict') === '⚠ يوجد اختلاف' && t('rak_missing') === 'حقل مفقود' && t('rak_review') === 'مراجعة سريعة') || J([m.alerts, m2.alerts, m3.alerts, m4.alerts]);
+  });
+  check('common text values as read (reference): the description as printed, the party name without its address; an address-only difference shows the engine values', () => {
+    const synth = (blC, gd) => {
+      const s = rdSrc({ pk: true, bl: { consignee: blC } });
+      s.docs.packing.fields = Object.assign({}, RD_PK, { goods_description: gd });
+      s.result = DM.compare({ bl: { fields: fld(Object.assign({}, RD_BL, { consignee: blC })), items: [] }, invoice: { fields: fld(RD_INV), items: RD_ITEMS },
+        packing: { fields: fld(s.docs.packing.fields), items: [] } }, { mode: 'strict' });
+      return F.buildReadingsModel(s);
+    };
+    const a = synth('NAJD SAMPLE TRADING CO', 'FROZEN FISH FILLET (Sample Spp)'), b = synth('NAJD SAMPLE TRADING CO\nP.O. BOX 1, RIYADH', 'FROZEN FISH FILLET');
+    const ga = a.common.filter(r => r.key === 'goods_description')[0], cb = b.common.filter(r => r.key === 'consignee')[0];
+    return (ga.packing === 'FROZEN FISH FILLET (Sample Spp)' && cb.status === 'diff' && cb.bl !== cb.invoice && /RIYADH/.test(cb.bl)) || J([ga, cb]);
   });
   check('a correction (a changed reading value) flows into the sheet and the common values', () => {
     const src = rdSrc({ pk: true, bl: { gross_weight: '13500' } });
@@ -814,20 +863,35 @@ section('Fasah sheet from the readings (buildReadingsModel)');
     return (m.fileBase === 'كشف-إدخال-فسح-مسودة-20261114-1205' && F.fileName(m.fileSeq, new Date('2026-11-14T09:05:00Z'), 'csv') === 'كشف-إدخال-فسح-مسودة-20261114-1205.csv'
       && rows.some(r => r.section === 'الكميات والأوزان كما وردت في البوليصة' && r.field === 'درجة الحرارة' && r.value === '-18')
       && rows.some(r => r.section === 'الحاويات والأختام') && common && J(common.columns.map(c => c.key)) === J(['field', 'bl', 'invoice', 'packing', 'result'])
+      && J(common.columns.map(c => c.label)) === J(['المعلومة', 'البوليصة', 'الفاتورة التجارية', 'بيان التعبئة', 'النتيجة']) && common.rows.length === 5
+      && common.rows[2].result === 'يوجد اختلاف' && common.rows[0].result === 'مطابق' && common.rows[3].invoice === '—'
+      && J(spec.sheets.filter(x => x.name === 'التعارضات والحقول المفقودة')[0].columns.map(c => c.label)) === J(['الحالة', 'الحقل', 'البوليصة', 'الفاتورة', 'بيان التعبئة', 'الملاحظة'])
+      && rows.some(r => r.section === '1 — معلومات البوليصة' && r.field === 'رقم البوليصة') && rows.some(r => r.section === 'أصناف الفاتورة' && /HS Code المورد: 030489/.test(r.value))
+      && rows.some(r => r.section === 'التعارضات والحقول المفقودة' && /^⚠ يوجد اختلاف: الوزن الإجمالي$/.test(r.field))
       && spec.meta[0][1] === 'مسودة — قبل إنشاء المعاملة' && spec.meta[2][1] === t('rd_foot_note') && bytes.length > 1000
       && F.rowCount(m) === rows.length) || J([m.fileBase, F.rowCount(m), rows.length, common && common.columns]);
+  });
+  check('no conflicts: one «لا توجد تعارضات» row in the CSV rows and the Excel conflicts sheet (row count kept)', () => {
+    const t = k => I18N.t('decl.' + k);
+    const ok = Object.assign(rdSrc(), { result: { documents: ['bl', 'invoice'], rows: ['consignee', 'packages_count', 'gross_weight', 'net_weight', 'goods_description'].map(k => ({ key: k, status: 'match', values: { bl: '1', invoice: '1' } })) } });
+    const m0 = F.buildReadingsModel(ok), rows = F.flatRows(m0, t), sh = F.xlsxSpec(m0, t, 'ar').sheets.filter(x => x.name === 'التعارضات والحقول المفقودة')[0];
+    return (m0.alerts.length === 0 && rows.filter(r => r.section === 'التعارضات والحقول المفقودة').map(r => r.value).join() === 'لا توجد تعارضات'
+      && sh.rows.length === 1 && sh.rows[0].field === 'لا توجد تعارضات' && F.rowCount(m0) === rows.length) || J([m0.alerts, sh && sh.rows]);
   });
   check('the transaction sheet is unchanged by the adapter (no docCols / groups → the four document columns)', () => J(F.docCols({})) === J(['bl', 'invoice', 'packing', 'declaration']) || 'docCols');
   check('i18n: the draft keys in Arabic and English (decl + ocr.mx_fsh_*)', () => {
     const keys = ['rd_draft', 'rd_lead', 'rd_foot_note', 'rd_need', 'rd_need_original', 'rd_excluded_fasah_sheet', 'rd_excluded_other', 'rsec_bl', 'rsec_invoice', 'rsec_packing', 'rsec_declaration',
-      'rg_bl_qty', 'rf_consignee', 'rf_pk_total', 'rf_gross', 'fc_rgross', 'fc_rgross_weight_kg', 'ftab_rd_containers', 'ftab_rd_packing_items', 'ak_invalid', 'ak_review', 'cs_review'];
+      'rg_bl_qty', 'rf_consignee', 'rf_pk_total', 'rf_gross', 'fc_rgross', 'fc_rgross_weight_kg', 'ftab_rd_containers', 'ftab_rd_packing_items', 'ak_invalid', 'ak_review', 'cs_review',
+      'rf_net', 'rf_pk_date', 'rfc_supplier_hs_code', 'rcm_importer', 'rcm_packages', 'rcm_gross', 'rcm_net', 'rcm_goods', 'rak_importer', 'rak_packages', 'rak_gross', 'rak_net', 'rak_goods',
+      'rak_container_numbers', 'rak_bl_number', 'rak_invoice_number', 'rak_conflict', 'rak_review', 'rak_missing', 'rak_invalid', 'rcs_ok', 'rcs_diff', 'rcs_review',
+      'rcol_bl', 'rcol_invoice', 'rcol_packing', 'rcol_field', 'rcol_note', 'rnote_diff', 'rnote_missing', 'rnote_invalid', 'rd_alerts_sub', 'rd_alerts_none'];
     const ocr = rd('assets/i18n/ocr.js');
     return (keys.every(has) && (ocr.match(/mx_fsh_title: '/g) || []).length === 2 && (ocr.match(/mx_fsh_tag: '/g) || []).length === 2
       && dicts.ar['decl.rd_foot_note'] === 'هذه الورقة مخصصة لتسريع ودقة إدخال المعاملة الجديدة في منصة فسح قبل إنشاء البيان، ولا تغني عن مراجعة المستندات الأصلية.') || keys.filter(k => !has(k));
   });
   check('en: the draft strip / sections in English', () => {
     LANG = 'en';
-    try { const e = F.buildReadingsModel(rdSrc({ lang: 'en' })); return (e.strip[0][1] === 'Draft — before the transaction is created' && e.sections[1].pairs.filter(p => p[0] === 'f_currency')[0][1] === 'USD — US dollar') || J(e.strip); }
+    try { const e = F.buildReadingsModel(rdSrc({ lang: 'en' })); return (e.strip[0][1] === 'Draft — before the transaction is created' && e.strip[3][1] === '2026/11/14, 12:05:00 PM' && e.sections[1].pairs.filter(p => p[0] === 'f_currency')[0][1] === 'US dollar — USD') || J(e.strip); }
     finally { LANG = 'ar'; }
   });
 }
@@ -849,10 +913,13 @@ section('Fasah sheet from the readings — page wiring (ocr.html, ocr-match.js, 
   check('ocr.js: a part of a combined file carries the whole file\'s detected type (an \'other\' file never makes the sheet); ocr-match keeps the file name', () =>
     (/source_detected_type: typeof res\.detected_type === 'string' \? res\.detected_type : null/.test(OCRJ) && /parentDetected: typeof res\.source_detected_type === 'string'/.test(MX)
       && /s\.fileName = String\(x\.fileName/.test(MX)) || 'ocr.js');
-  check('decl.css: the readings draft is left out of the matching report\'s own print; the draft prints 3 pairs per row', () => {
+  check('decl.css: the readings draft is left out of the matching report\'s own print; the draft prints 3 pairs per row, light blue heads, light green rows', () => {
     const css = rd('assets/css/pages/decl.css');
-    return (/body\.ocr-print-match \.ocr-fsh-block \{ display: none !important; \}/.test(css) && /\.fsh-draft \.fsh-grid \{ grid-template-columns: repeat\(3, minmax\(0, 1fr\)\); \}/.test(css)) || 'css';
+    return (/body\.ocr-print-match \.ocr-fsh-block \{ display: none !important; \}/.test(css) && /\.fsh-draft \.fsh-rgrid \{ grid-template-columns: repeat\(3, minmax\(0, 1fr\)\); \}/.test(css)
+      && /--fr-head: #DCEAF5/.test(css) && /--fr-row: #ECF7E9/.test(css) && /\.fsh-draft \.fsh-doc-title \{[^}]*text-align: center/.test(css)) || 'css';
   });
+  check('ocr-match.js: the sheet gets the transaction\'s client name (getTransaction, once per transaction) and the exception keys', () =>
+    (/tx: fasahTx\(\)/.test(MX) && /API\.getTransaction\(tx\.id\)/.test(MX) && /cl\.name_ar \|\| cl\.name_en/.test(MX) && /\{ st: x\.st, key: x\.key, label: x\.label/.test(MX)) || 'fasahTx');
 }
 async function draftFlow() {
   section('DOM: the readings draft (renderDraft) — export logged first, print copy, failed log');
@@ -877,6 +944,24 @@ async function draftFlow() {
       && /2 — معلومات الفاتورة التجارية/.test(host.textContent) && /3 — معلومات بيان التعبئة/.test(host.textContent) && /الكميات والأوزان كما وردت في البوليصة/.test(host.textContent)
       && /الحاويات والأختام/.test(host.textContent) && /مسودة — قبل إنشاء المعاملة/.test(host.textContent) && /يوجد اختلاف/.test(host.textContent)
       && /قبل إنشاء البيان، ولا تغني عن مراجعة المستندات الأصلية/.test(host.textContent) && !/البيان الجمركي<|col_declaration/.test(host.textContent)) || host.textContent.slice(0, 400));
+  check('reference layout: centred title, strip of 4 boxes, numbered light blue heads with the English tag, 3-per-row pair grid, 6 container columns, 5 common rows, conflicts columns', () => {
+    const q = sel => Array.from(host.querySelectorAll(sel));
+    const heads = q('.fsh-rhead').map(h => h.querySelector('.fsh-rhead-t').textContent + '|' + (h.querySelector('.fsh-rhead-tag') ? h.querySelector('.fsh-rhead-tag').textContent : ''));
+    const ths = tb => Array.from(tb.querySelectorAll('th')).map(x => x.textContent);
+    const tables = q('table.fsh-rtable');
+    const common = host.querySelector('.fsh-common table'), alerts = host.querySelector('.fsh-alerts table');
+    return (host.querySelector('.fsh-sheet .fsh-doc-title').textContent === 'ورقة معلومات الإدخال في منصة فسح'
+      && J(q('.fsh-rstrip-item .fsh-rl').map(x => x.textContent)) === J(['رقم المعاملة', 'المستورد', 'رقم البوليصة', 'تاريخ إعداد الكشف'])
+      && J(heads) === J(['1 — معلومات البوليصة|Bill of Lading', '2 — معلومات الفاتورة التجارية|Commercial Invoice', '3 — معلومات بيان التعبئة|Packing List',
+        'مراجعة سريعة للقيم المشتركة|لتسريع الإدخال واكتشاف الاختلاف قبل فتح فسح', 'التعارضات والحقول المفقودة|تظهر الاستثناءات التي تحتاج تدخل الموظف فقط'])
+      && q('.fsh-rsec-bl .fsh-rgrid')[0].querySelectorAll('.fsh-rpair').length === 8 && q('.fsh-rsec-bl .fsh-rpair.is-break').length === 1
+      && J(ths(tables[0])) === J(['الحاوية', 'الختم', 'النوع / الحجم', 'الطرود', 'الوزن الإجمالي', 'الوزن الصافي'])
+      && J(ths(tables[1])) === J(['الوصف', 'HS Code المورد', 'الكمية', 'الوحدة', 'سعر الوحدة', 'الإجمالي', 'بلد المنشأ', 'الاسم العلمي'])
+      && J(ths(common)) === J(['المعلومة', 'البوليصة', 'الفاتورة التجارية', 'بيان التعبئة', 'النتيجة']) && common.querySelectorAll('tbody tr').length === 5
+      && common.querySelector('.fsh-rres.is-ok').textContent === 'مطابق' && common.querySelector('.fsh-rres.is-diff').textContent === 'يوجد اختلاف'
+      && J(ths(alerts)) === J(['الحالة', 'الحقل', 'البوليصة', 'الفاتورة', 'بيان التعبئة', 'الملاحظة']) && /⚠ يوجد اختلاف/.test(alerts.textContent)
+      && /يوجد اختلاف يحتاج مراجعة الموظف\./.test(alerts.textContent) && !/جهة الإشعار/.test(host.textContent)) || J(heads);
+  });
   btnByText(host, /^Excel$/).click(); await settle(10);
   const log1 = calls.filter(x => x[0] === 'log')[0];
   check('Excel: logged FIRST (fasah_sheet, xlsx, filters {} — no transaction yet, row_count, org), then كشف-إدخال-فسح-مسودة-…xlsx', () =>

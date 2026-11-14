@@ -1248,6 +1248,25 @@
       });
       return out;
     }
+    // the transaction the sheet belongs to (the draft made here, or #match-tx) + its client's Arabic name for «المستورد»
+    // (owner reference): fetched once per transaction, the sheet is redrawn when it arrives
+    function fasahTx() {
+      var tx = S.draft && S.draft.txId ? { id: S.draft.txId, ref: S.draft.ref || '' } : (S.matchTx ? { id: S.matchTx.id, ref: S.matchTx.ref || '' } : null);
+      if (!tx || !tx.id) return null;
+      var c = S.txClient;
+      if (c && c.id === tx.id) { if (c.name) tx.client = c.name; return tx; }
+      if (has('getTransaction')) {
+        var mine = S.txClient = { id: tx.id, name: '' };
+        Promise.resolve(API.getTransaction(tx.id)).then(function (r) {
+          var cl = r && !r.error && r.data ? r.data.clients : null;
+          var name = cl ? String(cl.name_ar || cl.name_en || '').trim() : '';
+          if (S.txClient !== mine || !name) return;
+          mine.name = name;
+          renderFasah();
+        }, function () { /* the B/L consignee stays */ });
+      }
+      return tx;
+    }
     function renderFasah() {
       var blk = $('ocr-fsh-block'), body = $('ocr-fsh-body'), F = window.MarsaFasahSheet;
       if (!blk || !body) return;
@@ -1256,9 +1275,8 @@
         || R.documents.indexOf('invoice') === -1 || R.documents.indexOf('bl') === -1) { body.textContent = ''; blk.hidden = true; return; }
       var X2 = exceptionRows();
       var m = F.renderDraft(body, {
-        docs: fasahDocs(), result: R, lang: lang(), now: new Date(),
-        tx: S.draft && S.draft.txId ? { id: S.draft.txId, ref: S.draft.ref || '' } : (S.matchTx || null),
-        exceptions: X2.rows.map(function (x) { return { st: x.st, label: x.label, values: x.values, note: x.note }; })
+        docs: fasahDocs(), result: R, lang: lang(), now: new Date(), tx: fasahTx(),
+        exceptions: X2.rows.map(function (x) { return { st: x.st, key: x.key, label: x.label, values: x.values, note: x.note }; })
       }, { api: API, orgId: S.orgId || undefined, docName: docName });
       blk.hidden = false;
       blk.classList.toggle('is-ready', !!(m && m.ready));

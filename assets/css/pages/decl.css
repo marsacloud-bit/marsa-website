@@ -130,6 +130,70 @@ body.fsh-open { overflow: hidden; }
 .fsh-draft-lead { margin: 0; flex: 1 1 260px; min-width: 0; }
 .fsh-sheet.fsh-draft { max-width: none; margin: 0; }
 
+/* the readings draft drawn like the owner's reference «ورقة معلومات الإدخال في منصة فسح» (renderReadings): centred title,
+   strip of 4 boxes, light blue section heads (number + title / English tag), label · value boxes 3 per row in a bordered
+   grid, light green table rows. Square corners and hairline borders as on the reference; screen and print. */
+.fsh-draft { --fr-line: #9AAFC2; --fr-hair: #DDE5EA; --fr-ink: #17365D; --fr-text: #1F2A37; --fr-muted: #4F5C66;
+  --fr-head: #DCEAF5; --fr-label: #F7F9FA; --fr-bar: #F3F7FA; --fr-th: #F5F8FC; --fr-row: #ECF7E9; --fr-row2: #F9FBFD;
+  gap: 8px; color: var(--fr-text); font-size: 13px; }
+.fsh-draft .fsh-doc-title { margin: 0 0 2px; text-align: center; font-size: 1.35rem; font-weight: 800; color: #131313; }
+.fsh-draft .fsh-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: .95em; }
+.fsh-draft .fsh-strong { font-weight: 700; }
+.fsh-rstrip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--fr-line); background: #F8FAFD; }
+.fsh-rstrip-item { display: grid; gap: 4px; align-content: start; padding: 7px 10px; min-width: 0; overflow-wrap: anywhere; border-inline-start: 1px solid var(--fr-line); }
+.fsh-rstrip-item:first-child { border-inline-start: 0; }
+.fsh-rl { font-size: 11px; color: var(--fr-muted); }
+.fsh-rstrip-item > bdi { justify-self: start; font-size: 14px; font-weight: 700; color: var(--fr-ink); }
+.fsh-rsec { border: 1px solid var(--fr-line); border-radius: 0; padding: 0; min-width: 0; background: #fff; }
+.fsh-rhead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; background: var(--fr-head);
+  border-bottom: 1px solid var(--fr-line); padding: 7px 8px; }
+.fsh-rhead-t { margin: 0; font-size: 15px; font-weight: 800; color: var(--fr-ink); }
+.fsh-rhead-tag { font-size: 10px; font-weight: 600; color: #5B6B7F; }
+.fsh-rgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.fsh-rpair { display: grid; grid-template-columns: minmax(64px, 26%) minmax(0, 1fr); min-width: 0; border-bottom: 1px solid var(--fr-hair); border-inline-start: 1px solid var(--fr-hair); }
+.fsh-rpair:nth-child(3n + 1), .fsh-rpair.is-break { border-inline-start: 0; }
+.fsh-rpair.is-break { grid-column-start: 1; }
+.fsh-rpl { background: var(--fr-label); color: var(--fr-muted); font-size: 11px; padding: 6px 8px; border-inline-end: 1px solid var(--fr-hair); overflow-wrap: anywhere; }
+.fsh-rpv { padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; color: var(--fr-text); }
+.fsh-rpv .fsh-mono { font-weight: 600; }
+.fsh-rpv .is-num { font-weight: 500; }
+.fsh-rbar { margin: 0; padding: 6px 8px; background: var(--fr-bar); border-bottom: 1px solid var(--fr-hair); font-size: 12px; font-weight: 800; color: var(--fr-ink); }
+.fsh-rgrid + .fsh-rbar { border-top: 1px solid var(--fr-hair); margin-top: -1px; }
+.fsh-rtable-wrap { max-width: 100%; overflow: auto; margin: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+.fsh-rtable { width: 100%; min-width: 560px; border-collapse: collapse; font-size: 12px; }
+.fsh-rtable th, .fsh-rtable td { border: 1px solid #A9B8C6; padding: 7px 8px; vertical-align: middle; }
+.fsh-rtable th { background: var(--fr-th); color: var(--fr-ink); font-weight: 800; text-align: center; }
+.fsh-rtable tbody tr:nth-child(odd) td { background: var(--fr-row); }
+.fsh-rtable tbody tr:nth-child(even) td { background: var(--fr-row2); }
+.fsh-rtable td.is-c { text-align: center; }
+.fsh-rtable td.is-s { text-align: start; }
+.fsh-rtable td.is-empty { text-align: center; color: var(--fr-muted); }
+.fsh-rtable tr > :first-child { border-inline-start: 0; }
+.fsh-rtable tr > :last-child { border-inline-end: 0; }
+.fsh-rtable tbody tr:last-child td { border-bottom: 0; }
+.fsh-rres { font-weight: 800; }
+.fsh-rres.is-ok { color: #1E7A3E; }
+.fsh-rres.is-diff, .fsh-rres.is-review { color: #9A6700; }
+.fsh-draft .fsh-foot { margin: 4px 0 0; text-align: center; font-size: 12px; color: var(--fr-text); }
+.fsh-title-sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 900px) {
+  .fsh-rgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fsh-rpair:nth-child(n) { border-inline-start: 1px solid var(--fr-hair); }
+  .fsh-rpair:nth-child(2n + 1), .fsh-rpair.is-break { border-inline-start: 0; }
+  .fsh-rstrip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fsh-rstrip-item:nth-child(3) { border-inline-start: 0; }
+  .fsh-rstrip-item:nth-child(n + 3) { border-top: 1px solid var(--fr-line); }
+}
+@media (max-width: 560px) {
+  .fsh-rgrid { grid-template-columns: minmax(0, 1fr); }
+  .fsh-rpair:nth-child(n) { border-inline-start: 0; }
+  .fsh-rpair { grid-template-columns: 38% minmax(0, 1fr); }
+  .fsh-rstrip { grid-template-columns: minmax(0, 1fr); }
+  .fsh-rstrip-item { border-inline-start: 0; }
+  .fsh-rstrip-item + .fsh-rstrip-item { border-top: 1px solid var(--fr-line); }
+  .fsh-draft .fsh-doc-title { font-size: 1.1rem; }
+}
+
 @media (max-width: 480px) {
   .decl-grid, .decl-dl { grid-template-columns: 1fr; }
   .fsh-grid { grid-template-columns: 1fr; }
@@ -150,8 +214,33 @@ body.fsh-open { overflow: hidden; }
   .fsh-table thead { display: table-header-group; }
   .fsh-table tr { break-inside: avoid; page-break-inside: avoid; }
   .fsh-sec, .fsh-strip-item, .fsh-sec-title, .fsh-table th, .fsh-result { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .fsh-draft .fsh-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .fsh-print-copy .fsh-toolbar { justify-content: center; }
+  /* the draft prints like the reference: 3 pairs per row, the strip in one row, light green rows, A4 landscape */
+  .fsh-print-copy .fsh-toolbar { display: none !important; }
+  .fsh-sheet.fsh-draft { font-size: 8pt; line-height: 1.3; color: var(--fr-text); gap: 5px; max-width: 1000px; margin: 0 auto; }
+  .fsh-draft .fsh-rgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .fsh-draft .fsh-rpair { border-inline-start: 1px solid var(--fr-hair); grid-template-columns: minmax(64px, 26%) minmax(0, 1fr); }
+  .fsh-draft .fsh-rpair:nth-child(3n + 1), .fsh-draft .fsh-rpair.is-break { border-inline-start: 0; }
+  .fsh-draft .fsh-rstrip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .fsh-draft .fsh-rstrip-item { border-top: 0; border-inline-start: 1px solid var(--fr-line); }
+  .fsh-draft .fsh-rstrip-item:first-child { border-inline-start: 0; }
+  .fsh-draft .fsh-doc-title { font-size: 15pt; }
+  .fsh-draft .fsh-rhead-t { font-size: 11pt; }
+  .fsh-draft .fsh-rpl, .fsh-draft .fsh-rl { font-size: 7.5pt; }
+  .fsh-draft .fsh-rstrip-item > bdi { font-size: 10pt; }
+  .fsh-draft .fsh-rpl, .fsh-draft .fsh-rpv { padding: 3px 6px; }
+  .fsh-draft .fsh-rhead { padding: 4px 8px; }
+  .fsh-draft .fsh-rbar { padding: 3px 8px; font-size: 8pt; }
+  .fsh-draft .fsh-rstrip-item { padding: 4px 8px; gap: 2px; }
+  .fsh-draft .fsh-doc-title { margin: 0; }
+  .fsh-draft .fsh-foot { font-size: 8pt; }
+  .fsh-draft .fsh-rtable { min-width: 0; font-size: 7.5pt; }
+  .fsh-draft .fsh-rtable th, .fsh-draft .fsh-rtable td { border: 1px solid #A9B8C6; padding: 4px 6px; }
+  .fsh-draft .fsh-rtable thead { display: table-header-group; }
+  .fsh-draft .fsh-rtable tr, .fsh-draft .fsh-rpair, .fsh-draft .fsh-rhead { break-inside: avoid; page-break-inside: avoid; }
+  .fsh-draft .fsh-rhead, .fsh-draft .fsh-rbar { break-after: avoid; page-break-after: avoid; }
+  .fsh-draft .fsh-rsec { break-inside: auto; }
+  .fsh-draft .fsh-rstrip, .fsh-draft .fsh-rhead, .fsh-draft .fsh-rpl, .fsh-draft .fsh-rbar, .fsh-draft .fsh-rtable th, .fsh-draft .fsh-rtable td, .fsh-draft .fsh-rres {
+    -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   /* the matching report's own print leaves the draft out (it has its own «طباعة / PDF») */
   body.ocr-print-match .ocr-fsh-block { display: none !important; }
   @page { size: A4 landscape; margin: 8mm; }
