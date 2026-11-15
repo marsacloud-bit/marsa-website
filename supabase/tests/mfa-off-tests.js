@@ -82,7 +82,11 @@ const fnState = async () => J(await q(`SELECT p.oid::regprocedure::text s, md5(p
 
 async function secFiles() {
   section('1. file conventions, all_migrations.sql');
-  await check('this file is the latest migration', () => migFiles().slice(-1)[0] === MIG || 'latest: ' + migFiles().slice(-1)[0]);
+  const LATER_PHASES = ['20261130000100_tx_container_count.sql'];
+  await check('this file is the latest migration (later phases excepted)', () => {
+    const later = migFiles().filter(f => f > MIG);
+    return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
+  });
   await check('no BEGIN / COMMIT, a schema_versions row, every function pins search_path', () => {
     const fns = src.match(/CREATE OR REPLACE FUNCTION/g) || [];
     const pinned = src.match(/SET search_path = ''/g) || [];
@@ -93,7 +97,8 @@ async function secFiles() {
     const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
     const marker = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(marker);
-    const body = all.slice(i + marker.length);
+    const nx = all.indexOf('\n-- ===== migrations/', i + marker.length);
+    const body = all.slice(i + marker.length, nx < 0 ? undefined : nx);
     const order = (all.match(/^-- ===== migrations\/(\S+) =====$/gm) || []).map(l => l.split('/')[1].split(' ')[0]);
     return (i > 0 && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
       && all.slice(0, 26000).includes(MIG) && J(order) === J(migFiles())) || 'not appended verbatim / no header line / order';
@@ -127,8 +132,8 @@ async function secRerun() {
     const n = (await one(`SELECT count(*)::int n FROM public.schema_versions WHERE version = '20261129000100'`)).n;
     return (ok && n === 1 && h1 === await fnState()) || J({ ok, n });
   });
-  await check('health_check reports 20261129000100 (anon)', async () =>
-    (await as('anon', null, `SELECT public.health_check() r`))[0].r.schema_version === '20261129000100');
+  await check('health_check reports the latest migration (20261129000100 or a later phase) (anon)', async () =>
+    (await as('anon', null, `SELECT public.health_check() r`))[0].r.schema_version === migFiles().slice(-1)[0].split('_')[0]);
 }
 
 async function secPolicy() {
