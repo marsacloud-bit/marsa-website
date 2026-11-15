@@ -655,7 +655,7 @@ async function main() {
   const migFiles = fs.readdirSync(MIG_DIR).filter(f => /^\d+_.*\.sql$/.test(f)).sort();
   if (!migFiles.includes(MIG)) { fail('G6c migration present', MIG + ' not found'); return finish(); }
   if (!await runFile(db, path.join(SUPA, 'tests', 'shim.sql'))) return finish();
-  for (const m of migFiles) if (!await runFile(db, path.join(MIG_DIR, m))) return finish();
+  for (const m of migFiles.filter(m => m !== '20261129000100_mfa_off.sql')) if (!await runFile(db, path.join(MIG_DIR, m))) return finish();
   if (!await runFile(db, path.join(SUPA, 'seed.sql'))) return finish();
   try { await fixtures(); pass('fixtures: org A admin / ops / clearance JED / branch manager JED, a verified agent contact'); }
   catch (e) { fail('fixtures', errText(e)); return finish(); }

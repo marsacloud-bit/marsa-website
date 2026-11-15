@@ -101,7 +101,7 @@ const migFiles = () => fs.readdirSync(MIG_DIR).filter(f => /^\d+_.*\.sql$/.test(
 async function freshDb(upTo) {
   const d = new PGlite();
   await d.exec(fs.readFileSync(path.join(SUPA, 'tests', 'shim.sql'), 'utf8'));
-  for (const f of migFiles().filter(f => !upTo || f < upTo)) await d.exec(fs.readFileSync(path.join(MIG_DIR, f), 'utf8'));
+  for (const f of migFiles().filter(f => (!upTo || f < upTo) && f !== '20261129000100_mfa_off.sql')) await d.exec(fs.readFileSync(path.join(MIG_DIR, f), 'utf8'));
   return d;
 }
 async function withDb(d, fn) { const saved = db; db = d; try { return await fn(); } finally { db = saved; } }
@@ -198,7 +198,7 @@ async function secFile() {
   // later phases may follow this file (20261115000100 convert_in_place, 20261116000100 doc_match); none may sort before it unnoticed
   const LATER_PHASES = ['20261115000100_convert_in_place.sql', '20261116000100_doc_match.sql', '20261117000100_legacy_core.sql',
     '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql',
-    '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql'];
+    '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql'];
   await check('this file is present; only the listed later phases follow it', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');

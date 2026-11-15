@@ -128,7 +128,7 @@ const migFiles = () => fs.readdirSync(MIG_DIR).filter(f => /^\d+_.*\.sql$/.test(
 async function freshDb(upTo) {
   const d = new PGlite();
   await d.exec(fs.readFileSync(path.join(SUPA, 'tests', 'shim.sql'), 'utf8'));
-  for (const f of migFiles().filter(f => !upTo || f < upTo)) await d.exec(fs.readFileSync(path.join(MIG_DIR, f), 'utf8'));
+  for (const f of migFiles().filter(f => (!upTo || f < upTo) && f !== '20261129000100_mfa_off.sql')) await d.exec(fs.readFileSync(path.join(MIG_DIR, f), 'utf8'));
   return d;
 }
 async function withDb(d, fn) { const saved = db; db = d; try { return await fn(); } finally { db = saved; } }
@@ -605,7 +605,7 @@ async function secFile() {
       && /'updateDraftInvoice' = ANY \(v_ops\) AND NOT app\.daftra_allow_update/.test(body) && /app\.rpt_today\(\)/.test(body)
       && !/review_status = 'approved'/.test(body)) || 'decisions');
   // later phases may follow this file (20261124000100 legacy_reports: re-creates readers of G6a / G3, never a step-7 function)
-  const LATER_PHASES = ['20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql'];
+  const LATER_PHASES = ['20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');

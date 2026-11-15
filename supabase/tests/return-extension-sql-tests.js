@@ -107,7 +107,7 @@ const migFiles = () => fs.readdirSync(MIG_DIR).filter(f => /^\d+_.*\.sql$/.test(
 async function freshDb(upTo) {
   const d = new PGlite();
   await d.exec(fs.readFileSync(path.join(SUPA, 'tests', 'shim.sql'), 'utf8'));
-  for (const f of migFiles().filter(f => !upTo || f < upTo)) await d.exec(fs.readFileSync(path.join(MIG_DIR, f), 'utf8'));
+  for (const f of migFiles().filter(f => (!upTo || f < upTo) && f !== '20261129000100_mfa_off.sql')) await d.exec(fs.readFileSync(path.join(MIG_DIR, f), 'utf8'));
   return d;
 }
 async function withDb(d, fn) { const saved = db; db = d; try { return await fn(); } finally { db = saved; } }
@@ -241,12 +241,17 @@ async function secFile() {
       && !/\bUPDATE\s+public\./i.test(outside) && !/session_replication_role/.test(c) && !/sk-ant|https?:\/\//i.test(src)
       && !/msg_outbound|msg_replies|msg_jobs|net\.http|smtp/i.test(c.replace(/CREATE OR REPLACE FUNCTION app\.convert_delete_tables[\s\S]*?\$\$;/, ''))) || 'body';
   });
-  await check('this file is the latest migration', () => migFiles()[migFiles().length - 1] === MIG || migFiles().slice(-1)[0]);
-  await check('all_migrations.sql holds this file verbatim (appended last, in order) + a header line', () => {
+  const LATER_PHASES = ['20261129000100_mfa_off.sql'];
+  await check('this file is the latest migration (or only listed later phases follow it)', () => {
+    const later = migFiles().filter(f => f > MIG);
+    return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
+  });
+  await check('all_migrations.sql holds this file verbatim (followed only by the listed later phases, in order) + a header line', () => {
     const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
     const marker = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(marker);
-    const body = all.slice(i + marker.length);
+    const nx = all.indexOf('\n-- ===== migrations/', i + marker.length);
+    const body = all.slice(i + marker.length, nx < 0 ? undefined : nx);
     const order = (all.match(/^-- ===== migrations\/(\S+) =====$/gm) || []).map(l => l.split('/')[1].split(' ')[0]);
     return (i > 0 && body.replace(/\n+$/, '') === src.replace(/\n+$/, '') && all.indexOf(marker, i + 1) < 0
       && all.slice(0, 26000).includes(MIG) && J(order) === J(migFiles())) || 'not appended verbatim / no header line / order';

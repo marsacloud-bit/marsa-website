@@ -508,3 +508,12 @@ Never touched by either: `supabase/make_admin.sql`, `supabase/migrations/2026110
 ### 11.4 Docs
 - `docs/online/MFA_AR.md`: Arabic. Covers how it works, the self-invitation and import-staging notes, rollout, enrollment, the owner lockout SQL (§5, the same as §8 here) and the re-paste warning.
 - `docs/online/BACKUP_RESTORE_AR.md`: one pointer line to MFA_AR.md §5.
+
+---
+
+## تحديث 2026-11-15 — التحقق بخطوتين أُلغي (قرار المالك)
+
+- الترحيل `supabase/migrations/20261129000100_mfa_off.sql` (مطبَّق على الإنتاج): `app.mfa_gated_roles()` = `{}`، ومدير المنصة وبوابة الاستيراد (`app.li_gate`) لم يعودا يشترطان aal2.
+- حُذفت عوامل TOTP الموجودة في `auth.mfa_factors` على الإنتاج حتى لا يُطلب الكود عند الدخول.
+- الاختبارات: بقية الحِزم تحجز هذا الملف (تختبر مواصفات MFA الأصلية)، و`supabase/tests/mfa-off-tests.js` يختبر الحالة المجمَّعة.
+- للإرجاع: أعد `mfa_gated_roles` إلى `ARRAY['admin']` وتعريفات 20261109000100 / 20261125000100 (أو ترحيل جديد يفعل ذلك)، ثم يربط كل مدير Google Authenticator من «أمان الحساب».

@@ -118,7 +118,7 @@ const migFiles = () => fs.readdirSync(MIG_DIR).filter(f => /^\d+_.*\.sql$/.test(
 async function freshDb(upTo) {
   const d = new PGlite();
   await d.exec(fs.readFileSync(path.join(SUPA, 'tests', 'shim.sql'), 'utf8'));
-  for (const f of migFiles().filter(f => !upTo || f < upTo)) await d.exec(fs.readFileSync(path.join(MIG_DIR, f), 'utf8'));
+  for (const f of migFiles().filter(f => (!upTo || f < upTo) && f !== '20261129000100_mfa_off.sql')) await d.exec(fs.readFileSync(path.join(MIG_DIR, f), 'utf8'));
   return d;
 }
 async function withDb(d, fn) { const saved = db; db = d; try { return await fn(); } finally { db = saved; } }
@@ -320,7 +320,7 @@ async function secFile() {
     return bad.length === 0 || bad.map(b => b.slice(0, 80)).join(' | ');
   });
   // later phases may follow this file (20261125000100 legacy_import: re-creates att_reasons / alert_causes / rpt_tx_match / audit_label_of)
-  const LATER_PHASES = ['20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql'];
+  const LATER_PHASES = ['20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -1063,7 +1063,7 @@ async function main() {
   db = new PGlite();
   try {
     await db.exec(fs.readFileSync(path.join(SUPA, 'tests', 'shim.sql'), 'utf8'));
-    for (const f of migFiles()) await db.exec(fs.readFileSync(path.join(MIG_DIR, f), 'utf8'));
+    for (const f of migFiles().filter(f => f !== '20261129000100_mfa_off.sql')) await db.exec(fs.readFileSync(path.join(MIG_DIR, f), 'utf8'));
     await db.exec(fs.readFileSync(path.join(SUPA, 'seed.sql'), 'utf8'));
     pass('loaded ' + migFiles().length + ' migrations + seed');
   } catch (e) { fail('load', errText(e)); return finish(); }

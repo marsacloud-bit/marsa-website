@@ -182,7 +182,7 @@ async function secCatalog() {
   await check('schema_versions row 20261109000100 mfa; health_check reports the latest migration file (anon)', async () => {
     const r = await one(`SELECT name FROM public.schema_versions WHERE version = '20261109000100'`);
     const h = await rpc('anon', null, `SELECT public.health_check() r`);
-    const latest = fs.readdirSync(MIG_DIR).filter(f => /^\d+_.*\.sql$/.test(f)).sort().pop().split('_')[0];
+    const latest = fs.readdirSync(MIG_DIR).filter(f => /^\d+_.*\.sql$/.test(f) && f !== '20261129000100_mfa_off.sql').sort().pop().split('_')[0];
     return (r && r.name === 'mfa' && latest >= '20261109000100' && h.schema_version === latest) || J({ r, h, latest });
   });
   const m0 = new Map(C0.fns.map(f => [f.sig, f]));
@@ -712,7 +712,7 @@ async function dbMain() {
   C0 = await catalog();
   if (!await runFile(MFA_FILE)) return;
   C1M = await catalog();
-  for (const f of files.filter(f => f > MFA_MIGRATION)) if (!await runFile(path.join(MIG_DIR, f), QUIET)) return;
+  for (const f of files.filter(f => f > MFA_MIGRATION && f !== '20261129000100_mfa_off.sql')) if (!await runFile(path.join(MIG_DIR, f), QUIET)) return;
   try { await fixtures(); pass('fixtures: adminA, plat, both, clrA, mixed, same, clientA, optUser, pendingUser, oldAdmin, clrM, selfInv'); }
   catch (e) { fail('fixtures', errText(e)); return; }
   const secs = [secCatalog, secPreflight, secOrgAdmin, secPlatform, secStaff, secMixed, secContext, secFail, secShim, secDrift, secReviewFixes];

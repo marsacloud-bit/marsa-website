@@ -121,7 +121,7 @@ const migFiles = () => fs.readdirSync(MIG_DIR).filter(f => /^\d+_.*\.sql$/.test(
 async function freshDb(upTo) {
   const d = new PGlite();
   await d.exec(fs.readFileSync(path.join(SUPA, 'tests', 'shim.sql'), 'utf8'));
-  for (const f of migFiles().filter(f => !upTo || f < upTo)) await d.exec(fs.readFileSync(path.join(MIG_DIR, f), 'utf8'));
+  for (const f of migFiles().filter(f => (!upTo || f < upTo) && f !== '20261129000100_mfa_off.sql')) await d.exec(fs.readFileSync(path.join(MIG_DIR, f), 'utf8'));
   return d;
 }
 async function withDb(d, fn) { const saved = db; db = d; try { return await fn(); } finally { db = saved; } }
@@ -299,7 +299,7 @@ async function secFile() {
     (!/set_transaction_status\s*\(/i.test(src.replace(/--.*$/gm, '').replace(/'under_billing'/g, '')) && /'bypasses_empty_return', false/.test(src)
       && /SELECT true\n\$\$/.test(src) && !/CREATE OR REPLACE FUNCTION public\.set_transaction_status/.test(src)) || 'decisions');
   // later phases may follow this file (20261122000100 legacy_pay: re-creates the conversion lists)
-  const LATER_PHASES = ['20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql'];
+  const LATER_PHASES = ['20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
