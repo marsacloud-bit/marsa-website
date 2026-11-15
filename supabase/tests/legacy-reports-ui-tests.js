@@ -1141,6 +1141,9 @@ function rtApi(calls, rows) {
     return !/createBillingIntent|issueInvoice|pushToDaftra|approve[A-Z]\w*\(|setDaftraWritePolicy/.test(ui) || 'writes';
   });
 
+  check('rpt.css: number cells stay table cells (style.css .num is inline-block; «عدد الحاويات» was drawn outside the row)', () =>
+    /\.rpt-table td\.num, \.rpt-table th\.num \{ display: table-cell;/.test(rd('assets/css/pages/rpt.css')) || 'missing');
+
   console.log('\n' + (fail ? 'FAILED' : 'OK') + ': ' + pass + ' passed, ' + fail + ' failed');
   if (fail) { console.log('\nFAILURES:'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }
   process.exit(0);   // app-shell.js arms its badge timers (a page lifetime); the suite ends here

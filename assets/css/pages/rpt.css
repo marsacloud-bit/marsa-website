@@ -25,7 +25,8 @@
 .rpt-export-msg.is-error { color: var(--danger); font-weight: 700; }
 
 .rpt-table tfoot td { font-weight: 800; color: var(--navy-dark); border-top: 2px solid var(--border); background: #F6F9FC; }
-.rpt-table td.num, .rpt-table th.num { text-align: end; }
+/* a number cell stays a table cell (style.css .num { display: inline-block } pulled it out of the row grid) */
+.rpt-table td.num, .rpt-table th.num { display: table-cell; text-align: end; }
 .rpt-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .rpt-chip { font-weight: 600; }
 .rpt-filters-text { font-size: var(--fs-xs); color: var(--muted); word-break: break-word; }
