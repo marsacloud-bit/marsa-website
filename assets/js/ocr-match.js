@@ -55,6 +55,36 @@
       if (!m || !isUuid(m[1]) || (m[2] && !isUuid(m[2]))) return null;
       return { tx: m[1].toLowerCase(), decl: m[2] ? m[2].toLowerCase() : null };
     }
+    // ocr.html#match=<document_match id> (a saved comparison reopened from «آخر المطابقات المحفوظة») → id | null
+    function parseMatchId(h) {
+      var m = /^match=([0-9a-f-]{36})$/i.exec(String(h || '').replace(/^#/, ''));
+      return m && isUuid(m[1]) ? m[1].toLowerCase() : null;
+    }
+    function matchLink(id) { return isUuid(id) ? '#match=' + String(id).toLowerCase() : ''; }
+    // the reviewer's note of a saved match without the check-level line savedNote() appended ([…] on the last line)
+    function noteOfSaved(note) {
+      var lines = String(note || '').split('\n');
+      if (lines.length && /^\[[^\]\n]{1,80}\]$/.test(lines[lines.length - 1].trim())) lines.pop();
+      return lines.join('\n').trim().slice(0, 1000);
+    }
+    // the readings of a saved match: [slot, extraction id] for each one it was saved with
+    function savedMatchIds(m) {
+      m = m || {};
+      var out = [];
+      [['invoice', m.invoice_extraction_id], ['bl', m.bl_extraction_id], ['declaration', m.declaration_extraction_id], ['packing', m.packing_extraction_id]]
+        .forEach(function (x) { if (isUuid(x[1])) out.push(x); });
+      return out;
+    }
+    // the saved result vs the one computed again now: null when equal, else { saved, now } (overall + counts as text)
+    function savedDiff(m, R) {
+      if (!m || !R) return null;
+      var c = m.counts || {}, rc = R.counts || {};
+      var keys = ['match', 'partial', 'missing', 'mismatch'];
+      var same = m.overall === R.overall && keys.every(function (k) { return Number(c[k] || 0) === Number(rc[k] || 0); });
+      if (same) return null;
+      var txt = function (o, cc) { return o + ' ' + keys.map(function (k) { return Number(cc[k] || 0); }).join('/'); };
+      return { saved: txt(m.overall, c), now: txt(R.overall, rc) };
+    }
     function matchTxLink(tx, decl) {
       return 'ocr.html#match-tx=' + encodeURIComponent(String(tx || '')) + (isUuid(decl) ? '&decl=' + encodeURIComponent(String(decl)) : '');
     }
@@ -139,6 +169,7 @@
       return v.slice(0, 300);
     }
     return { BATCH_SLOT: BATCH_SLOT, isUuid: isUuid, parseMatchTx: parseMatchTx, matchTxLink: matchTxLink, pickReadings: pickReadings,
+      parseMatchId: parseMatchId, matchLink: matchLink, noteOfSaved: noteOfSaved, savedMatchIds: savedMatchIds, savedDiff: savedDiff,
       readingOf: readingOf, draftNext: draftNext, draftPayload: draftPayload, draftKey: draftKey, importerName: importerName };
   })();
   window.MarsaOcrMatchPure = PURE;
@@ -329,7 +360,7 @@
        --------------------------------------------------------------- */
     function setFile(k, file) {
       var s = S.slots[k];
-      if (S.running) return;
+      if (S.running || S.saving) return;
       if (!file) return;
       var mt = mediaType(file);
       if (!mt) { slotError(k, T('ai_unsupported')); return; }
@@ -341,7 +372,10 @@
         if (f2 && f2.name === file.name && f2.size === file.size && f2.lastModified === file.lastModified) dupOf = o;
       });
       if (dupOf) { slotError(k, T('mx_dup_file', { doc: docName(dupOf) })); return; }
+      // the automatic match of the previous report is voided by the next save (as after a correction)
+      var prevAuto = S.saved.match && S.saved.match.auto ? S.saved.match.id : null;
       if (S.result) clearResult();
+      if (prevAuto) { S.saved.prevMatch = prevAuto; S.idem = null; }
       s.file = file; s.mime = mt; s.status = 'ready'; s.res = null; s.fields = null; s.orig = null; s.items = []; s.error = ''; s.sha256 = '';
       unbridge(s);
       delete S.saved.extractions[k];
@@ -379,7 +413,7 @@
         if (isQuickRes(s.res)) {
           stEl.appendChild(el('span', 'badge badge-sm badge-warning ocr-quick-badge', T('quick_badge')));
           // the same file read in full (not for a reading already saved, a reused one or one brought from the single reader)
-          if (s.file && !s.bridged && !s.res.reused && !S.saved.extractions[k] && !S.running) {
+          if (s.file && !s.bridged && !s.res.reused && (!S.saved.extractions[k] || S.saved.extractions[k].auto) && !S.running && !S.saving) {
             var fb = el('button', 'btn btn-ghost btn-sm ocr-quick-full', T('quick_full_btn'));
             fb.type = 'button';
             fb.setAttribute('data-full', k);
@@ -436,11 +470,13 @@
         if (f) setFile(k, f);
       });
       qsa('[data-clear="' + k + '"]')[0].addEventListener('click', function () {
-        if (S.running) return;
+        if (S.running || S.saving) return;
         var s = S.slots[k];
         s.file = null; s.status = 'empty'; s.res = null; s.fields = null; s.orig = null; s.items = []; s.error = ''; s.sha256 = '';
         unbridge(s);
         delete S.saved.extractions[k];
+        // (7) the automatic match had this document: the comparison of what is left is saved again (the old one voided)
+        supersedeAuto();
         // a report loaded from the single reader keeps comparing what is left (2+ documents)
         var left = SLOTS.filter(function (o) { return S.slots[o].res; }).length;
         if (S.result) { if ((S.slots.invoice.res && S.slots.bl.res) || (S.bridge && left >= 2)) recompute(); else clearResult(); }
@@ -512,9 +548,32 @@
     });
     function readFull(k) {
       var s = S.slots[k];
-      if (S.running || !s.file || !isQuickRes(s.res)) return;
+      if (S.running || S.saving || !s.file || !isQuickRes(s.res)) return;
       var edited = Object.keys(s.fields || {}).some(function (x) { return s.fields[x] && s.fields[x].corrected; });
-      var go = function () { s.forceFull = true; s.status = 'ready'; renderSlot(k); syncRun(); run(); };
+      var go = function () {
+        // the quick reading saved automatically is replaced by the full one: it is voided (else the same file would be
+        // found again and reused), so is its automatic match; the full reading is then saved with a new automatic match
+        var ext = S.saved.extractions[k] && S.saved.extractions[k].auto ? S.saved.extractions[k] : null;
+        var am = S.saved.match && S.saved.match.auto ? S.saved.match.id : null;
+        var start = function () { s.forceFull = true; s.status = 'ready'; renderSlot(k); syncRun(); run(); };
+        if (!ext && !am) { start(); return; }
+        var mine = S;
+        S.saving = true; renderSaveState();
+        var why = T('mx_auto_void_full');
+        var p = am && has('voidDocumentMatch') ? API.voidDocumentMatch(am, why).catch(function () { return null; }) : Promise.resolve();
+        p.then(function () {
+          if (!ext || ext.reused || !has('voidExtraction')) return null;   // a reading saved elsewhere (reused) is not voided here
+          return API.voidExtraction(ext.id, why).catch(function () { return null; });
+        }).then(function () {
+          if (S !== mine) return;
+          S.saving = false;
+          if (ext) delete S.saved.extractions[k];
+          if (am && S.saved.match && S.saved.match.id === am) { S.saved.match = null; S.idem = null; }
+          if (S.saved.prevMatch === am) S.saved.prevMatch = null;
+          renderSaveState();
+          start();
+        });
+      };
       if (!edited) { go(); return; }
       ask({ title: T('quick_full_btn'), text: T('quick_full_confirm'), okText: T('quick_full_btn'), danger: true })
         .then(function (yes) { if (yes) go(); });
@@ -554,6 +613,7 @@
         S.readAt = new Date().toISOString();
         var failed = todo.filter(function (k, i) { return !oks[i]; });
         if (S.slots.invoice.res && S.slots.bl.res && (!S.slots.declaration.file || S.slots.declaration.res) && (!S.slots.packing.file || S.slots.packing.res)) {
+          S.autoOK = true;
           recompute(true);
         } else if (failed.length) {
           showError(T('m_err_failed', { docs: failed.map(docName).join('، ') }));
@@ -618,6 +678,7 @@
       $('ocr-match-result').hidden = false;
       section.hidden = false;
       if (focus) revealReport();   // the errors summary (or the report) is scrolled to and focused
+      scheduleAutoSave();
     }
     function clearResult() {
       S.result = null; S.reviewed = {}; S.approved = false; S.saved.match = null; S.idem = null;
@@ -854,9 +915,12 @@
       S.approved = false;
       S.idem = null;
       if (S.saved.match) {
-        // the saved match no longer reflects the table: the next save replaces it (the old one is voided then)
+        // the saved match no longer reflects the table: the next save replaces it (the old one is voided then);
+        // an automatic save is replaced by the next automatic one, without a warning
+        var wasAuto = !!S.saved.match.auto;
         if (S.saved.match.id) S.saved.prevMatch = S.saved.match.id;
-        S.saved.match = null; setSaveMsg('warning', T('m_changed_after_save'));
+        S.saved.match = null;
+        if (!wasAuto) setSaveMsg('warning', T('m_changed_after_save'));
       }
       recompute(false, true);
       // rows were added / removed (full rebuild): give the focus back to the control that had it, by its attributes
@@ -1597,13 +1661,15 @@
       return null;
     }
     function renderSaveState() {
-      var done = !!(S.saved.match && S.saved.match.id);
+      // an automatic save (unlinked) keeps everything open: the user can still save it on a transaction / make a draft
+      var autoOnly = autoSavedOnly();
+      var done = !!(S.saved.match && S.saved.match.id) && !autoOnly;
       var block = done ? null : saveBlock();
       var bn = $('ocr-match-save-block');
       if (bn) { $('ocr-match-save-block-text').textContent = block || ''; bn.hidden = !block; }
       $('ocr-match-save-label').textContent = done ? T('m_saved_label') : T('m_save');
       $('ocr-match-save-btn').disabled = done || S.saving || !!block;
-      var anyExt = Object.keys(S.saved.extractions).length > 0;
+      var anyExt = Object.keys(S.saved.extractions).length > 0 && !autoOnly;
       var locked = done || anyExt || !!S.matchTx || !!(S.draft && S.draft.batchId);
       $('ocr-match-tx').disabled = $('ocr-match-tx-q').disabled = $('ocr-match-tx-search').disabled = locked;
       $('ocr-match-attach').disabled = done || anyExt;
@@ -1712,22 +1778,65 @@
     // transaction documents. A retry continues where it stopped (S.saved.extractions).
     function saveReadings(docs, txId, attach, notes) {
       var chain = Promise.resolve();
+      var mine = S;
       docs.forEach(function (k) {
         chain = chain.then(function () {
+          if (S !== mine) return null;   // another report replaced this one (reset / a new comparison): nothing more for it
           var saved = S.saved.extractions[k];
           if (saved) {
             // already saved (earlier save of this result): only push the corrections made since then
             var snap = fieldsSnap(k);
-            if (snap === saved.snap || !slotCorrected(k) || !has('reviewExtraction')) return null;
-            return API.reviewExtraction(saved.id, { reviewed_fields: plainFields(S.slots[k]) }).then(function (u) {
-              if (u.error) notes.push(T('m_note_review_failed', { doc: docName(k), msg: errMsg(u.error) }));
-              else saved.snap = snap;
+            var corr = snap === saved.snap || !slotCorrected(k) || !has('reviewExtraction') ? Promise.resolve() :
+              API.reviewExtraction(saved.id, { reviewed_fields: plainFields(S.slots[k]) }).then(function (u) {
+                if (u.error) notes.push(T('m_note_review_failed', { doc: docName(k), msg: errMsg(u.error) }));
+                else saved.snap = snap;
+              });
+            // saved unlinked by the automatic save: linked now to the transaction the user picked (with "attach": the
+            // original file becomes a document of that transaction, which links the reading too)
+            var row = saved.row || {};
+            if (!txId || !saved.auto || row.transaction_id || row.document_id) return corr;
+            return corr.then(function () {
+              // the same file already read on that transaction (document_extractions_dedupe_uidx): that reading is used
+              var useTxReading = function () {
+                var sha = S.slots[k].sha256 || row.source_sha256 || '';
+                if (!has('findExtractionBySource') || !/^[0-9a-f]{64}$/.test(sha)) return Promise.resolve(false);
+                return API.findExtractionBySource({ orgId: S.orgId || undefined, sha256: sha, transactionId: txId }).then(function (f) {
+                  var hit = f && !f.error ? f.data : null;
+                  if (!hit || !UUID_RE.test(String(hit.id || '')) || hit.doc_type !== DOC_TYPE[k] || S !== mine) return false;
+                  var ent = S.saved.extractions[k] = { id: hit.id, row: hit, reused: true, snap: null, auto: false };
+                  notes.push(T('m_note_reused', { doc: docName(k) }));
+                  if (!slotCorrected(k) || !has('reviewExtraction')) return true;
+                  return API.reviewExtraction(hit.id, { reviewed_fields: plainFields(S.slots[k]) }).then(function (u) {
+                    if (u && u.error) notes.push(T('m_note_review_failed', { doc: docName(k), msg: errMsg(u.error) }));
+                    else ent.snap = fieldsSnap(k);
+                    return true;
+                  });
+                }, function () { return false; });
+              };
+              var link = function () {
+                return has('reviewExtraction') ? API.reviewExtraction(saved.id, { transaction_id: txId }).then(function (u) {
+                  if (!(u && u.error)) { row.transaction_id = txId; return null; }
+                  if (u.error.code !== 'MRS_EXTRACTION_DUPLICATE') { notes.push(T('m_note_review_failed', { doc: docName(k), msg: errMsg(u.error) })); return null; }
+                  return useTxReading().then(function (used) {
+                    if (!used) notes.push(T('m_note_review_failed', { doc: docName(k), msg: errMsg(u.error) }));
+                  });
+                }) : null;
+              };
+              if (attach && S.slots[k].file && has('attachExtractionDocument')) {
+                return API.attachExtractionDocument(saved.id, { file: S.slots[k].file, transactionId: txId, kind: DOC_TYPE[k] }).then(function (a) {
+                  if (!a.error) { row.transaction_id = txId; return null; }
+                  notes.push(T('m_note_attach_failed', { doc: docName(k), msg: errMsg(a.error) }));
+                  return a.data ? null : link();
+                });
+              }
+              return link();
             });
           }
           return insertOrReuse(k, txId, attach).then(function (r) {
+            if (S !== mine) return null;
             if (r.error) { var e = r.error; e.doc = k; throw e; }
             var reused = !!r.reused;
-            S.saved.extractions[k] = { id: r.data.id, row: r.data, reused: reused, snap: slotCorrected(k) ? null : fieldsSnap(k) };
+            S.saved.extractions[k] = { id: r.data.id, row: r.data, reused: reused, snap: slotCorrected(k) ? null : fieldsSnap(k), auto: !!S.autoSaving };
             if (reused && !S.matchTx) notes.push(T('m_note_reused', { doc: docName(k) }));   // #match-tx: every reading is a saved one
             // a reading of the single reader saved here: that reader knows it now (its own save becomes a review)
             else if (S.slots[k].onSaved) { try { S.slots[k].onSaved(r.data); } catch (x) { /* noop */ } }
@@ -1770,8 +1879,14 @@
       return chain;
     }
     // the match row (once per result: a retry keeps S.saved.match); txId = the transaction it is saved on (or '')
-    function saveMatchRow(txId, notes) {
+    function saveMatchRow(txId, notes, auto) {
+      // the automatic (unlinked) match is replaced by the one saved on a transaction (the automatic one is voided then)
+      if (S.saved.match && S.saved.match.id && S.saved.match.auto && txId && !auto) { supersedeAuto(); }
       if (S.saved.match && S.saved.match.id) return Promise.resolve(null);
+      // a key used by an automatic attempt (its answer may have been lost) is not reused by a save on a transaction
+      if (!auto && S.idemAuto) { S.idem = null; S.idemAuto = false; }
+      if (auto) S.idemAuto = true;
+      var mine = S;
       return API.saveDocumentMatch({
         orgId: S.orgId || undefined, transactionId: txId || null,
         invoiceExtractionId: S.saved.extractions.invoice.id, blExtractionId: S.saved.extractions.bl.id,
@@ -1780,8 +1895,9 @@
         mode: S.result.mode, engineVersion: S.result.version, overall: S.result.overall, counts: S.result.counts,
         rows: payloadRows(), reviewedRows: reviewedRows(), note: savedNote(), idempotencyKey: idemKey()
       }).then(function (r) {
+        if (S !== mine) return null;   // another report replaced this one meanwhile: its state is not touched
         if (r.error) throw r.error;
-        S.saved.match = { id: r.data && r.data.id, status: (r.data && r.data.status) || 'saved', created_at: r.data && r.data.created_at };
+        S.saved.match = { id: r.data && r.data.id, status: (r.data && r.data.status) || 'saved', created_at: r.data && r.data.created_at, auto: !!auto };
         var prev = S.saved.prevMatch;
         var after = Promise.resolve();
         if (prev && prev !== S.saved.match.id && has('voidDocumentMatch')) {
@@ -1799,8 +1915,79 @@
         });
       });
     }
+    /* ---------------------------------------------------------------
+       Automatic save (owner, 2026-11-15: «كل عمليات المطابقة يتم حفظها كداتابيز»): every new comparison (read here, or
+       readings brought from the single reader) is saved — its readings + the match, unlinked — as soon as the report is
+       on screen, and again (replacing it, the old one voided) after a corrected value. Not for #match-tx or a reopened
+       saved match (already saved), not while saving / reading, not when the report cannot be saved (saveBlock: a part of a
+       combined file, no invoice / B/L, an unsaved reading without its file). «حفظ في النظام» with a transaction,
+       «إنشاء مسودة معاملة» and «ربط بمعاملة» still work: the readings are linked then and the automatic match is replaced
+       by the one on the transaction. The ticks / approval are saved by «اعتماد» (review_document_match) as before.
+       --------------------------------------------------------------- */
+    var autoTimer = null;
+    // the automatic match no longer stands for the report (a correction, a document cleared / read again, saved on a
+    // transaction): the next save replaces it (voided then), with its own idempotency key
+    function supersedeAuto() {
+      if (!(S.saved.match && S.saved.match.id && S.saved.match.auto)) return false;
+      S.saved.prevMatch = S.saved.match.id; S.saved.match = null; S.idem = null;
+      return true;
+    }
+    // only the automatic save wrote anything for this result (its readings / match): nothing is locked by it
+    function autoSavedOnly() {
+      var keys = Object.keys(S.saved.extractions);
+      var allAuto = keys.every(function (k) { return S.saved.extractions[k].auto; });
+      var m = S.saved.match && S.saved.match.id ? S.saved.match : null;
+      return allAuto && (keys.length > 0 || !!m) && !(m && !m.auto);
+    }
+    function autoSaveAllowed() {
+      return !!(S.autoOK && S.result && !S.matchTx && !(S.saved.match && S.saved.match.id) && !S.saving && !S.running && !(S.draft && S.draft.batchId)
+        && ONLINE && STAFF && has('saveExtraction') && has('saveDocumentMatch') && !saveBlock()
+        && S.result.documents.indexOf('invoice') !== -1 && S.result.documents.indexOf('bl') !== -1
+        // a reading saved by hand for this result (a manual save that failed half-way) is left to the manual save
+        && Object.keys(S.saved.extractions).every(function (k) { return S.saved.extractions[k].auto; })
+        // an automatic save that failed is not retried for the same report (only after a change; «حفظ» stays available)
+        && S.autoFailedFor !== S.result);
+    }
+    function scheduleAutoSave() {
+      if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+      if (!autoSaveAllowed()) return;
+      var mine = S, res = S.result;
+      // a short pause: several corrections in a row make one save
+      autoTimer = setTimeout(function () { autoTimer = null; if (S === mine && S.result === res) autoSave(); }, 1200);
+    }
+    function autoSave() {
+      if (!autoSaveAllowed()) return;
+      var mine = S, res = S.result;
+      var docs = S.result.documents.filter(function (k) { return S.slots[k].res; });
+      var notes = [];
+      S.saving = true; S.autoSaving = true; renderSaveState();
+      saveReadings(docs, '', false, notes).then(function () {
+        if (S !== mine) return null;
+        return saveMatchRow('', notes, true);
+      }).then(function () {
+        if (S !== mine || !(S.saved.match && S.saved.match.id)) return;
+        S.idem = null;   // the next save (on a transaction, or after a correction) is another request
+        setSaveMsg(notes.length ? 'warning' : 'info', T('mx_auto_saved', { id: String(S.saved.match.id).slice(0, 8) }) + (notes.length ? ' ' + notes.join(' ') : ''));
+        renderReview();
+        loadRecent();
+      }).catch(function (e) {
+        if (S !== mine) return;
+        S.autoFailedFor = res;
+        var where = e && e.doc ? docName(e.doc) + ': ' : '';
+        setSaveMsg('warning', T('mx_auto_failed', { msg: where + errMsg(e) }));
+      }).then(function () {
+        if (S !== mine) return;
+        S.saving = false; S.autoSaving = false;
+        // the report changed while saving (a correction): what was saved is replaced by a save of the report on screen
+        if (S.result !== res && S.result) { supersedeAuto(); }
+        renderSaveState();
+        var then = S.afterAuto; S.afterAuto = null;
+        if (then) then(); else scheduleAutoSave();
+      });
+    }
     $('ocr-match-save-btn').addEventListener('click', save);
     function save() {
+      if (S.result && S.autoSaving) { S.afterAuto = save; setSaveMsg('info', T('m_saving')); return; }
       if (!S.result || S.saving) return;
       if (!(ONLINE && STAFF)) { setSaveMsg('error', T('m_err_access')); return; }
       if (!has('saveExtraction') || !has('saveDocumentMatch')) { setSaveMsg('error', T('m_save_unavailable')); return; }
@@ -1810,9 +1997,11 @@
       if (docs.indexOf('invoice') === -1 || docs.indexOf('bl') === -1) { setSaveMsg('error', T('m_err_need_two')); return; }
       if (docs.some(function (k) { return !savedOf(k) && !/^[0-9a-f]{64}$/.test(S.slots[k].sha256 || ''); })) { setSaveMsg('error', T('m_err_hash')); return; }
       var txId = $('ocr-match-tx').value || '';
+      var autoMatch = !!(S.saved.match && S.saved.match.id && S.saved.match.auto);
+      if (autoMatch && !txId) { setSaveMsg('info', T('mx_auto_already', { id: String(S.saved.match.id).slice(0, 8) })); return; }
       // «ربط بمعاملة» + «نقل البيانات»: the B/L + invoice data go into that transaction through an approved doc batch, then the match
       var bc = $('ocr-match-batch'), bw = $('ocr-match-batch-wrap');
-      if (txId && bc && bc.checked && bw && !bw.hidden && !(S.saved.match && S.saved.match.id)) { runDraft('existing', txId); return; }
+      if (txId && bc && bc.checked && bw && !bw.hidden && !(S.saved.match && S.saved.match.id && !autoMatch)) { runDraft('existing', txId); return; }
       S.saving = true; renderSaveState();
       setSaveMsg('info', T('m_saving'));
       var attach = !!(txId && $('ocr-match-attach').checked && has('attachExtractionDocument'));
@@ -1856,7 +2045,7 @@
       if (S.slots.declaration.res && R.documents.indexOf('declaration') !== -1) return T('mx_draft_block_decl');
       var b = saveBlock();
       if (b) return b;
-      if (S.saved.match && S.saved.match.id && !(S.draft && S.draft.txId)) return T('mx_draft_block_saved');
+      if (S.saved.match && S.saved.match.id && !S.saved.match.auto && !(S.draft && S.draft.txId)) return T('mx_draft_block_saved');
       return null;
     }
     function errorCount() {
@@ -2118,6 +2307,7 @@
       }, function () { return base; });
     }
     function runDraft(target, txId) {
+      if (S.result && S.autoSaving) { S.afterAuto = function () { runDraft(target, txId); }; setSaveMsg('info', T('m_saving')); return; }
       if (S.saving || !S.result) return;
       var D = draftState();
       if (D.txId) return;
@@ -2204,7 +2394,62 @@
         showError(T('mx_mt_failed', { msg: errMsg(e) }));
       });
     }
+    /* ---------------------------------------------------------------
+       #match=<id>: a saved comparison reopened (owner, 2026-11-15: «لو حد عايز يرجع لأي حاجة تم مقارنتها قبل كده يضغط عليها
+       ويرجع لها»). The readings it was saved with are loaded again and compared (strict) — the same report, review ticks
+       and note as saved; if the comparison gives another result now, a warning says so. Ticking / saving again replaces it
+       (the old one is voided), exactly like a match changed after its save.
+       --------------------------------------------------------------- */
+    var smSeq = 0;
+    function openSavedMatch(id) {
+      if (!P.isUuid(id) || !(ONLINE && STAFF) || !has('getDocumentMatch') || !has('getExtraction')) return;
+      var seq = ++smSeq;
+      section.hidden = false;
+      showError('');
+      API.getDocumentMatch(id).then(function (r) {
+        if (r.error) throw r.error;
+        var m = r.data || {};
+        var ids = P.savedMatchIds(m);
+        if (ids.length < 2) throw { message: T('mx_sm_missing') };
+        return Promise.all(ids.map(function (x) {
+          return API.getExtraction(x[1]).then(function (e) {
+            if (e.error || !e.data) throw { message: T('mx_sm_missing') };
+            return P.readingOf(e.data, x[0]);
+          });
+        })).then(function (entries) { return { m: m, entries: entries }; });
+      }).then(function (x) {
+        if (seq !== smSeq) return;
+        var m = x.m;
+        if (!compareReadings(x.entries, { saved: true, readAt: m.created_at || undefined, orgId: m.org_id || undefined })) throw { message: T('mx_mt_busy') };
+        var d = P.savedDiff(m, S.result);
+        // the saved match stays bound only when it is live and gives the same result now; a voided one, or one whose result
+        // differs (other readings / rules), is shown but saved again as a new match (a different one replaces the old,
+        // which is voided then — like a match changed after its save)
+        if (m.status !== 'voided' && !d) S.saved.match = { id: m.id, status: m.status === 'reviewed' ? 'reviewed' : 'saved', created_at: m.created_at, reopened: true };
+        else if (m.status !== 'voided') S.saved.prevMatch = m.id;
+        var keys = {}; S.result.rows.forEach(function (row) { keys[row.key] = 1; });
+        (Array.isArray(m.reviewed_rows) ? m.reviewed_rows : []).forEach(function (k) { if (typeof k === 'string' && keys[k]) S.reviewed[k] = true; });
+        // the approval note (review_note) of a reviewed match, else the note it was saved with
+        $('ocr-match-note-text').value = P.noteOfSaved(m.status === 'reviewed' && m.review_note ? m.review_note : m.note);
+        if (P.isUuid(m.transaction_id)) {
+          var sel = $('ocr-match-tx');
+          var o = el('option', null, m.transaction_ref || m.transaction_id); o.value = m.transaction_id; sel.appendChild(o); sel.value = m.transaction_id;
+        }
+        render();
+        var info = T('mx_sm_loaded', { date: fmtDate(m.created_at), tx: m.transaction_ref ? T('m_recent_tx', { ref: m.transaction_ref }) : T('m_recent_no_tx'),
+          status: m.status === 'voided' ? T('mx_sm_st_voided') : m.status === 'reviewed' ? T('m_review_approved') : T('m_review_pending') });
+        if (m.status === 'voided') setSaveMsg('warning', info + ' ' + T('mx_sm_voided'));
+        else if (d) setSaveMsg('warning', info + ' ' + T('mx_sm_changed', d));
+        else setSaveMsg('info', info);
+        markRecent();
+      }).catch(function (e) {
+        if (seq !== smSeq) return;
+        showError(T('mx_sm_failed', { msg: errMsg(e) }));
+      });
+    }
     function routeHash() {
+      var id = P.parseMatchId(window.location.hash);
+      if (id) { if (!(S.saved.match && S.saved.match.id === id && S.result)) openSavedMatch(id); return; }
       var r = P.parseMatchTx(window.location.hash);
       if (r && !(S.matchTx && S.matchTx.id === r.tx && S.result)) openMatchTx(r);
     }
@@ -2264,7 +2509,17 @@
         var rows = Array.isArray(r.data) ? r.data : [];
         rows.forEach(function (m) { ul.appendChild(recentItem(m)); });
         $('ocr-match-recent-empty').hidden = rows.length > 0;
+        markRecent();
       }, function () { /* keep the old list */ });
+    }
+    // the saved comparison on screen is marked in the list
+    function markRecent() {
+      var cur = S.saved.match && S.saved.match.id ? String(S.saved.match.id).toLowerCase() : '';
+      Array.prototype.forEach.call($('ocr-match-recent').querySelectorAll('li[data-match-id]'), function (li) {
+        var on = !!cur && li.getAttribute('data-match-id') === cur;
+        li.classList.toggle('is-current', on);
+        if (on) li.setAttribute('aria-current', 'true'); else li.removeAttribute('aria-current');
+      });
     }
     function countsOf(m) {
       var c = m.counts && typeof m.counts === 'object' ? m.counts : {};
@@ -2277,7 +2532,15 @@
       li.appendChild(el('span', 'ocr-match-chip ' + OVERALL_CLS[ov], T('m_overall_' + ov)));
       var main = el('div', 'ocr-h-main');
       var title = m.transaction_ref ? T('m_recent_tx', { ref: m.transaction_ref }) : T('m_recent_no_tx');
-      main.appendChild(el('span', 'ocr-h-name', title));
+      var href = P.matchLink(m.id);
+      if (href && has('getDocumentMatch') && has('getExtraction')) {
+        var a = el('a', 'ocr-h-name ocr-mx-recent-open', title);
+        a.href = href; a.title = T('mx_sm_open_hint');
+        // the same link clicked again (hash unchanged) still reopens it
+        a.addEventListener('click', function () { if (window.location.hash.toLowerCase() === href) setTimeout(function () { openSavedMatch(m.id); }, 0); });
+        main.appendChild(a);
+        li.setAttribute('data-match-id', String(m.id).toLowerCase());
+      } else main.appendChild(el('span', 'ocr-h-name', title));
       var sub = el('div', 'ocr-h-sub');
       sub.appendChild(el('span', null, fmtDate(m.created_at)));
       var md = m.mode === 'three_way' ? T('m_mode_three') : T('m_mode_two');
@@ -2687,7 +2950,7 @@
     function compareReadings(list, opts) {
       opts = opts && typeof opts === 'object' ? opts : {};
       // opts.saved: readings already saved on a transaction (#match-tx) — no AI call is made, so the AI switch is not needed
-      if (!(ONLINE && STAFF && (AI.enabled || opts.saved === true)) || S.running || S.saving) return false;
+      if (!(ONLINE && STAFF && (AI.enabled || opts.saved === true)) || S.running || (S.saving && !S.autoSaving)) return false;
       var picked = {}, n = 0;
       (Array.isArray(list) ? list : []).forEach(function (x) {
         if (!x || typeof x !== 'object' || SLOTS.indexOf(x.slot) === -1 || picked[x.slot] || !x.fields || typeof x.fields !== 'object') return;
@@ -2695,6 +2958,7 @@
       });
       if (n < 2) return false;
       S = fresh();
+      S.autoOK = opts.saved !== true;
       clearResult();
       showError('');
       $('ocr-match-note-text').value = '';
@@ -2747,7 +3011,7 @@
        Reset
        --------------------------------------------------------------- */
     $('ocr-match-reset').addEventListener('click', function () {
-      if (S.running) return;
+      if (S.running || (S.saving && !S.autoSaving)) return;
       S = fresh();
       clearResult();
       showError('');

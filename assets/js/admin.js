@@ -229,7 +229,7 @@
     // server-side filters of the list views (re-query); offset = first row of the fetched window
     filters: {
       requests: { status: 'new', search: '', offset: 0 },
-      transactions: { status: '', branchId: '', search: '', cancelled: '', ttype: '', unit: '', offset: 0 },
+      transactions: { status: '', branchId: '', search: '', cancelled: '', draft: '', ttype: '', unit: '', offset: 0 },
       clients: { search: '', inactive: false, offset: 0 },
       messages: { status: 'new', offset: 0 },
       imports: { status: '', search: '', offset: 0 }
@@ -1995,7 +1995,7 @@
     var f = S.filters.transactions;
     var LX = legacyTx();
     return api.listTransactions({ orgId: S.orgId, status: f.status || null, branchId: f.branchId || null, search: f.search, limit: WINDOW, offset: f.offset,
-      cancelled: f.cancelled || null, transactionType: f.ttype || null, cargoUnitType: f.unit || null }).then(function (r) {
+      cancelled: f.cancelled || null, draft: f.draft || null, transactionType: f.ttype || null, cargoUnitType: f.unit || null }).then(function (r) {
       var canNew = branchesFor(R.opsWriter).length > 0;
       // legacy step 8: the full register (advanced + column filters, attention, follow-up export) when its module is loaded
       var regLink = opsView('register') ? el('a', { class: 'btn btn-sm btn-ghost', href: '#register', 'data-act': 'open-register', text: opsT('lrpt.open_register', null, 'سجل المعاملات والمتابعة') }) : null;
@@ -2007,6 +2007,8 @@
       if (LX) {
         // legacy step 2: cancelled (cancelled_at) / transaction type / cargo unit
         tools.push(filterSelect('transactions', 'cancelled', LX.t('f_cancelled_label'), [['', LX.t('f_cancelled_all')], ['exclude', LX.t('f_cancelled_exclude')], ['only', LX.t('f_cancelled_only')]]));
+        // 20261127000100: draft (made from the readings, not approved yet) / approved (not a draft)
+        tools.push(filterSelect('transactions', 'draft', LX.t('f_draft_label'), [['', LX.t('f_draft_all')], ['only', LX.t('f_draft_only')], ['approved', LX.t('f_draft_approved')]]));
         tools.push(filterSelect('transactions', 'ttype', LX.t('k_type'), [['', LX.t('f_type_all')], ['normal', opsLabel('transaction_type', 'normal')], ['re_export', opsLabel('transaction_type', 're_export')]]));
         tools.push(filterSelect('transactions', 'unit', LX.t('k_unit'), [['', LX.t('f_unit_all')], ['container', opsLabel('cargo_unit_type', 'container')], ['roro', opsLabel('cargo_unit_type', 'roro')]]));
       }

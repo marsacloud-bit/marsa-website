@@ -794,3 +794,8 @@ html[dir="ltr"] .ocr-mx-cell.is-calm.is-warn { box-shadow: inset 4px 0 0 #B7791F
 .ocr-quick-full { margin-inline-start: 6px; }
 .ocr-match-slot-status .ocr-quick-full { display: inline-flex; margin-block-start: 4px; }
 @media print { .ocr-quick, .ocr-quick-full { display: none !important; } }
+
+/* saved matches: the title opens the review (ocr.html#match=<id>); the one on screen is marked */
+.ocr-mx-recent-open { color: var(--teal, #14a3a8); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.ocr-mx-recent-open:hover, .ocr-mx-recent-open:focus-visible { color: var(--navy, #0b2545); }
+.ocr-history li.is-current { background: rgba(20, 163, 168, .08); box-shadow: inset -3px 0 0 var(--teal, #14a3a8); }

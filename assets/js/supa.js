@@ -1734,6 +1734,10 @@
       // o.transactionType (normal | re_export), o.cargoUnitType (container | roro), o.portCode
       if (o.cancelled === 'only') q = q.not('cancelled_at', 'is', null);
       else if (o.cancelled === 'exclude') q = q.is('cancelled_at', null);
+      // 20261127000100: o.draft = 'only' (المسودات: is_draft) | 'approved' (غير المسودة: معتمدة أو مُدخلة يدويًا) | absent (all);
+      // a database without is_draft has no drafts → 'only' returns nothing, 'approved' everything
+      if (o.draft === 'only') q = cols.indexOf('is_draft') >= 0 ? q.eq('is_draft', true) : q.is('id', null);
+      else if (o.draft === 'approved' && cols.indexOf('is_draft') >= 0) q = q.eq('is_draft', false);
       if (o.transactionType) q = q.eq('transaction_type', o.transactionType);
       if (o.cargoUnitType) q = q.eq('cargo_unit_type', o.cargoUnitType);
       if (o.portCode) q = q.eq('port_code', o.portCode);

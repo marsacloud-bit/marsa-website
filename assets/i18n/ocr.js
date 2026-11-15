@@ -254,6 +254,16 @@
       m_match_id: 'رقم المطابقة', m_png_footer: 'مرسى MARSA · محرك المطابقة {v} · القراءة بالذكاء الاصطناعي تحتاج مراجعة بشرية',
       m_recent: 'آخر المطابقات المحفوظة', m_refresh: 'تحديث', m_recent_empty: 'لا توجد مطابقات محفوظة بعد.',
       m_recent_failed: 'تعذّر تحميل المطابقات: {msg}', m_recent_tx: 'معاملة {ref}', m_recent_no_tx: 'بدون معاملة',
+      mx_sm_open_hint: 'اضغط لفتح مراجعة هذه المطابقة كما حُفظت',
+      mx_sm_loaded: 'مطابقة محفوظة بتاريخ {date} — {tx} — {status}.',
+      mx_sm_changed: 'تنبيه: المقارنة الآن تعطي نتيجة مختلفة عن المحفوظة (المحفوظة: {saved} — الآن: {now})؛ ربما تغيّرت القراءات أو قواعد المقارنة.',
+      mx_sm_voided: 'هذه المطابقة ملغاة.', mx_sm_st_voided: 'ملغاة',
+      mx_sm_missing: 'إحدى القراءات التي حُفظت بها هذه المطابقة لم تعد متاحة.',
+      mx_sm_failed: 'تعذّر فتح المطابقة المحفوظة: {msg}',
+      mx_auto_saved: 'حُفظت هذه المطابقة تلقائيًا في النظام (رقم {id}). يمكنك ربطها بمعاملة أو إنشاء مسودة معاملة منها.',
+      mx_auto_failed: 'تعذّر الحفظ التلقائي لهذه المطابقة: {msg} — يمكنك الحفظ يدويًا.',
+      mx_auto_already: 'هذه المطابقة محفوظة تلقائيًا بالفعل (رقم {id}). اختر معاملة لربطها بها.',
+      mx_auto_void_full: 'استُبدلت بالقراءة الكاملة للمستند نفسه.',
       m_void: 'إلغاء', m_void_reason: 'سبب إلغاء المطابقة (مطلوب):', m_void_reason_required: 'اكتب سبب الإلغاء.', m_voided: 'أُلغيت المطابقة.'
     },
     en: {
@@ -492,6 +502,16 @@
       m_match_id: 'Match no.', m_png_footer: 'MARSA · match engine {v} · AI readings need human review',
       m_recent: 'Recently saved matches', m_refresh: 'Refresh', m_recent_empty: 'No saved matches yet.',
       m_recent_failed: 'Could not load the matches: {msg}', m_recent_tx: 'Transaction {ref}', m_recent_no_tx: 'No transaction',
+      mx_sm_open_hint: 'Click to open the review of this match as it was saved',
+      mx_sm_loaded: 'Saved match of {date} — {tx} — {status}.',
+      mx_sm_changed: 'Note: comparing now gives a different result from the saved one (saved: {saved} — now: {now}); the readings or the comparison rules may have changed.',
+      mx_sm_voided: 'This match was voided.', mx_sm_st_voided: 'Voided',
+      mx_sm_missing: 'One of the readings this match was saved with is no longer available.',
+      mx_sm_failed: 'The saved match could not be opened: {msg}',
+      mx_auto_saved: 'This match was saved automatically (no. {id}). You can link it to a transaction or make a draft transaction from it.',
+      mx_auto_failed: 'The automatic save of this match failed: {msg} — you can save it manually.',
+      mx_auto_already: 'This match is already saved automatically (no. {id}). Pick a transaction to link it to.',
+      mx_auto_void_full: 'Replaced by the full reading of the same document.',
       m_void: 'Void', m_void_reason: 'Reason for voiding the match (required):', m_void_reason_required: 'Enter a reason.', m_voided: 'Match voided.'
     }
   });

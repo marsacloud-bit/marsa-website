@@ -116,6 +116,7 @@
         // list filters / pills
         f_cancelled_all: 'كل المعاملات', f_cancelled_exclude: 'غير الملغاة فقط', f_cancelled_only: 'الملغاة فقط',
         f_cancelled_label: 'الإلغاء', f_type_all: 'كل الأنواع', f_unit_all: 'كل الوحدات',
+        f_draft_label: 'الاعتماد', f_draft_all: 'المسودات والمعتمدة', f_draft_only: 'المسودات فقط', f_draft_approved: 'المعتمدة فقط (غير المسودة)',
         // movements
         mv_title: 'حركات النقل (موعد + نقلة + إرجاع الفارغ)', mv_add: 'حركة جديدة', mv_deliver: 'تم النقل', mv_cancel: 'إلغاء الحركة',
         mv_new_title: 'حركة نقل جديدة', mv_edit_title: 'تعديل الحركة', mv_container: 'الحاوية', mv_at: 'وقت الموعد',
@@ -222,6 +223,7 @@
         cancel_err_role: 'You cannot cancel this transaction at its current stage.',
         f_cancelled_all: 'All transactions', f_cancelled_exclude: 'Not cancelled', f_cancelled_only: 'Cancelled only',
         f_cancelled_label: 'Cancellation', f_type_all: 'All types', f_unit_all: 'All units',
+        f_draft_label: 'Approval', f_draft_all: 'Drafts and approved', f_draft_only: 'Drafts only', f_draft_approved: 'Approved only (not a draft)',
         mv_title: 'Transport movements (appointment + trip + empty return)', mv_add: 'New movement', mv_deliver: 'Delivered', mv_cancel: 'Cancel movement',
         mv_new_title: 'New transport movement', mv_edit_title: 'Edit movement', mv_container: 'Container', mv_at: 'Appointment time',
         mv_no: 'Appointment number (TAS)', mv_no_hint: 'Normalised to TAS followed by the digits.', mv_no_preview: 'Will be saved as: {v}',

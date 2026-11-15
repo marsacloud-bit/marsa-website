@@ -2413,7 +2413,7 @@ async function secFrontEnd() {
   await check('ocr-match.js: window.MarsaOcrMatch.compareReadings (no AI call: no aiExtract / quota in it), only with AI access (or readings already saved on a transaction: #match-tx, 20261127000100), 2+ slots; save blocked for parts of a combined file, reuses rows the reader saved', () => {
     const a = mx.indexOf('    function compareReadings('), b = mx.indexOf('    function canCompare(');
     const body = a > 0 && b > a ? mx.slice(a, b) : '';
-    return (!!body && !/aiExtract|AI\.remaining/.test(body) && /if \(!\(ONLINE && STAFF && \(AI\.enabled \|\| opts\.saved === true\)\) \|\| S\.running \|\| S\.saving\) return false;/.test(body)
+    return (!!body && !/aiExtract|AI\.remaining/.test(body) && /if \(!\(ONLINE && STAFF && \(AI\.enabled \|\| opts\.saved === true\)\) \|\| S\.running \|\| \(S\.saving && !S\.autoSaving\)\) return false;/.test(body)
       && /if \(n < 2\) return false;/.test(body) && /window\.MarsaOcrMatch = \{ version: E\.VERSION, compareReadings: compareReadings, available: canCompare \};/.test(mx)
       && /if \(parts\.length\) return T\('mx_save_block_part'/.test(mx) && /\$\('ocr-match-save-btn'\)\.disabled = done \|\| S\.saving \|\| !!block;/.test(mx)
       && /var ref = savedOf\(k\);\n      if \(ref\) \{/.test(mx) && /S\.slots\[k\]\.onSaved\(r\.data\)/.test(mx) && /id="ocr-match-save-block"/.test(html)

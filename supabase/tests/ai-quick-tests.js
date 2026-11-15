@@ -421,7 +421,8 @@ const savedRow = (o) => Object.assign({ id: 'e0000000-0000-4000-8000-00000000000
   });
   await check('ocr-match.js: slots read quick with the switch (not after «اقرأ المستند كاملًا»), badge + button per quick slot (not saved / reused / bridged), the quick mark not listed, the two switches mirror each other', async () => {
     return (/if \(q\.promptVersion === 'ai-doc-v3' && !s\.forceFull && quickOn\(\)\) q\.readingMode = 'quick';/.test(mx)
-      && /if \(s\.file && !s\.bridged && !s\.res\.reused && !S\.saved\.extractions\[k\] && !S\.running\)/.test(mx)
+      // 2026-11-15: a reading saved only by the automatic save can still be read in full (it is voided then); not while saving
+      && /if \(s\.file && !s\.bridged && !s\.res\.reused && \(!S\.saved\.extractions\[k\] \|\| S\.saved\.extractions\[k\]\.auto\) && !S\.running && !S\.saving\)/.test(mx)
       && /T\('quick_badge'\)/.test(mx) && /fb\.setAttribute\('data-full', k\)/.test(mx)
       && /if \(w\.source === 'server' && w\.code === 'quick_reading'\) return;/.test(mx)
       && /var o = \$\('ocr-quick'\); if \(o\) o\.checked = c\.checked;/.test(mx) && /var m = \$\('ocr-match-quick'\); if \(m\) m\.checked = c\.checked;/.test(ocr)
@@ -432,7 +433,8 @@ const savedRow = (o) => Object.assign({ id: 'e0000000-0000-4000-8000-00000000000
     const mk = (yes, corrected) => {
       const c = { asked: 0, runs: 0, SLOTS: ['invoice', 'bl'], T: k => k, renderSlot() {}, syncRun() {}, run() { c.runs++; },
         ask: () => { c.asked++; return Promise.resolve(yes); }, isQuickRes: r => !!(r && r.reading_mode === 'quick'),
-        S: { running: false, slots: { invoice: { file: {}, status: 'done', res: { reading_mode: 'quick' }, fields: { total: { value: '1', corrected: corrected } } } } } };
+        renderSaveState() {}, has: () => false, API: {},
+        S: { running: false, saving: false, saved: { extractions: {}, match: null }, slots: { invoice: { file: {}, status: 'done', res: { reading_mode: 'quick' }, fields: { total: { value: '1', corrected: corrected } } } } } };
       vm.createContext(c); vm.runInContext(mx.slice(i, j) + ';this.readFull = readFull;', c); return c;
     };
     const a = mk(true, false); a.readFull('invoice');
