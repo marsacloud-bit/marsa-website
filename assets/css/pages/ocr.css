@@ -798,4 +798,16 @@ html[dir="ltr"] .ocr-mx-cell.is-calm.is-warn { box-shadow: inset 4px 0 0 #B7791F
 /* saved matches: the title opens the review (ocr.html#match=<id>); the one on screen is marked */
 .ocr-mx-recent-open { color: var(--teal, #14a3a8); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .ocr-mx-recent-open:hover, .ocr-mx-recent-open:focus-visible { color: var(--navy, #0b2545); }
+button.ocr-mx-recent-open { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; text-align: start; }
+.ocr-mx-rs { flex-basis: 100%; margin-top: 4px; padding: 12px 14px; border-top: 1px dashed var(--border); }
+.ocr-mx-rs-h { margin: 6px 0; font-size: var(--fs-sm); color: var(--navy, #0b2545); }
+.ocr-mx-rs-files, .ocr-mx-rs-diffs { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 6px; }
+.ocr-mx-rs-diffs li { padding: 8px 10px; border-radius: 8px; border-inline-start: 3px solid #d97706; background: #fffaf0; }
+.ocr-mx-rs-diffs li.is-mismatch { border-inline-start-color: #dc2626; background: #fef2f2; }
+.ocr-mx-rs-diffs li.is-missing { border-inline-start-color: #64748b; background: #f8fafc; }
+.ocr-mx-rs-row { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.ocr-mx-rs-st { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: rgba(0,0,0,.06); }
+.ocr-mx-rs-crit { font-size: 12px; color: #b91c1c; }
+.ocr-mx-rs-vals { display: grid; gap: 2px; margin-top: 4px; overflow-wrap: anywhere; }
+.ocr-mx-rs-vals em { font-style: normal; color: var(--text-muted, #64748b); }
 .ocr-history li.is-current { background: rgba(20, 163, 168, .08); box-shadow: inset -3px 0 0 var(--teal, #14a3a8); }

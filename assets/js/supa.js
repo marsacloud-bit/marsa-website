@@ -2864,6 +2864,15 @@
       return ok(Array.isArray(r.data) ? (r.data[0] || null) : (r.data || null));
     });
   }
+  // ids = [uuid…] (≤ 10) → [{ id, doc_type, source_name, source_pages }] (the saved match summary; no raw text / fields)
+  function listExtractionNames(ids) {
+    var list = (Array.isArray(ids) ? ids : []).filter(isUuid).slice(0, 10);
+    if (!list.length) return Promise.resolve(ok([]));
+    if (!configured) return Promise.all(list.map(function (id) { return localExtractions.get(id); })).then(function (rs) {
+      return ok(rs.filter(function (r) { return r && r.data; }).map(function (r) { return { id: r.data.id, doc_type: r.data.doc_type, source_name: r.data.source_name, source_pages: r.data.source_pages }; }));
+    });
+    return online(function (c) { return c.from('document_extractions').select('id,doc_type,source_name,source_pages').in('id', list); });
+  }
   function getExtraction(id) {
     if (!configured) return localExtractions.get(id);
     return online(function (c) { return c.from('document_extractions').select(EXT_COLS).eq('id', id).maybeSingle(); })
@@ -4619,7 +4628,7 @@
     updateImportRow: updateImportRow, findBatchByFingerprint: findBatchByFingerprint,
     cancelImportBatch: cancelImportBatch, importCommit: importCommit,
     // document extractions (OCR)
-    saveExtraction: saveExtraction, listExtractions: listExtractions, getExtraction: getExtraction, findExtractionBySource: findExtractionBySource,
+    saveExtraction: saveExtraction, listExtractions: listExtractions, getExtraction: getExtraction, listExtractionNames: listExtractionNames, findExtractionBySource: findExtractionBySource,
     reviewExtraction: reviewExtraction, voidExtraction: voidExtraction, attachExtractionDocument: attachExtractionDocument,
     localExtractions: localExtractions,
     // AI document reading (Claude, Edge Function ai-extract; 20261114000100)

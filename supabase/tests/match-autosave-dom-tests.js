@@ -186,15 +186,38 @@ async function main() {
   await check('reopen with a different result now: «نتيجة مختلفة» warning, not bound (save usable)', () =>
     (/مختلفة/.test(msg(P)) && !P.$('ocr-match-save-btn').disabled) || J({ m: msg(P), b: P.$('ocr-match-save-btn').disabled }));
 
-  /* 6. recent list: links */
-  P = page({ recent: [savedRow({ status: 'saved', id: OLD, overall: 'mismatch', counts: { match: 1, partial: 0, missing: 0, mismatch: 1 } })] });
+  /* 6. recent list: a click shows the summary (files + only the differences) under the item */
+  P = page({ recent: [savedRow({ status: 'saved', id: OLD, overall: 'mismatch', counts: { match: 1, partial: 0, missing: 0, mismatch: 1 } })],
+    saved: savedRow({ status: 'saved', rows: [
+      { key: 'invoice_number', label_ar: 'رقم الفاتورة', status: 'match', values: { invoice: 'INV-1', bl: 'INV-1' } },
+      { key: 'consignee', label_ar: 'المستلم', status: 'mismatch', critical: true, detail_ar: 'اسم مختلف', values: { invoice: 'شركة أ', bl: 'شركة ب' } },
+      { key: 'vessel', label_ar: 'الباخرة', status: 'info', values: { invoice: null, bl: 'MSC X' } }] }) });
+  P.w.MarsaApi.listExtractionNames = ids => { P.calls.push({ n: 'listExtractionNames', a: ids }); return Promise.resolve({ data: [{ id: EX.invoice, source_name: 'invoice-1.pdf', source_pages: 2 }, { id: EX.bl, source_name: 'bl-1.jpg' }], error: null }); };
   await sleep(100);
   P.w.MarsaOcrMatch.compareReadings(bridged(P));   // shows the section → loadRecent
   await sleep(200);
-  await check('recent list: the title links to #match=<id>', () => {
-    const a = P.w.document.querySelector('#ocr-match-recent a.ocr-mx-recent-open');
-    return (a && a.getAttribute('href') === '#match=' + OLD) || (P.$('ocr-match-recent') || {}).innerHTML;
+  const btn = P.w.document.querySelector('#ocr-match-recent button.ocr-mx-recent-open');
+  await check('recent list: the title is a button (no hash change)', () => (btn && btn.getAttribute('aria-expanded') === 'false') || (P.$('ocr-match-recent') || {}).innerHTML);
+  const g0 = P.n('getExtraction').length;
+  btn && btn.click();
+  await sleep(150);
+  const box = P.w.document.querySelector('#ocr-match-recent .ocr-mx-rs');
+  await check('summary under the item: the 2 files by name, only the 1 difference (mismatch, not match / info), «حقل أساسي»', () => {
+    const t = box ? box.textContent : '';
+    const diffs = box ? box.querySelectorAll('.ocr-mx-rs-diffs li').length : -1;
+    return (box && !box.hidden && /invoice-1\.pdf/.test(t) && /bl-1\.jpg/.test(t) && /2 صفحة/.test(t) && diffs === 1 && /المستلم/.test(t) && /شركة أ/.test(t) && /شركة ب/.test(t)
+      && /حقل أساسي/.test(t) && /اسم مختلف/.test(t) && !/الباخرة/.test(t) && !/رقم الفاتورة/.test(t) && btn.getAttribute('aria-expanded') === 'true') || J({ t, diffs });
   });
+  await check('summary: no full readings loaded (only the names), the hash unchanged', () =>
+    (P.n('getExtraction').length === g0 && P.n('listExtractionNames').length === 1 && !/match=/.test(P.w.location.hash)) || J({ e: P.n('getExtraction').length - g0, h: P.w.location.hash }));
+  btn && btn.click();
+  await check('a second click hides it (no reload)', () => (box.hidden && btn.getAttribute('aria-expanded') === 'false' && P.n('getDocumentMatch').filter(Boolean).length >= 1) || 'still shown');
+  btn && btn.click();
+  const full = [...box.querySelectorAll('button')].find(b => /المراجعة كاملة/.test(b.textContent));
+  full && full.click();
+  await sleep(250);
+  await check('«فتح المراجعة كاملة» → #match=<id> and the review opens', () =>
+    (full && P.w.location.hash === '#match=' + OLD && !P.$('ocr-match-result').hidden) || J({ f: !!full, h: P.w.location.hash }));
 
   /* 7. review fixes */
   // idempotency: the match on the transaction gets its own key

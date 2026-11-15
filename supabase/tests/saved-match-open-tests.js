@@ -94,10 +94,12 @@ check('openSavedMatch: restores the saved match id / status, ticks (only rows th
 });
 check('openSavedMatch needs getDocumentMatch + getExtraction (feature-detected) and staff online', () =>
   /has\('getDocumentMatch'\) \|\| !has\('getExtraction'\)/.test(fnBody('openSavedMatch')) || 'no guard');
-check('recentItem: the title is a link to #match=<id> (re-click on the same hash reopens), data-match-id for the mark', () => {
+check('recentItem: the title is a button that shows the summary under the item (aria-expanded), data-match-id for the mark', () => {
   const b = fnBody('recentItem');
-  return (/P\.matchLink\(m\.id\)/.test(b) && /a\.href = href/.test(b) && /openSavedMatch\(m\.id\)/.test(b) && /data-match-id/.test(b)) || 'missing link';
+  return (/el\('button', 'ocr-h-name ocr-mx-recent-open'/.test(b) && /toggleRecentSummary\(li, m, a\)/.test(b) && /aria-expanded/.test(b) && /data-match-id/.test(b)) || 'missing button';
 });
+check('summary: «فتح المراجعة كاملة» opens the review (same hash → openSavedMatch), the review is scrolled into view', () =>
+  (/openSavedMatch\(m\.id\); else window\.location\.hash = href/.test(fnBody('renderRecentSummary')) && /ocr-match-result'\);\s*\n\s*if \(rep && rep\.scrollIntoView\)/.test(fnBody('openSavedMatch'))) || 'missing');
 check('loadRecent marks the open match; markRecent sets is-current + aria-current', () =>
   (/markRecent\(\);/.test(fnBody('loadRecent')) && /is-current/.test(fnBody('markRecent')) && /aria-current/.test(fnBody('markRecent'))) || 'missing');
 

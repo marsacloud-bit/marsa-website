@@ -85,6 +85,35 @@
       var txt = function (o, cc) { return o + ' ' + keys.map(function (k) { return Number(cc[k] || 0); }).join('/'); };
       return { saved: txt(m.overall, c), now: txt(R.overall, rc) };
     }
+    // the short summary of a saved match (the list item opened): its files (slot order) and only the differences found
+    // (mismatch, then partial, then missing; «match» / «info» rows are left out). names = [{ id, doc_type, source_name }]
+    var SUM_ORDER = { mismatch: 0, partial: 1, missing: 2 };
+    function sumVal(v) {
+      if (v == null || v === '') return '';
+      var s = typeof v === 'object' ? (Array.isArray(v) ? v.map(function (x) { return x && typeof x === 'object' ? JSON.stringify(x) : String(x); }).join('، ') : JSON.stringify(v)) : String(v);
+      s = s.replace(/\s+/g, ' ').trim();
+      return s.length > 160 ? s.slice(0, 159) + '…' : s;
+    }
+    function savedSummary(m, names) {
+      if (!m) return { files: [], diffs: [] };
+      var byId = {};
+      (Array.isArray(names) ? names : []).forEach(function (n) { if (n && n.id) byId[String(n.id).toLowerCase()] = n; });
+      var files = savedMatchIds(m).map(function (x) {
+        var n = byId[String(x[1]).toLowerCase()];
+        return { doc: x[0], name: n && n.source_name ? String(n.source_name) : '', pages: n && n.source_pages ? Number(n.source_pages) || null : null };
+      });
+      var diffs = [];
+      (Array.isArray(m.rows) ? m.rows : []).forEach(function (r, i) {
+        if (!r || !Object.prototype.hasOwnProperty.call(SUM_ORDER, r.status)) return;
+        var vals = {};
+        files.forEach(function (f) { vals[f.doc] = sumVal(r.values ? r.values[f.doc] : null); });
+        diffs.push({ key: String(r.key || ''), status: r.status, critical: !!r.critical, label_ar: r.label_ar || r.key || '', label_en: r.label_en || r.key || '',
+          detail_ar: r.detail_ar || '', detail_en: r.detail_en || '', values: vals, i: i });
+      });
+      diffs.sort(function (a, b) { return SUM_ORDER[a.status] - SUM_ORDER[b.status] || (b.critical - a.critical) || a.i - b.i; });
+      diffs.forEach(function (d) { delete d.i; });
+      return { files: files, diffs: diffs };
+    }
     function matchTxLink(tx, decl) {
       return 'ocr.html#match-tx=' + encodeURIComponent(String(tx || '')) + (isUuid(decl) ? '&decl=' + encodeURIComponent(String(decl)) : '');
     }
@@ -169,7 +198,7 @@
       return v.slice(0, 300);
     }
     return { BATCH_SLOT: BATCH_SLOT, isUuid: isUuid, parseMatchTx: parseMatchTx, matchTxLink: matchTxLink, pickReadings: pickReadings,
-      parseMatchId: parseMatchId, matchLink: matchLink, noteOfSaved: noteOfSaved, savedMatchIds: savedMatchIds, savedDiff: savedDiff,
+      parseMatchId: parseMatchId, matchLink: matchLink, noteOfSaved: noteOfSaved, savedMatchIds: savedMatchIds, savedDiff: savedDiff, savedSummary: savedSummary,
       readingOf: readingOf, draftNext: draftNext, draftPayload: draftPayload, draftKey: draftKey, importerName: importerName };
   })();
   window.MarsaOcrMatchPure = PURE;
@@ -2442,6 +2471,8 @@
         else if (d) setSaveMsg('warning', info + ' ' + T('mx_sm_changed', d));
         else setSaveMsg('info', info);
         markRecent();
+        var rep = $('ocr-match-result');
+        if (rep && rep.scrollIntoView) rep.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }).catch(function (e) {
         if (seq !== smSeq) return;
         showError(T('mx_sm_failed', { msg: errMsg(e) }));
@@ -2526,6 +2557,72 @@
       return { match: Number(c.match != null ? c.match : m.match_count) || 0, mismatch: Number(c.mismatch != null ? c.mismatch : m.mismatch_count) || 0,
         partial: Number(c.partial != null ? c.partial : m.partial_count) || 0, missing: Number(c.missing != null ? c.missing : m.missing_count) || 0 };
     }
+    function toggleRecentSummary(li, m, btn) {
+      var box = li.querySelector('.ocr-mx-rs');
+      if (box) { var open = box.hidden; box.hidden = !open; btn.setAttribute('aria-expanded', open ? 'true' : 'false'); return; }
+      box = el('div', 'ocr-mx-rs'); box.id = 'ocr-mx-rs-' + String(m.id).toLowerCase();
+      btn.setAttribute('aria-controls', box.id); btn.setAttribute('aria-expanded', 'true');
+      box.appendChild(el('p', 'text-sm text-muted', T('mx_rs_loading')));
+      li.appendChild(box);
+      API.getDocumentMatch(m.id).then(function (r) {
+        if (r.error) throw r.error;
+        var full = r.data || {};
+        var ids = P.savedMatchIds(full).map(function (x) { return x[1]; });
+        var names = has('listExtractionNames') && ids.length ? API.listExtractionNames(ids).then(function (n) { return n && !n.error ? n.data : []; }, function () { return []; }) : Promise.resolve([]);
+        return names.then(function (n) { renderRecentSummary(box, full, P.savedSummary(full, n)); });
+      }).catch(function (e) {
+        box.textContent = '';
+        box.appendChild(el('p', 'text-sm', T('mx_sm_failed', { msg: errMsg(e) })));
+      });
+    }
+    function renderRecentSummary(box, m, sum) {
+      var en = lang() === 'en';
+      box.textContent = '';
+      box.appendChild(el('h4', 'ocr-mx-rs-h', T('mx_rs_files')));
+      var fl = el('ul', 'ocr-mx-rs-files');
+      sum.files.forEach(function (f) {
+        var li = el('li');
+        li.appendChild(el('strong', null, docName(f.doc) + ': '));
+        li.appendChild(el('span', null, f.name || T('mx_rs_noname')));
+        if (f.pages) li.appendChild(el('span', 'text-muted', ' (' + T('mx_rs_pages', { n: f.pages }) + ')'));
+        fl.appendChild(li);
+      });
+      box.appendChild(fl);
+      box.appendChild(el('h4', 'ocr-mx-rs-h', T('mx_rs_diffs', { n: sum.diffs.length })));
+      if (!sum.diffs.length) box.appendChild(el('p', 'text-sm', T('mx_rs_none')));
+      else {
+        var dl = el('ul', 'ocr-mx-rs-diffs');
+        sum.diffs.forEach(function (d) {
+          var li = el('li', 'is-' + d.status);
+          var head = el('div', 'ocr-mx-rs-row');
+          head.appendChild(el('span', 'ocr-mx-rs-st', T('m_st_' + d.status)));
+          head.appendChild(el('strong', null, en ? d.label_en : d.label_ar));
+          if (d.critical) head.appendChild(el('span', 'ocr-mx-rs-crit', T('mx_rs_critical')));
+          li.appendChild(head);
+          var vals = el('div', 'ocr-mx-rs-vals');
+          sum.files.forEach(function (f) {
+            var v = el('span');
+            v.appendChild(el('em', null, docName(f.doc) + ': '));
+            v.appendChild(el('bdi', null, d.values[f.doc] || '—'));
+            vals.appendChild(v);
+          });
+          li.appendChild(vals);
+          var det = en ? d.detail_en : d.detail_ar;
+          if (det) li.appendChild(el('div', 'ocr-mx-rs-det text-sm text-muted', det));
+          dl.appendChild(li);
+        });
+        box.appendChild(dl);
+      }
+      if (has('getExtraction')) {
+        var go = el('button', 'btn btn-ghost btn-sm', T('mx_rs_open_full'));
+        go.type = 'button';
+        go.addEventListener('click', function () {
+          var href = P.matchLink(m.id);
+          if (window.location.hash.toLowerCase() === href) openSavedMatch(m.id); else window.location.hash = href;
+        });
+        box.appendChild(go);
+      }
+    }
     function recentItem(m) {
       var li = el('li');
       var ov = ['match', 'review', 'mismatch'].indexOf(m.overall) !== -1 ? m.overall : 'review';
@@ -2533,11 +2630,11 @@
       var main = el('div', 'ocr-h-main');
       var title = m.transaction_ref ? T('m_recent_tx', { ref: m.transaction_ref }) : T('m_recent_no_tx');
       var href = P.matchLink(m.id);
-      if (href && has('getDocumentMatch') && has('getExtraction')) {
-        var a = el('a', 'ocr-h-name ocr-mx-recent-open', title);
-        a.href = href; a.title = T('mx_sm_open_hint');
-        // the same link clicked again (hash unchanged) still reopens it
-        a.addEventListener('click', function () { if (window.location.hash.toLowerCase() === href) setTimeout(function () { openSavedMatch(m.id); }, 0); });
+      if (href && has('getDocumentMatch')) {
+        // (owner, 2026-11-15) a click shows a short summary right under the item: the files read + the differences found
+        var a = el('button', 'ocr-h-name ocr-mx-recent-open', title);
+        a.type = 'button'; a.title = T('mx_rs_hint'); a.setAttribute('aria-expanded', 'false');
+        a.addEventListener('click', function () { toggleRecentSummary(li, m, a); });
         main.appendChild(a);
         li.setAttribute('data-match-id', String(m.id).toLowerCase());
       } else main.appendChild(el('span', 'ocr-h-name', title));
