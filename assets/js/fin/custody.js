@@ -13,6 +13,8 @@
      it; the server re-checks under a per-client lock, and refuses voiding a deposit that would make it negative
      (MRS_CUSTODY_NEGATIVE void_deposit — the legacy bug, fixed) — the page explains that refusal clearly.
    * Void needs a finance approver and a reason of at least 3 characters. Wallet balances are a later phase.
+   * Balances: the Daftra customer code column; the search matches the client name or the code (prefix); tiles: the total
+     balance, the clients with a balance, the total deposits / deductions (custody_balances totals, 20261201000100).
    * Entry dates are DATES in Asia/Riyadh (no time, never shifted by the device zone).
    * Server and user data go through textContent / createElement only.
    ========================================================================== */
@@ -183,6 +185,9 @@
       var rows = d ? U.rowsOf(d) : [];
       tiles.appendChild(U.kpi(T('tile_total'), d ? U.fmtMoney(+d.total_balance || 0, 'SAR') : '—', 'neutral', { foot: T('tile_total_foot') }));
       tiles.appendChild(U.kpi(T('tile_clients'), d ? String(rows.filter(function (x) { return Math.abs(+x.balance || 0) >= 0.005; }).length) : '—', 'neutral'));
+      // the totals of the clients the search selects (custody_balances; an older server without them shows —)
+      tiles.appendChild(U.kpi(T('tile_deposits'), d && d.total_deposits != null ? U.fmtMoney(+d.total_deposits || 0, 'SAR') : '—', 'neutral', { foot: T('tile_sums_foot') }));
+      tiles.appendChild(U.kpi(T('tile_deductions'), d && d.total_deductions != null ? U.fmtMoney(+d.total_deductions || 0, 'SAR') : '—', 'neutral', { foot: T('tile_sums_foot') }));
     }
     function drawBar() {
       U.clear(bar);
@@ -206,7 +211,7 @@
     function drawBalances(rows) {
       U.clear(body);
       if (!rows.length) { body.appendChild(U.card(null, U.emptyState('inbox', T('bal_empty_title'), T('bal_empty_text')))); return; }
-      var tbl = U.table([T('c_client'), { label: T('c_balance'), num: true }, { label: T('c_deposits'), num: true }, { label: T('c_deductions'), num: true },
+      var tbl = U.table([T('c_client'), T('c_code'), { label: T('c_balance'), num: true }, { label: T('c_deposits'), num: true }, { label: T('c_deductions'), num: true },
         { label: T('c_refunds'), num: true }, T('c_last'), { label: T('actions'), cls: 'ops-col-actions' }],
         rows.map(function (b) {
           var acts = el('div', { class: 'ops-row-actions' }, [
@@ -214,6 +219,7 @@
             canW ? U.btn(T('new_for_client'), 'btn-secondary', function () { openForm({ client_id: b.client_id }); }, { 'data-new-for': b.client_id }) : null]);
           return el('tr', { 'data-client': b.client_id }, [
             U.td(el('a', { class: 'ops-ref', href: '#client/' + b.client_id, text: b.client_name || '' })),
+            U.td(b.client_code ? el('bdi', { dir: 'ltr', class: 'cu-code', text: b.client_code }) : el('span', { class: 'ops-muted', text: '—' })),
             U.td(money(U, b.balance), 'num fin-strong'), U.td(money(U, b.total_deposits), 'num'), U.td(money(U, b.total_deductions), 'num'), U.td(money(U, b.total_refunds), 'num'),
             U.td([el('span', { text: b.last_entry_date ? day(b.last_entry_date) : '—' }), el('span', { class: 'cell-sub', text: T('entries_n', { n: b.entry_count || 0 }) })]),
             U.td(acts, 'ops-col-actions')]);

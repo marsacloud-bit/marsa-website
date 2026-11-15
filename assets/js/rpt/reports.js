@@ -12,7 +12,8 @@
    (#reports/containers?overdue=true) replaces the tab's filters once (dashboard tiles).
    Legacy step 8 (docs/online/LEGACY_REPORTS_AR.md): movements «المواعيد والنقل» (report_movements, the legacy filters
    and totals, 19-column file; value / revenue only for trip finance), payments «كشف السدادات» (report_payments, finance
-   readers), trips by carrier / by driver summaries + driver / party / q filters, and the Excel-style column filters of
+   readers), trips by carrier / by driver summaries + driver / party / q filters (party type «غير محدد» = 'unset'; the
+   «إجمالي قيمة النقل» tile for trip finance with costs shown), and the Excel-style column filters of
    rpt/colfilter.js on every table (the file keeps the same rows: MarsaExport rowFilter).
    ========================================================================== */
 (function () {
@@ -29,6 +30,7 @@
   var MV_SORTS = ['appointment_desc', 'appointment_asc', 'deadline_asc', 'updated_desc'];
   var MV_STATUSES = ['registered', 'incomplete', 'delivered', 'cancelled'];
   var PARTY_TYPES = ['supplier', 'company', 'direct'];
+  var TRIP_PARTY_TYPES = PARTY_TYPES.concat(['unset']);   // report_trips: 'unset' = trips with no party type (20261201000100)
   var RETURN_SCOPES = ['overdue', 'pending', 'returned'];
   var PORT_CODES = ['SAJED', 'SADMM', 'SAKAC', 'SARUH', 'SAJED-AIR', 'SADMM-AIR', 'SARUH-AIR'];
   var PAY_SORTS = ['paid_desc', 'paid_asc', 'amount_desc', 'created_desc'];
@@ -219,7 +221,7 @@
           K.field(t('f_carrier'), K.select('carrier_id', ca, S.carrier_id)),
           K.field(t('f_sort'), K.select('sort', opt(['planned_desc', 'planned_asc'], function (c) { return t('sort_' + c); }), S.sort || 'planned_desc')));
         F.push(K.field(K.lt('f_driver_q'), K.input('driver_q', S.driver_q)),
-          K.field(K.lt('f_party_type'), K.select('party_type', [['', t('all')]].concat(opt(PARTY_TYPES, function (c) { return K.lt('party_type_' + c); })), S.party_type)),
+          K.field(K.lt('f_party_type'), K.select('party_type', [['', t('all')]].concat(opt(TRIP_PARTY_TYPES, function (c) { return K.lt('party_type_' + c); })), S.party_type)),
           K.field(K.lt('f_party_q'), K.input('party_q', S.party_q)),
           K.field(t('f_q'), K.input('q', S.q, { placeholder: K.lt('f_q_trips_ph') }), 'is-wide'));
         var late = el('input', { type: 'checkbox', name: 'late' }); late.checked = !!S.late;
@@ -358,6 +360,13 @@
       } else if (kind === 'trips') {
         tile(t('k_count'), tt.count != null ? tt.count : d.total);
         ['planned', 'dispatched', 'loaded', 'delivered'].forEach(function (s) { tile(K.lab('trip_status', s, api), (tt.by_status || {})[s] || 0); });
+        // «إجمالي قيمة النقل»: trip finance with «إظهار التكلفة والبيع» only (the server fills transport_value only then)
+        if (ctx.includeFinance) {
+          var tv = tt.transport_value && typeof tt.transport_value === 'object' ? tt.transport_value : ((tt.finance || {}).cost_by_currency || {});
+          var tvc = Object.keys(tv).sort().slice(0, 3);
+          if (tvc.length) tvc.forEach(function (c) { moneyTile(K.lt('k_trip_value'), tv[c], c); });
+          else tiles.appendChild(U.kpi(K.lt('k_trip_value'), '—', 'neutral'));
+        }
       } else if (kind === 'movements') {
         tile(K.lt('k_mv_count'), tt.count != null ? tt.count : d.total);
         tile(K.lt('k_mv_appointments'), tt.appointments);

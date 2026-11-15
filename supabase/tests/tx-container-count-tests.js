@@ -266,10 +266,16 @@ async function secFile() {
       && /CREATE TRIGGER trg_container_count AFTER UPDATE OF status ON public\.doc_batches/.test(s)
       && /OLD\.status = 'draft' AND NEW\.status = 'approved'/.test(s) && /SECURITY DEFINER SET search_path = ''/.test(s)) || 'conventions');
   const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
-  await check('all_migrations.sql: appended verbatim under its header, last; the paste note names it', () => {
+  // later phases (each has its own suite) follow it, in order
+  const LATER_PHASES = ['20261201000100_legacy_gaps.sql'];
+  await check('all_migrations.sql: appended verbatim under its header (followed only by the later phases); the paste note names it', () => {
     const h = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(h);
-    return (i > 0 && all.slice(i + h.length) === s && all.slice(0, 30000).includes(MIG)) || 'not appended verbatim / no note';
+    const nx = all.indexOf('\n-- ===== migrations/', i + h.length);
+    const body = nx < 0 ? all.slice(i + h.length) : all.slice(i + h.length, nx);
+    const rest = nx < 0 ? '' : all.slice(nx);
+    const later = (rest.match(/-- ===== migrations\/([^ ]+) =====/g) || []).map(x => x.replace(/^-- ===== migrations\/| =====$/g, ''));
+    return (i > 0 && body === s && J(later) === J(LATER_PHASES) && all.slice(0, 30000).includes(MIG)) || 'not appended verbatim / no note / later ' + J(later);
   });
 }
 

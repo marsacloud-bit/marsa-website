@@ -16,6 +16,10 @@
      finance readers only (owner decision 2026-11-11 (5)), Excel-style column filters (rpt/colfilter.js) on the page.
    * Export: the 14-column follow-up file (MarsaExport defs.tx_followup) — XLSX / CSV / print A4 landscape, audited by
      logReportExport, exactly the filtered rows (server filters + the column filters), attention tones on the status cell.
+   * «مسودات دفترة: N» (finance readers): report_transactions totals.by_daftra_state.draft of the same filters; its button
+     applies the «مسودات دفترة فقط» quick filter. A click anywhere on a row opens the transaction (#tx/<id>, the ref link's
+     target) unless it lands on a link / button / field / the container list or ends a text selection; the ref link stays the
+     keyboard target. #register?reset=1 (the dashboard «إجمالي المعاملات» tile) opens the statement with no filters.
    * Read only. Strings: 'lrpt' (assets/i18n/lrpt.js). Data → textContent / createElement only.
    ========================================================================== */
 (function () {
@@ -96,6 +100,7 @@
     var finRead = U.can(api, 'finRead');
     var q = typeof api.hashQuery === 'function' ? api.hashQuery() : {};
     if (ST_ORG !== (api && api.orgId)) { ST = null; CF_STATE = null; ST_ORG = api && api.orgId; }
+    if (q && q.reset) { ST = null; CF_STATE = null; }   // the dashboard «إجمالي المعاملات» tile: the statement unfiltered
     var fromHash = fromQuery(K, q);
     if (fromHash) { ST = Object.assign({ offset: 0 }, fromHash); CF_STATE = null; }
     if (!ST) ST = { offset: 0 };
@@ -107,9 +112,10 @@
     root.appendChild(U.head(lt('reg_title'), lt('reg_sub'), [el('a', { class: 'btn btn-sm btn-ghost', href: '#attention_rules', text: lt('rules_link') })]));
     if (!K.hasFn(api, 'reportTransactions')) { root.appendChild(U.alertBox('warning', t('api_missing', { fn: 'reportTransactions' }))); return; }
     var bannerBox = el('div', { class: 'lrpt-banner-box', 'aria-live': 'polite' });
+    var dftBox = el('div', { class: 'lrpt-dft-banner-box', 'aria-live': 'polite' });
     var quickBox = el('div', { class: 'lrpt-quick', role: 'group', 'aria-label': lt('quick_label') });
     var formBox = el('div'), body = el('div', { class: 'app-stack rpt-results' });
-    root.appendChild(bannerBox); root.appendChild(quickBox); root.appendChild(formBox); root.appendChild(body);
+    root.appendChild(bannerBox); root.appendChild(dftBox); root.appendChild(quickBox); root.appendChild(formBox); root.appendChild(body);
 
     function nameOf(x) { return (K.isEn() && x.name_en) || x.name_ar || x.name_en || String(x.id).slice(0, 8); }
     function lookups() {
@@ -331,6 +337,7 @@
       var c = 'lrpt-row' + (x.declaration_status ? ' lrpt-stage-' + x.declaration_status : '');
       if (x.attention && x.attention.level) c += ' lrpt-row-' + x.attention.level;
       if (x.cancelled_at) c += ' is-cancelled';
+      if (K.Q.uuid(x.id || '')) c += ' is-clickable';
       return c;
     }
 
@@ -355,6 +362,36 @@
       ]));
     }
 
+    // «مسودات دفترة: N — عرض المسودات فقط»: finance readers only (by_daftra_state is null for the others)
+    function drawDaftraBanner(r) {
+      U.clear(dftBox);
+      if (!finRead || !r || r.error || !r.data) return;
+      var bd = (r.data.totals || {}).by_daftra_state, n = bd && typeof bd === 'object' ? +bd.draft || 0 : 0;
+      var on = S.daftra_state === 'draft';
+      if (!n && !on) return;
+      var btn = el('button', { type: 'button', class: 'btn btn-sm ' + (on ? 'btn-primary' : 'btn-secondary') + ' lrpt-dft-toggle', 'aria-pressed': String(on), text: lt(on ? 'dft_banner_all' : 'dft_banner_show') });
+      btn.addEventListener('click', function (e) { e.preventDefault(); S.daftra_state = on ? '' : 'draft'; S.offset = 0; drawAll(); });
+      dftBox.appendChild(el('div', { class: 'alert alert-info lrpt-banner lrpt-dft-banner', role: 'status' }, [
+        el('div', { class: 'ops-alert-text' }, [el('strong', { text: lt('dft_banner_count', { n: K.fmtNum(n, 0) }) })]),
+        el('div', { class: 'ops-alert-actions' }, [btn])
+      ]));
+    }
+    // a click anywhere on a row opens the transaction like its ref link; links / buttons / fields / the container list keep
+    // their own behaviour, and a text selection never navigates (the ref link stays the keyboard focus target)
+    var ROW_SKIP = ['a', 'button', 'input', 'select', 'textarea', 'label', 'summary', '.lrpt-ctrs', '.lrpt-ctr', '.cf-btn', '[tabindex]'];
+    function onRowClick(e) {
+      var tg = e && e.target;
+      if (!tg || typeof tg.closest !== 'function') return;
+      if (e.defaultPrevented || e.button > 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      for (var i = 0; i < ROW_SKIP.length; i++) if (tg.closest(ROW_SKIP[i])) return;
+      var tr = tg.closest('tr');
+      if (!tr || !tr.parentNode || tr.parentNode.tagName !== 'TBODY') return;
+      try { if (window.getSelection && String(window.getSelection() || '').length) return; } catch (x) { /* ignore */ }
+      var a = tr.querySelector('a.ops-ref'), href = a && a.getAttribute('href');
+      if (!href || !/^#tx\//.test(href)) return;
+      if (api && typeof api.go === 'function') api.go(href); else location.hash = href;
+    }
+
     /* ---- data ---- */
     var lastFilters = {};
     function load() {
@@ -373,6 +410,7 @@
         U.doneLoading(body);
         drawBanner(res && res[1]);
         var r = res && res[0];
+        drawDaftraBanner(r);
         if (!r) return;   // cancelled: the page stays as it was
         if (r.error) { body.appendChild(U.errorState(api, r.error, load)); return; }
         draw(r.data || {});
@@ -406,7 +444,8 @@
         getCriteria: function () { return cf && cf.active() ? cf.describe().map(function (p) { return [lt('cf_crit', { c: p[0] }), p[1]]; }) : null; } });
       body.appendChild(el('div', { class: 'rpt-result-head' }, [el('div', { class: 'rpt-count-box' }, [countP, clearCf]),
         el('div', { class: 'lrpt-export' }, [el('span', { class: 'lrpt-export-title text-xs text-muted', text: lt('followup_export') }), bar])]));
-      var tableBox = el('div');
+      var tableBox = el('div', { class: 'lrpt-reg-table' });
+      tableBox.addEventListener('click', onRowClick);
       body.appendChild(tableBox);
       function paint() {
         U.clear(tableBox);

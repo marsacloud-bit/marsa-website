@@ -836,6 +836,8 @@ async function main() {
       // return extension (20261128000100): the extension request to the shipping agent + the org rule / template
       'prepare_return_extension', 'update_return_extension', 'mark_return_extension_sent', 'decide_return_extension', 'cancel_return_extension',
       'list_return_extensions', 'get_empty_return_rules', 'set_empty_return_rules', 'set_return_extension_template',
+      // legacy gaps (20261201000100): the client category + Daftra code, the follow-up employee list
+      'set_client_legacy_fields', 'list_assignable_staff',
       // legacy appt (20261121000100): appointment card drafts, empty-return proofs, the TASTO carrier order, the readiness banner
       'appointment_card_state', 'save_appointment_draft', 'get_appointment_draft', 'cancel_appointment_draft', 'move_appointment_draft',
       'approve_appointment_draft', 'create_empty_return_proof', 'verify_empty_return_proof', 'void_empty_return_proof',
@@ -864,7 +866,7 @@ async function main() {
       'legacy_import_commit', 'legacy_import_void', 'legacy_import_get_run', 'legacy_import_list_runs', 'legacy_import_list_rows',
       'legacy_import_skip_rows', 'legacy_import_queue_daftra', 'legacy_import_daftra_candidates'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 309) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 311) return 'expected list has ' + exp.length + ' names';
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');

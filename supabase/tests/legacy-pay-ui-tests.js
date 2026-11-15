@@ -732,7 +732,8 @@ async function custodyFlows() {
   const calls = [];
   let voidAnswer = bad('MRS_CUSTODY_NEGATIVE', 'void_deposit', '40.00');
   const A = {
-    custodyBalances: (org, f) => { calls.push(['bal', f]); return ok({ rows: [{ client_id: 'c1', client_name: 'عميل ١', balance: 400, total_deposits: 500, total_deductions: 100, total_refunds: 0, entry_count: 3, last_entry_date: '2026-11-10' }], total_balance: 400 }); },
+    custodyBalances: (org, f) => { calls.push(['bal', f]); return ok({ rows: [{ client_id: 'c1', client_name: 'عميل ١', client_code: 'C-1001', balance: 400, total_deposits: 500, total_deductions: 100, total_refunds: 0, entry_count: 3, last_entry_date: '2026-11-10' }],
+      total_balance: 400, total_deposits: 1500, total_deductions: 700, total_refunds: 0, client_count: 1 }); },
     listClients: o => ok([{ id: 'c1', name_ar: 'عميل ١' }, { id: 'c2', name_ar: 'عميل ٢' }]),
     listCustodyEntries: (org, f) => { calls.push(['list', f]); return ok(f.kind === 'deduction' ? { rows: [{ id: 'e7', disbursement_id: 'pd', ref: 'CUS-000007', kind: 'deduction', status: 'active' }], total: 1 }
       : { total: 1, rows: [{ id: 'e1', ref: 'CUS-000001', client_id: 'c1', client_name: 'عميل ١', kind: 'deposit', amount: 500, signed_amount: 500, entry_date: '2026-11-01', status: 'active', branch_id: 'b1' }] }); },
@@ -747,6 +748,21 @@ async function custodyFlows() {
   await c.w.MarsaOps.views.custody.render(root, M.api); await settle(10);
   check('balances tab: total tile, the client row with balance / deposits / deductions; non-zero filter sent', () =>
     (calls.some(x => x[0] === 'bal' && x[1].nonzero === true) && /400\.00 SAR/.test(root.textContent) && !!root.querySelector('tr[data-client="c1"]') && /3 حركة/.test(root.textContent)) || root.textContent.slice(0, 300));
+  check('balances (gaps): the Daftra customer code column (ltr) and the search placeholder names the code', () => {
+    const h = root.querySelectorAll('thead th').map(th => th.textContent), code = root.querySelector('tr[data-client="c1"] .cu-code');
+    return (h.indexOf('كود العميل في دفترة') === 1 && code && code.textContent === 'C-1001' && code.tagName === 'BDI' && code.getAttribute('dir') === 'ltr'
+      && /أو كود دفترة/.test(J(root.querySelectorAll('input').map(i => i.getAttribute('aria-label'))))) || J({ h, code: code && code.textContent });
+  });
+  {
+    const sb = root.querySelector('.toolbar-search input'); sb.value = 'C-10'; sb.dispatch('input');
+    await new Promise(r => setTimeout(r, 220)); await settle(10);
+    check('balances (gaps): the search (name or Daftra code) is sent as q to custodyBalances', () => calls.some(x => x[0] === 'bal' && x[1].q === 'C-10') || J(calls.filter(x => x[0] === 'bal')));
+    sb.value = ''; sb.dispatch('input'); await new Promise(r => setTimeout(r, 220)); await settle(10);
+  }
+  check('balances (gaps): «إجمالي الإيداعات» / «إجمالي الخصومات» tiles from the server totals (not the page rows)', () => {
+    const t = root.querySelector('.cu-tiles').textContent;
+    return (/إجمالي الإيداعات/.test(t) && /1500\.00 SAR/.test(t) && /إجمالي الخصومات/.test(t) && /700\.00 SAR/.test(t)) || t;
+  });
   root.querySelector('[data-new-for="c1"]').click(); await settle(10);
   const form = root.querySelector('.cu-form');
   check('new entry for the client: current balance shown, deposit by default, today (Riyadh)', () =>

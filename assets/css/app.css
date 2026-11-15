@@ -80,6 +80,12 @@ html[dir="ltr"] .shell-org-select { padding-inline: 10px 30px; }
 .shell-user-name { display: block; color: var(--navy-dark); }
 .shell-user-meta { display: block; }
 @media (max-width: 640px) { .shell-org { flex: 1 1 100%; } .shell-org-select { max-width: none; flex: 1; } }
+/* [data-shell-orgname] slot: active organisation name (the shell adds one after admin.html's #adm-me-name) */
+.shell-org-name { display: flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; margin-block: 2px; font-size: var(--fs-xs); font-weight: 700; color: var(--navy); line-height: 1.5; }
+.shell-org-name[hidden] { display: none; }
+.shell-org-name .icon { flex: none; width: 14px; height: 14px; color: var(--teal); }
+.shell-org-name-text { min-width: 0; overflow-wrap: anywhere; }
+.adm-me > div { min-width: 0; }
 
 /* == 02 BUTTON EXTRAS (variants style.css does not have) ============== */
 .btn-danger { background: var(--danger); color: #fff; border-color: var(--danger); }

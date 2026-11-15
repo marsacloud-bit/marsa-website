@@ -495,7 +495,7 @@
   /* ------------------------------------------------------------------
      Legacy step 8 — dash_tx_counts KPI tiles (legacy fastBuildDashboardStats_ / renderDashboardStats /
      applyDashboardStatFilter): every tile opens the list that reproduces its number (docs/online/LEGACY_REPORTS_AR.md §1):
-     status → #transactions?status=X, Fasah stage → ?stage=X, Daftra drafts → ?daftra_state=draft (admin.js sends these
+     the total → #register?reset=1 (the statement unfiltered), status → #transactions?status=X, Fasah stage → ?stage=X, Daftra drafts → ?daftra_state=draft (admin.js sends these
      to #register), appointments today / transported containers → #reports/movements. Strings: 'lrpt' (assets/i18n/lrpt.js).
      ------------------------------------------------------------------ */
   var DECL_STAGES = ['accepted', 'cco_review_done', 'awaiting_duty_payment', 'release_ready', 'released'];
@@ -515,6 +515,10 @@
     var status = OPS_ORDER.map(function (c) {
       return { id: 'st_' + c, label: lbl(api, 'operational_status', c), value: num(bs[c]) || 0, href: '#transactions' + q(Object.assign({ status: c }, br)) };
     });
+    // «إجمالي المعاملات» opens «كشف المعاملات» with no filters (reset=1 drops the statement's remembered filters; only the
+    // dashboard branch, when one is chosen, is kept so the list reproduces the number)
+    status.unshift({ id: 'tx_total', label: lt(api, 'k_tx_total'), value: d.total, href: '#register' + q(Object.assign({ reset: '1' }, br)), tone: 'brand',
+      foot: lt(api, 'k_tx_total_foot', { o: count(api, d.open), c: count(api, d.cancelled) }) });
     var stages = DECL_STAGES.map(function (c) {
       return { id: 'stage_' + c, label: lbl(api, 'declaration_status', c), value: num(ds[c]) || 0, href: '#transactions' + q(Object.assign({ stage: c }, br)),
         tone: c === 'awaiting_duty_payment' ? 'warning' : null };

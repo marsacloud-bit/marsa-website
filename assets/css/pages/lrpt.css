@@ -80,6 +80,13 @@
 [dir="ltr"] .rpt-table tbody tr.lrpt-row-warning > td:first-child { box-shadow: inset 3px 0 0 var(--warning); }
 [dir="ltr"] .rpt-table tbody tr.lrpt-row-critical > td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
 .rpt-table tbody tr.is-cancelled > td { color: var(--muted); }
+/* a click anywhere on a statement row opens the transaction (the ref link stays the keyboard target) */
+.lrpt-register .rpt-table tbody tr.is-clickable { cursor: pointer; }
+.lrpt-register .rpt-table tbody tr.is-clickable:hover > td { background-image: linear-gradient(rgba(20, 163, 168, .06), rgba(20, 163, 168, .06)); }
+.lrpt-register .rpt-table tbody tr.is-clickable:focus-within > td { background-image: linear-gradient(rgba(20, 163, 168, .08), rgba(20, 163, 168, .08)); }
+.lrpt-register .rpt-table tbody tr.is-clickable .lrpt-ctrs { cursor: auto; }
+.lrpt-register .rpt-table tbody tr.is-clickable .lrpt-ctrs[title], .lrpt-register .rpt-table tbody tr.is-clickable .lrpt-ctr { cursor: help; }
+.lrpt-dft-banner-box:empty, .lrpt-banner-box:empty { display: none; }
 
 /* ---- trips by carrier / driver ---- */
 .lrpt-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }

@@ -171,3 +171,12 @@ button.ops-kpi { font: inherit; color: inherit; width: 100%; cursor: pointer; }
 .docb-tx-batches { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: var(--fs-sm); }
 .docb-tx-batches .adm-sub { display: inline; }
 @media (max-width: 640px) { .docb-tx-dl { grid-template-columns: 1fr; } }
+
+/* legacy gaps: new-transaction dialog (admin.js txNew) — seal / size per container, clear-form button */
+.adm-ctr-details { display: grid; gap: 6px; margin-block-start: 10px; min-width: 0; }
+.adm-ctr-details:empty { display: none; }
+.adm-ctr-details .table-wrap { overflow-x: auto; }
+.adm-ctr-details td { vertical-align: middle; }
+.adm-ctr-details .form-control { min-width: 8ch; text-transform: uppercase; }
+.adm-txnew-tools { justify-content: flex-end; margin-block-start: 12px; }
+@media (max-width: 640px) { .adm-txnew-tools .btn { width: 100%; } }

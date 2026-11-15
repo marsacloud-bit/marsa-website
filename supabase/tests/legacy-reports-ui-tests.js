@@ -496,7 +496,7 @@ const ROWS = [
   { id: TX3, ref: 'T-3', client_name: 'البحر', operational_status: 'closed', declaration_status: null, bl_number: 'BL3', unit_count: 1, cargo_unit_type: 'roro', chassis_no: 'JTDBR32E720012345', vehicle_plate_no: 'ABC 123', containers: [], port_code: 'SAJED',
     port_name: 'ميناء جدة الإسلامي', attention: null, daftra: { state: 'issued', number: 'INV-9' }, updated_at: '2026-11-01T10:00:00Z' }
 ];
-const TOTALS = { count: 3, containers: 3, units: 4, attention: { critical: 1, warning: 1, total: 2 }, by_status: { transport: 1, new: 1, closed: 1 } };
+const TOTALS = { count: 3, containers: 3, units: 4, attention: { critical: 1, warning: 1, total: 2 }, by_status: { transport: 1, new: 1, closed: 1 }, by_daftra_state: { none: 1, draft: 1, issued: 1 } };
 function rtApi(calls, rows) {
   rows = rows || ROWS;
   return {
@@ -656,6 +656,60 @@ function rtApi(calls, rows) {
     check('the column filter survives the reload (same rows): still 2 rows', () => trs().length === 2 || trs().length);
   }
   {
+    // «مسودات دفترة: N — عرض المسودات فقط» (totals.by_daftra_state) + a click on a row opens the transaction
+    const ctx = context(), calls = [];
+    const api = mkApi(ctx, rtApi(calls), ['accountant']);
+    const root = ctx.document.createElement('div'); ctx.document.body.appendChild(root);
+    ctx.w.MarsaOps.views.register._reset();
+    await ctx.w.MarsaOps.views.register.render(root, api); await settle(20);
+    const db = () => root.querySelector('.lrpt-dft-banner'), dbtn = () => root.querySelector('.lrpt-dft-toggle');
+    check('Daftra drafts banner (finance reader): «مسودات دفترة: 1» from totals.by_daftra_state.draft, a «عرض المسودات فقط» button not pressed', () =>
+      (db() && /مسودات دفترة: 1/.test(db().textContent) && dbtn().textContent === 'عرض المسودات فقط' && dbtn().getAttribute('aria-pressed') === 'false') || textOf(db()));
+    calls.length = 0;
+    dbtn().click(); await settle(20);
+    check('… its button applies the Daftra-draft quick filter: reload with daftra_state=draft, in the hash, the chip pressed, the button now pressed «عرض كل حالات دفترة»', () => {
+      const a = calls.filter(c => c[0] === 'rt')[0];
+      return (a && a[1].daftra_state === 'draft' && /daftra_state=draft/.test(ctx.location.hash) && root.querySelector('[data-quick="daftra_draft"]').getAttribute('aria-pressed') === 'true'
+        && dbtn() && dbtn().getAttribute('aria-pressed') === 'true' && dbtn().textContent === 'عرض كل حالات دفترة') || J([calls, ctx.location.hash]);
+    });
+    dbtn().click(); await settle(20);
+    check('… pressed again it clears the Daftra filter', () => (calls.filter(c => c[0] === 'rt').pop()[1].daftra_state === undefined && !/daftra_state/.test(ctx.location.hash)) || ctx.location.hash);
+    const box = root.querySelector('.lrpt-reg-table'), rows = () => root.querySelectorAll('.lrpt-reg-table tbody tr');
+    const before = ctx.location.hash;
+    const clickOn = n => { ctx.location.hash = before; box.dispatch('click', { target: n }); return ctx.location.hash; };
+    check('statement rows: every data row is .is-clickable, the totals row is not', () =>
+      (rows().length === 3 && rows().every(r => /is-clickable/.test(r.className)) && !/is-clickable/.test(root.querySelector('.lrpt-reg-table tfoot tr').className || '')) || rows().map(r => r.className));
+    check('a click on a plain cell of a row opens #tx/<id> (the ref link\'s target)', () => {
+      const td = rows()[0].querySelectorAll('td')[1];
+      return clickOn(td) === '#tx/' + TX1 && clickOn(rows()[1].querySelectorAll('td')[10]) === '#tx/' + TX2 || ctx.location.hash;
+    });
+    check('a click on a link / the container list / the totals row keeps its own behaviour (no row navigation)', () => {
+      const r0 = rows()[0];
+      const a = clickOn(r0.querySelector('a.ops-ref').querySelector('bdi') || r0.querySelector('a.ops-ref'));
+      const c = clickOn(r0.querySelector('.lrpt-ctrs-no'));
+      const f = clickOn(root.querySelector('.lrpt-reg-table tfoot td'));
+      return (a === before && c === before && f === before) || J([a, c, f]);
+    });
+    check('a text selection never navigates', () => {
+      ctx.w.getSelection = () => 'MSCU1234567';
+      const h = clickOn(rows()[0].querySelectorAll('td')[1]);
+      delete ctx.w.getSelection;
+      return h === before || h;
+    });
+    check('the ref link stays the keyboard target (a real <a href="#tx/…">), rows add no tabindex', () =>
+      (rows()[0].querySelector('a.ops-ref').getAttribute('href') === '#tx/' + TX1 && rows().every(r => r.getAttribute('tabindex') == null)) || 'kbd');
+    // #register?reset=1 (the dashboard total tile) drops the remembered filters
+    const R = ctx.w.MarsaOps.views.register;
+    const r2 = ctx.document.createElement('div'); ctx.document.body.appendChild(r2);
+    await R.render(r2, mkApi(ctx, rtApi(calls), ['accountant'], { hashQuery: () => ({ vessel: 'MSC X' }) })); await settle(20);
+    calls.length = 0;
+    const r3 = ctx.document.createElement('div'); ctx.document.body.appendChild(r3);
+    await R.render(r3, mkApi(ctx, rtApi(calls), ['accountant'], { hashQuery: () => ({ reset: '1' }) })); await settle(20);
+    const rq = calls.filter(c => c[0] === 'rt').pop();
+    check('#register?reset=1 opens the statement unfiltered (the remembered vessel filter dropped) and the hash loses reset', () =>
+      (rq && J(Object.keys(rq[1]).sort()) === J(['limit', 'offset']) && !/reset/.test(ctx.location.hash)) || J([rq, ctx.location.hash]));
+  }
+  {
     const ctx = context(), calls = [];
     const api = mkApi(ctx, rtApi(calls), ['clearance_staff'], { hashQuery: () => ({ stage: 'released', status: 'transport', branchId: BR }) });
     const root = ctx.document.createElement('div'); ctx.document.body.appendChild(root);
@@ -665,7 +719,8 @@ function rtApi(calls, rows) {
     check('a dashboard tile link (?stage=released&status=transport&branchId=…) becomes the filters', () =>
       (rt && rt[1].declaration_status === 'released' && rt[1].operational_status === 'transport' && rt[1].branch_id === BR) || J(rt));
     check('a non-finance reader: no Daftra column, no «مسودات دفترة فقط» chip, no Daftra filter', () =>
-      (!root.querySelectorAll('thead th').some(th => /فاتورة دفترة/.test(th.textContent)) && !root.querySelector('[data-quick="daftra_draft"]') && !root.querySelector('[name="daftra_state"]')) || 'daftra visible');
+      (!root.querySelectorAll('thead th').some(th => /فاتورة دفترة/.test(th.textContent)) && !root.querySelector('[data-quick="daftra_draft"]') && !root.querySelector('[name="daftra_state"]')
+        && !root.querySelector('.lrpt-dft-banner')) || 'daftra visible');
     check('the advanced filters are open when the query set one of them; every field has a label', () => {
       const det = root.querySelector('.lrpt-adv');
       return (det && det.open === true && root.querySelectorAll('.rpt-field').every(g => !!g.querySelector('label'))) || 'adv';
@@ -701,8 +756,13 @@ function rtApi(calls, rows) {
       reportMovements: f => { calls.push(['mv', f]); return ok({ items: MV, total: 2, finance: true, totals: { count: 2, appointments: 1, cancelled: 1, delivered_containers: 1, overdue_returns: 1,
         by_movement_status: { delivered: 1, cancelled: 1 }, transport_value: { SAR: 500 }, revenue: { SAR: 700 }, rows_with_finance: 1 } }); },
       reportPayments: f => { calls.push(['pay', f]); return ok({ items: [{ id: TX3, ref: 'PAY-1', paid_at: '2026-11-05', currency: 'SAR', paid_amount: 100, review_status: 'pending', transactions: [{ id: TX1, ref: 'T-1' }] }], total: 1, totals: { count: 1, paid: { SAR: 100 }, by_review_status: { pending: 1 } } }); },
-      reportTrips: f => { calls.push(['trips', f]); return ok({ items: [{ id: 't1', transaction_id: TX1, transaction_ref: 'T-1', status: 'planned' }], total: 1,
-        totals: { count: 1, by_status: { planned: 1 }, by_carrier: [{ party_type: 'company', party_name: 'ناقل', trips: 1, value_by_currency: {} }], by_driver: [{ driver_id: null, driver_name: null, trips: 1 }] } }); },
+      reportTrips: f => { calls.push(['trips', f]); const fin = !!f.include_finance;
+        return ok({ items: [{ id: 't1', transaction_id: TX1, transaction_ref: 'T-1', status: 'planned', client_name: 'شركة الاختبار', party_type: 'company', party_name: 'ناقل',
+            driver_name: 'سالم', driver_phone: '0500000001', declaration_no: '1234567', transport_order_no: null, tx_transport_order_no: 'TO-77', tx_transport_order_date: '2026-11-09',
+            cost_amount: fin ? 300 : null, cost_currency: fin ? 'SAR' : null },
+          { id: 't2', transaction_id: TX2, transaction_ref: 'T-2', status: 'planned', party_type: null, transport_order_no: 'TR-5' }], total: 2,
+        totals: { count: 2, by_status: { planned: 2 }, by_carrier: [{ party_type: 'company', party_name: 'ناقل', trips: 1, value_by_currency: {} }], by_driver: [{ driver_id: null, driver_name: null, trips: 1 }],
+          transport_value: fin ? { SAR: 300 } : {}, finance: fin ? { cost_by_currency: { SAR: 300 }, sell_by_currency: {} } : undefined } }); },
       listClients: () => ok([]), listParties: () => ok([]), logReportExport: p => { calls.push(['log', p]); return ok({}); }, isOnline: () => true,
       listMemberships: () => ok([{ user_id: U1, role: 'clearance_staff', profiles: { full_name: 'سارة' } }, { user_id: 'cl1', role: 'client', profiles: { full_name: 'عميل' } }])
     };
@@ -747,6 +807,34 @@ function rtApi(calls, rows) {
       return (g && g.querySelectorAll('.lrpt-group-card').length === 2 && /شركة نقل/.test(g.textContent) && /بلا سائق/.test(g.textContent)) || textOf(g);
     });
     check('trips: the driver / party / q filters exist on the form', () => (!!r4.querySelector('[name="driver_q"]') && !!r4.querySelector('[name="party_type"]') && !!r4.querySelector('[name="party_q"]') && !!r4.querySelector('[name="q"]')) || 'fields');
+    check('trips (gaps): the detail table has العميل / نوع الجهة / أمر النقل / جوال السائق (after the driver) / رقم البيان; «غير محدد» for no party type; the TASTO order with its date', () => {
+      const h = r4.querySelectorAll('.rpt-table thead th').map(th => th.querySelector('.rpt-th-label') ? th.querySelector('.rpt-th-label').textContent : th.textContent.replace('▾', ''));
+      const rows = r4.querySelectorAll('.rpt-table tbody tr'), t0 = textOf(rows[0]), t1 = textOf(rows[1]);
+      const iD = h.indexOf('السائق'), iP = h.indexOf('جوال السائق');
+      return (['العميل', 'نوع الجهة', 'أمر النقل', 'رقم البيان'].every(x => h.indexOf(x) !== -1) && iD !== -1 && iP === iD + 1
+        && /شركة الاختبار/.test(t0) && /شركة نقل/.test(t0) && /TO-77/.test(t0) && /2026-11-09/.test(t0) && /0500000001/.test(t0) && /1234567/.test(t0)
+        && /غير محدد/.test(t1) && /TR-5/.test(t1) && !/قيمة النقل/.test(r4.querySelector('.rpt-tiles').textContent)) || J({ h, t0, t1 });
+    });
+    check('trips (gaps): the party-type filter offers «غير محدد» (unset); the movements one does not', () => {
+      const o = r4.querySelector('select[name="party_type"]').querySelectorAll('option').map(x => [x.getAttribute('value'), x.textContent]);
+      const om = r1.querySelector('select[name="party_type"]').querySelectorAll('option').map(x => x.getAttribute('value'));
+      return (o.some(x => x[0] === 'unset' && x[1] === 'غير محدد') && om.indexOf('unset') === -1) || J({ o, om });
+    });
+    const resT = await r4.querySelector('.rpt-export-bar').__run('csv');
+    check('trips export (gaps): the file has the new columns and values (same as the table)', () =>
+      (resT.ok && /العميل/.test(resT.text) && /أمر النقل/.test(resT.text) && /جوال السائق/.test(resT.text) && /رقم البيان/.test(resT.text) && /TO-77/.test(resT.text) && /0500000001/.test(resT.text) && /غير محدد/.test(resT.text)) || J([resT.error, resT.text && resT.text.slice(0, 300)]));
+    // the filters arrive as a hash query (#reports/trips?…), read once on render
+    async function showWith(roles, q) { const root = ctx.document.createElement('div'); ctx.document.body.appendChild(root); R._reset(); ctx.location.hash = '#reports/trips' + (q ? '?' + q : ''); await R.render(root, mkApi(ctx, A, roles), 'trips'); await settle(20); return root; }
+    await showWith(['clearance_staff'], 'party_type=unset');
+    const lastT = calls.filter(c => c[0] === 'trips').pop();
+    check('trips (gaps): «غير محدد» sends party_type = unset', () => (lastT && lastT[1].party_type === 'unset') || J(lastT));
+    const r5 = await showWith(['operations_manager'], 'include_finance=true');
+    check('trips (trip finance + costs shown): «إجمالي قيمة النقل (SAR)» tile from totals.transport_value', () =>
+      (/إجمالي قيمة النقل \(SAR\)/.test(r5.querySelector('.rpt-tiles').textContent) && /300/.test(r5.querySelector('.rpt-tiles').textContent)) || textOf(r5.querySelector('.rpt-tiles')));
+    const r5b = await showWith(['operations_manager'], '');
+    check('trips (trip finance, costs not shown): no transport value tile', () => !/قيمة النقل/.test(r5b.querySelector('.rpt-tiles').textContent) || textOf(r5b.querySelector('.rpt-tiles')));
+    const r6 = await showWith(['clearance_staff'], 'include_finance=true');
+    check('trips (no trip finance): no transport value tile even with include_finance remembered', () => !/قيمة النقل/.test(r6.querySelector('.rpt-tiles').textContent) || textOf(r6.querySelector('.rpt-tiles')));
   }
 
   /* ================================================================ DOM: dashboards */
@@ -768,6 +856,10 @@ function rtApi(calls, rows) {
     check('values: «فسح كلي» shows 3, drafts 3 with the split, the summary line', () => {
       const rel = root.querySelector('[data-dash-tile="stage_released"]'), dr = root.querySelector('[data-dash-tile="drafts"]');
       return (rel && /^3/.test(rel.textContent) && /فسح كلي/.test(rel.textContent) && dr && /^3/.test(dr.textContent) && /مستندات 2 · بطاقات مواعيد 1/.test(dr.textContent) && /الإجمالي 9/.test(root.textContent)) || textOf(rel);
+    });
+    check('«إجمالي المعاملات» is a clickable tile (the total, open / cancelled foot) that opens the statement unfiltered: #register?reset=1', () => {
+      const tt = root.querySelector('[data-dash-tile="tx_total"]');
+      return (tt && tt.tagName === 'A' && tt.getAttribute('href') === '#register?reset=1' && /^9/.test(tt.textContent) && /إجمالي المعاملات/.test(tt.textContent) && /المفتوحة 7 · الملغاة 1/.test(tt.textContent)) || textOf(tt);
     });
     const root2 = ctx.document.createElement('div'); ctx.document.body.appendChild(root2);
     await ctx.w.MarsaDash.render(root2, 'ops', mkApi(ctx, { dashOps: () => ok({}), dashTxCounts: () => ok(Object.assign({}, counts, { daftra: null })) }, ['clearance_staff'])); await settle(20);

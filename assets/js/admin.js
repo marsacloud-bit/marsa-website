@@ -94,6 +94,8 @@
     direction: { import: 'استيراد', export: 'تصدير' },
     mode: { sea: 'بحري', air: 'جوي', land: 'بري' },
     client_type: { individual: 'فرد', business: 'منشأة' },
+    // 20261117000100 status_labels domain client_port_category (loaded by loadLabels when present)
+    client_port_category: { airport: 'مطار', port: 'ميناء', shared: 'مشترك' },
     contact_pref: { phone: 'اتصال هاتفي', whatsapp: 'واتساب', email: 'بريد إلكتروني' },
     source: { web: 'الموقع', portal: 'بوابة العميل', bulk: 'رفع جماعي', staff: 'موظف' },
     doc_source: { upload: 'رفع', staff_scan: 'مسح ضوئي من الموظف', email: 'بريد إلكتروني', whatsapp: 'واتساب', import: 'رفع جماعي', system: 'النظام' },
@@ -695,7 +697,7 @@
   function loadLabels() {
     var domains = ['operational_status', 'financial_status', 'request_status', 'container_return_status', 'document_kind', 'classification_status', 'contact_status', 'import_row_status', 'role',
       // legacy step 1 / 2 (20261117000100, 20261118000100)
-      'transaction_type', 'cargo_unit_type', 'transport_mode', 'transaction_state', 'movement_status'];
+      'transaction_type', 'cargo_unit_type', 'transport_mode', 'transaction_state', 'movement_status', 'client_port_category'];
     return Promise.all(domains.map(function (d) { return api.statusLabels(d); })).then(function (res) {
       res.forEach(function (r, i) {
         if (r.error || !r.data || !r.data.length) return;
@@ -1698,6 +1700,7 @@
       var rs = Array.isArray(x.reasons) ? x.reasons : (x.reasons ? [x.reasons] : (x.reason ? [x.reason] : []));
       return { id: x.client_id || x.id, name_ar: x.name_ar || x.name || '', name_en: x.name_en || null, cr_number: x.cr_number || null,
         vat_number: x.vat_number || null, is_active: x.is_active !== false, strength: st, score: x.score != null ? x.score : null,
+        daftra_client_code: x.daftra_client_code || null, port_category: x.port_category || null,
         reasons: rs.map(function (r) { return typeof r === 'object' && r ? (r.code || r.field || r.reason || JSON.stringify(r)) : String(r); }) };
     }).filter(function (x) { return x.id && UUID_RE.test(x.id); });
   }
@@ -1727,9 +1730,11 @@
       var p = payload || {};
       var mine = ++seq;
       list.textContent = '';
-      if (!nn(p.name) && !nn(p.vat_number) && !nn(p.cr_number)) { list.appendChild(el('p', { class: 'text-sm text-muted', text: t('match_need_data') })); return; }
+      if (!nn(p.name) && !nn(p.vat_number) && !nn(p.cr_number) && !nn(p.daftra_client_code)) { list.appendChild(el('p', { class: 'text-sm text-muted', text: t('match_need_data') })); return; }
       list.appendChild(el('p', { class: 'text-sm text-muted', text: t('loading') }));
-      call('matchClient', { name: nn(p.name), vat_number: nn(p.vat_number), cr_number: nn(p.cr_number) }).then(function (r) {
+      var q = { name: nn(p.name), vat_number: nn(p.vat_number), cr_number: nn(p.cr_number) };
+      if (nn(p.daftra_client_code)) q.daftra_client_code = nn(p.daftra_client_code);
+      call('matchClient', q).then(function (r) {
         if (mine !== seq) return;
         list.textContent = '';
         if (r.error) { list.appendChild(dAlert('warning', t('match_failed', { e: apiErr(r.error) }))); return; }
@@ -1738,11 +1743,15 @@
           el('div', null, [el('strong', { text: t('match_conflict') }), el('ul', { class: 'adm-list' }, conflicts.map(function (c) { return el('li', { text: c }); }))])]));
         if (!rows.length) { list.appendChild(el('p', { class: 'text-sm text-muted', text: t('match_none') })); return; }
         list.appendChild(el('ul', { class: 'adm-mini adm-match-rows' }, rows.slice(0, 8).map(function (x) {
-          var ids = [x.cr_number ? t('match_cr', { v: x.cr_number }) : null, x.vat_number ? t('match_vat', { v: x.vat_number }) : null].filter(Boolean).join(' · ');
+          // the ids as nodes: each value isolated in <bdi dir="ltr"> (a Latin code with - _ . / would reorder in Arabic text)
+          var ids = [], why = x.reasons.map(reasonText).join('، ');
+          [['match_code', x.daftra_client_code], ['match_cr', x.cr_number], ['match_vat', x.vat_number]].forEach(function (p) {
+            if (p[1]) ids.push(ids.length ? ' · ' : null, ltrTpl(p[0], p[1]));
+          });
           return el('li', { class: 'adm-mini-row' }, [
             el('span', { class: 'adm-mini-main' }, [
               el('span', { class: 'adm-mini-title' }, [el('bdi', { text: x.name_ar || x.name_en || '' }), x.is_active ? null : [' ', pillNode('danger', t('inactive'))]]),
-              el('span', { class: 'adm-mini-sub', text: [ids, x.reasons.map(reasonText).join('، ')].filter(Boolean).join(' — ') })
+              el('span', { class: 'adm-mini-sub' }, ids.concat(ids.length && why ? ' — ' : null, why || null))
             ]),
             el('span', { class: 'adm-mini-side' }, [pillNode(MATCH_TONE[x.strength], t('match_' + x.strength)), ' ',
               dBtn(t('match_pick'), 'btn-secondary', function () { onPick(x); })])
@@ -1750,7 +1759,8 @@
         })));
       });
     }
-    return { node: node, run: run };
+    function clear() { seq++; list.textContent = ''; }
+    return { node: node, run: run, clear: clear };
   }
   // put a candidate into a client <select> (adding the option when the list does not hold it) and select it
   function pickClientOption(sel, x) {
@@ -1759,6 +1769,54 @@
     sel.value = x.id;
     sel.dispatchEvent(new Event('change', { bubbles: true }));
     toast(t('match_picked', { n: x.name_ar || x.name_en || '' }), 'info');
+  }
+
+  /* ------------------------------------------------------------------
+     20261201000100 legacy gaps: the client category (clients.port_category, status_labels domain
+     client_port_category) + the Daftra client code (set_client_legacy_fields), and the follow-up
+     employee of a transaction (transactions.responsible_user_id, list_assignable_staff)
+     ------------------------------------------------------------------ */
+  var PORT_CATS = ['airport', 'port', 'shared'];
+  // as set_client_legacy_fields accepts it: Latin letters / digits (- _ . /), up to 40, starting with a letter or digit
+  var DAFTRA_CODE_RE = /^[A-Za-z0-9][A-Za-z0-9_.\/-]{0,39}$/;
+  // Arabic-Indic / Persian digits → Western, nothing else (app.to_western): a code typed on an Arabic keyboard
+  function westernDigits(s) {
+    return s == null ? s : String(s).replace(/[\u0660-\u0669\u06F0-\u06F9]/g, function (d) { return String(d.charCodeAt(0) & 15); });
+  }
+  // a code inside an <option> (text only): wrapped in Unicode isolates (LRI … PDI), as <bdi dir="ltr"> does elsewhere
+  function ltrText(v) { return '\u2066' + v + '\u2069'; }
+  // t(key, { v }) as nodes, the value in <bdi dir="ltr">
+  function ltrTpl(key, v) {
+    var parts = t(key, { v: '\u0001' }).split('\u0001');
+    return parts.length < 2 ? [el('bdi', { dir: 'ltr', text: String(v) })] : [parts[0], el('bdi', { dir: 'ltr', text: String(v) }), parts.slice(1).join('')];
+  }
+  // a name typed as one code-like token: match_client also tries it as a Daftra client code
+  var CODE_TOKEN_RE = /^[A-Za-z0-9_.\/-]{2,}$/;
+  function portCatOptions() {
+    return [['', t('client_cat_none')]].concat((ORDER.client_port_category || PORT_CATS).map(function (k) { return [k, lbl('client_port_category', k)]; }));
+  }
+  // fill a follow-up employee <select> (first option = "none") from list_assignable_staff: org-wide members + the
+  // branch's members. The wanted user stays an option when the list does not hold it; a failed load keeps the options.
+  function fillStaffSelect(sel, branchId, want, hint) {
+    var mine = (sel.__staffSeq || 0) + 1;
+    sel.__staffSeq = mine;
+    if (want === undefined) want = sel.value;
+    return call('listAssignableStaff', { orgId: S.orgId, branchId: branchId || null }).then(function (r) {
+      if (sel.__staffSeq !== mine) return r;
+      if (r.error) { if (hint) hint.textContent = t('staff_load_failed', { e: apiErr(r.error) }); return r; }
+      var now = sel.value;
+      while (sel.options.length > 1) sel.remove(1);
+      rowsOf(r.data).forEach(function (u) {
+        if (!u || !u.user_id) return;
+        if (u.full_name) S.profiles[u.user_id] = u.full_name;
+        var me = S.ctx && u.user_id === S.ctx.user_id;
+        sel.appendChild(el('option', { value: u.user_id, text: (u.full_name || who(u.user_id)) + (me && u.full_name ? ' (' + t('you') + ')' : '') }));
+      });
+      var keep = now !== want && now ? now : want;   // a choice made while the list was loading wins
+      if (keep && !Array.prototype.some.call(sel.options, function (o) { return o.value === keep; })) sel.appendChild(el('option', { value: keep, text: who(keep) }));
+      sel.value = keep || '';
+      return r;
+    });
   }
 
   /* ------------------------------------------------------------------
@@ -1782,12 +1840,48 @@
     var branches = branchesFor(R.opsWriter);
     if (!branches.length) return toast(t('txnew_no_branch'), 'error');
     var mp = null, clientSel = null, LX = legacyTx(), lxf = null, dupAck = null;
+    // client category on the form: orig = the picked client's value (undefined while unknown), touched = changed by hand
+    var cat = { orig: null, touched: false };
     openDialog({
       title: t('txnew_title'), submit: t('txnew_submit'), wide: true, body: '',
       onOpen: function (b) {
         clientSel = el('select', { class: 'form-control', id: 'adg-client_id', name: 'client_id' }, [el('option', { value: '', text: t('txnew_client_choose') })]);
         var nameIn, vatIn, crIn;
-        mp = matchPanel(function (x) { pickClientOption(clientSel, x); });
+        var known = {};   // client id → { daftra_client_code, port_category } (matches / client list / getClient)
+        mp = matchPanel(function (x) { known[x.id] = { daftra_client_code: x.daftra_client_code, port_category: x.port_category }; pickClientOption(clientSel, x); });
+        // the picked client's Daftra code (read-only) and category (prefilled; a change is saved to the client after the create)
+        var codeOut = el('input', { class: 'form-control', id: 'adg-client_daftra_code', type: 'text', dir: 'ltr', readOnly: true, placeholder: t('txnew_code_none') });
+        var grpCode = el('div', { class: 'form-group' }, [el('label', { class: 'form-label', for: 'adg-client_daftra_code', text: t('client_daftra_code') }), codeOut]);
+        var grpCat = dField({ name: 'port_category', label: t('client_port_category'), type: 'select', value: '', options: portCatOptions(), hint: t('txnew_cat_hint') });
+        var catSel = grpCat.querySelector('select');
+        catSel.addEventListener('change', function () { cat.touched = true; });
+        var clientSeq = 0;
+        function applyClient(k) {
+          codeOut.value = k.daftra_client_code || '';
+          cat.orig = k.port_category || null;
+          if (!cat.touched) catSel.value = cat.orig || '';
+        }
+        function showClient() {
+          var id = clientSel.value, mine = ++clientSeq;
+          cat.touched = false;
+          if (!id) { codeOut.value = ''; cat.orig = null; catSel.value = ''; return; }
+          if (known[id]) return applyClient(known[id]);
+          codeOut.value = ''; cat.orig = undefined; catSel.value = '';
+          api.getClient(id).then(function (r) {
+            var c = r && !r.error ? r.data : null;
+            if (mine !== clientSeq || !c || !('port_category' in c || 'daftra_client_code' in c)) return;
+            known[id] = { daftra_client_code: c.daftra_client_code || null, port_category: c.port_category || null };
+            applyClient(known[id]);
+          });
+        }
+        clientSel.addEventListener('change', showClient);
+        // follow-up employee: the current user by default; the list follows the chosen branch
+        var me = S.ctx && S.ctx.user_id ? S.ctx.user_id : '';
+        var staffSel = el('select', { class: 'form-control', id: 'adg-responsible_user_id', name: 'responsible_user_id' },
+          [el('option', { value: '', text: t('txnew_responsible_none') }), me ? el('option', { value: me, text: who(me) }) : null]);
+        staffSel.value = me;
+        var staffHint = el('span', { class: 'form-hint', text: t('txnew_responsible_hint') });
+        var grpStaff = el('div', { class: 'form-group' }, [el('label', { class: 'form-label', for: 'adg-responsible_user_id', text: t('tx_responsible') }), staffSel, staffHint]);
         var matchBtn = dBtn(t('txnew_match'), 'btn-secondary', function () { mp.run({ name: nameIn.value, vat_number: vatIn.value, cr_number: crIn.value }); });
         var grpName = dField({ name: 'client_name', label: t('txnew_client_name'), max: 160, hint: t('txnew_client_name_hint') });
         var grpVat = dField({ name: 'client_vat', label: t('col_vat'), ltr: true, max: 15 });
@@ -1795,6 +1889,33 @@
         nameIn = grpName.querySelector('input'); vatIn = grpVat.querySelector('input'); crIn = grpCr.querySelector('input');
         var grpCtr = dField({ name: 'containers', label: t('col_containers'), type: 'textarea', rows: 3, full: true, ltr: true, hint: t('txnew_containers_hint') });
         grpCtr.setAttribute('data-lx-hide-roro', '');   // Ro-Ro carries no containers (tx-legacy.js toggles it)
+        // optional seal no. + size / type per container: one row per valid number of the list (values kept by number)
+        var ctrVals = {}, ctrBox = el('div', { class: 'adm-ctr-details', 'data-ctr-details': '' }), ctrTimer = null;
+        grpCtr.appendChild(ctrBox);
+        function ctrRows() {
+          Array.prototype.forEach.call(ctrBox.querySelectorAll('[data-ctr]'), function (x) {
+            var no = x.getAttribute('data-ctr');
+            ctrVals[no] = ctrVals[no] || {};
+            ctrVals[no][x.getAttribute('data-k')] = x.value;
+          });
+          ctrBox.textContent = '';
+          var list = parseContainers(grpCtr.querySelector('textarea').value).good;
+          if (!list.length) return;
+          var inp = function (no, k, max, label) {
+            return el('input', { class: 'form-control', type: 'text', dir: 'ltr', maxlength: max, name: 'ctr_' + k + '_' + no, 'data-ctr': no, 'data-k': k,
+              'aria-label': label + ' ' + no, autocomplete: 'off', value: (ctrVals[no] && ctrVals[no][k]) || '' });
+          };
+          append(ctrBox, [
+            el('span', { class: 'form-label', text: t('txnew_ctr_details') }),
+            dTable([t('txnew_ctr_no'), t('txnew_ctr_seal'), t('txnew_ctr_size')], list.map(function (no) {
+              return el('tr', null, [el('td', null, el('bdi', { dir: 'ltr', class: 'num', text: no })),
+                el('td', null, inp(no, 'seal', 30, t('txnew_ctr_seal'))), el('td', null, inp(no, 'size', 10, t('txnew_ctr_size')))]);
+            })),
+            el('span', { class: 'form-hint', text: t('txnew_ctr_details_hint') })
+          ]);
+        }
+        grpCtr.querySelector('textarea').addEventListener('input', function () { if (ctrTimer) clearTimeout(ctrTimer); ctrTimer = setTimeout(ctrRows, 300); });
+        grpCtr.querySelector('textarea').addEventListener('change', function () { if (ctrTimer) clearTimeout(ctrTimer); ctrRows(); });
         lxf = LX ? LX.txFields(opsApi(), null) : null;
         var dup = LX ? LX.dupPanel(opsApi(), function () {
           var u = b.querySelector('[name=cargo_unit_type]'), roro = !!(u && u.value === 'roro'), ch = b.querySelector('[name=chassis_no]');
@@ -1808,11 +1929,13 @@
               options: (branches.length > 1 ? [['', t('txnew_branch_choose')]] : []).concat(branches.map(function (x) { return [x.id, ((isEn() && x.name_en) || x.name_ar) + ' (' + x.code + ')']; })) }),
             dField({ name: 'operation', label: t('col_operation'), type: 'select', req: true, value: 'import', options: [['import', lbl('direction', 'import')], ['export', lbl('direction', 'export')]] }),
             dField({ name: 'mode', label: t('txnew_mode'), type: 'select', req: true, value: 'sea', options: [['sea', lbl('mode', 'sea')], ['air', lbl('mode', 'air')], ['land', lbl('mode', 'land')]] }),
+            grpStaff,
             el('h4', { class: 'adm-full adm-form-sep', text: t('txnew_client_sec') }),
             grpName, grpVat, grpCr,
             el('div', { class: 'form-group adm-full' }, matchBtn),
             mp.node,
             el('div', { class: 'form-group adm-full' }, [el('label', { class: 'form-label', for: 'adg-client_id', text: t('col_client') }), clientSel]),
+            grpCode, grpCat,
             dField({ name: 'new_client', label: t('txnew_new_client'), type: 'checkbox', full: true, hint: t('txnew_new_client_hint') }),
             dField({ name: 'save_alias', label: t('txnew_save_alias'), type: 'checkbox', value: true, full: true, hint: t('txnew_save_alias_hint') }),
             el('h4', { class: 'adm-full adm-form-sep', text: t('txnew_bl_sec') }),
@@ -1827,26 +1950,31 @@
             dField({ name: 'eta', label: t('txnew_eta'), type: 'date' }),
             dField({ name: 'goods_description', label: t('txnew_goods'), type: 'textarea', max: 1000, full: true }),
             grpCtr
-          ].concat(lxf ? lxf.nodes : [], dup ? [el('h4', { class: 'adm-full adm-form-sep', text: LX.t('dup_title') }), dup.node] : []))
+          ].concat(lxf ? lxf.nodes : [], dup ? [el('h4', { class: 'adm-full adm-form-sep', text: LX.t('dup_title') }), dup.node] : [])),
+          el('div', { class: 'btn-group adm-txnew-tools' }, dBtn(t('txnew_clear'), 'btn-ghost', function () { clearAsk(); }, { 'data-txnew-clear': '' }))
         ]);
+        var branchSel = b.querySelector('[name=branch_id]');
+        fillStaffSelect(staffSel, branchSel.value, me, staffHint);
+        branchSel.addEventListener('change', function () { fillStaffSelect(staffSel, branchSel.value, undefined, staffHint); });
         if (lxf) lxf.bind(b);
         if (dup) ['bl_number', 'containers', 'chassis_no', 'cargo_unit_type'].forEach(function (n) {
           var x = b.querySelector('[name=' + n + ']');
           if (x) { x.addEventListener('change', dup.soon); if (n === 'containers' || n === 'bl_number') x.addEventListener('blur', dup.soon); }
         });
-        // client typeahead (legacy): match_client runs while typing a name (3+ letters), a full VAT (15) or CR (10)
+        // client typeahead (legacy): match_client runs while typing a name (2+ letters, or a Daftra client code), a full VAT (15) or CR (10)
         var typing = null;
         function typeahead() {
           if (typing) clearTimeout(typing);
           typing = setTimeout(function () {
             var digits = function (x) { return String(x || '').replace(/[٠-٩]/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'.indexOf(d); }).replace(/\D/g, ''); };
-            if (String(nameIn.value || '').trim().length >= 3 || digits(vatIn.value).length === 15 || digits(crIn.value).length === 10) {
+            var nm = String(nameIn.value || '').trim();
+            if (nm.length >= 2 || CODE_TOKEN_RE.test(nm) || digits(vatIn.value).length === 15 || digits(crIn.value).length === 10) {
               mp.run({ name: nameIn.value, vat_number: vatIn.value, cr_number: crIn.value });
             }
           }, 450);
         }
         [nameIn, vatIn, crIn].forEach(function (x) { x.addEventListener('input', typeahead); });
-        if (LX) grpName.appendChild(el('span', { class: 'form-hint', text: LX.t('client_typing') }));
+        grpName.appendChild(el('span', { class: 'form-hint', text: t('txnew_client_typing') }));
         // B/L type follows the mode (air → AWB) until the user picks a type by hand
         var modeSel = b.querySelector('[name=mode]'), typeSel = b.querySelector('[name=bl_type]'), typeTouched = false;
         if (modeSel && typeSel) {
@@ -1857,10 +1985,43 @@
           clientSel.removeEventListener('focus', onFirst);
           api.listClients({ orgId: S.orgId, limit: 100 }).then(function (cr) {
             (cr.data || []).forEach(function (c) {
-              if (!Array.prototype.some.call(clientSel.options, function (o) { return o.value === c.id; })) clientSel.appendChild(el('option', { value: c.id, text: c.name_ar }));
+              if (c && ('port_category' in c || 'daftra_client_code' in c) && !known[c.id]) known[c.id] = { daftra_client_code: c.daftra_client_code || null, port_category: c.port_category || null };
+              if (!Array.prototype.some.call(clientSel.options, function (o) { return o.value === c.id; }))
+                clientSel.appendChild(el('option', { value: c.id, text: c.name_ar + (c.daftra_client_code ? ' — ' + ltrText(c.daftra_client_code) : '') }));
             });
           });
         });
+        // «تفريغ النموذج»: every control back to the value the form opened with (asks first when something was entered)
+        var snap = Array.prototype.map.call(b.querySelectorAll('input, select, textarea'), function (x) { return { n: x, v: x.value, c: x.checked }; });
+        var isBox = function (x) { return x.type === 'checkbox' || x.type === 'radio'; };
+        function dirty() {
+          return snap.some(function (s) { return b.contains(s.n) && (isBox(s.n) ? s.n.checked !== s.c : s.n.value !== s.v); })
+            || Array.prototype.some.call(ctrBox.querySelectorAll('input'), function (x) { return !!x.value; });
+        }
+        function clearNow() {
+          if (typing) clearTimeout(typing);
+          if (ctrTimer) clearTimeout(ctrTimer);
+          ctrVals = {}; ctrBox.textContent = '';
+          snap.forEach(function (s) {
+            var x = s.n;
+            if (!b.contains(x) || (isBox(x) ? x.checked === s.c : x.value === s.v)) return;
+            if (isBox(x)) x.checked = s.c; else x.value = s.v;
+            if (x.tagName !== 'SELECT' && !isBox(x)) x.dispatchEvent(new Event('input', { bubbles: true }));
+            x.dispatchEvent(new Event('change', { bubbles: true }));   // dependent parts (Ro-Ro, B/L type, staff list) follow
+          });
+          if (typing) clearTimeout(typing);
+          mp.clear();
+          codeOut.value = ''; cat.orig = null; cat.touched = false; catSel.value = '';
+          typeTouched = false; dupAck = null;
+          dlgErr.hidden = true; dlgErr.textContent = '';
+          toast(t('txnew_cleared'), 'info');
+          var first = b.querySelector('select, input:not([readonly]), textarea');
+          if (first) first.focus();
+        }
+        function clearAsk() {
+          if (!dirty()) return clearNow();
+          askConfirm({ title: t('txnew_clear_title'), text: t('txnew_clear_confirm'), okText: t('txnew_clear'), danger: true }).then(function (ok) { if (ok) clearNow(); });
+        }
       },
       onSubmit: function (form) {
         var v = function (k) { return nn(fval(form, k)); };
@@ -1876,6 +2037,25 @@
         var roro = lx.patch.cargo_unit_type === 'roro';
         var ctr = roro ? { good: [], bad: [] } : parseContainers(fval(form, 'containers'));
         if (ctr.bad.length) return t('txnew_bad_containers', { list: ctr.bad.slice(0, 5).join(', ') });
+        // seal no. / size-type per container (optional; upper case without spaces, like the server; ≤ 30 / ≤ 10)
+        var ctrMeta = {}, ctrErr = null;
+        ctr.good.forEach(function (no) {
+          var g = function (k) { var x = form.elements['ctr_' + k + '_' + no]; var s0 = x ? String(x.value || '').toUpperCase().replace(/\s+/g, '') : ''; return s0 || null; };
+          var m = { seal_no: g('seal'), size_type: g('size') };
+          if (!ctrErr && m.seal_no && m.seal_no.length > 30) ctrErr = t('txnew_bad_seal', { no: no });
+          if (!ctrErr && m.size_type && m.size_type.length > 10) ctrErr = t('txnew_bad_size', { no: no });
+          ctrMeta[no] = m;
+        });
+        if (ctrErr) return ctrErr;
+        var ctrRow = function (no, blId) {
+          var o = { container_no: no }, m = ctrMeta[no] || {};
+          if (blId) o.bl_id = blId;
+          if (m.seal_no) o.seal_no = m.seal_no;
+          if (m.size_type) o.size_type = m.size_type;
+          return o;
+        };
+        var resp = v('responsible_user_id'), pcat = v('port_category');
+        var catSend = cat.touched && (cat.orig === undefined ? pcat != null : pcat !== cat.orig);
         var bl = v('bl_number') ? v('bl_number').toUpperCase() : null;
         // legacy validateTransaction_: B/L, port from the approved list, ≥ 1 container (or the Ro-Ro chassis, checked above).
         // Sea and air only: a land shipment may travel without a B/L / AWB, a port of the list or containers.
@@ -1907,6 +2087,7 @@
             port_of_loading: v('port_of_loading'), port_of_discharge: v('port_of_discharge'), country: v('country'),
             goods_description: v('goods_description'), shipping_line: v('shipping_line'), eta: v('eta'), container_count: ctr.good.length };
           Object.keys(lx.patch).forEach(function (k) { if (lx.patch[k] != null) row[k] = lx.patch[k]; });
+          if (resp && UUID_RE.test(resp)) row.responsible_user_id = resp;
           return api.createTransaction(row).then(function (tr) {
             if (tr.error) return apiErr(tr.error);
             var tx = tr.data;
@@ -1934,7 +2115,7 @@
               return ctr.good.reduce(function (p, no) {
                 return p.then(function () {
                   if (dupHit) return null;
-                  return api.addContainer(tx.id, blId ? { container_no: no, bl_id: blId } : { container_no: no }).then(function (r) {
+                  return api.addContainer(tx.id, ctrRow(no, blId)).then(function (r) {
                     if (isDup(r.error)) dupHit = r.error; else if (r.error) warn.push(no + ': ' + apiErr(r.error));
                   });
                 });
@@ -1951,6 +2132,14 @@
                   return true;
                 }
                 return { stop: (LX ? LX.t('dup_race_cancelled', { ref: tx.ref || '', e: msg }) : msg) };
+              });
+            }).then(function (r) {
+              if (r === true || (r && r.stop)) return r;
+              // the client category changed on the form: saved to the client now (a failure is a note; the transaction stays)
+              if (!catSend) return null;
+              return call('setClientLegacyFields', cid, { port_category: pcat }).then(function (sr) {
+                if (sr.error) warn.push(t('txnew_warn_cat', { e: apiErr(sr.error) }));
+                return null;
               });
             }).then(function (r) {
               if (r === true || (r && r.stop)) return r;
@@ -2086,7 +2275,7 @@
           ['رقم البوليصة', ltr(t.bl_number), true], ['رقم البيان الجمركي', ltr(t.declaration_no), true],
           ['تاريخ البيان', fmtDate(t.declaration_date), true], ['نوع البيان', t.declaration_type],
           ['عدد الحاويات', num(t.container_count), true], ['عدد الطرود', t.package_count != null ? num(t.package_count) : T.common.none, true],
-          ['تاريخ الوصول المتوقع', fmtDate(t.eta), true], ['المسؤول', t.responsible_user_id ? who(t.responsible_user_id) : T.common.none],
+          ['تاريخ الوصول المتوقع', fmtDate(t.eta), true], [tl('tx_responsible'), t.responsible_user_id ? esc(who(t.responsible_user_id)) : T.common.none, true],
           ['ملاحظات', t.notes]
         ]);
         var status = '<div class="adm-status-now"><div><span class="text-xs text-muted">الحالة التشغيلية</span>' + (cancelled ? pillHtml('danger', cancelledText()) : badge('operational_status', t.operational_status)) +
@@ -2254,6 +2443,9 @@
       title: 'تعديل بيانات المعاملة ' + t.ref, wide: true,
       // legacy step 2: port / terminal / cargo unit / transport mode / declaration notes (assets/js/ops/tx-legacy.js)
       onOpen: function (b) {
+        // the follow-up employee: org-wide members + the transaction branch's members (list_assignable_staff)
+        var rs = b.querySelector('[name=responsible_user_id]');
+        if (rs) fillStaffSelect(rs, t.branch_id, t.responsible_user_id || '', rs.parentNode.querySelector('.form-hint'));
         if (!LX) return;
         lxf = LX.txFields(opsApi(), t);
         var g = b.querySelector('.adm-form-grid'), cc = b.querySelector('[name=container_count]');
@@ -2273,6 +2465,9 @@
         field({ name: 'container_count', label: 'عدد الحاويات', type: 'number', value: t.container_count, attrs: ' min="0" step="1"' }) +
         field({ name: 'package_count', label: 'عدد الطرود', type: 'number', value: t.package_count, attrs: ' min="0" step="1"' }) +
         field({ name: 'eta', label: 'تاريخ الوصول المتوقع', type: 'date', value: t.eta }) +
+        field({ name: 'responsible_user_id', label: tl('tx_responsible'), type: 'select', hint: tl('tx_responsible_hint'),
+          options: '<option value="">' + esc(tl('txnew_responsible_none')) + '</option>' +
+            (t.responsible_user_id ? '<option value="' + esc(t.responsible_user_id) + '" selected>' + esc(who(t.responsible_user_id)) + '</option>' : '') }) +
         field({ name: 'notes', label: 'ملاحظات', type: 'textarea', rows: 2, value: t.notes, attrs: ' maxlength="2000"', full: true })
       ),
       onSubmit: function (form) {
@@ -2280,7 +2475,7 @@
         // declaration_no / date / type are not sent from here: the declarations section owns them
         // (correct / cancel + replace with a reason). The server refuses a renumber or a clear through the record.
         ['service', 'country', 'port_of_loading', 'port_of_discharge', 'goods_description', 'hs_code', 'shipping_line', 'bl_number',
-          'eta', 'notes'].forEach(function (k) { patch[k] = nn(fval(form, k)); });
+          'eta', 'notes', 'responsible_user_id'].forEach(function (k) { patch[k] = nn(fval(form, k)); });
         if (patch.hs_code && !/^[0-9]{4,12}$/.test(patch.hs_code)) return 'رمز HS يجب أن يكون من 4 إلى 12 رقمًا.';
         if (patch.bl_number) patch.bl_number = patch.bl_number.toUpperCase();
         var cc = nn(fval(form, 'container_count')), pc = nn(fval(form, 'package_count'));
@@ -2518,11 +2713,14 @@
         placeholder: t('ph_clients'), empty: t('empty_clients'), tools: [inactive],
         href: function (c) { return '#client/' + c.id; },
         rowClass: function (c) { return c.is_active ? null : 'adm-voided'; },
-        text: function (c) { return [c.name_ar, c.name_en, c.cr_number, c.vat_number, c.phone, c.email, c.national_address_short].join(' '); },
+        text: function (c) { return [c.name_ar, c.name_en, c.daftra_client_code, c.cr_number, c.vat_number, c.phone, c.email, c.national_address_short].join(' '); },
         columns: [
           { id: 'name', label: t('col_name'), value: function (c) { return c.name_ar; }, cell: function (c) {
             return [el('a', { class: 'cell-main', href: '#client/' + c.id, text: c.name_ar }), c.name_en ? el('span', { class: 'cell-sub', dir: 'ltr', text: c.name_en }) : null]; } },
           { id: 'type', label: t('col_type'), value: function (c) { return lbl('client_type', c.client_type); }, cell: function (c) { return lbl('client_type', c.client_type); } },
+          { id: 'daftra_code', label: t('col_daftra_code'), value: function (c) { return c.daftra_client_code; }, cell: function (c) { return dLtr(c.daftra_client_code); } },
+          { id: 'port_category', label: t('col_port_category'), value: function (c) { return c.port_category ? lbl('client_port_category', c.port_category) : ''; },
+            cell: function (c) { return c.port_category ? lbl('client_port_category', c.port_category) : T.common.none; } },
           { id: 'cr', label: t('col_cr'), value: function (c) { return c.cr_number; }, cell: function (c) { return dLtr(c.cr_number); } },
           { id: 'vat', label: t('col_vat'), value: function (c) { return c.vat_number; }, cell: function (c) { return dLtr(c.vat_number); } },
           { id: 'phone', label: t('col_phone'), value: function (c) { return c.phone; }, cell: function (c) { return dLtr(c.phone); } },
@@ -2545,7 +2743,9 @@
         canAny(R.opsWriter) ? '<button class="btn btn-sm btn-primary" type="button" data-act="client-edit" data-id="' + esc(c.id) + '">' + T.common.edit + '</button>' : '', '#clients');
       html += '<div class="adm-cols">' + card('البيانات الأساسية', kv([
         ['الاسم بالعربية', c.name_ar], ['الاسم بالإنجليزية', c.name_en ? '<bdi dir="ltr">' + esc(c.name_en) + '</bdi>' : T.common.none, true],
-        ['جهة الاتصال', c.contact_person], ['التصنيف', c.classification],
+        ['جهة الاتصال', c.contact_person], [t('client_classification_internal'), c.classification],
+        [t('client_daftra_code'), ltr(c.daftra_client_code), true],
+        [t('client_port_category'), c.port_category ? lbl('client_port_category', c.port_category) : T.common.none],
         ['السجل التجاري', ltr(c.cr_number), true], ['الرقم الضريبي', ltr(c.vat_number), true],
         ['الجوال', ltr(c.phone), true], ['البريد الإلكتروني', ltr(c.email), true], ['طريقة التواصل', lbl('contact_pref', c.preferred_contact)]
       ])) + card('العنوان الوطني', kv([
@@ -2624,6 +2824,7 @@
     var c = id ? CLIENT_CACHE[id] : { client_type: 'business', is_active: true, national_address: {} };
     if (!c) return;
     var a = c.national_address || {};
+    var legacyOk = canAny(R.opsWriter);
     openDialog({
       title: id ? 'تعديل بيانات العميل' : 'عميل جديد', wide: true,
       body: grid(
@@ -2636,7 +2837,11 @@
         field({ name: 'phone', label: 'الجوال', value: c.phone, ltr: true, type: 'tel', attrs: ' maxlength="10"', hint: 'مثل 0551234567' }) +
         field({ name: 'email', label: 'البريد الإلكتروني', value: c.email, ltr: true, type: 'email', attrs: ' maxlength="160"' }) +
         field({ name: 'preferred_contact', label: 'طريقة التواصل المفضلة', type: 'select', options: opts('contact_pref', c.preferred_contact, 'غير محدد') }) +
-        field({ name: 'classification', label: 'تصنيف العميل', value: c.classification, attrs: ' maxlength="60"' }) +
+        field({ name: 'classification', label: t('client_classification_internal'), value: c.classification, attrs: ' maxlength="60"' }) +
+        // 20261201000100: category + Daftra client code (set_client_legacy_fields, ops writers — the roles that open this dialog)
+        (legacyOk ? field({ name: 'port_category', label: t('client_port_category'), type: 'select',
+          options: portCatOptions().map(function (o) { return '<option value="' + esc(o[0]) + '"' + (o[0] === (c.port_category || '') ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') }) +
+          field({ name: 'daftra_client_code', label: t('client_daftra_code'), value: c.daftra_client_code, ltr: true, attrs: ' maxlength="40" autocomplete="off"', hint: t('client_daftra_code_hint') }) : '') +
         field({ name: 'national_address_short', label: 'العنوان الوطني المختصر', value: c.national_address_short, ltr: true, attrs: ' maxlength="8"', hint: '4 أحرف ثم 4 أرقام، مثل RRRD2929' }) +
         field({ name: 'a_building_no', label: 'رقم المبنى', value: a.building_no, attrs: ' maxlength="10"' }) +
         field({ name: 'a_street', label: 'الشارع', value: a.street, attrs: ' maxlength="120"' }) +
@@ -2668,14 +2873,32 @@
         if (row.phone && !/^0[0-9]{9}$/.test(row.phone)) return 'رقم الجوال يجب أن يبدأ بـ 0 ويتكون من 10 أرقام.';
         if (row.email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(row.email)) return 'البريد الإلكتروني غير صحيح.';
         if (row.national_address_short && !/^[A-Z]{4}[0-9]{4}$/.test(row.national_address_short)) return 'العنوان المختصر يجب أن يكون 4 أحرف إنجليزية ثم 4 أرقام.';
-        var p;
-        if (id) p = api.updateClient(id, row);
-        else { row.org_id = S.orgId; p = api.createClient(row); }
-        return p.then(function (r) {
-          if (r.error) return r.error.code === 'DUPLICATE' ? 'يوجد عميل بنفس السجل التجاري أو الرقم الضريبي.' : errText(r.error);
-          toast(T.common.saved, 'success');
-          if (!id && r.data) go('#client/' + r.data.id); else rerender();
-          return true;
+        // category / Daftra code: only the changed keys, through set_client_legacy_fields ('' clears)
+        var legacy = {};
+        if (legacyOk) {
+          var pc = nn(fval(form, 'port_category')), dc = westernDigits(nn(fval(form, 'daftra_client_code')));
+          if (dc && !DAFTRA_CODE_RE.test(dc)) return t('client_bad_daftra_code');
+          if (pc !== (c.port_category || null)) legacy.port_category = pc;
+          if (dc !== (c.daftra_client_code || null)) legacy.daftra_client_code = dc;
+        }
+        var hasLegacy = Object.keys(legacy).length > 0;
+        // editing: the category / code first (a taken code stops before anything is written); a new client: after the create
+        var preP = id && hasLegacy ? call('setClientLegacyFields', id, legacy) : Promise.resolve({ data: null, error: null });
+        return preP.then(function (lr) {
+          if (lr.error) return apiErr(lr.error);
+          var p;
+          if (id) p = api.updateClient(id, row);
+          else { row.org_id = S.orgId; p = api.createClient(row); }
+          return p.then(function (r) {
+            if (r.error) return r.error.code === 'DUPLICATE' ? 'يوجد عميل بنفس السجل التجاري أو الرقم الضريبي.' : errText(r.error);
+            var postP = !id && hasLegacy && r.data ? call('setClientLegacyFields', r.data.id, legacy) : Promise.resolve({ error: null });
+            return postP.then(function (pr) {
+              if (pr.error) toast(t('client_legacy_failed', { e: apiErr(pr.error) }), 'warning');
+              else toast(T.common.saved, 'success');
+              if (!id && r.data) go('#client/' + r.data.id); else rerender();
+              return true;
+            });
+          });
         });
       }
     });

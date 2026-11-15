@@ -82,7 +82,7 @@ const fnState = async () => J(await q(`SELECT p.oid::regprocedure::text s, md5(p
 
 async function secFiles() {
   section('1. file conventions, all_migrations.sql');
-  const LATER_PHASES = ['20261130000100_tx_container_count.sql'];
+  const LATER_PHASES = ['20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql'];
   await check('this file is the latest migration (later phases excepted)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');

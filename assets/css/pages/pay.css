@@ -96,6 +96,7 @@
 .cu-form .app-card-body { display: grid; gap: 10px; }
 .cu-balance:empty, .cu-max:empty { display: none; }
 .cu-balance { font-weight: 700; }
+.cu-code { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .cu-balance .fin-money { font-weight: 800; color: var(--teal, #0E8C8C); }
 .cu-max { margin: 0; font-weight: 700; }
 .cu-void-error { display: grid; gap: 6px; }

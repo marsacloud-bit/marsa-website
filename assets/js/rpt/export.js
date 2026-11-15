@@ -792,9 +792,21 @@
           { key: 'transaction_ref', label: t('c_ref'), type: 'text', ltr: true, width: 18, value: function (x) { return x.transaction_ref; }, cell: function (x) { return txLinkCell(x.transaction_id, x.transaction_ref); } },
           { key: 'container_no', label: t('c_container_no'), type: 'text', ltr: true, width: 15, value: function (x) { return x.container_no; } },
           { key: 'leg_no', label: t('c_leg_no'), type: 'int', value: function (x) { return x.leg_no == null ? null : +x.leg_no; } },
-          { key: 'carrier_name', label: t('c_carrier'), type: 'text', width: 20, value: function (x) { return x.carrier_name; } },
+          // legacy gaps (20261201000100): the client, the party type («غير محدد» when none), the order, the driver's phone, the declaration
+          { key: 'client', label: lt('c_client'), type: 'text', width: 24, value: clientName },
+          { key: 'carrier_name', label: t('c_carrier'), type: 'text', width: 20, value: function (x) { return x.carrier_name || x.party_name; } },
+          { key: 'party_type', label: lt('c_party_type'), type: 'text', width: 12, value: function (x) { return lt('party_type_' + (x.party_type || 'unset')); } },
+          { key: 'transport_order_no', label: lt('c_transport_order'), type: 'text', ltr: true, width: 16, value: tripOrderNo,
+            cell: function (x) {
+              var no = tripOrderNo(x);
+              if (!no) return NONE;
+              var own = !!x.transport_order_no, d = !own && x.tx_transport_order_date ? riyadhDay(x.tx_transport_order_date) || String(x.tx_transport_order_date).slice(0, 10) : '';
+              return el('span', { class: 'lrpt-two' }, [el('bdi', { dir: 'ltr', class: 'cell-main', text: no }), d ? el('bdi', { dir: 'ltr', class: 'cell-sub', text: d }) : null]);
+            } },
           { key: 'driver_name', label: t('c_driver'), type: 'text', width: 18, value: function (x) { return x.driver_name; } },
+          { key: 'driver_phone', label: lt('c_driver_phone'), type: 'text', ltr: true, width: 14, value: function (x) { return x.driver_phone; } },
           { key: 'truck_plate', label: t('c_truck'), type: 'text', ltr: true, width: 12, value: function (x) { return x.truck_plate; } },
+          { key: 'declaration_no', label: lt('c_declaration_no'), type: 'text', ltr: true, width: 16, value: function (x) { return x.declaration_no; } },
           { key: 'origin', label: t('c_origin'), type: 'text', width: 16, value: function (x) { return x.origin; } },
           { key: 'destination', label: t('c_destination'), type: 'text', width: 16, value: function (x) { return x.destination; } },
           { key: 'planned_at', label: t('c_planned_at'), type: 'datetime', value: function (x) { return x.planned_at || null; } },
@@ -838,6 +850,8 @@
           branch_id: { label: function () { return t('f_branch'); }, fmt: function (v) { return branchName(ctxApi, v) || v; } },
           client_id: { label: function () { return t('f_client'); }, fmt: function (v, c) { return nameFrom(c && c.clients, v); } },
           carrier_id: { label: function () { return t('f_carrier'); }, fmt: function (v, c) { return nameFrom(c && c.carriers, v); } },
+          driver_q: MV_FILTERS.driver_q, party_q: MV_FILTERS.party_q, q: { label: function () { return t('f_q'); } },
+          party_type: { label: function () { return lt('f_party_type'); }, fmt: function (v) { return [].concat(v).map(function (c) { return lt('party_type_' + c); }).join(isEn() ? ', ' : '، '); } },
           status: { label: function () { return t('f_trip_status'); }, fmt: function (v) { return [].concat(v).map(function (c) { return lab('trip_status', c, ctxApi); }).join('، '); } },
           from: { label: function () { return t('f_from_planned'); } }, to: { label: function () { return t('f_to'); } },
           include_finance: { label: function () { return t('f_include_finance'); } },
@@ -953,6 +967,8 @@
     var own = lt(domain + '_' + code);
     return own !== domain + '_' + code ? own : String(code);
   }
+  // the trip's own transport order, else the transaction's TASTO order (report_trips, 20261201000100)
+  function tripOrderNo(x) { return (x && (x.transport_order_no || x.tx_transport_order_no)) || ''; }
   function joinList(v) { return (Array.isArray(v) ? v : v == null ? [] : [v]).filter(function (x) { return x != null && x !== ''; }).join(isEn() ? ', ' : '، '); }
   function portName(x) { return (isEn() && x.port_name_en) || x.port_name || x.port_code || ''; }
   function money2(items, amountKey, curKey) { return sumMinorBy(items.filter(function (x) { return x[amountKey] != null && x[amountKey] !== ''; }), amountKey, curKey); }

@@ -524,7 +524,14 @@
       'MRS_REQUIRED:containers': 'المعاملة البحرية تحتاج حاوية واحدة على الأقل من البوليصة. أضف أرقام الحاويات أو اختر Ro-Ro.',
       'MRS_REQUIRED:declaration_approval': 'اعتمد قراءة البيان الجمركي أولًا، ثم طابقه مع الفاتورة والبوليصة قبل اعتماد المعاملة.',
       'MRS_REQUIRED:match_id': 'احفظ مطابقة البيان مع الفاتورة والبوليصة أولًا، ثم اعتمد المعاملة.',
-      'MRS_INVALID:match_id': 'المطابقة المختارة لا تصلح للاعتماد: يجب أن تكون مطابقة ثلاثية محفوظة لهذه المعاملة على قراءة البيان المعتمدة، وغير ملغاة.'
+      'MRS_INVALID:match_id': 'المطابقة المختارة لا تصلح للاعتماد: يجب أن تكون مطابقة ثلاثية محفوظة لهذه المعاملة على قراءة البيان المعتمدة، وغير ملغاة.',
+      // 20261201000100: legacy gaps (client category / Daftra code, follow-up employee)
+      'MRS_INVALID:daftra_client_code': 'كود العميل في دفترة غير صحيح: حروف إنجليزية وأرقام فقط (ويُسمح بـ - _ . /)، حتى 40 خانة، ويبدأ بحرف أو رقم.',
+      'MRS_INVALID:daftra_client_code_taken': 'كود العميل في دفترة مستخدم لعميل آخر في مؤسستك. افتح ذلك العميل أو استخدم كودًا آخر.',
+      'MRS_INVALID:port_category': 'تصنيف العميل غير صحيح: اختر مطار أو ميناء أو مشترك.',
+      'MRS_INVALID:responsible_user_id': 'موظف المتابعة المختار ليس موظفًا نشطًا في مؤسستك.',
+      'MRS_NOT_FOUND:client': 'العميل غير موجود أو لا تملك صلاحية عرضه.',
+      'MRS_FORBIDDEN:client_edit': 'تعديل بيانات العميل متاح لموظفي التخليص ومديري العمليات والفروع والمشرفين ومدير النظام فقط.'
     },
     banner: {
       staging: 'بيئة تجريبية (Staging) — البيانات للاختبار فقط'
@@ -688,7 +695,14 @@
         'cdetail_MRS_INVALID_document': 'The document does not belong to the transaction linked to the conversation, or it is void.',
         'cdetail_MRS_INVALID_extraction': 'The value does not match the format of this reference kind.',
         'cdetail_MRS_REQUIRED_transaction': 'Link the conversation to a transaction first.',
-        'cdetail_MRS_REQUIRED_body': 'Write the reply text.'
+        'cdetail_MRS_REQUIRED_body': 'Write the reply text.',
+        // 20261201000100: legacy gaps (client category / Daftra code, follow-up employee)
+        'cdetail_MRS_INVALID_daftra_client_code': 'Invalid Daftra client code: Latin letters and digits only (- _ . / allowed), up to 40 characters, starting with a letter or digit.',
+        'cdetail_MRS_INVALID_daftra_client_code_taken': 'This Daftra client code belongs to another client of your organisation. Open that client or use another code.',
+        'cdetail_MRS_INVALID_port_category': 'Invalid client category: choose airport, port or shared.',
+        'cdetail_MRS_INVALID_responsible_user_id': 'The chosen follow-up employee is not an active staff member of your organisation.',
+        'cdetail_MRS_NOT_FOUND_client': 'The client does not exist or you may not view it.',
+        'cdetail_MRS_FORBIDDEN_client_edit': 'Editing client data is available to clearance staff, operations / branch managers, supervisors and the admin only.'
       } });
       I.register('field', { en: {
         // document matching (20261116000100)
@@ -1761,6 +1775,37 @@
   function updateTransaction(id, patch) {
     return online(function (c) { return c.from('transactions').update(patch).eq('id', id).select(TX_COLS).single(); }).then(function (r) { return withInternal('transactions', r); });
   }
+  // 20261201000100: the follow-up employee (transactions.responsible_user_id). createTransaction(row) takes
+  // row.responsible_user_id too; the server (trg_responsible) accepts only an active staff member of the org
+  // who reaches the transaction's branch: org-wide or a member of that active branch (MRS_INVALID responsible_user_id).
+  // userId null clears it. Same rights as any transaction edit.
+  function setTransactionResponsible(txId, userId) {
+    return updateTransaction(txId, { responsible_user_id: userId || null });
+  }
+  // the employees a transaction may be followed up by → { rows [{ user_id, full_name }] } (active staff of the org,
+  // never portal users; o.branchId → org-wide members + that branch's members). Ops writers only (MRS_FORBIDDEN role /
+  // branch). A database without 20261201000100 (RPC missing) is answered from the memberships list, same shape.
+  function listAssignableStaff(o) {
+    o = o || {};
+    return inActiveOrg(o.orgId, function (oid) {
+      return rpc('list_assignable_staff', { p_org: oid, p_branch: o.branchId || null }).then(function (r) {
+        if (!r.error || !rpcMissing(r.error)) return r;
+        return listMemberships(oid).then(function (m) {
+          if (m.error) return m;
+          var by = {}, out = [];
+          (m.data || []).forEach(function (x) {
+            if (!x || !x.user_id || x.is_active === false || x.role === 'client') return;
+            if (o.branchId && x.branch_id && x.branch_id !== o.branchId) return;
+            if (by[x.user_id]) return;
+            by[x.user_id] = true;
+            out.push({ user_id: x.user_id, full_name: (x.profiles && x.profiles.full_name) || null });
+          });
+          out.sort(function (a, b) { return String(a.full_name || '').localeCompare(String(b.full_name || '')); });
+          return ok({ rows: out });
+        });
+      });
+    });
+  }
   // idemKey (optional 4th arg) → p_idem_key; generated when absent and kept for the retries.
   // opts.docsOverride (G3.10) → p_docs_override: the explicit manager override of the document gate
   // (sent only by the override dialog, with the reason in note). Never inferred from a note.
@@ -2228,7 +2273,9 @@
     if (!configured) return demoOnly();
     return aiOrg(orgIdArg).then(function (r) { return r.error ? r : rpc('list_custody_entries', { p_org: r.data, p_filters: filters || {} }); });
   }
-  // filters = { q?, nonzero? } → { rows [{client_id, client_name, balance, total_deposits, total_deductions, total_refunds, …}], total_balance }
+  // filters = { q?, nonzero? } → { rows [{client_id, client_name, client_code, balance, total_deposits, total_deductions, total_refunds,
+  // entry_count, last_entry_date}], total_balance, total_deposits, total_deductions, total_refunds, client_count }
+  // (20261201000100: client_code = the Daftra client code; q also matches it by prefix; the org totals feed the KPI tiles)
   function custodyBalances(orgIdArg, filters) {
     if (!configured) return demoOnly();
     return aiOrg(orgIdArg).then(function (r) { return r.error ? r : rpc('custody_balances', { p_org: r.data, p_filters: filters || {} }); });
@@ -3052,10 +3099,29 @@
   function removeClientAlias(id) {
     return online(function (c) { return c.from('client_aliases').delete().eq('id', id).select('id').maybeSingle(); });
   }
-  // payload = { name, vat_number, cr_number } → ranked candidates [{client_id, name_ar, strength, reasons…}]; never links
+  // payload = { name, name_en?, vat_number, cr_number, daftra_client_code? } → { candidates [{client_id, name_ar, name_en, match
+  // (strong | alias | weak), rank, score, reasons, daftra_client_code, port_category, …}], conflict, linked: false }; never links.
+  // 20261201000100: the Daftra client code matches exactly (strong, reason daftra_code) or by prefix (weak, daftra_code_prefix),
+  // sent as daftra_client_code or typed into name as one code-like token; a name of 2+ letters matches the start of a word of
+  // the client's name (weak, name_prefix)
   function matchClient(payload, o) {
     o = o || {};
     return inActiveOrg(o.orgId, function (oid) { return rpc('match_client', { p_org: oid, p_payload: payload || {} }); });
+  }
+  // 20261201000100: the client category + Daftra client code (the #clients edit dialog; ops writers of the org).
+  // patch = { port_category?: 'airport'|'port'|'shared'|null, daftra_client_code?: string|null } — only the keys given change
+  // ('' / null clears) → { client_id, port_category, daftra_client_code, changed }. Errors: MRS_INVALID port_category /
+  // daftra_client_code / daftra_client_code_taken, MRS_FORBIDDEN client_edit, MRS_NOT_FOUND client
+  function setClientLegacyFields(clientId, patch) {
+    var p = {};
+    ['port_category', 'daftra_client_code'].forEach(function (k) {
+      if (patch && Object.prototype.hasOwnProperty.call(patch, k)) {
+        var v = patch[k];
+        p[k] = v == null ? null : (String(v).trim() || null);
+      }
+    });
+    if (!Object.keys(p).length) return Promise.resolve(fail('MRS_REQUIRED', 'payload'));
+    return rpc('set_client_legacy_fields', { p_client: clientId, p_payload: p });
   }
 
   /* customs declarations (G3.5) — any status; the newest first */
@@ -3983,6 +4049,9 @@
   function dashManagement(f) { return rptRpc('dash_management', f, 0); }
   function reportTransactions(f) { return rptRpc('report_transactions', f, 500); }
   function reportContainers(f) { return rptRpc('report_containers', f, 500); }
+  // 20261201000100: f.party_type accepts 'unset' (trips without a party type) beside supplier / company / direct; items + client_name,
+  // party_type, transport_order_no (the trip's), tx_transport_order_no / tx_transport_order_date (the transaction's TASTO order),
+  // driver_phone, declaration_no, client_id; totals.transport_value = { currency: Σ cost } (include_finance only, else {})
   function reportTrips(f) { return rptRpc('report_trips', f, 500); }
   function listReportExports(f) { return rptRpc('list_report_exports', f, 200); }
   // p = { report, format, filters, row_count } — only these keys travel (never rows or totals); the filters are the
@@ -4619,6 +4688,8 @@
     matchPaymentTransaction: matchPaymentTransaction, saveCustodyEntry: saveCustodyEntry, voidCustodyEntry: voidCustodyEntry,
     listCustodyEntries: listCustodyEntries, custodyBalances: custodyBalances, clientCustodyBalance: clientCustodyBalance,
     listServiceItems: listServiceItems,
+    // 20261201000100: legacy gaps (client category / Daftra code, follow-up employee)
+    setClientLegacyFields: setClientLegacyFields, setTransactionResponsible: setTransactionResponsible, listAssignableStaff: listAssignableStaff,
     listContainers: listContainers, addContainer: addContainer, updateContainer: updateContainer,
     // documents
     listDocuments: listDocuments, uploadDocument: uploadDocument, documentUrl: documentUrl,

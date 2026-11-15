@@ -42,6 +42,8 @@
      [data-shell-search]        click opens the palette (an empty one is filled with icon + label + shortcut)
      [data-shell-org]           slot: a labelled <select class="form-control"> org switcher when the user has > 1 org
      [data-shell-user]          slot: name + roles text (strong + span.text-xs.text-muted)
+     [data-shell-orgname]       slot: building icon + active org name (title «المؤسسة النشطة: …»); the shell adds one
+                                after admin.html's #adm-me-name. Hidden when signed out / no org. No logo yet.
      [data-shell-signout] / [data-shell-signout-all]   buttons (an empty one is filled with icon + label)
      [data-shell-security]      link to login.html?security=1 («أمان الحساب»); the shell also adds one
                                 before the first sign-out button of the page while signed in
@@ -968,6 +970,27 @@
       slot.appendChild(el('span', { class: 'text-xs text-muted shell-user-meta', text: meta.filter(Boolean).join(' · ') }));
     });
   }
+  // active organisation name next to the user name: [data-shell-orgname] slots, plus one the shell adds after the
+  // staff dashboard's #adm-me-name (admin.html). Name only: organizations.settings.logo_path has no storage bucket
+  // or read policy yet and my_context does not return it, so no logo is shown.
+  function renderOrgNameSlots() {
+    var me = doc.getElementById('adm-me-name');
+    if (me && me.parentNode && !me.parentNode.querySelector('[data-shell-orgname]')) {
+      var add = el('span', { class: 'shell-org-name', 'data-shell-orgname': true, hidden: true });
+      me.parentNode.insertBefore(add, me.nextSibling);
+    }
+    qsa('[data-shell-orgname]').forEach(function (slot) {
+      clear(slot);
+      var o = S.status === 'ready' ? activeOrg() : null;
+      var name = o ? orgName(o) : '';
+      slot.hidden = !name;
+      if (!name) { slot.removeAttribute('title'); return; }
+      slot.classList.add('shell-org-name');
+      slot.setAttribute('title', t('org_switch') + ': ' + name);
+      slot.appendChild(icon('building'));
+      slot.appendChild(el('bdi', { class: 'shell-org-name-text', text: name }));
+    });
+  }
   var MAC = /Mac|iPhone|iPad/i.test((navigator.platform || '') + ' ' + (navigator.userAgent || ''));
   function renderSearchSlots() {
     qsa('[data-shell-search]').forEach(function (b) {
@@ -1019,7 +1042,7 @@
     });
     paintBadge('alerts');
   }
-  function renderSlots() { renderOrgSlots(); renderUserSlots(); renderSearchSlots(); renderSessionSlots(); }
+  function renderSlots() { renderOrgSlots(); renderUserSlots(); renderOrgNameSlots(); renderSearchSlots(); renderSessionSlots(); }
   doc.addEventListener('click', function (e) {
     var n = e.target && e.target.closest ? e.target.closest('[data-shell-search],[data-shell-signout],[data-shell-signout-all]') : null;
     if (!n) return;
