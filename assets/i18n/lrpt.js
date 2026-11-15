@@ -15,8 +15,8 @@
   'use strict';
   var ar = {
     // nav / shared
-    nav_register: 'سجل المعاملات والمتابعة', nav_fasah_recon: 'المطابقة الشهرية مع فسح', nav_rules: 'قواعد المتابعة', nav_changes: 'سجل العمليات',
-    open_register: 'سجل المعاملات والمتابعة', all: 'الكل', apply: 'تطبيق', older: 'الأقدم', yes: 'نعم', no: 'لا', api_missing_fn: 'هذه الميزة غير متاحة بعد في واجهة الاتصال ({fn}).',
+    nav_register: 'كشف المعاملات', nav_fasah_recon: 'المطابقة الشهرية مع فسح', nav_rules: 'قواعد المتابعة', nav_changes: 'سجل العمليات',
+    open_register: 'كشف المعاملات', all: 'الكل', apply: 'تطبيق', older: 'الأقدم', yes: 'نعم', no: 'لا', api_missing_fn: 'هذه الميزة غير متاحة بعد في واجهة الاتصال ({fn}).',
     err_range: 'تاريخ «من» يجب ألا يتجاوز تاريخ «إلى».', cancelled_load: 'أُلغي الانتظار. لم تتغير النتائج المعروضة.',
     // column filter (rpt/colfilter.js)
     cf_open: 'تصفية العمود «{c}»', cf_open_active: 'تصفية العمود «{c}» (مفعّلة)', cf_title: 'تصفية: {c}', cf_search: 'بحث في القيم',
@@ -26,7 +26,7 @@
     cf_clear_all: 'مسح تصفية الأعمدة', cf_shown: 'معروض {n} من {m} صفًا في هذه الصفحة (الإجمالي {total}) بعد تصفية الأعمدة',
     cf_crit: 'تصفية العمود: {c}', cf_page_note: 'تصفية الأعمدة تعمل على الصفحة المحمّلة ({n} صف). استخدم الفلاتر المتقدمة لتضييق النتائج على الخادم.',
     // register
-    reg_title: 'سجل المعاملات والمتابعة', reg_sub: 'بحث في 23 حقلًا، فلاتر متقدمة وفلاتر أعمدة، شارات التأخير، وحالة دفترة لقرّاء المالية.',
+    reg_title: 'كشف المعاملات', reg_sub: 'بحث في 23 حقلًا، فلاتر متقدمة وفلاتر أعمدة، شارات التأخير، وحالة دفترة لقرّاء المالية.',
     rules_link: 'قواعد المتابعة', quick_label: 'فلاتر سريعة', q_all: 'الكل', q_late: 'المتأخرة فقط', q_critical: 'الحرجة فقط', q_daftra_draft: 'مسودات دفترة فقط',
     q_re_export: 'إعادة تصدير', q_roro: 'Ro-Ro', adv_filters: 'فلاتر متقدمة', f_q_reg_ph: 'رقم المعاملة، العميل، البيان، البوليصة، الحاوية، الباخرة، المشغل…',
     f_client_code: 'كود العميل في دفترة', f_client_category: 'فئة العميل', cat_airport: 'مطار', cat_port: 'ميناء', cat_shared: 'مشترك',
@@ -34,7 +34,7 @@
     f_containers_min: 'عدد الوحدات من', f_containers_max: 'عدد الوحدات إلى', f_unit: 'وحدة الشحن', f_tx_type: 'نوع المعاملة',
     f_daftra_state: 'حالة دفترة', f_attention: 'المتابعة', att_filter_any: 'المتأخرة والمحتاجة متابعة', att_filter_warning: 'تحتاج متابعة', att_filter_critical: 'متأخرة (حرجة)',
     f_declaration_status: 'مرحلة البيان', err_containers_range: 'عدد الوحدات «من» أكبر من «إلى».', err_count: 'عدد الوحدات رقم صحيح.',
-    no_declaration: 'بلا بيان', client_code_n: 'كود: {c}', ctr_tip: '{n} وحدة: {list}', loading_register: 'جارٍ تحميل سجل المعاملات…',
+    no_declaration: 'بلا بيان', client_code_n: 'كود: {c}', ctr_tip: '{n} وحدة: {list}', loading_register: 'جارٍ تحميل كشف المعاملات…',
     banner_none: 'لا توجد معاملات متأخرة أو تحتاج متابعة في هذه النتائج.', banner_counts: '{c} معاملة متأخرة و{w} تحتاج متابعة',
     banner_truncated: '(القائمة مقتطعة عند 2000 معاملة.)', followup_export: 'كشف المتابعة (14 عمودًا):',
     att_badge: '{level} · {h} س', att_totals: 'متأخرة {c} · متابعة {w}', att_level_warning: 'متابعة', att_level_critical: 'متأخرة',
@@ -45,7 +45,7 @@
     sort_appointment_desc: 'تاريخ الموعد (الأحدث)', sort_appointment_asc: 'تاريخ الموعد (الأقدم)', sort_deadline_asc: 'أقرب موعد إعادة', sort_paid_desc: 'تاريخ السداد (الأحدث)',
     sort_paid_asc: 'تاريخ السداد (الأقدم)', sort_amount_desc: 'المبلغ (الأعلى)', sort_created_desc: 'تاريخ الإدخال (الأحدث)',
     // columns
-    c_seq: 'م', c_ref: 'رقم المعاملة', c_importer: 'المستورد', c_client: 'العميل', c_declaration_no: 'رقم البيان', c_declaration_date: 'تاريخ البيان', c_bl_number: 'رقم البوليصة',
+    c_seq: 'م', c_ref: 'رقم المعاملة', c_importer: 'المستورد', c_client: 'العميل', c_declaration_no: 'رقم البيان', c_declaration_date: 'تاريخ البيان', c_declaration_date_short: 'تاريخه', c_container_count: 'عدد الحاويات', c_containers: 'الحاويات', c_port_short: 'الميناء', c_bl_number: 'رقم البوليصة',
     c_unit_count: 'عدد الوحدات', c_unit: 'وحدة الشحن', unit_chassis: 'شاسيه: {v}', unit_plate: 'لوحة: {v}', c_port: 'الميناء / المنفذ', c_operator: 'المشغل', c_agent: 'الوكيل الملاحي', c_vessel: 'الباخرة',
     c_tx_status: 'حالة المعاملة', c_daftra: 'فاتورة دفترة', c_stage: 'مرحلة البيان', c_attention: 'المتابعة', c_employee: 'الموظف', c_updated_at: 'آخر تحديث',
     c_driver: 'السائق', c_driver_phone: 'جوال السائق', c_truck: 'الشاحنة', c_container_no: 'رقم الحاوية', c_appointment_at: 'موعد الخروج', c_destination: 'الوجهة',
@@ -159,8 +159,8 @@
     code_billing_sync_state_idle: 'لم تُرسل', code_billing_sync_state_pending: 'بانتظار الإرسال', code_billing_sync_state_in_flight: 'قيد الإرسال', code_billing_sync_state_synced: 'متزامنة', code_billing_sync_state_unknown: 'غير معروفة', code_billing_sync_state_conflict: 'تعارض', code_billing_sync_state_error: 'خطأ',
   };
   var en = {
-    nav_register: 'Transactions register', nav_fasah_recon: 'Monthly Fasah reconciliation', nav_rules: 'Follow-up rules', nav_changes: 'Operations log',
-    open_register: 'Transactions register', all: 'All', apply: 'Apply', older: 'Older', yes: 'Yes', no: 'No', api_missing_fn: 'This feature is not available in the data layer yet ({fn}).',
+    nav_register: 'Transactions statement', nav_fasah_recon: 'Monthly Fasah reconciliation', nav_rules: 'Follow-up rules', nav_changes: 'Operations log',
+    open_register: 'Transactions statement', all: 'All', apply: 'Apply', older: 'Older', yes: 'Yes', no: 'No', api_missing_fn: 'This feature is not available in the data layer yet ({fn}).',
     err_range: '"From" must not be after "To".', cancelled_load: 'Stopped waiting. The results shown did not change.',
     cf_open: 'Filter the «{c}» column', cf_open_active: 'Filter the «{c}» column (active)', cf_title: 'Filter: {c}', cf_search: 'Search values',
     cf_all: 'Select all', cf_empty: '(empty)', cf_apply: 'Apply', cf_clear: 'Clear', cf_cancel: 'Cancel', cf_none_found: 'No matching values.',
@@ -168,7 +168,7 @@
     cf_year: 'Year {y}', cf_month: 'Month {m}', cf_toggle: 'Show / hide', cf_sep: ', ',
     cf_clear_all: 'Clear column filters', cf_shown: '{n} of {m} rows on this page shown (total {total}) after the column filters',
     cf_crit: 'Column filter: {c}', cf_page_note: 'Column filters work on the loaded page ({n} rows). Use the advanced filters to narrow the results on the server.',
-    reg_title: 'Transactions register', reg_sub: 'A 23-field search, advanced and column filters, attention badges, and the Daftra state for finance readers.',
+    reg_title: 'Transactions statement', reg_sub: 'A 23-field search, advanced and column filters, attention badges, and the Daftra state for finance readers.',
     rules_link: 'Follow-up rules', quick_label: 'Quick filters', q_all: 'All', q_late: 'Late only', q_critical: 'Critical only', q_daftra_draft: 'Daftra drafts only',
     q_re_export: 'Re-export', q_roro: 'Ro-Ro', adv_filters: 'Advanced filters', f_q_reg_ph: 'Reference, client, declaration, B/L, container, vessel, operator…',
     f_client_code: 'Daftra client code', f_client_category: 'Client category', cat_airport: 'Airport', cat_port: 'Port', cat_shared: 'Shared',
@@ -176,7 +176,7 @@
     f_containers_min: 'Units from', f_containers_max: 'Units to', f_unit: 'Cargo unit', f_tx_type: 'Transaction type',
     f_daftra_state: 'Daftra state', f_attention: 'Follow-up', att_filter_any: 'Late or needing follow-up', att_filter_warning: 'Needs follow-up', att_filter_critical: 'Late (critical)',
     f_declaration_status: 'Declaration stage', err_containers_range: 'Units "from" is above "to".', err_count: 'The unit count is a whole number.',
-    no_declaration: 'No declaration', client_code_n: 'Code: {c}', ctr_tip: '{n} units: {list}', loading_register: 'Loading the transactions register…',
+    no_declaration: 'No declaration', client_code_n: 'Code: {c}', ctr_tip: '{n} units: {list}', loading_register: 'Loading the transactions statement…',
     banner_none: 'No late transactions or transactions needing follow-up in these results.', banner_counts: '{c} late and {w} needing follow-up',
     banner_truncated: '(The list stops at 2000 transactions.)', followup_export: 'Follow-up sheet (14 columns):',
     att_badge: '{level} · {h} h', att_totals: 'Late {c} · follow-up {w}', att_level_warning: 'Follow up', att_level_critical: 'Late',
@@ -186,7 +186,7 @@
     sort_ref_desc: 'Reference (descending)', sort_declaration_date_desc: 'Declaration date (newest)', sort_declaration_date_asc: 'Declaration date (oldest)', sort_updated_desc: 'Last update (newest)',
     sort_appointment_desc: 'Appointment (newest)', sort_appointment_asc: 'Appointment (oldest)', sort_deadline_asc: 'Nearest return deadline', sort_paid_desc: 'Payment date (newest)',
     sort_paid_asc: 'Payment date (oldest)', sort_amount_desc: 'Amount (highest)', sort_created_desc: 'Entry date (newest)',
-    c_seq: '#', c_ref: 'Transaction', c_importer: 'Importer', c_client: 'Client', c_declaration_no: 'Declaration no.', c_declaration_date: 'Declaration date', c_bl_number: 'B/L no.',
+    c_seq: '#', c_ref: 'Transaction', c_importer: 'Importer', c_client: 'Client', c_declaration_no: 'Declaration no.', c_declaration_date: 'Declaration date', c_declaration_date_short: 'Date', c_container_count: 'Containers', c_containers: 'Container nos.', c_port_short: 'Port', c_bl_number: 'B/L no.',
     c_unit_count: 'Units', c_unit: 'Cargo unit', unit_chassis: 'Chassis: {v}', unit_plate: 'Plate: {v}', c_port: 'Port', c_operator: 'Operator', c_agent: 'Shipping agent', c_vessel: 'Vessel',
     c_tx_status: 'Transaction status', c_daftra: 'Daftra invoice', c_stage: 'Declaration stage', c_attention: 'Follow-up', c_employee: 'Employee', c_updated_at: 'Last update',
     c_driver: 'Driver', c_driver_phone: 'Driver phone', c_truck: 'Truck', c_container_no: 'Container no.', c_appointment_at: 'Gate-out appointment', c_destination: 'Destination',

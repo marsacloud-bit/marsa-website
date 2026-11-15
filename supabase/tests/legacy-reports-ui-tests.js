@@ -581,14 +581,23 @@ function rtApi(calls, rows) {
       const td = root.querySelector('.lrpt-table-card tfoot [data-key="unit_count"]');
       return (td && td.getAttribute('data-value') === '4') || (td && td.getAttribute('data-value'));
     });
-    check('cells: the container tooltip lists the numbers (focusable), the attention badge with hours, the Daftra pill, «بلا بيان» for no declaration', () => {
-      const ctr = root.querySelector('.lrpt-ctr'), r = trs();
-      return (ctr && /MSCU1234567، MSCU7654321/.test(ctr.getAttribute('title')) && ctr.getAttribute('tabindex') === '0' && /متأخرة · 120 س/.test(r[0].textContent)
-        && /مسودة دفترة/.test(r[0].textContent) && /بلا بيان/.test(r[2].textContent) && /Ro-Ro/.test(r[2].textContent)) || (ctr && ctr.getAttribute('title'));
+    check('«كشف المعاملات»: the 13 columns of the legacy statement, in order (Daftra for a finance reader)', () => {
+      const h = root.querySelectorAll('.lrpt-table-card thead th').map(th => th.querySelector('.rpt-th-label') ? th.querySelector('.rpt-th-label').textContent : th.textContent.replace('▾', ''));
+      const want = ['رقم المعاملة', 'المستورد', 'رقم البيان', 'تاريخه', 'رقم البوليصة', 'عدد الحاويات', 'الحاويات', 'الميناء', 'المشغل', 'الوكيل الملاحي', 'الباخرة', 'حالة المعاملة', 'فاتورة دفترة'];
+      return (J(h) === J(want) && root.classList.contains('lrpt-statement')) || J(h);
+    });
+    check('cells: container numbers one per line, the late badge with hours under the status, Daftra «Draft» / the invoice number, «—» without a declaration, Ro-Ro', () => {
+      const r = trs(), nos = r[0].querySelectorAll('.lrpt-ctrs-no').map(x => x.textContent);
+      return (J(nos) === J(['MSCU1234567', 'MSCU7654321']) && /متأخرة · 120 س/.test(r[0].querySelector('.lrpt-stcell').textContent)
+        && r[0].querySelector('.lrpt-dft-draft').textContent === 'Draft' && r[2].querySelector('.lrpt-dft-no').textContent === 'INV-9' && /Ro-Ro/.test(r[2].textContent)) || J({ nos, t: r[0].textContent });
+    });
+    check('review fixes: Ro-Ro shows chassis + plate in «الحاويات»; more than 3 containers → focusable with the full list', () => {
+      const r = trs(), ro = r[2].querySelectorAll('.lrpt-ctrs-no').map(x => x.textContent);
+      return (J(ro) === J(['شاسيه: JTDBR32E720012345', 'لوحة: ABC 123'])) || J(ro);
     });
     check('every column has an accessible filter button (aria-haspopup dialog, aria-expanded, a label naming the column)', () => {
       const b = root.querySelectorAll('.cf-btn');
-      return (b.length >= 15 && b.every(x => x.getAttribute('aria-haspopup') === 'dialog' && x.getAttribute('aria-expanded') === 'false' && /تصفية العمود «/.test(x.getAttribute('aria-label')))) || b.length;
+      return (b.length === 13 && b.every(x => x.getAttribute('aria-haspopup') === 'dialog' && x.getAttribute('aria-expanded') === 'false' && /تصفية العمود «/.test(x.getAttribute('aria-label')))) || b.length;
     });
     // open the port column filter, keep جدة only
     const portBtn = root.querySelector('[data-cf-key="port"]');

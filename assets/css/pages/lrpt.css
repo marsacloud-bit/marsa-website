@@ -148,3 +148,25 @@
   .rpt-print-table td.is-tone-danger { background: #F8D7DA !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .cf-pop, .app-progress, .app-rt-badge { display: none !important; }
 }
+
+/* ---- «كشف المعاملات» (owner, 2026-11-15: the legacy statement look): navy header, label over the filter button,
+   centred bordered cells, the follow-up badge under the status, the Daftra invoice number / Draft ---- */
+.lrpt-statement .rpt-table { border-collapse: collapse; }
+.lrpt-statement .rpt-table thead th {
+  background: var(--navy, #0b2545); color: #fff; font-weight: 700; text-align: center; vertical-align: top;
+  padding: 10px 8px; border: 1px solid rgba(255, 255, 255, .14); white-space: normal; min-inline-size: 70px;
+}
+.lrpt-statement .rpt-table th.has-cf .rpt-th-label { display: block; margin-block-end: 6px; }
+.lrpt-statement .rpt-table thead .cf-btn { margin-inline-start: 0; background: #f5b301; border-color: #f5b301; color: var(--navy, #0b2545); }
+.lrpt-statement .rpt-table thead .cf-btn:hover, .lrpt-statement .rpt-table thead .cf-btn:focus-visible { background: #fff; border-color: #fff; color: var(--navy, #0b2545); }
+.lrpt-statement .rpt-table th.num, .lrpt-statement .rpt-table td.num, html[dir="ltr"] .lrpt-statement .rpt-table .num { text-align: center; }
+.lrpt-statement .rpt-table thead .cf-btn.is-active { background: var(--teal); border-color: #fff; color: #fff; }
+.lrpt-statement .rpt-table tbody td { text-align: center; vertical-align: middle; border: 1px solid var(--border); padding: 10px 8px; }
+.lrpt-statement .rpt-table tbody td:first-child, .lrpt-statement .rpt-table tbody td:nth-child(2) { text-align: start; font-weight: 600; }
+.lrpt-stcell { display: inline-flex; flex-direction: column; align-items: center; gap: 4px; }
+.lrpt-ctrs { display: inline-flex; flex-direction: column; gap: 2px; font-weight: 700; }
+.lrpt-ctrs-no { white-space: nowrap; }
+.lrpt-ctrs[tabindex] { cursor: help; }
+.lrpt-ctrs[tabindex]:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.lrpt-dft-no { color: #15803d; font-weight: 800; white-space: nowrap; }
+.lrpt-dft-draft { color: #1d4ed8; font-weight: 700; white-space: nowrap; }

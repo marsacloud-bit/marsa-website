@@ -88,13 +88,13 @@
     // the short summary of a saved match (the list item opened): its files (slot order) and only the differences found
     // (mismatch, then partial, then missing; «match» / «info» rows are left out). names = [{ id, doc_type, source_name }]
     var SUM_ORDER = { mismatch: 0, partial: 1, missing: 2 };
-    function sumVal(v) {
+    function sumVal(v, sep) {
       if (v == null || v === '') return '';
-      var s = typeof v === 'object' ? (Array.isArray(v) ? v.map(function (x) { return x && typeof x === 'object' ? JSON.stringify(x) : String(x); }).join('، ') : JSON.stringify(v)) : String(v);
+      var s = typeof v === 'object' ? (Array.isArray(v) ? v.map(function (x) { return x && typeof x === 'object' ? JSON.stringify(x) : String(x); }).join(sep || '، ') : JSON.stringify(v)) : String(v);
       s = s.replace(/\s+/g, ' ').trim();
       return s.length > 160 ? s.slice(0, 159) + '…' : s;
     }
-    function savedSummary(m, names) {
+    function savedSummary(m, names, sep) {
       if (!m) return { files: [], diffs: [] };
       var byId = {};
       (Array.isArray(names) ? names : []).forEach(function (n) { if (n && n.id) byId[String(n.id).toLowerCase()] = n; });
@@ -106,7 +106,7 @@
       (Array.isArray(m.rows) ? m.rows : []).forEach(function (r, i) {
         if (!r || !Object.prototype.hasOwnProperty.call(SUM_ORDER, r.status)) return;
         var vals = {};
-        files.forEach(function (f) { vals[f.doc] = sumVal(r.values ? r.values[f.doc] : null); });
+        files.forEach(function (f) { vals[f.doc] = sumVal(r.values ? r.values[f.doc] : null, sep); });
         diffs.push({ key: String(r.key || ''), status: r.status, critical: !!r.critical, label_ar: r.label_ar || r.key || '', label_en: r.label_en || r.key || '',
           detail_ar: r.detail_ar || '', detail_en: r.detail_en || '', values: vals, i: i });
       });
@@ -2559,25 +2559,31 @@
     }
     function toggleRecentSummary(li, m, btn) {
       var box = li.querySelector('.ocr-mx-rs');
+      if (box && box.getAttribute('data-state') === 'failed') { box.parentNode.removeChild(box); box = null; }   // a failed load is tried again
+      if (box && box.getAttribute('data-state') === 'loading') return;
       if (box) { var open = box.hidden; box.hidden = !open; btn.setAttribute('aria-expanded', open ? 'true' : 'false'); return; }
       box = el('div', 'ocr-mx-rs'); box.id = 'ocr-mx-rs-' + String(m.id).toLowerCase();
       btn.setAttribute('aria-controls', box.id); btn.setAttribute('aria-expanded', 'true');
       box.appendChild(el('p', 'text-sm text-muted', T('mx_rs_loading')));
+      box.setAttribute('data-state', 'loading');
       li.appendChild(box);
       API.getDocumentMatch(m.id).then(function (r) {
         if (r.error) throw r.error;
         var full = r.data || {};
         var ids = P.savedMatchIds(full).map(function (x) { return x[1]; });
         var names = has('listExtractionNames') && ids.length ? API.listExtractionNames(ids).then(function (n) { return n && !n.error ? n.data : []; }, function () { return []; }) : Promise.resolve([]);
-        return names.then(function (n) { renderRecentSummary(box, full, P.savedSummary(full, n)); });
+        return names.then(function (n) { box._rs = { m: full, names: n }; box.setAttribute('data-state', 'ready'); renderRecentSummary(box); });
       }).catch(function (e) {
+        box.setAttribute('data-state', 'failed');
         box.textContent = '';
         box.appendChild(el('p', 'text-sm', T('mx_sm_failed', { msg: errMsg(e) })));
       });
     }
-    function renderRecentSummary(box, m, sum) {
-      var en = lang() === 'en';
+    function renderRecentSummary(box) {
+      if (!box._rs) return;
+      var en = lang() === 'en', m = box._rs.m, sum = P.savedSummary(m, box._rs.names, en ? ', ' : '، ');
       box.textContent = '';
+      if (m.status === 'voided') box.appendChild(el('p', 'ocr-mx-rs-voided text-sm', T('mx_sm_st_voided') + ' — ' + T('mx_sm_voided')));
       box.appendChild(el('h4', 'ocr-mx-rs-h', T('mx_rs_files')));
       var fl = el('ul', 'ocr-mx-rs-files');
       sum.files.forEach(function (f) {
@@ -2618,7 +2624,10 @@
         go.type = 'button';
         go.addEventListener('click', function () {
           var href = P.matchLink(m.id);
-          if (window.location.hash.toLowerCase() === href) openSavedMatch(m.id); else window.location.hash = href;
+          if (S.saved.match && String(S.saved.match.id || '').toLowerCase() === String(m.id).toLowerCase() && S.result) {
+            if (window.location.hash.toLowerCase() !== href && window.history && window.history.replaceState) window.history.replaceState(null, '', href);
+            var rep = $('ocr-match-result'); if (rep && rep.scrollIntoView) rep.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          } else if (window.location.hash.toLowerCase() === href) openSavedMatch(m.id); else window.location.hash = href;
         });
         box.appendChild(go);
       }
@@ -3140,7 +3149,11 @@
     if (ONLINE && API && API.onAuth) {
       API.onAuth(function () { initRole().then(function (st) { if (st !== STAFF) { STAFF = st; initAi(); } }); });
     }
-    window.addEventListener('marsa:langchange', function () { SLOTS.forEach(renderSlot); if (S.result) render(); });
+    window.addEventListener('marsa:langchange', function () {
+      SLOTS.forEach(renderSlot); if (S.result) render();
+      // the recent list (titles, the open summaries) in the new language
+      if (!$('ocr-match-recent-block').hidden) loadRecent();
+    });
     // test hook (no state is exposed beyond the pure engine)
     // compareReadings: the single reader (ocr.js) opens its readings here (no new AI call)
     window.MarsaOcrMatch = { version: E.VERSION, compareReadings: compareReadings, available: canCompare };

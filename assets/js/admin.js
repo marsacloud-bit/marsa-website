@@ -1998,7 +1998,7 @@
       cancelled: f.cancelled || null, draft: f.draft || null, transactionType: f.ttype || null, cargoUnitType: f.unit || null }).then(function (r) {
       var canNew = branchesFor(R.opsWriter).length > 0;
       // legacy step 8: the full register (advanced + column filters, attention, follow-up export) when its module is loaded
-      var regLink = opsView('register') ? el('a', { class: 'btn btn-sm btn-ghost', href: '#register', 'data-act': 'open-register', text: opsT('lrpt.open_register', null, 'سجل المعاملات والمتابعة') }) : null;
+      var regLink = opsView('register') ? el('a', { class: 'btn btn-sm btn-ghost', href: '#register', 'data-act': 'open-register', text: opsT('lrpt.open_register', null, 'كشف المعاملات') }) : null;
       var acts = [regLink, canNew ? dBtn([svgIcon('plus'), t('txnew_btn')], 'btn-primary', function () { txNew(); }) : null].filter(Boolean);
       var out = frag(dHead(viewLabel('transactions'), t('transactions_sub'), acts.length ? acts : null));
       var multi = S.branches.length > 1;

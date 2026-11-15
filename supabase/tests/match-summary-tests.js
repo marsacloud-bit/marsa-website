@@ -43,6 +43,18 @@ eq('missing value → empty text', S.diffs.find(d => d.key === 'c').values.invoi
 eq('names missing → files without name', P.savedSummary(M, null).files.map(f => f.name), ['', '']);
 eq('null match → empty summary', P.savedSummary(null, N), { files: [], diffs: [] });
 eq('no differences → []', P.savedSummary({ invoice_extraction_id: U1, bl_extraction_id: U3, rows: [row('a', 'match', {}), row('b', 'info', {})] }, []).diffs, []);
+eq('the array separator follows the language (EN: ", ")', P.savedSummary(M, N, ', ').diffs.find(d => d.key === 'g').values.invoice, '{"desc":"x"}, y');
+const OM = rd('assets/js/ocr-match.js');
+const body = n => { const a = OM.indexOf('function ' + n + '('); return a < 0 ? '' : OM.slice(a, OM.indexOf('\n    }\n', a)); };
+check('a failed load is tried again on the next click; a click while loading does nothing', () =>
+  (/data-state'\) === 'failed'\) \{ box\.parentNode\.removeChild\(box\)/.test(body('toggleRecentSummary')) && /setAttribute\('data-state', 'failed'\)/.test(body('toggleRecentSummary'))
+    && /=== 'loading'\) return/.test(body('toggleRecentSummary'))) || 'missing');
+check('a voided match says so in the summary; the separator by language', () =>
+  (/m\.status === 'voided'\) box\.appendChild/.test(body('renderRecentSummary')) && /en \? ', ' : '، '/.test(body('renderRecentSummary'))) || 'missing');
+check('«فتح المراجعة كاملة» for the match already on screen scrolls to it (no hash route that would do nothing)', () =>
+  /S\.saved\.match\.id \|\| ''\)\.toLowerCase\(\) === String\(m\.id\)\.toLowerCase\(\) && S\.result\)/.test(body('renderRecentSummary')) || 'missing');
+check('language change reloads the recent list (titles + summaries)', () => /marsa:langchange[\s\S]{0,200}loadRecent\(\)/.test(OM) || 'missing');
+check('ocr.css: the nested summary items are reset from .ocr-history li', () => /\.ocr-history \.ocr-mx-rs li \{ display: block; border: 0/.test(rd('assets/css/pages/ocr.css')) || 'missing');
 check('a long value is cut to 160 characters', () => P.savedSummary({ invoice_extraction_id: U1, bl_extraction_id: U2, rows: [row('x', 'mismatch', { invoice: 'q'.repeat(400), bl: '' })] }, []).diffs[0].values.invoice.length === 160);
 
 const SU = rd('assets/js/supa.js');

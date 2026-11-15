@@ -103,7 +103,7 @@
     var ctx = { finRead: finRead, clients: [], members: [] };
 
     U.clear(root);
-    root.classList.add('ops-view', 'rpt-view', 'lrpt-register');
+    root.classList.add('ops-view', 'rpt-view', 'lrpt-register', 'lrpt-statement');
     root.appendChild(U.head(lt('reg_title'), lt('reg_sub'), [el('a', { class: 'btn btn-sm btn-ghost', href: '#attention_rules', text: lt('rules_link') })]));
     if (!K.hasFn(api, 'reportTransactions')) { root.appendChild(U.alertBox('warning', t('api_missing', { fn: 'reportTransactions' }))); return; }
     var bannerBox = el('div', { class: 'lrpt-banner-box', 'aria-live': 'polite' });
@@ -248,6 +248,51 @@
       var tip = list.slice(0, 50).join('، ') + (list.length > 50 ? ' …' : '');
       return el('span', { class: 'lrpt-ctr', tabindex: '0', title: tip, 'aria-label': lt('ctr_tip', { n: text, list: tip }) }, [el('bdi', { dir: 'ltr', class: 'num', text: text }), el('span', { class: 'lrpt-ctr-dot', 'aria-hidden': 'true', text: 'ⓘ' })]);
     }
+    // «الحاويات»: the container numbers, one per line (3 shown, the rest in the tooltip); Ro-Ro: chassis / plate
+    function roroParts(x) {
+      var p = [];
+      if (x.chassis_no) p.push(lt('unit_chassis', { v: x.chassis_no }));
+      if (x.vehicle_plate_no) p.push(lt('unit_plate', { v: x.vehicle_plate_no }));
+      return p;
+    }
+    function ctrListValue(x) {
+      if (x.cargo_unit_type === 'roro') return roroParts(x).join(' · ');
+      return (x.containers || []).map(K.ctrNo).filter(Boolean).join(K.isEn() ? ', ' : '، ');
+    }
+    function ctrListNode(x) {
+      if (x.cargo_unit_type === 'roro') {
+        var rp = roroParts(x);
+        if (!rp.length) return K.NONE;
+        var rb = el('span', { class: 'lrpt-ctrs' });
+        rp.forEach(function (t) { rb.appendChild(el('bdi', { class: 'lrpt-ctrs-no', text: t })); });
+        return rb;
+      }
+      var list = (x.containers || []).map(K.ctrNo).filter(Boolean);
+      if (!list.length) return K.NONE;
+      var total = x.unit_count != null ? +x.unit_count : x.container_count != null ? +x.container_count : list.length;
+      if (!(total >= list.length)) total = list.length;
+      var more = total - Math.min(list.length, 3);
+      var all = list.slice(0, 50).join('، ') + (total > list.length ? ' …' : '');
+      var box = el('span', more > 0 ? { class: 'lrpt-ctrs', tabindex: '0', title: all, 'aria-label': lt('ctr_tip', { n: K.fmtNum(total, 0), list: all }) } : { class: 'lrpt-ctrs' });
+      list.slice(0, 3).forEach(function (n) { box.appendChild(el('bdi', { dir: 'ltr', class: 'lrpt-ctrs-no', text: n })); });
+      if (more > 0) box.appendChild(el('span', { class: 'cell-sub', 'aria-hidden': 'true', text: '+' + K.fmtNum(more, 0) }));
+      return box;
+    }
+    function countNode(x) { var n = x.unit_count != null ? x.unit_count : x.container_count; return U.ltr(K.fmtNum(n == null ? 0 : n, 0)); }
+    // «حالة المعاملة» + the late / critical badge under it (the legacy statement)
+    function statusNode(x) {
+      var st = x.cancelled_at ? U.pill('danger', K.lab('transaction_state', 'cancelled', api)) : U.pill('brand', K.lab('operational_status', x.operational_status, api));
+      var a = x.attention && x.attention.level ? attentionNode(x) : null;
+      return a ? el('span', { class: 'lrpt-stcell' }, [st, a]) : st;
+    }
+    // «فاتورة دفترة»: the invoice number (issued), «Draft» (a Daftra draft), else —
+    function daftraCell(x) {
+      var d = x.daftra;
+      if (!d || !d.state || d.state === 'none') return K.NONE;
+      if (d.state === 'issued') return el('bdi', { dir: 'ltr', class: 'lrpt-dft-no', text: d.number || K.famLab('tx_daftra_state', 'lrpt', 'dft_state', 'issued') });
+      if (d.state === 'draft') return el('bdi', { dir: 'ltr', class: 'lrpt-dft-draft', text: d.number ? 'Draft · ' + d.number : 'Draft' });
+      return daftraNode(x);
+    }
     function daftraNode(x) {
       var d = x.daftra;
       if (!d || !d.state) return K.NONE;
@@ -264,25 +309,23 @@
         } },
         { key: 'client', label: lt('c_importer'), type: 'text', value: K.clientName, cell: function (x) { return U.twoLine(K.clientName(x) || K.NONE, x.client_code ? lt('client_code_n', { c: x.client_code }) : null); } },
         { key: 'declaration_no', label: lt('c_declaration_no'), type: 'text', value: function (x) { return x.declaration_no; },
-          cell: function (x) { return x.declaration_no ? U.twoLine(x.declaration_no, x.declaration_date ? K.riyadhDay(x.declaration_date) : null, true) : K.NONE; } },
-        { key: 'declaration_date', label: lt('c_declaration_date'), type: 'date', value: function (x) { return x.declaration_date || null; }, hidden: true },
+          cell: function (x) { return x.declaration_no ? el('bdi', { dir: 'ltr', text: x.declaration_no }) : K.NONE; } },
+        { key: 'declaration_date', label: lt('c_declaration_date_short'), type: 'date', value: function (x) { return x.declaration_date || null; },
+          cell: function (x) { return x.declaration_date ? el('span', { class: 'is-nowrap', text: K.riyadhDay(x.declaration_date) }) : K.NONE; } },
         { key: 'bl_number', label: lt('c_bl_number'), type: 'text', value: function (x) { return x.bl_number; }, cell: function (x) { return x.bl_number ? el('bdi', { dir: 'ltr', text: x.bl_number }) : K.NONE; } },
-        { key: 'unit_count', label: lt('c_unit_count'), type: 'int', value: function (x) { var n = x.unit_count != null ? x.unit_count : x.container_count; return n == null ? null : +n; }, cell: containersNode },
-        { key: 'port', label: lt('c_port'), type: 'text', value: function (x) { return K.portName(x) || x.port_of_discharge || ''; } },
+        { key: 'unit_count', label: lt('c_container_count'), type: 'int', value: function (x) { var n = x.unit_count != null ? x.unit_count : x.container_count; return n == null ? null : +n; }, cell: countNode },
+        { key: 'containers', label: lt('c_containers'), type: 'text', value: ctrListValue, cell: ctrListNode },
+        { key: 'port', label: lt('c_port_short'), type: 'text', value: function (x) { return K.portName(x) || x.port_of_discharge || ''; } },
         { key: 'operator_name', label: lt('c_operator'), type: 'text', value: function (x) { return x.operator_name; } },
         { key: 'agent_name', label: lt('c_agent'), type: 'text', value: function (x) { return x.agent_name || x.shipping_line; } },
         { key: 'vessel', label: lt('c_vessel'), type: 'text', value: function (x) { return x.vessel; } },
-        { key: 'declaration_status', label: lt('c_stage'), type: 'text', value: function (x) { return x.declaration_status ? K.lab('declaration_status', x.declaration_status, api) : ''; }, cell: stagePill },
         { key: 'operational_status', label: lt('c_tx_status'), type: 'text', value: function (x) { return x.cancelled_at ? K.lab('transaction_state', 'cancelled', api) : K.lab('operational_status', x.operational_status, api); },
-          cell: function (x) { return x.cancelled_at ? U.pill('danger', K.lab('transaction_state', 'cancelled', api)) : U.pill('brand', K.lab('operational_status', x.operational_status, api)); } },
-        { key: 'attention', label: lt('c_attention'), type: 'text', value: function (x) { return x.attention && x.attention.level ? K.famLab('attention_level', 'lrpt', 'att_level', x.attention.level) : ''; }, cell: attentionNode }
+          cell: statusNode }
       ];
-      if (finRead) cols.push({ key: 'daftra', label: lt('c_daftra'), type: 'text', value: function (x) { return x.daftra && x.daftra.state ? K.famLab('tx_daftra_state', 'lrpt', 'dft_state', x.daftra.state) : ''; }, cell: daftraNode });
-      cols.push(
-        { key: 'employee_name', label: lt('c_employee'), type: 'text', value: function (x) { return x.employee_name; } },
-        { key: 'updated_at', label: lt('c_updated_at'), type: 'datetime', value: function (x) { return x.updated_at || null; },
-          cell: function (x) { return x.updated_at ? el('span', { class: 'is-nowrap', text: K.riyadhDateTime(x.updated_at) }) : K.NONE; } });
-      return cols.filter(function (c) { return !c.hidden; });
+      // (owner, 2026-11-15: «كشف المعاملات» like the legacy statement) the stage / follow-up / employee / update columns are
+      // no longer on screen: the stage tones the row, the follow-up badge sits under the status; the export file is unchanged
+      if (finRead) cols.push({ key: 'daftra', label: lt('c_daftra'), type: 'text', value: function (x) { var d = x.daftra; return !d || !d.state || d.state === 'none' ? '' : d.state === 'issued' ? (d.number || K.famLab('tx_daftra_state', 'lrpt', 'dft_state', 'issued')) : d.state === 'draft' ? 'Draft' : K.famLab('tx_daftra_state', 'lrpt', 'dft_state', d.state); }, cell: daftraCell });
+      return cols;
     }
     function rowClass(x) {
       var c = 'lrpt-row' + (x.declaration_status ? ' lrpt-stage-' + x.declaration_status : '');
@@ -371,7 +414,7 @@
         countP.textContent = on ? lt('cf_shown', { n: K.fmtNum(shown.length, 0), m: K.fmtNum(items.length, 0), total: K.fmtNum(total, 0) }) : t('results_n', { n: K.fmtNum(total, 0) });
         clearCf.hidden = !on;
         var totals = on ? [] : [{ ref: K.t('total_n', { n: K.fmtNum(tt.count != null ? tt.count : total, 0) }), unit_count: tt.units != null ? +tt.units : null,
-          attention: lt('att_totals', { c: K.fmtNum((tt.attention || {}).critical || 0, 0), w: K.fmtNum((tt.attention || {}).warning || 0, 0) }) }];
+          operational_status: lt('att_totals', { c: K.fmtNum((tt.attention || {}).critical || 0, 0), w: K.fmtNum((tt.attention || {}).warning || 0, 0) }) }];
         tableBox.appendChild(U.card(null, K.reportTable(cols, shown, totals, ctx, { caption: lt('reg_title'), rowId: function (x) { return x.id; }, rowClass: rowClass,
           thExtra: cf ? function (c) { return cf.button(c.key); } : null }), null, { flush: true, cls: 'lrpt-table-card' }));
       }
