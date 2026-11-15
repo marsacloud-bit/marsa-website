@@ -931,6 +931,46 @@ section('26. check level (owner 2026-11-13): basic = numbers 100% + names / kind
   check('check_mode is reported; CHECK_MODES / SIM_MIN exported', () =>
     C('shipper', 'A', 'A', 'basic').check_mode === 'basic' && C('shipper', 'A', 'A', 'strict').check_mode === 'strict'
     && J(M.CHECK_MODES) === J(['basic', 'strict']) && M.SIM_MIN === 0.6 || 'check_mode');
+  // 2026-11-15 (owner): the same name with a city written after it in one document is a strict match, named in the detail
+  const stS = (key, a, b) => st(C(key, a, b, 'strict'), key);
+  eq('strict names: a known place after the name → match («… LTD., DHAKA», «… LLC., DAMMAM», «…، الدمام», Arabic letter forms, a line break, postcode, K.S.A, city + country, no separator after LTD + city)',
+    [stS('shipper', 'OVIJAT FOOD & BEVERAGE INDUSTRIES LTD.', 'OVIJAT FOOD & BEVERAGE INDUSTRIES LTD., DHAKA'),
+      stS('consignee', 'NAS AL SHARQ TRADING COMPANY LLC.', 'NAS AL SHARQ TRADING COMPANY LLC., DAMMAM'),
+      stS('consignee', 'NAS AL SHARQ TRADING COMPANY LLC., DAMMAM', 'NAS AL SHARQ TRADING COMPANY LLC.'),
+      stS('consignee', 'شركة ناس الشرق للتجارة', 'شركة ناس الشرق للتجارة، الدمام'), stS('consignee', 'شركة المراعي', 'شركة المراعى - الرياض'),
+      stS('shipper', 'OVIJAT FOOD & BEVERAGE INDUSTRIES LTD.', 'OVIJAT FOOD & BEVERAGE INDUSTRIES LTD.\nDHAKA'), stS('shipper', 'ACME LTD', 'ACME LTD, JEDDAH 21442'), stS('shipper', 'ACME LTD', 'ACME LTD, DHAKA-1212'),
+      stS('shipper', 'ACME LTD', 'ACME LTD, RIYADH K.S.A'), stS('shipper', 'abc foods ltd.', 'ABC FOODS LTD. - Dhaka, Bangladesh'),
+      stS('shipper', 'ACME LTD', 'ACME LTD JEDDAH'), stS('shipper', 'ACME CO.,LTD', 'ACME CO., LTD, SHANGHAI'), stS('shipper', 'ACME LTD', 'ACME LTD, CHITTAGONG, BANGLADESH'),
+      stS('shipper', 'SAUDI ARAMCO', 'SAUDI ARAMCO, DHAHRAN'), stS('consignee', 'ACME LTD', 'ACME LTD, DAMMAM 31411 KSA'), stS('consignee', 'ACME LTD', 'ACME LTD, SAUDI ARABIA'),
+      stS('consignee', 'ABC TRADING', 'ABC TRADING, RIYADH')],
+    Array(17).fill('match'));
+  eq('strict names: not a known place → still a mismatch (branch / division / holding / sons / office / second party / order / person / region / street / bare country without a separator / a changed word)',
+    [stS('consignee', 'ABC TRADING LTD', 'ABC TRADING LTD, DAMMAM BRANCH'), stS('consignee', 'ABC LTD', 'ABC LTD - FOODS DIVISION'),
+      stS('consignee', 'ABC CO', 'ABC CO HOLDING'), stS('consignee', 'شركة المراعي', 'شركة المراعي - القابضة'), stS('consignee', 'مؤسسة أحمد علي', 'مؤسسة أحمد علي - وأولاده'),
+      stS('consignee', 'ABC LTD', 'ABC LTD, HEAD OFFICE'), stS('consignee', 'ABC FOODS LTD', 'ABC FOODS LTD / XYZ LOGISTICS'), stS('consignee', 'TO ORDER', 'TO ORDER, AL RAJHI BANK'),
+      stS('consignee', 'AHMED ALI', 'AHMED ALI, HASSAN'), stS('consignee', 'ACME LTD', 'ACME LTD, MIDDLE EAST'), stS('consignee', 'ACME LTD', 'ACME LTD, KING FAHD ROAD'),
+      stS('consignee', 'ABC TRADING LLC', 'ABC TRADING LLC SAUDI ARABIA'), stS('consignee', 'ABC FOODS LTD', 'ABC FOODS LTD BANGLADESH'),
+      stS('shipper', 'OVIJAT FOOD LTD', 'OVIJAT FOODS LTD, DHAKA'), stS('consignee', 'MARSA TRADING CO', 'MARSA TRADING CO.'),
+      stS('consignee', 'ABC LTD', 'ABC LTD PLOT 12 DHAKA'), stS('consignee', 'ACME LTD', 'ACME LTD, DAMMAM BRANCH, KSA'), stS('consignee', 'ABC', 'ABC, DHAKA'), stS('consignee', 'ACME FOODS', 'ACME FOODS UK'),
+      // second review (2026-11-15): order consignees, short codes, person / royal port names, subsidiaries, a city with no separator
+      // after a name without a legal word, brackets
+      stS('consignee', 'TO THE ORDER', 'TO THE ORDER, RIYADH'), stS('consignee', 'لأمر', 'لأمر، الرياض'), stS('consignee', 'لامر بنك الراجحي', 'لامر بنك الراجحي - الرياض'),
+      stS('shipper', 'ACME', 'ACME, S.A.'), stS('shipper', 'ACME HOLDING', 'ACME HOLDING - SA'), stS('shipper', 'ABC TRADING', 'ABC TRADING - JED'),
+      stS('shipper', 'ABC TRADING', 'ABC TRADING SIN'), stS('consignee', 'ABDULLAH SALEH', 'ABDULLAH SALEH - HAMAD'), stS('consignee', 'مؤسسة سعد', 'مؤسسة سعد - هند'),
+      stS('consignee', 'مؤسسة محمد', 'مؤسسة محمد - المدينه'), stS('consignee', 'SAVOLA', 'SAVOLA - EGYPT'), stS('consignee', 'NESTLE', 'NESTLE - UAE'),
+      stS('consignee', 'ACME LTD', 'ACME LTD - UK'), stS('consignee', 'ABC TRADING', 'ABC TRADING RIYADH'), stS('consignee', 'ALMARAI', 'ALMARAI JEDDAH'),
+      stS('consignee', 'ABC TRADING EST', 'ABC TRADING EST (RIYADH)'), stS('consignee', 'مؤسسة سعد', 'مؤسسة سعد عمان'), stS('shipper', 'ACME FOODS', 'ACME FOODS\nDHAKA')],
+    Array(37).fill('mismatch'));
+  check('strict names: a different place in each document stays a mismatch (B/L «…, JEDDAH» vs declaration «…, RIYADH»)', () => {
+    const r = M.compare({ invoice: { fields: { consignee: 'ACME LTD' } }, bl: { fields: { consignee: 'ACME LTD, JEDDAH' } }, declaration: { fields: { consignee: 'ACME LTD, RIYADH' } } }, { mode: 'strict' });
+    const x = r.rows.find(y => y.key === 'consignee');
+    return (x && x.pairs.inv_bl === 'match' && x.pairs.bl_decl === 'mismatch' && x.status === 'mismatch') || J(x && x.pairs);
+  });
+  check('strict names: the detail names the place and the document it was added in (ar + en); other text fields unchanged', () => {
+    const r1 = row(C('shipper', 'OVIJAT FOOD & BEVERAGE INDUSTRIES LTD.', 'OVIJAT FOOD & BEVERAGE INDUSTRIES LTD., DHAKA', 'strict'), 'shipper');
+    return (/أُضيف بعده «DHAKA» \(مدينة \/ مكان\) في البوليصة/.test(r1.detail_ar) && /«DHAKA» \(city \/ place\) added after it in/.test(r1.detail_en)
+      && stS('goods_description', 'BISCUITS', 'BISCUITS, DHAKA') === 'mismatch' && stS('port_of_loading', 'CHITTAGONG', 'CHITTAGONG, BD') === 'mismatch') || J(r1);
+  });
   eq('PURE CARE MEDICAL CO. vs Pure Care Medical Est. → legacy / basic match, strict mismatch', S3('shipper', 'PURE CARE MEDICAL CO.', 'Pure Care Medical Est.'), ['match', 'match', 'mismatch']);
   check('strict detail says why', () => /التدقيق الشديد/.test(row(C('shipper', 'PURE CARE MEDICAL CO.', 'Pure Care Medical Est.', 'strict'), 'shipper').detail_ar)
     && /Strict check/.test(row(C('shipper', 'PURE CARE MEDICAL CO.', 'Pure Care Medical Est.', 'strict'), 'shipper').detail_en) || 'detail');
@@ -1008,7 +1048,10 @@ section('26. check level (owner 2026-11-13): basic = numbers 100% + names / kind
     snapshotCorpus().forEach((inp, i) => M.compare(inp, { mode: 'strict' }).rows.forEach(r => {
       if (textKeys.indexOf(r.key) === -1) return;
       if (r.status === 'partial') bad.push([i, r.key, 'partial']);
-      Object.keys(r.pairs).forEach(p => { if (r.pairs[p] !== 'match') return; const d = M.PAIRS[p]; if (!M.looseSame(r.values[d[0]], r.values[d[1]])) bad.push([i, r.key, p]); });
+      Object.keys(r.pairs).forEach(p => { if (r.pairs[p] !== 'match') return; const d = M.PAIRS[p], x = r.values[d[0]], y = r.values[d[1]];
+        // 2026-11-15: a name + a place written after it (shipper / consignee) is the one other strict match
+        const placed = (r.key === 'shipper' || r.key === 'consignee') && (M.placeAfter(x, y) || M.placeAfter(y, x));
+        if (!M.looseSame(x, y) && !placed) bad.push([i, r.key, p]); });
     }));
     return textKeys.length === 9 && bad.length === 0 || J(bad.slice(0, 5)); });
   check('the levels are deterministic and never throw on the corpus (and with a packing list)', () => {

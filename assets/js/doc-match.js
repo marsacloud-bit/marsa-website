@@ -710,6 +710,114 @@
     return { s: 'mismatch', why: 'lv_low', sim: m.ratio };
   }
   function strictText(a, b) { return looseSame(a, b) ? { s: 'match' } : { s: 'mismatch', why: 'strict' }; }
+  /* Strict check, names (owner, 2026-11-15: «في البوليصة فقط أضاف مدينة الشاحن اللي هي دكا لكن اسم العميل كما هو»): the
+     same name with a PLACE written after it in one document — "OVIJAT FOOD & BEVERAGE INDUSTRIES LTD." / "… LTD., DHAKA",
+     "NAS AL SHARQ TRADING COMPANY LLC." / "… LLC., DAMMAM" — is a match (why 'place_added', the place is named in the
+     detail). Only when:
+       - the shorter name (≥ 4 letters, not "TO ORDER" / «لأمر») is, word for word, the start of the longer one (fold():
+         case, spacing, punctuation, Arabic letter forms / tashkeel aside);
+       - what follows is 1–3 parts set off by a comma / «،» / dash / line break, each part a KNOWN place: a port or a country
+         of the engine's lists, or a city of PLACE_CITIES (a 4–6 digit postcode may follow a place: "JEDDAH 21442",
+         "DHAKA-1212"; "K.S.A" / "U.A.E." are read as KSA / UAE);
+       - with no separator ("… LTD JEDDAH", or a line break — the field values carry it as a space): only right after a
+         legal-entity word (LTD / LLC / CO …) and one city / port; a country alone: only after a comma and a legal-entity
+         word ("ACME LTD, SAUDI ARABIA" — "SAVOLA - EGYPT" / "ACME LTD UK" are subsidiaries);
+       - short codes ("S.A." is a legal form; KSA / UAE / USA / UK are kept), person / royal names of ports (HAMAD, KING
+         ABDULLAH) and short Arabic country words (هند، امريكا) are not places; "TO (THE) ORDER" / «لأمر» never; brackets never.
+     So a branch / division / holding / sons / office / second party / person / street after the name stays a mismatch
+     (in KSA a branch has its own CR); anything not a known place does too. */
+  // inland / trade cities that are not in PORTS (folded, as words() gives them)
+  var PLACE_CITIES = ['dhaka', 'dacca', 'gazipur', 'narayanganj', 'riyadh', 'mecca', 'makkah', 'medina', 'madinah', 'al madinah', 'khobar', 'al khobar',
+    'qassim', 'al qassim', 'buraidah', 'buraydah', 'taif', 'tabuk', 'abha', 'hail', 'hafr al batin', 'al hasa', 'al ahsa', 'hofuf', 'al hofuf',
+    'khamis mushait', 'najran', 'sudair', 'kharj', 'al kharj', 'unaizah', 'abu dhabi', 'al ain', 'ajman', 'kuwait city', 'doha', 'manama',
+    'muscat', 'amman', 'cairo', 'giza', 'alexandria', '6th of october', 'new delhi', 'delhi', 'lahore', 'faisalabad', 'sialkot', 'multan',
+    'yiwu', 'hangzhou', 'foshan', 'dongguan', 'beijing', 'wenzhou', 'suzhou', 'wuxi', 'jinhua', 'zhengzhou', 'chengdu', 'istanbul', 'ankara',
+    'bursa', 'gaziantep', 'konya', 'izmir', 'ho chi minh city', 'ho chi minh', 'hanoi', 'kuala lumpur', 'bangkok', 'seoul', 'tokyo', 'osaka',
+    'taipei', 'milan', 'madrid', 'paris', 'london', 'frankfurt', 'kathmandu', 'nairobi', 'addis ababa',
+    'chittagong', 'chattogram', 'mongla', 'dhahran', 'qatif', 'al qatif', 'ras tanura', 'sharjah', 'beirut', 'baghdad', 'sanaa', 'aden',
+    'ahmedabad', 'kolkata', 'calcutta', 'tirupur', 'ludhiana', 'surat', 'surabaya', 'semarang', 'jinjiang', 'linyi', 'nanjing', 'changzhou',
+    'binh duong', 'denizli', 'kayseri', '10th of ramadan',
+    'شيتاغونغ', 'شيتاجونج', 'الظهران', 'القطيف', 'راس تنوره', 'الشارقه', 'بيروت', 'بغداد', 'صنعاء', 'عدن',
+    'دكا', 'الرياض', 'مكه', 'مكه المكرمه', 'المدينه المنوره', 'الخبر', 'القصيم', 'بريده', 'الطايف', 'تبوك', 'ابها', 'حايل',
+    'حفر الباطن', 'الاحساء', 'الهفوف', 'خميس مشيط', 'نجران', 'الخرج', 'عنيزه', 'ابوظبي', 'ابو ظبي', 'العين', 'عجمان', 'الدوحه', 'المنامه',
+    'مسقط', 'عمان', 'القاهره', 'الجيزه', 'الاسكندريه', 'اسطنبول'].map(function (x) { return words(x).join(' '); });
+  // aliases of the port / country lists that are names or codes, not places, when written after a party name: short codes
+  // ("S.A." is a legal form, "JED" / "IN" / "CAN" are codes), person / royal names of ports, short Arabic country words
+  var PLACE_SHORT_OK = ['ksa', 'uae', 'usa', 'uk'];
+  var PLACE_NOT = ['hamad', 'khalifa bin salman', 'king abdullah', 'king abdulaziz', 'الملك عبدالعزيز', 'ملك عبدالعزيز', 'هند', 'صين', 'سعوديه',
+    'امارات', 'امريكا'].map(function (x) { return words(x).join(' '); });
+  function inAliases(list, t) {
+    if (PLACE_NOT.indexOf(t) !== -1) return false;
+    if (t.replace(/ /g, '').length < 4 && PLACE_SHORT_OK.indexOf(t) === -1) return false;
+    for (var i = 0; i < list.length; i++) if (list[i][1].indexOf(t) !== -1) return true;
+    return false;
+  }
+  var LEGAL_END = ['ltd', 'limited', 'llc', 'co', 'company', 'inc', 'incorporated', 'corp', 'corporation', 'est', 'establishment', 'plc',
+    'gmbh', 'ag', 'sa', 'srl', 'spa', 'bv', 'pvt', 'pte', 'pty', 'jsc', 'fze', 'fzco', 'fzc', 'llp', 'wll', 'spc', 'nv', 'sarl', 'bhd',
+    'المحدوده', 'محدوده', 'ذمم'].map(function (x) { return fold(x); });
+  // one part after the name → 'city' | 'port' | 'country' | null (the WHOLE part must be the place)
+  function placeKind(part) {
+    var t = words(String(part).replace(/\b([a-z])\.(?=[a-z]\b)/g, '$1').replace(/\./g, '')).join(' ');
+    t = t.replace(/ [0-9]{4,6}(?= |$)/g, '').replace(/ +/g, ' ').trim();
+    if (!t) return null;
+    if (PLACE_CITIES.indexOf(t) !== -1) return 'city';
+    if (inAliases(PORTS, t) || inAliases(PORTS, t.replace(/^al /, ''))) return 'port';
+    if (inAliases(COUNTRIES, t) || inAliases(COUNTRIES, t.replace(/^ال/, ''))) return 'country';
+    // a city / port followed by its country in the same part ("RIYADH K.S.A", "DHAKA BANGLADESH")
+    var w = t.split(' ');
+    for (var n = 1; n <= Math.min(3, w.length - 1); n++) {
+      var c = w.slice(-n).join(' '), head = w.slice(0, -n).join(' ');
+      if ((inAliases(COUNTRIES, c) || inAliases(COUNTRIES, c.replace(/^ال/, ''))) && (PLACE_CITIES.indexOf(head) !== -1 || inAliases(PORTS, head) || inAliases(PORTS, head.replace(/^al /, '')))) return 'city';
+    }
+    return null;
+  }
+  var NAME_SEP = '[^a-z0-9\u0621-\u064a]';
+  function escRe(x) { return x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+  // the place written after the name in longV (as written there), or null
+  function placeAfter(shortV, longV) {
+    var ws = words(shortV);
+    if ((ws.join('').match(/[a-z\u0621-\u064a]/g) || []).length < 4) return null;
+    if (/^(to (the )?order|order of|لامر)( |$)/.test(ws.join(' '))) return null;
+    var raw = str(longV).replace(/\r\n|\r|\n|\u2028|\u2029/g, ' , ');
+    var fl = fold(typeof longV === 'string' ? longV.replace(/\r\n|\r|\n|\u2028|\u2029/g, ' , ') : raw);
+    var m = new RegExp('^' + NAME_SEP + '*' + ws.map(escRe).join(NAME_SEP + '+') + '(?![a-z0-9\u0621-\u064a])').exec(fl);
+    if (!m) return null;
+    var rest = fl.slice(m[0].length);
+    if (!/[a-z\u0621-\u064a]/.test(rest) || /[()\[\]]/.test(rest)) return null;
+    var sep = /^[^a-z0-9\u0621-\u064a]*[,\u060c\-\u2013]/.test(rest), comma = /^[^a-z0-9\u0621-\u064a]*[,\u060c]/.test(rest);
+    var last = ws[ws.length - 1], legalEnd = LEGAL_END.indexOf(last) !== -1 || LEGAL_END.indexOf(ws.slice(-3).join('')) !== -1;
+    var parts = rest.split(/[,\u060c\-\u2013;]+/).map(function (x) { return x.replace(/^[\s.]+|[\s.]+$/g, ''); }).filter(Boolean);
+    var kinds = [];
+    for (var i = 0; i < parts.length; i++) {
+      if (/^[0-9]{4,6}$/.test(parts[i]) && i > 0 && kinds.length) continue;   // a postcode after a place ("DHAKA-1212")
+      var k = placeKind(parts[i]);
+      if (!k) return null;
+      kinds.push(k);
+    }
+    if (!kinds.length || kinds.length > 3) return null;
+    // no separator (also a line break, which the field values carry as a space): only after a legal-entity word and one
+    // city / port (a CR name may itself end in a city: "ALMARAI JEDDAH"; "ACME LTD UK" is often a sister company)
+    if (!sep && (!legalEnd || kinds.length !== 1 || kinds[0] === 'country')) return null;
+    // a country alone (no city before it): only after a comma and a legal-entity word ("ACME LTD, SAUDI ARABIA");
+    // "SAVOLA - EGYPT" / "NESTLE - UAE" are subsidiaries
+    if (kinds.every(function (k) { return k === 'country'; }) && !(comma && legalEnd)) return null;
+    // the place as written in the longer name: the shortest end of it whose words are the words after the name
+    var restWords = words(rest).join(' '), shown = rest.trim();
+    var src = typeof longV === 'string' ? longV.replace(/\r\n|\r|\n|\u2028|\u2029/g, ', ') : raw;
+    for (var n = 1; n <= Math.min(src.length, 300); n++) {
+      var piece = src.slice(src.length - n);
+      if (words(piece).join(' ') === restWords && !/^[A-Za-z0-9\u0621-\u064A\u0660-\u0669]/.test(src.charAt(src.length - n - 1) || ' ')) { shown = piece; break; }
+    }
+    return shown.replace(/^[\s.,\u060C;:\-\u2013\/|]+|[\s.,\u060C;:]+$/g, '') || null;
+  }
+  function strictName(a, b) {
+    if (looseSame(a, b)) return { s: 'match' };
+    var t = placeAfter(a, b);
+    if (t) return { s: 'match', why: 'place_added', place: t, longer: 'b' };
+    t = placeAfter(b, a);
+    if (t) return { s: 'match', why: 'place_added', place: t, longer: 'a' };
+    return { s: 'mismatch', why: 'strict' };
+  }
   function isLbs(v) { return typeof v !== 'number' && /\b(lb|lbs|pound|pounds)\b|رطل/.test(fold(v)); }
   function exactWeight(a, b) {
     var x = parseWeight(a), y = parseWeight(b);
@@ -735,7 +843,7 @@
       if (d.key === 'container_numbers') return noPartial(d.cmp);
       return noPartial(d.cmp, 'id_exact');
     }
-    if (level === 'strict') return strictText;
+    if (level === 'strict') return d.key === 'shipper' || d.key === 'consignee' ? strictName : strictText;
     if (d.key === 'incoterms') {
       return function (a, b) {
         var r = d.cmp(a, b);
@@ -877,6 +985,11 @@
     if (r.why === 'lv_low') { ar.push('التشابه ' + Math.floor(r.sim * 100) + '% فقط (أقل من 60%)'); en.push('Only ' + Math.floor(r.sim * 100) + '% similar (below 60%)'); }
     if (r.why === 'code') { ar.push('قيمتان مختلفتان'); en.push('Two different values'); }
     if (r.why === 'strict') { ar.push('التدقيق الشديد: النص غير مطابق حرفيًا'); en.push('Strict check: the text is not identical'); }
+    if (r.why === 'place_added') {
+      var inDoc = r.longer === 'a' ? A : B;
+      ar.push('الاسم نفسه؛ أُضيف بعده «' + r.place + '» (مدينة / مكان) في ' + DOC_AR[inDoc]);
+      en.push('Same name; «' + r.place + '» (city / place) added after it in ' + DOC_EN[inDoc]);
+    }
     if (r.must === 'id_exact') { ar.push('الأرقام يجب أن تتطابق 100%'); en.push('Numbers must match 100%'); }
     if (r.must === 'hs_exact') { ar.push('رموز HS يجب أن تتطابق في أول 6 خانات'); en.push('HS codes must match on their first 6 digits'); }
     if (r.why === 'place') { ar.push('نفس الشرط بمكان تسليم مختلف'); en.push('Same term, different named place'); }
@@ -1227,7 +1340,7 @@
     DOC_LABELS: { ar: JSON.parse(JSON.stringify(DOC_AR)), en: JSON.parse(JSON.stringify(DOC_EN)) },
     PAIRS: (function () { var o = {}; PAIRS.forEach(function (p) { o[p[0]] = [p[1], p[2]]; }); return o; })(),
     FIELDS: F.map(function (d) { return { key: d.key, label_ar: d.ar, label_en: d.en, keys: d.keys, exp: d.exp.slice(), opt: d.opt.slice(), critical: d.crit, kind: d.kind }; }),
-    compare: compare, CHECK_MODES: CHECK_MODES.slice(), SIM_MIN: SIM_MIN, similarity: similarity,
+    compare: compare, CHECK_MODES: CHECK_MODES.slice(), SIM_MIN: SIM_MIN, similarity: similarity, placeAfter: placeAfter,
     // helpers (tests / UI)
     // the cmp* helpers are the lenient ones the rows use (case / spacing never differs: looseKey / looseSame)
     normName: normName, cmpName: lenient(cmpName), normPort: normPort, cmpPort: lenient(cmpPort), normCountry: normCountry, normCurrency: normCurrency,
