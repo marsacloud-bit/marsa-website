@@ -383,9 +383,10 @@
       var tg = e && e.target;
       if (!tg || typeof tg.closest !== 'function') return;
       if (e.defaultPrevented || e.button > 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
-      for (var i = 0; i < ROW_SKIP.length; i++) if (tg.closest(ROW_SKIP[i])) return;
       var tr = tg.closest('tr');
       if (!tr || !tr.parentNode || tr.parentNode.tagName !== 'TBODY') return;
+      // only controls INSIDE the row count: the view container itself carries tabindex="-1" (focus target of the shell)
+      for (var i = 0; i < ROW_SKIP.length; i++) { var m = tg.closest(ROW_SKIP[i]); if (m && tr.contains(m)) return; }
       try { if (window.getSelection && String(window.getSelection() || '').length) return; } catch (x) { /* ignore */ }
       var a = tr.querySelector('a.ops-ref'), href = a && a.getAttribute('href');
       if (!href || !/^#tx\//.test(href)) return;

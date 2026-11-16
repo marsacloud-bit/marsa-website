@@ -683,6 +683,12 @@ function rtApi(calls, rows) {
       const td = rows()[0].querySelectorAll('td')[1];
       return clickOn(td) === '#tx/' + TX1 && clickOn(rows()[1].querySelectorAll('td')[10]) === '#tx/' + TX2 || ctx.location.hash;
     });
+    check('the view container carries tabindex="-1" (admin.html .adm-view, live 2026-11-16): a plain cell still opens #tx/<id>', () => {
+      root.setAttribute('tabindex', '-1');
+      const h = clickOn(rows()[0].querySelectorAll('td')[1]);
+      root.removeAttribute('tabindex');
+      return h === '#tx/' + TX1 || h;
+    });
     check('a click on a link / the container list / the totals row keeps its own behaviour (no row navigation)', () => {
       const r0 = rows()[0];
       const a = clickOn(r0.querySelector('a.ops-ref').querySelector('bdi') || r0.querySelector('a.ops-ref'));
