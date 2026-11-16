@@ -35,6 +35,9 @@
       // organization switcher
       org_switch: 'المؤسسة النشطة', org_switched: 'المؤسسة النشطة الآن: {name}', org_failed: 'تعذّر تبديل المؤسسة: {msg}',
       org_unknown: 'هذه المؤسسة غير متاحة لحسابك.',
+      // staff dashboard nav layout («القائمة»: horizontal bar ↔ side menu; a drawer on phones)
+      nav_menu: 'القائمة', nav_layout_side: 'عرض الأقسام في قائمة جانبية', nav_layout_top: 'عرض الأقسام في شريط أفقي',
+      nav_drawer_open: 'فتح قائمة الأقسام', nav_drawer_close: 'إغلاق قائمة الأقسام',
       // account
       user_fallback: 'مستخدم', none: '—', platform_admin: 'مدير المنصة', client_account: 'حساب عميل',
       signout: 'تسجيل الخروج', signout_all: 'تسجيل الخروج من كل الأجهزة',
@@ -72,6 +75,8 @@
       act_lang: 'Switch to Arabic', act_signout: 'Sign out',
       org_switch: 'Active organization', org_switched: 'Active organization: {name}', org_failed: 'Could not switch organization: {msg}',
       org_unknown: 'This organization is not available to your account.',
+      nav_menu: 'Menu', nav_layout_side: 'Show the sections as a side menu', nav_layout_top: 'Show the sections as a top bar',
+      nav_drawer_open: 'Open the sections menu', nav_drawer_close: 'Close the sections menu',
       user_fallback: 'User', none: '—', platform_admin: 'Platform admin', client_account: 'Client account',
       signout: 'Sign out', signout_all: 'Sign out of all devices',
       security: 'Account security',

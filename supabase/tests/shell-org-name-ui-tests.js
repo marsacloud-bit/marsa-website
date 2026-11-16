@@ -7,7 +7,8 @@
   Covers: the shell adds one [data-shell-orgname] slot right after admin.html's #adm-me-name (never twice), shows the
   active org (Arabic name, English name in English, the switched org for a multi-org user, slug fallback), text only
   (no innerHTML of server data; a "<img onerror>" name stays text), hidden while signed out / demo, no logo element
-  (logo_path has no storage bucket yet), ES5 only in the new code, and the CSS keeps it on a phone (wrap, min-width 0).
+  when the context carries no logo path (the logo itself: shell-sidebar-logo-ui-tests.js), ES5 only in the new code,
+  and the CSS keeps it on a phone (wrap, min-width 0).
 
   usage:  node supabase/tests/shell-org-name-ui-tests.js [/path/to/marsa-website] [--quiet]
 */
@@ -135,7 +136,7 @@ function textOf(n) { let s = ''; (function w(x) { if (x.tagName === '#TEXT') s +
     eq('visible', sl.hidden, false);
     eq('shows the Arabic name in a <bdi>', (sl.querySelector('bdi') || {}).textContent, 'مؤسسة التجربة');
     eq('title names it as the active org', sl.getAttribute('title'), 'المؤسسة النشطة: مؤسسة التجربة');
-    check('no logo <img> (no storage path for logo_path yet)', () => !sl.querySelector('img') || 'img found');
+    check('no logo <img> without a logo path (see shell-sidebar-logo-ui-tests.js)', () => !sl.querySelector('img') || 'img found');
     b.win.dispatchEvent({ type: 'marsa:langchange' });
     eq('re-render does not duplicate the slot', b.slot().length, 1);
   }

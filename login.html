@@ -431,21 +431,24 @@
                 <p class="auth-otp-or text-sm text-muted" data-i18n="login.otpOr">أو</p>
                 <button class="btn btn-secondary btn-block" type="button" data-otp-open aria-expanded="false" aria-controls="otp-request-form" data-i18n="login.otpOpen">الدخول برمز يُرسل إلى البريد</button>
                 <form class="form" id="otp-request-form" data-auth-form novalidate hidden>
-                  <p class="text-sm text-muted" data-i18n="login.otpLead">للموظفين فقط، إن فعّلت مؤسستك الدخول بالرمز. يبقى التحقق بخطوتين مطلوبًا لمن يلزمه.</p>
+                  <p class="text-sm text-muted" data-i18n="login.otpLead">للموظفين فقط، إن فعّلت مؤسستك الدخول بالرمز.</p>
                   <div class="form-group">
                     <label class="form-label" for="otp-email"><span data-i18n="login.workEmail">البريد الإلكتروني للعمل</span> <span class="req">*</span></label>
                     <input class="form-control" id="otp-email" name="email" type="email" dir="ltr" autocomplete="username" inputmode="email" maxlength="160" required>
                     <span class="form-error" data-i18n="login.errEmail">أدخل بريدًا إلكترونيًا صحيحًا.</span>
                   </div>
+                  <!-- the code validity + the session length (api.sessionMaxHours()); auth.js otpNote() fills both notes -->
+                  <p class="auth-otp-note text-xs text-muted" data-otp-note>الرمز صالح لمدة محدودة ولمرة واحدة فقط.</p>
                   <button class="btn btn-primary btn-block" type="submit" data-i18n="login.otpSend">إرسال الرمز</button>
                 </form>
                 <form class="form" id="otp-verify-form" data-auth-form novalidate hidden>
                   <p class="text-sm" data-otp-sent role="status"></p>
                   <div class="form-group">
                     <label class="form-label" for="otp-code"><span data-i18n="login.otpCode">الرمز المرسل إلى بريدك</span> <span class="req">*</span></label>
-                    <input class="form-control" id="otp-code" name="code" type="text" dir="ltr" autocomplete="one-time-code" inputmode="numeric" maxlength="10" required>
+                    <input class="form-control" id="otp-code" name="code" type="text" dir="ltr" autocomplete="one-time-code" inputmode="numeric" maxlength="10" aria-describedby="otp-note-verify" required>
                     <span class="form-error" data-i18n="login.otpCodeError">أدخل الرمز المكوّن من 6 أرقام.</span>
                   </div>
+                  <p class="auth-otp-note text-xs text-muted" id="otp-note-verify" data-otp-note>الرمز صالح لمدة محدودة ولمرة واحدة فقط.</p>
                   <button class="btn btn-primary btn-block" type="submit" data-i18n="login.otpVerify">تأكيد الرمز والدخول</button>
                   <div class="auth-links">
                     <button class="link-btn" type="button" data-otp-resend data-i18n="login.otpResend">إرسال رمز جديد</button>

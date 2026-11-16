@@ -5,6 +5,9 @@
 #   export PROD_SUPABASE_URL='https://<prod-ref>.supabase.co'
 #   export PROD_PUBLISHABLE_KEY='sb_publishable_…'     # the PUBLIC key of the production project
 #   export PROD_ORG_SLUG='<slug>'                       # organizations.slug of the production tenant
+#   export PROD_EMAIL_OTP_LOGIN=1                       # optional: emailOtpLogin: true (the e-mail code login, platform
+#                                                       #   switch; docs/online/EMAIL_CODE_LOGIN_AR.md). Unset / 0 = false
+#   export PROD_SESSION_MAX_HOURS=12                    # optional: sessionMaxHours, whole hours 0..168 (default 12; 0 = no cap)
 #   ./scripts/build-release.sh OUT_DIR [--allow-dirty] [--in-place]
 #   ./scripts/build-release.sh --self-test              # the key / page / guide checks below on built-in samples
 #
@@ -46,7 +49,7 @@ ALLOW_DIRTY=0
 IN_PLACE=0
 
 usage() {
-  sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,41p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 die() { echo "build-release: $*" >&2; exit 1; }
@@ -129,6 +132,18 @@ def inline_hashes(htmls):
             if h not in seen: seen.append(h)
     return seen
 
+# optional config.js switches: PROD_EMAIL_OTP_LOGIN ('' / '0' → false, '1' → true) and PROD_SESSION_MAX_HOURS
+# ('' → 12; whole hours 0..168, 0 = no cap) → ('true'|'false', hours); anything else → ValueError (nothing is written)
+def switches(env):
+    otp = env.get('PROD_EMAIL_OTP_LOGIN', '')
+    if otp not in ('', '0', '1'):
+        raise ValueError('PROD_EMAIL_OTP_LOGIN must be 1 (on) or 0 / unset (off), got %r' % otp[:20])
+    h = env.get('PROD_SESSION_MAX_HOURS', '')
+    if h == '': h = '12'
+    if not re.fullmatch(r'0|[1-9][0-9]{0,2}', h) or int(h) > 168:
+        raise ValueError('PROD_SESSION_MAX_HOURS must be whole hours 0..168 (0 = no cap; default 12), got %r' % h[:20])
+    return ('true' if otp == '1' else 'false'), int(h)
+
 def rd(p): return open(p, encoding='utf-8').read()
 def wr(p, s): open(p, 'w', encoding='utf-8').write(s)
 def pages(site): return sorted(glob.glob(os.path.join(site, '*.html')))
@@ -174,6 +189,16 @@ def self_test():
     try: prod_md('<!-- env:staging -->\n> x\n'); ok(False, 'unbalanced marker accepted')
     except ValueError: ok(True, '')
     ok(len(inline_hashes([page])) == 2, 'inline hashes: <script> and <script type=…>, never src=')
+    for env, want in [({}, ('false', 12)), ({'PROD_EMAIL_OTP_LOGIN': '1'}, ('true', 12)), ({'PROD_EMAIL_OTP_LOGIN': '0'}, ('false', 12)),
+                      ({'PROD_EMAIL_OTP_LOGIN': ''}, ('false', 12)), ({'PROD_SESSION_MAX_HOURS': '8'}, ('false', 8)),
+                      ({'PROD_SESSION_MAX_HOURS': '0'}, ('false', 0)), ({'PROD_SESSION_MAX_HOURS': '168', 'PROD_EMAIL_OTP_LOGIN': '1'}, ('true', 168))]:
+        ok(switches(env) == want, 'switches(%r) = %r, expected %r' % (env, switches(env), want))
+    for env in [{'PROD_EMAIL_OTP_LOGIN': 'true'}, {'PROD_EMAIL_OTP_LOGIN': 'yes'}, {'PROD_EMAIL_OTP_LOGIN': '1 '}, {'PROD_EMAIL_OTP_LOGIN': '1\n'},
+                {'PROD_SESSION_MAX_HOURS': '169'}, {'PROD_SESSION_MAX_HOURS': '-1'}, {'PROD_SESSION_MAX_HOURS': '1.5'},
+                {'PROD_SESSION_MAX_HOURS': '012'}, {'PROD_SESSION_MAX_HOURS': '12\n'}, {'PROD_SESSION_MAX_HOURS': "12;alert(1)"},
+                {'PROD_SESSION_MAX_HOURS': 'abc'}, {'PROD_SESSION_MAX_HOURS': '١٢'}]:
+        try: switches(env); ok(False, 'switches accepted %r' % env)
+        except ValueError: ok(True, '')
     print('build-release --self-test OK — %d checks' % n)
 
 cmd, args = sys.argv[1], sys.argv[2:]
@@ -194,6 +219,9 @@ elif cmd == 'scan':
         hits += [os.path.relpath(f, site) + ':%d  %s' % h for h in scan_text(rd(f))]
     if hits: sys.exit('build-release: staging wording in site/ (put it in data-show-env="staging" / data-show-mode="demo",\n'
                       '  or between <!-- env:staging --> and <!-- /env --> in a guide):\n  ' + '\n  '.join(hits))
+elif cmd == 'switches':
+    try: print('%s %d' % switches(os.environ))
+    except ValueError as e: sys.exit('build-release: ' + str(e))
 elif cmd == 'hashes':
     print(' '.join(inline_hashes([rd(f) for f in pages(args[0])])))
 elif cmd == 'self-test':
@@ -256,6 +284,12 @@ esac
 printf '%s' "$KEY" | grep -Eq '^[A-Za-z0-9._-]+$' || die "PROD_PUBLISHABLE_KEY holds characters outside [A-Za-z0-9._-]"
 printf '%s' "$SLUG" | grep -Eq '^[a-z0-9][a-z0-9-]{1,40}$' || die "PROD_ORG_SLUG must be a lowercase slug (a-z 0-9 -)"
 [ "$SLUG" != "blue-sea" ] || die "PROD_ORG_SLUG is the staging demo org 'blue-sea'"
+# optional switches (validated before anything is written): PROD_EMAIL_OTP_LOGIN → emailOtpLogin (default false),
+# PROD_SESSION_MAX_HOURS → sessionMaxHours (default 12)
+SWITCHES="$(pyl switches)" || exit 1
+EMAIL_OTP="${SWITCHES% *}"; SESSION_HOURS="${SWITCHES#* }"
+case "$EMAIL_OTP" in true|false) ;; *) die "internal: emailOtpLogin '$EMAIL_OTP'" ;; esac
+[[ "$SESSION_HOURS" =~ ^[0-9]{1,3}$ ]] || die "internal: sessionMaxHours '$SESSION_HOURS'"
 
 # ---- the site file list: tracked files only, whitelisted
 cd "$REPO"
@@ -291,7 +325,9 @@ window.MARSA_CONFIG = {
   supabaseUrl: '$URL',
   supabaseAnonKey: '$KEY',
   orgSlug: '$SLUG',
-  environment: 'production'
+  environment: 'production',
+  sessionMaxHours: $SESSION_HOURS,
+  emailOtpLogin: $EMAIL_OTP
 };
 EOF
 
@@ -374,6 +410,7 @@ shasum -a 256 "$(basename "$ZIP")" >> SHA256SUMS
 echo "release built from commit $COMMIT$([ -n "$DIRTY" ] && echo ' (+ uncommitted changes)') → $OUT"
 echo "  site/: $(find site -type f | wc -l | tr -d ' ') files ($(du -sk site | cut -f1) KB)   edge/: $(ls edge | tr '\n' ' ')"
 echo "  config.js → $URL, orgSlug $SLUG, environment production ($KEY_KIND key)$([ "$IN_PLACE" = 1 ] && echo ', IN PLACE (current project)')"
+echo "  config.js sessionMaxHours $SESSION_HOURS$([ "$SESSION_HOURS" = 0 ] && echo ' (NO session cap)'), emailOtpLogin $EMAIL_OTP$([ "$EMAIL_OTP" = true ] && echo ' (the org admin must ALSO enable it + Supabase Auth e-mail template: docs/online/EMAIL_CODE_LOGIN_AR.md)')"
 echo "  sw.js VERSION $(sed -n "s/^var VERSION = '\([^']*\)'.*/\1/p" site/sw.js)"
 echo "  zip:  $(basename "$ZIP")  sha256 $(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
 echo "  SHA256SUMS: $(wc -l < SHA256SUMS | tr -d ' ') entries"

@@ -40,8 +40,15 @@ window.MARSA_CONFIG = {
   // (localStorage 'marsa_lang' wins): 'ar' (default, RTL) | 'en'.
   defaultLocale: 'ar',
 
+  // Optional. Session cap in whole hours (the old system's 12-hour sessions): a session older than this is signed out on
+  // this device and app pages go to login.html?expired=1. Absent / invalid → 12; 0 → no cap. Production: written by
+  // scripts/build-release.sh from PROD_SESSION_MAX_HOURS (default 12).
+  sessionMaxHours: 12,
+
   // Optional (legacy step 8). Platform switch of the e-mail code login on login.html: true shows «الدخول برمز يُرسل إلى
-  // البريد» to staff. OFF (false) by default. Each organization must ALSO enable it (#attention_rules, owner, aal2) and the
-  // Supabase project must allow e-mail OTP (Auth → Providers → Email; code expiry 10 minutes). MFA rules are unchanged.
+  // البريد» to staff. OFF (false) by default. Each organization must ALSO enable it (the org admin, «قواعد المتابعة»
+  // #attention_rules, with a reason) and the Supabase project must send the 6-digit code (Auth → Email OTP expiry 600 s,
+  // the «Magic Link» template shows {{ .Token }}). Runbook: docs/online/EMAIL_CODE_LOGIN_AR.md. Production: written by
+  // scripts/build-release.sh (PROD_EMAIL_OTP_LOGIN=1 → true; default false).
   emailOtpLogin: false
 };

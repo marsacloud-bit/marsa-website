@@ -149,12 +149,21 @@ async function secFile() {
     return (/version = '20261130000100'/.test(s) && /VALUES \('20261201000100', 'legacy_gaps'\)/.test(s) && !/^\s*(BEGIN|COMMIT)\s*;/im.test(s)
       && /Down-path:/.test(s) && fns === 8 && pinned === 8) || J({ fns, pinned });
   });
-  await check('this file is the latest migration', () => migFiles().pop() === MIG || 'latest ' + migFiles().pop());
+  // later phases (each has its own suite) follow it, in order
+  const LATER_PHASES = ['20261202000100_org_logo.sql'];
+  await check('this file is the latest migration (later phases excepted)', () => {
+    const later = migFiles().filter(f => f > MIG);
+    return (migFiles().includes(MIG) && J(later) === J(LATER_PHASES)) || 'later ' + J(later);
+  });
   const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
-  await check('all_migrations.sql: appended verbatim under its header, last; the paste note names it', () => {
+  await check('all_migrations.sql: appended verbatim under its header (followed only by the later phases); the paste note names it', () => {
     const h = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(h);
-    return (i > 0 && all.slice(i + h.length) === s && all.slice(0, 30000).includes(MIG)) || 'not appended verbatim / no note';
+    const nx = all.indexOf('\n-- ===== migrations/', i + h.length);
+    const body = nx < 0 ? all.slice(i + h.length) : all.slice(i + h.length, nx);
+    const rest = nx < 0 ? '' : all.slice(nx);
+    const later = (rest.match(/-- ===== migrations\/([^ ]+) =====/g) || []).map(x => x.replace(/^-- ===== migrations\/| =====$/g, ''));
+    return (i > 0 && body === s && J(later) === J(LATER_PHASES) && all.slice(0, 30000).includes(MIG)) || 'not appended verbatim / no note / later ' + J(later);
   });
 }
 

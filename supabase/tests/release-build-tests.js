@@ -9,7 +9,8 @@
   .htaccess (no Basic Auth, www → apex, the inline-script hashes), every page with data-marsa-env="production", a hidden
   demo banner, data-show-mode flipped, no meta «(بيئة تجريبية)», guides without <!-- env:staging --> blocks, the zip
   holding .htaccess + robots.txt, no staging ref / key anywhere; --in-place (the current project becomes production:
-  its URL / key only, only in config.js + .htaccess, = deploy/convert/*); the repository unchanged.
+  its URL / key only, only in config.js + .htaccess, = deploy/convert/*); the optional switches PROD_EMAIL_OTP_LOGIN /
+  PROD_SESSION_MAX_HOURS (defaults false / 12, refusals, the config.production.example.js shape); the repository unchanged.
 
   usage:
     node supabase/tests/release-build-tests.js [/path/to/marsa-website] [--quiet]
@@ -76,7 +77,13 @@ function main() {
     ['an sb_secret_ key', { PROD_PUBLISHABLE_KEY: 'sb_secret_TESTONLY' }, /SECRET key/],
     ['the staging project URL', { PROD_SUPABASE_URL: 'https://' + (STAGING_REF || 'x') + '.supabase.co' }, /STAGING project/],
     ['the staging key', { PROD_PUBLISHABLE_KEY: STAGING_KEY || 'x' }, /STAGING key|neither|SECRET|ANOTHER/],
-    ['the demo slug blue-sea', { PROD_ORG_SLUG: 'blue-sea' }, /demo org 'blue-sea'/]
+    ['the demo slug blue-sea', { PROD_ORG_SLUG: 'blue-sea' }, /demo org 'blue-sea'/],
+    ['PROD_EMAIL_OTP_LOGIN=true (only 1 / 0)', { PROD_EMAIL_OTP_LOGIN: 'true' }, /PROD_EMAIL_OTP_LOGIN must be 1 \(on\) or 0/],
+    ['PROD_EMAIL_OTP_LOGIN=yes', { PROD_EMAIL_OTP_LOGIN: 'yes' }, /PROD_EMAIL_OTP_LOGIN must be/],
+    ['PROD_SESSION_MAX_HOURS=169 (over a week)', { PROD_SESSION_MAX_HOURS: '169' }, /PROD_SESSION_MAX_HOURS must be whole hours 0\.\.168/],
+    ['PROD_SESSION_MAX_HOURS=-1', { PROD_SESSION_MAX_HOURS: '-1' }, /PROD_SESSION_MAX_HOURS must be/],
+    ['PROD_SESSION_MAX_HOURS=1.5', { PROD_SESSION_MAX_HOURS: '1.5' }, /PROD_SESSION_MAX_HOURS must be/],
+    ['PROD_SESSION_MAX_HOURS with JS in it', { PROD_SESSION_MAX_HOURS: '12,evil:1' }, /PROD_SESSION_MAX_HOURS must be/]
   ];
   for (const [name, env, re] of refusals) {
     check('refused: ' + name, () => {
@@ -94,7 +101,24 @@ function main() {
   check('config.js: the PROD values, environment production', () => {
     const c = rd(path.join(site, 'assets', 'js', 'config.js'));
     return (c.includes("supabaseUrl: '" + PROD.PROD_SUPABASE_URL + "'") && c.includes("supabaseAnonKey: '" + PROD.PROD_PUBLISHABLE_KEY + "'")
-      && c.includes("orgSlug: 'real-org'") && c.includes("environment: 'production'")) || c;
+      && c.includes("orgSlug: 'real-org'") && c.includes("environment: 'production',")) || c;
+  });
+  // the keys of window.MARSA_CONFIG in order (comments dropped)
+  const cfgKeys = x => (x.slice(x.indexOf('window.MARSA_CONFIG')).match(/^\s+([A-Za-z]+):/gm) || []).map(l => l.trim().slice(0, -1));
+  const runCfg = x => { const w = {}; require('vm').runInNewContext(x, { window: w }); return w.MARSA_CONFIG; };
+  check('config.js defaults: sessionMaxHours 12, emailOtpLogin false (the e-mail code login stays OFF); valid JS', () => {
+    const c = runCfg(rd(path.join(site, 'assets', 'js', 'config.js')));
+    return (c.sessionMaxHours === 12 && c.emailOtpLogin === false && c.environment === 'production') || JSON.stringify(c);
+  });
+  check('config.js has exactly the keys of assets/js/config.production.example.js, in the same order', () => {
+    const a = cfgKeys(rd(path.join(site, 'assets', 'js', 'config.js'))), b = cfgKeys(rd(path.join(ROOT, 'assets', 'js', 'config.production.example.js')));
+    return (JSON.stringify(a) === JSON.stringify(b) && JSON.stringify(a) === JSON.stringify(['supabaseUrl', 'supabaseAnonKey', 'orgSlug', 'environment', 'sessionMaxHours', 'emailOtpLogin']))
+      || JSON.stringify({ a, b });
+  });
+  check('the build summary prints the two switches', () => /config\.js sessionMaxHours 12, emailOtpLogin false\n/.test(ok.text) || ok.text.slice(-600));
+  check('assets/js/config.example.js documents sessionMaxHours: 12 and emailOtpLogin: false (+ the runbook)', () => {
+    const c = rd(path.join(ROOT, 'assets', 'js', 'config.example.js')), v = runCfg(c);
+    return (v.sessionMaxHours === 12 && v.emailOtpLogin === false && /EMAIL_CODE_LOGIN_AR\.md/.test(c) && !/aal2/.test(c)) || 'config.example.js';
   });
   check('sw.js VERSION ends with -prod', () => /^var VERSION = '[^']+-prod';/m.test(rd(path.join(site, 'sw.js'))));
   check('robots.txt: User-agent: * / Allow: /', () => rd(path.join(site, 'robots.txt')) === 'User-agent: *\nAllow: /\n');
@@ -149,6 +173,23 @@ function main() {
     return (/\s\.htaccess\n/.test(l) && /\srobots\.txt\n/.test(l)) || l.slice(0, 300);
   });
 
+  section('3b. the optional switches: PROD_EMAIL_OTP_LOGIN=1, PROD_SESSION_MAX_HOURS');
+  for (const [name, env, want] of [
+    ['PROD_EMAIL_OTP_LOGIN=1 → emailOtpLogin true (sessionMaxHours stays 12)', { PROD_EMAIL_OTP_LOGIN: '1' }, { sessionMaxHours: 12, emailOtpLogin: true }],
+    ['PROD_EMAIL_OTP_LOGIN=0 + PROD_SESSION_MAX_HOURS=8 → false / 8', { PROD_EMAIL_OTP_LOGIN: '0', PROD_SESSION_MAX_HOURS: '8' }, { sessionMaxHours: 8, emailOtpLogin: false }],
+    ['PROD_SESSION_MAX_HOURS=0 → no cap (0), with a NO session cap note', { PROD_SESSION_MAX_HOURS: '0' }, { sessionMaxHours: 0, emailOtpLogin: false, note: /NO session cap/ }],
+    ['empty values → the defaults', { PROD_EMAIL_OTP_LOGIN: '', PROD_SESSION_MAX_HOURS: '' }, { sessionMaxHours: 12, emailOtpLogin: false }]
+  ]) {
+    check(name, () => {
+      const r = build(env);
+      if (r.code !== 0) return 'exit ' + r.code + ': ' + r.text.slice(-400);
+      const c = runCfg(rd(path.join(r.out, 'site', 'assets', 'js', 'config.js')));
+      fs.rmSync(r.out, { recursive: true, force: true });
+      return (c.sessionMaxHours === want.sessionMaxHours && c.emailOtpLogin === want.emailOtpLogin && (!want.note || want.note.test(r.text))
+        && (!want.emailOtpLogin || /EMAIL_CODE_LOGIN_AR\.md/.test(r.text))) || JSON.stringify(c);
+    });
+  }
+
   section('4. --in-place (docs/online/CONVERT_IN_PLACE_AR.md): the CURRENT project becomes production');
   const SAME = { PROD_SUPABASE_URL: 'https://' + STAGING_REF + '.supabase.co', PROD_PUBLISHABLE_KEY: STAGING_KEY, PROD_ORG_SLUG: 'real-org' };
   for (const [name, env, re] of [
@@ -170,9 +211,11 @@ function main() {
       const c = rd(path.join(ipSite, 'assets', 'js', 'config.js'));
       const tpl = rd(path.join(ROOT, 'deploy', 'convert', 'config.js.template'));
       const body = x => x.slice(x.indexOf('window.MARSA_CONFIG'));
+      // the template holds the 4 identity keys; the build appends the two optional switches (defaults 12 / false)
+      const four = x => x.replace("environment: 'production',\n  sessionMaxHours: 12,\n  emailOtpLogin: false\n};", "environment: 'production'\n};");
       return (c.includes("supabaseUrl: '" + SAME.PROD_SUPABASE_URL + "'") && c.includes("supabaseAnonKey: '" + STAGING_KEY + "'")
         && c.includes("orgSlug: 'real-org'") && c.includes("environment: 'production'")
-        && body(c) === body(tpl).replace("'<NEW_SLUG>'", "'real-org'")) || c;
+        && four(body(c)) === body(tpl).replace("'<NEW_SLUG>'", "'real-org'")) || c;
     });
     check('in place: the project ref / key appear ONLY in assets/js/config.js and .htaccess', () => {
       const r = spawnSync('grep', ['-rIlF', '-e', STAGING_REF, '-e', STAGING_KEY, '.'], { cwd: ipSite, encoding: 'utf8' });

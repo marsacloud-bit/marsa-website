@@ -43,7 +43,14 @@
      [data-shell-org]           slot: a labelled <select class="form-control"> org switcher when the user has > 1 org
      [data-shell-user]          slot: name + roles text (strong + span.text-xs.text-muted)
      [data-shell-orgname]       slot: building icon + active org name (title «المؤسسة النشطة: …»); the shell adds one
-                                after admin.html's #adm-me-name. Hidden when signed out / no org. No logo yet.
+                                after admin.html's #adm-me-name. Hidden when signed out / no org. With an org logo
+                                (MarsaApi.orgLogoPathOf → orgLogoUrl, signed) its <img> replaces the icon once it loaded;
+                                no path / a failed URL or image → name only. 'marsa:orglogochange' re-reads the context.
+     Staff dashboard nav (admin.html .adm-nav > #adm-nav): a «القائمة» button (.shell-nav-toggle, first in
+                                .adm-topbar-actions) switches the same nav between the horizontal bar (default) and a
+                                side menu on the start side (localStorage 'marsa_nav_layout' = 'side', per device). On a
+                                phone (≤ 767px) it opens the nav as an overlay drawer (backdrop, Esc / backdrop / item
+                                click close it, focus kept inside, aria-expanded / aria-controls).
      [data-shell-signout] / [data-shell-signout-all]   buttons (an empty one is filled with icon + label)
      [data-shell-security]      link to login.html?security=1 («أمان الحساب»); the shell also adds one
                                 before the first sign-out button of the page while signed in
@@ -53,7 +60,8 @@
      [data-shell-nav]           marks a page nav container (setActive / setBadge also work without it)
    Events: window 'marsa:shellready' {detail:{context}} once; 'marsa:contextchange' {detail:{context, status}};
      'marsa:orgchange' {detail:{orgId}} (dispatched by MarsaApi.setActiveOrg; the shell dispatches it itself
-     only if supa.js did not); 'marsa:badgechange' {detail:{navId, count}}; listens to 'marsa:alertschange'.
+     only if supa.js did not); 'marsa:badgechange' {detail:{navId, count}}; listens to 'marsa:alertschange' and
+     'marsa:orglogochange' {detail:{orgId, logo_path}} (admin.js after a logo upload / removal).
 
    * There is no dark theme: the shell removes any html[data-theme] attribute and never sets one.
    * Role sets R mirror assets/js/admin.js (VIEWS / R); the UI only hides — RLS + guarded RPCs are the gate.
@@ -317,7 +325,9 @@
     template: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 9v11M11 13h7M11 16h5"/>',
     antenna: '<circle cx="12" cy="11" r="1.6"/><path d="M12 12.6V21M8.5 7.5a5 5 0 0 0 0 7M15.5 7.5a5 5 0 0 1 0 7M5.6 4.6a9 9 0 0 0 0 12.8M18.4 4.6a9 9 0 0 1 0 12.8"/>',
     // G7 help / user guide
-    help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 1c0 1.8-2.5 2.3-2.5 4"/><path d="M12 17.3h.01"/>'
+    help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 1c0 1.8-2.5 2.3-2.5 4"/><path d="M12 17.3h.01"/>',
+    // staff dashboard «القائمة» toggle
+    menu: '<path d="M4 6h16M4 12h16M4 18h16"/>'
   };
   function icon(name, cls) {
     var s = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -410,10 +420,24 @@
     });
     return function () { set.forEach(function (n) { n.removeAttribute('inert'); }); set = []; };
   }
+  // like inertBehind, for an overlay that lives deep in the page (the phone nav drawer): every sibling on the way from
+  // keep up to <body> becomes inert, except the given backdrop, toasts and an open native <dialog>
+  function inertOutside(keep, backdrop) {
+    var set = [], node = keep;
+    while (node && node.parentNode && node !== doc.body) {
+      Array.prototype.forEach.call(node.parentNode.children, function (n) {
+        if (n === node || n === backdrop || n.hasAttribute('inert') || /^(SCRIPT|STYLE|TEMPLATE|NOSCRIPT)$/.test(n.tagName) ||
+            n.classList.contains('toast-stack') || (n.tagName === 'DIALOG' && n.open)) return;
+        n.setAttribute('inert', ''); set.push(n);
+      });
+      node = node.parentNode;
+    }
+    return function () { set.forEach(function (n) { n.removeAttribute('inert'); }); set = []; };
+  }
   function appModalOpen() { return !!doc.querySelector('.app-modal-backdrop'); }
   // html.app-lock: no page scroll behind an overlay (also used by assets/js/ops/alerts.js)
   function lockScroll() {
-    html.classList.toggle('app-lock', !!doc.querySelector('.app-modal-backdrop') || !!(paletteEl && !paletteEl.hidden));
+    html.classList.toggle('app-lock', !!doc.querySelector('.app-modal-backdrop') || !!(paletteEl && !paletteEl.hidden) || navDrawerOpen());
   }
 
   /* ------------------------------------------------------------------
@@ -971,8 +995,8 @@
     });
   }
   // active organisation name next to the user name: [data-shell-orgname] slots, plus one the shell adds after the
-  // staff dashboard's #adm-me-name (admin.html). Name only: organizations.settings.logo_path has no storage bucket
-  // or read policy yet and my_context does not return it, so no logo is shown.
+  // staff dashboard's #adm-me-name (admin.html). ORG LOGO (20261202000100): the org's logo (private bucket, signed
+  // URL) goes in front of the name once the image has loaded; until then, and on any failure, the name stays alone.
   function renderOrgNameSlots() {
     var me = doc.getElementById('adm-me-name');
     if (me && me.parentNode && !me.parentNode.querySelector('[data-shell-orgname]')) {
@@ -987,9 +1011,166 @@
       if (!name) { slot.removeAttribute('title'); return; }
       slot.classList.add('shell-org-name');
       slot.setAttribute('title', t('org_switch') + ': ' + name);
+      slot.classList.remove('has-logo');
       slot.appendChild(icon('building'));
       slot.appendChild(el('bdi', { class: 'shell-org-name-text', text: name }));
     });
+    paintOrgLogo();
+  }
+  /* Org logo: MarsaApi.orgLogoPathOf(ctx, org) → orgLogoUrl(path, 3600) (signed, on our Supabase origin — supa.js checks
+     it). One URL per path for the page lifetime, asked again shortly before it expires (or after a logo change); the
+     path itself is read from the context on every render, so an org switch shows that org's logo. An image that fails
+     to load is dropped (no broken icon) and that path is not tried again on this page. */
+  var LOGO_TTL = 3600, LOGO_REUSE_MS = (LOGO_TTL - 120) * 1000;
+  var logoCache = {}, logoSeq = 0;
+  function activeLogoPath() {
+    if (S.status !== 'ready' || !S.ctx || !S.orgId || !api || typeof api.orgLogoPathOf !== 'function') return null;
+    try { var p = api.orgLogoPathOf(S.ctx, S.orgId); return typeof p === 'string' && p ? p : null; } catch (e) { return null; }
+  }
+  function logoUrlFor(path) {
+    var c = logoCache[path];
+    if (c && c.failed) return Promise.resolve(null);
+    if (c && c.url && Date.now() - c.at < LOGO_REUSE_MS) return Promise.resolve(c.url);
+    if (c && c.p) return c.p;
+    if (typeof api.orgLogoUrl !== 'function') return Promise.resolve(null);
+    var entry = { url: null, at: 0, failed: false, p: null };
+    logoCache[path] = entry;
+    entry.p = call(function () { return api.orgLogoUrl(path, LOGO_TTL); }).then(function (r) {
+      entry.p = null;
+      var u = !r.error && typeof r.data === 'string' && /^https?:\/\//i.test(r.data) ? r.data : null;
+      if (!u) { if (logoCache[path] === entry) delete logoCache[path]; return null; }   // asked again on the next render
+      entry.url = u; entry.at = Date.now();
+      return u;
+    });
+    return entry.p;
+  }
+  function addLogo(slot, url, path) {
+    if (slot.querySelector('.shell-org-logo')) return;
+    var img = el('img', { class: 'shell-org-logo', alt: '', 'aria-hidden': 'true', decoding: 'async', referrerpolicy: 'no-referrer' });
+    img.hidden = true;
+    img.addEventListener('load', function () { img.hidden = false; slot.classList.add('has-logo'); });
+    img.addEventListener('error', function () {
+      var c = logoCache[path];
+      if (c) { c.failed = true; c.url = null; }
+      if (img.parentNode) img.parentNode.removeChild(img);
+      slot.classList.remove('has-logo');
+    });
+    slot.insertBefore(img, slot.firstChild);
+    img.src = url;
+  }
+  function paintOrgLogo() {
+    var seq = ++logoSeq, org = S.orgId, path = activeLogoPath();
+    if (!path) return;
+    logoUrlFor(path).then(function (url) {
+      if (!url || seq !== logoSeq || org !== S.orgId) return;   // a newer render / another org won
+      qsa('[data-shell-orgname]').forEach(function (slot) { if (!slot.hidden) addLogo(slot, url, path); });
+    });
+  }
+  // admin.js «شعار المؤسسة»: the logo changed → forget the URLs and re-read my_context (new logo_path)
+  window.addEventListener('marsa:orglogochange', function () {
+    logoCache = {};
+    if (S.status === 'ready') refresh();
+  });
+
+  /* ------------------------------------------------------------------
+     Staff dashboard nav layout: «القائمة» toggles admin.html's .adm-nav between the horizontal bar (default, nothing
+     changes for users who never press it) and a side menu on the start side (right in RTL), remembered per device
+     (localStorage 'marsa_nav_layout', try/catch). Phone (≤ 767px): the button opens the same nav as an overlay drawer
+     with a backdrop; Esc / backdrop / an item click / the close button close it; Tab stays inside while it is open, and
+     while it is open the nav is a modal dialog (role=dialog + aria-modal, its own aria-label) with everything outside it
+     inert. Wide screens: the button switches the layout (aria-pressed = side menu on); phone: aria-expanded = drawer open.
+     The nav items themselves stay admin.js buildNav() + NAV (same items, badges and role rules).
+     ------------------------------------------------------------------ */
+  var NAV_LAYOUT_KEY = 'marsa_nav_layout', NARROW_Q = '(max-width: 767px)';
+  var navUi = { app: null, wrap: null, btn: null, close: null, backdrop: null, release: null, unInert: null, open: false, mq: null };
+  function readNavLayout() { try { return localStorage.getItem(NAV_LAYOUT_KEY) === 'side' ? 'side' : 'top'; } catch (e) { return 'top'; } }
+  var navLayout = 'top';
+  function saveNavLayout(v) {
+    navLayout = v === 'side' ? 'side' : 'top';
+    try { if (navLayout === 'side') localStorage.setItem(NAV_LAYOUT_KEY, 'side'); else localStorage.removeItem(NAV_LAYOUT_KEY); } catch (e) { /* this view only */ }
+  }
+  function isNarrow() {
+    try { return !!(window.matchMedia && window.matchMedia(NARROW_Q).matches); } catch (e) { return false; }
+  }
+  function navDrawerOpen() { return !!(navUi && navUi.open); }
+  function setupNavToggle() {
+    if (navUi.btn || PAGE !== 'admin') return;
+    var list = doc.getElementById('adm-nav'), app = doc.getElementById('adm-app');
+    var wrap = list && list.parentNode;
+    var actions = app && app.querySelector('.adm-topbar-actions');
+    if (!list || !app || !wrap || !actions || !app.contains(wrap)) return;
+    if (!wrap.id) wrap.id = 'adm-nav-wrap';
+    navLayout = readNavLayout();
+    navUi.app = app; navUi.wrap = wrap;
+    var btn = el('button', { type: 'button', class: 'btn btn-sm btn-ghost shell-nav-toggle', 'aria-controls': wrap.id });
+    btn.appendChild(icon('menu'));
+    btn.appendChild(el('span', { class: 'shell-nav-toggle-text' }));
+    actions.insertBefore(btn, actions.firstChild);
+    navUi.btn = btn;
+    var x = el('button', { type: 'button', class: 'btn btn-sm btn-ghost btn-icon shell-nav-close' }, [icon('x')]);
+    wrap.insertBefore(x, wrap.firstChild);
+    navUi.close = x;
+    btn.addEventListener('click', function () {
+      if (isNarrow()) { if (navUi.open) closeNavDrawer(); else openNavDrawer(); return; }
+      saveNavLayout(navLayout === 'side' ? 'top' : 'side');
+      paintNav();
+    });
+    x.addEventListener('click', function () { closeNavDrawer(); });
+    // an item click in the drawer closes it (the route / page change does the rest)
+    wrap.addEventListener('click', function (e) {
+      if (navUi.open && e.target && e.target.closest && e.target.closest('a[href]')) closeNavDrawer(false);
+    });
+    try {
+      navUi.mq = window.matchMedia ? window.matchMedia(NARROW_Q) : null;
+      var onMq = function () { if (navUi.open && !isNarrow()) closeNavDrawer(false); paintNav(); };
+      if (navUi.mq && navUi.mq.addEventListener) navUi.mq.addEventListener('change', onMq);
+      else if (navUi.mq && navUi.mq.addListener) navUi.mq.addListener(onMq);
+    } catch (e) { /* no matchMedia: wide layout only */ }
+    paintNav();
+  }
+  function paintNav() {
+    if (!navUi.btn) return;
+    var narrow = isNarrow(), side = navLayout === 'side';
+    navUi.app.classList.toggle('shell-nav-side', side);
+    navUi.app.classList.toggle('shell-nav-open', !!navUi.open);
+    // phone: it shows / hides the drawer; wide: it switches the layout (nothing is hidden), so it is a pressed toggle
+    if (narrow) { navUi.btn.removeAttribute('aria-pressed'); navUi.btn.setAttribute('aria-expanded', String(!!navUi.open)); }
+    else { navUi.btn.removeAttribute('aria-expanded'); navUi.btn.setAttribute('aria-pressed', String(side)); }
+    var tip = narrow ? t(navUi.open ? 'nav_drawer_close' : 'nav_drawer_open') : t(side ? 'nav_layout_top' : 'nav_layout_side');
+    navUi.btn.setAttribute('title', tip);
+    var txt = navUi.btn.querySelector('.shell-nav-toggle-text');
+    if (txt) txt.textContent = t('nav_menu');
+    navUi.close.setAttribute('aria-label', t('nav_drawer_close'));
+    navUi.close.setAttribute('title', t('nav_drawer_close'));
+  }
+  function openNavDrawer() {
+    if (navUi.open || !navUi.wrap) return;
+    navUi.open = true;
+    var bd = el('div', { class: 'shell-nav-backdrop', 'aria-hidden': 'true' });
+    bd.addEventListener('click', function () { closeNavDrawer(); });
+    body.appendChild(bd);
+    navUi.backdrop = bd;
+    navUi.wrap.setAttribute('role', 'dialog');
+    navUi.wrap.setAttribute('aria-modal', 'true');
+    navUi.unInert = inertOutside(navUi.wrap, bd);
+    navUi.release = trap(navUi.wrap, function () { closeNavDrawer(); });
+    paintNav();
+    lockScroll();
+    var first = navUi.wrap.querySelector('.adm-nav-link.is-active') || navUi.wrap.querySelector('a[href]') || navUi.close;
+    setTimeout(function () { if (navUi.open && first && first.focus) { try { first.focus(); } catch (e) { /* ignore */ } } }, 0);
+  }
+  // restore = false: an item was chosen, focus goes wherever the new view puts it
+  function closeNavDrawer(restore) {
+    if (!navUi.open) return;
+    navUi.open = false;
+    if (navUi.backdrop && navUi.backdrop.parentNode) navUi.backdrop.parentNode.removeChild(navUi.backdrop);
+    navUi.backdrop = null;
+    navUi.wrap.removeAttribute('role');
+    navUi.wrap.removeAttribute('aria-modal');
+    if (navUi.unInert) { var u = navUi.unInert; navUi.unInert = null; u(); }   // before the focus goes back to «القائمة»
+    if (navUi.release) { var r = navUi.release; navUi.release = null; r(restore !== false); }
+    paintNav();
+    lockScroll();
   }
   var MAC = /Mac|iPhone|iPad/i.test((navigator.platform || '') + ' ' + (navigator.userAgent || ''));
   function renderSearchSlots() {
@@ -1042,7 +1223,7 @@
     });
     paintBadge('alerts');
   }
-  function renderSlots() { renderOrgSlots(); renderUserSlots(); renderOrgNameSlots(); renderSearchSlots(); renderSessionSlots(); }
+  function renderSlots() { renderOrgSlots(); renderUserSlots(); renderOrgNameSlots(); renderSearchSlots(); renderSessionSlots(); setupNavToggle(); paintNav(); }
   doc.addEventListener('click', function (e) {
     var n = e.target && e.target.closest ? e.target.closest('[data-shell-search],[data-shell-signout],[data-shell-signout-all]') : null;
     if (!n) return;

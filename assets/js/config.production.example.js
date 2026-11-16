@@ -7,6 +7,10 @@
      PROD_SUPABASE_URL      → supabaseUrl
      PROD_PUBLISHABLE_KEY   → supabaseAnonKey
      PROD_ORG_SLUG          → orgSlug
+     PROD_SESSION_MAX_HOURS → sessionMaxHours (optional; whole hours 0..168,
+                              default 12, 0 = no session cap)
+     PROD_EMAIL_OTP_LOGIN   → emailOtpLogin (optional; 1 → true, unset / 0 →
+                              false; docs/online/EMAIL_CODE_LOGIN_AR.md)
    so nothing about production is committed. The repository's own
    assets/js/config.js stays the STAGING one.
 
@@ -35,5 +39,12 @@ window.MARSA_CONFIG = {
   // organizations.slug of the production tenant that the public forms
   // (request.html, contact.html, tracking.html) submit to — never 'blue-sea'
   orgSlug: '<PROD_ORG_SLUG>',
-  environment: 'production'
+  environment: 'production',
+  // the session cap in hours (the old system's 12-hour sessions): an older
+  // session is signed out and app pages go to login.html?expired=1; 0 = no cap
+  sessionMaxHours: 12,
+  // platform switch of the e-mail code login (OFF by default). Turning it on
+  // also needs the org admin («قواعد المتابعة», with a reason) and the
+  // Supabase Auth e-mail settings — owner steps, never automatic
+  emailOtpLogin: false
 };

@@ -63,3 +63,6 @@ button[aria-busy="true"] { cursor: progress; opacity: .8; }
 .mfa-factor { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px;
   border: 1px solid var(--border); border-radius: var(--r); background: #F7FAFD; }
 .mfa-factor-info { display: flex; flex-direction: column; gap: 2px; min-inline-size: 0; }
+
+/* e-mail code login: the validity / session-length note under both code forms (auth.js otpNote) */
+.auth-otp-note { margin-block: 0 12px; overflow-wrap: anywhere; }

@@ -17,6 +17,9 @@
      else → portal.html. Roles are NEVER read from signup data.
    * ?source=pwa (installed app start): an existing session is routed at once.
    * ?signedout=1|all: notice after a sign-out started on another page.
+   * ?expired=1[&next=…]: sent by supa.js when the session cap (api.sessionMaxHours(), default 12 h)
+     ended the session: a notice with the number of hours; only ?expired is dropped from the address
+     (next is kept for the sign-in).
    * Recovery: resetPassword() redirects back to login.html?mode=reset;
      supabase-js reads the token from the URL (type=recovery) and fires
      PASSWORD_RECOVERY; we then show the "new password" form.
@@ -84,6 +87,10 @@
     otpOrgDisabled: 'الدخول بالرمز غير مفعّل لمؤسستك (أو لإحدى مؤسساتك). ادخل بكلمة المرور.',
     otpStaffOnly: 'الدخول بالرمز متاح لحسابات الموظفين فقط. ادخل بكلمة المرور.',
     otpNotAllowed: 'الدخول بالرمز غير متاح الآن. ادخل بكلمة المرور.',
+    otpValidity: 'الرمز صالح لمدة محدودة ولمرة واحدة فقط. بعد الدخول تبقى الجلسة {h} ساعة، ثم يلزم تسجيل الدخول من جديد.',
+    otpValidityNoCap: 'الرمز صالح لمدة محدودة ولمرة واحدة فقط.',
+    sessionExpired: 'انتهت مدة الجلسة ({h} ساعة). سجّل الدخول من جديد.',
+    sessionExpiredNoCap: 'انتهت مدة الجلسة. سجّل الدخول من جديد.',
     roleFallback: { admin: 'مدير المؤسسة', branch_manager: 'مدير الفرع', supervisor: 'مشرف', operations_manager: 'مدير العمليات',
       accounts_manager: 'مدير الحسابات', accountant: 'محاسب', clearance_staff: 'موظف تخليص', transport_staff: 'موظف نقل', client: 'عميل (بوابة العميل)' }
   };
@@ -122,6 +129,8 @@
   // legacy step 8: sent back by app-shell.js after an e-mail code session that is not allowed (reason code only)
   var otpAtLoad = /^[a-z_]{1,40}$/.test(query.otp || '') ? query.otp : '';
   var securityAtLoad = query.security === '1';
+  // the session cap ended the previous session (supa.js expiredHref → login.html?expired=1&next=…#staff|#client)
+  var expiredAtLoad = query.expired === '1';
   var routing = false;
 
   function parseParams(s) {
@@ -142,6 +151,19 @@
     return m && NEXT_PAGES.indexOf(m[1]) !== -1 ? n : '';
   }
   function nextPage(n) { return String(n || '').split('#')[0]; }
+  // hours of the session cap (api.sessionMaxHours(): 12 by default, 0 = no cap); 0 when unknown
+  function capHours() {
+    var h = api && typeof api.sessionMaxHours === 'function' ? Number(api.sessionMaxHours()) : 0;
+    return isFinite(h) && h > 0 ? h : 0;
+  }
+  // drop one parameter from the address bar (the others and the hash stay: ?next= still works after a reload)
+  function dropQueryParam(name) {
+    if (!Object.prototype.hasOwnProperty.call(query, name)) return;
+    delete query[name];
+    var rest = Object.keys(query).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(query[k]); }).join('&');
+    searchAtLoad = rest ? '?' + rest : '';
+    try { history.replaceState(null, '', location.pathname + searchAtLoad + location.hash); } catch (e) { /* ignore */ }
+  }
   function cleanUrl(keepHash) {
     try { history.replaceState(null, '', location.pathname + (keepHash ? '#' + keepHash : '')); } catch (e) { /* ignore */ }
   }
@@ -418,6 +440,11 @@
   var OTP_COOLDOWN_S = 60, OTP_MAX_TRIES = 5;
   var otpBox = $('[data-otp]'), otpReq = $('#otp-request-form'), otpVer = $('#otp-verify-form');
   var otpEmail = '', otpTries = 0, otpUntil = 0, otpTimer = null;
+  // «valid for a limited time» + the session length (api.sessionMaxHours()) under both code forms
+  function otpNote() {
+    var h = capHours(), txt = h ? tr('otpValidity', { h: h }) : tr('otpValidityNoCap');
+    $$('[data-otp-note]').forEach(function (el) { el.textContent = txt; });
+  }
   function otpOn() { return !!(otpBox && typeof api.emailOtpEnabled === 'function' && api.emailOtpEnabled() && typeof api.requestEmailOtp === 'function' && typeof api.otpGate === 'function'); }
   function otpCooldown() {
     var cd = $('[data-otp-cooldown]'), rs = $('[data-otp-resend]');
@@ -445,6 +472,8 @@
   function otpBlockedText(reason) { return tr(reason === 'org_disabled' ? 'otpOrgDisabled' : reason === 'no_staff_membership' ? 'otpStaffOnly' : 'otpNotAllowed'); }
   if (otpOn()) {
     otpBox.hidden = false;
+    otpNote();
+    window.addEventListener('marsa:langchange', otpNote);
     var opener = $('[data-otp-open]');
     if (opener) opener.addEventListener('click', function () {
       hideMsg();
@@ -807,6 +836,7 @@
   function afterSession(session) {
     {   // (kept as a block: the body was the tail of the initial-state handler)
       if (session) {
+        if (expiredAtLoad) dropQueryParam('expired');   // signed in again meanwhile (another tab): no notice
         if (securityAtLoad) return showSecurity();
         // sent here for two-step verification (app-shell / admin / platform gates): that step at once
         if (mfaAtLoad) return routeByRole(false);
@@ -818,6 +848,12 @@
       showView('tabs');
       if (mfaAtLoad) { selectTab('staff'); return; }
       if (confirmedAtLoad) { cleanUrl('client'); showMsg(tr('confirmed'), 'success'); return; }
+      if (expiredAtLoad) {
+        dropQueryParam('expired');
+        var eh = capHours();
+        showMsg(eh ? tr('sessionExpired', { h: eh }) : tr('sessionExpiredNoCap'), 'warning');
+        return;
+      }
       if (signedOutAtLoad) {
         cleanUrl(location.hash.replace(/^#/, ''));
         showMsg(tr(signedOutAtLoad === 'all' ? 'signedOutAll' : 'signedOut'), 'info');

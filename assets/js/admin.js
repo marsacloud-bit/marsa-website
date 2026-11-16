@@ -3281,6 +3281,91 @@
      المؤسسة — org identity & settings (admin_update_org whitelist)
      ------------------------------------------------------------------ */
   var HEX_RE = /^#[0-9a-fA-F]{6}$/;
+  // ORG LOGO (20261202000100): «شعار المؤسسة» — preview (MarsaApi.orgLogoUrl, signed), upload (PNG / JPG / WEBP, ≤ 1 MB)
+  // and remove through MarsaApi.uploadOrgLogo / removeOrgLogo (org admin; the storage policies + admin_update_org are
+  // the gate, this check is only for a clear message). After a change the header logo follows: 'marsa:orglogochange'
+  // makes MarsaShell re-read my_context.
+  var LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp'], LOGO_MAX_BYTES = 1048576;
+  function logoFileError(f) {
+    if (!f) return t('org_logo_err_required');
+    if (LOGO_TYPES.indexOf(String(f.type || '').toLowerCase()) === -1) return t('org_logo_err_type');
+    if (!(f.size > 0)) return t('org_logo_err_empty');
+    if (f.size > LOGO_MAX_BYTES) return t('org_logo_err_size');
+    return null;
+  }
+  function logoApiErr(e) {
+    var c = errCode(e);
+    if (c === 'MRS_LOGO_TYPE') return t('org_logo_err_type');
+    if (c === 'MRS_LOGO_TOO_LARGE') return t('org_logo_err_size');
+    if (c === 'MRS_UPLOAD') return t('org_logo_err_upload');
+    return apiErr(e);
+  }
+  function orgLogoChanged(orgId, path) {
+    try { window.dispatchEvent(new CustomEvent('marsa:orglogochange', { detail: { orgId: orgId, logo_path: path } })); } catch (e) { /* old browser */ }
+  }
+  function orgLogoCard(st) {
+    var orgId = S.orgId;
+    var path = typeof st.logo_path === 'string' && st.logo_path ? st.logo_path : null;
+    var img = el('img', { class: 'adm-logo-img', alt: t('org_logo_alt') });
+    img.hidden = true;
+    var note = el('p', { class: 'text-sm text-muted adm-logo-empty', text: path ? t('org_logo_loading') : t('org_logo_none') });
+    var fileIn = el('input', { type: 'file', id: 'adg-logo-file', name: 'logo_file', class: 'form-control', accept: LOGO_TYPES.join(',') });
+    var msg = el('p', { class: 'form-error', role: 'alert', hidden: true });
+    var upBtn = el('button', { class: 'btn btn-primary', type: 'button', text: t('org_logo_upload') });
+    var rmBtn = path ? el('button', { class: 'btn btn-ghost', type: 'button', text: t('org_logo_remove') }) : null;
+    img.addEventListener('load', function () { img.hidden = false; note.hidden = true; });
+    img.addEventListener('error', function () { img.hidden = true; img.removeAttribute('src'); note.textContent = t('org_logo_unavailable'); note.hidden = false; });
+    if (path) {
+      call('orgLogoUrl', path).then(function (r) {
+        if (r.error || !r.data) { note.textContent = t('org_logo_unavailable'); return; }
+        img.src = r.data;
+      });
+    }
+    function busy(on) { upBtn.disabled = on; fileIn.disabled = on; if (rmBtn) rmBtn.disabled = on; }
+    function showErr(text) { msg.textContent = text; msg.hidden = false; }
+    fileIn.addEventListener('change', function () { var f = fileIn.files && fileIn.files[0], bad = f ? logoFileError(f) : null; msg.hidden = !bad; if (bad) msg.textContent = bad; });
+    upBtn.addEventListener('click', function () {
+      msg.hidden = true;
+      var f = fileIn.files && fileIn.files[0], bad = logoFileError(f);
+      if (bad) return showErr(bad);
+      busy(true);
+      call('uploadOrgLogo', orgId, f).then(function (r) {
+        busy(false);
+        if (r.error) return showErr(logoApiErr(r.error));
+        toast(t('org_logo_saved'), 'success');
+        orgLogoChanged(orgId, r.data && r.data.logo_path || null);
+        swapCard(r.data && r.data.logo_path || null);
+      });
+    });
+    if (rmBtn) rmBtn.addEventListener('click', function () {
+      msg.hidden = true;
+      askConfirm({ title: t('org_logo_remove_title'), text: t('org_logo_remove_text'), okText: t('org_logo_remove'), danger: true }).then(function (yes) {
+        if (!yes) return;
+        busy(true);
+        call('removeOrgLogo', orgId).then(function (r) {
+          busy(false);
+          if (r.error) return showErr(logoApiErr(r.error));
+          toast(t('org_logo_removed'), 'success');
+          orgLogoChanged(orgId, null);
+          swapCard(null);
+        });
+      });
+    });
+    var card = dCard(t('org_logo_title'), el('div', { class: 'adm-logo-box' }, [
+      el('div', { class: 'adm-logo-preview' }, [img, note]),
+      el('div', { class: 'form-group' }, [
+        el('label', { class: 'form-label', for: 'adg-logo-file', text: t('org_logo_file') }), fileIn,
+        el('span', { class: 'form-hint', text: t('org_logo_hint') })
+      ]),
+      msg, el('div', { class: 'btn-group' }, [upBtn, rmBtn])
+    ]));
+    // only this card is rebuilt (not the org view): unsaved edits in «إعدادات المؤسسة» above stay as typed
+    function swapCard(newPath) {
+      if (S.orgId !== orgId || !card.parentNode) return rerender();
+      card.parentNode.replaceChild(orgLogoCard({ logo_path: newPath }), card);
+    }
+    return card;
+  }
   var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
   function renderOrg() {
     return L.getOrgRow(S.orgId).then(function (r) {
@@ -3309,7 +3394,6 @@
           dField({ name: 'contact_email', label: t('f_contact_email'), value: st.contact_email, ltr: true, max: 160, type: 'email' }),
           dField({ name: 'address_ar', label: t('f_address_ar'), value: st.address_ar, type: 'textarea', max: 300 }),
           dField({ name: 'address_en', label: t('f_address_en'), value: st.address_en, type: 'textarea', max: 300, ltr: true }),
-          dField({ name: 'logo_path', label: t('f_logo_path'), value: st.logo_path, ltr: true, max: 300, hint: t('f_logo_path_hint'), full: true }),
           dField({ name: 'public_intake_enabled', label: t('f_public_intake'), type: 'checkbox', value: o.public_intake_enabled !== false, hint: t('f_public_intake_hint'), full: true })
         ]),
         msg, el('div', { class: 'btn-group' }, saveBtn)
@@ -3332,8 +3416,8 @@
           public_intake_enabled: !!form.elements.public_intake_enabled.checked,
           settings: {
             brand_color: color, contact_phone: v('contact_phone'), contact_email: mail ? mail.toLowerCase() : null,
-            address_ar: v('address_ar'), address_en: v('address_en'), logo_path: v('logo_path')
-          }
+            address_ar: v('address_ar'), address_en: v('address_en')
+          }   // settings.logo_path is left as is (keys not sent are kept): «شعار المؤسسة» below changes it
         };
         saveBtn.disabled = true;
         call('updateOrg', S.orgId, payload).then(function (res) {
@@ -3343,6 +3427,7 @@
         });
       });
       out.appendChild(dCard(t('org_settings'), [dAlert('info', t('org_settings_info')), form]));
+      out.appendChild(orgLogoCard(st));
       return aiSettingsCard().then(function (card) { if (card) out.appendChild(card); return out; });
     });
   }

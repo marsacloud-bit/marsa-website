@@ -289,7 +289,7 @@ async function secFile() {
       && !/\bUPDATE\s+public\./i.test(outside) && !/session_replication_role/.test(c) && !/sk-ant|https?:\/\//i.test(src)) || 'body';
   });
   // later phases may follow this file (20261128000100 return_extension: widens the event types again)
-  const LATER_PHASES = ['20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql'];
+  const LATER_PHASES = ['20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');

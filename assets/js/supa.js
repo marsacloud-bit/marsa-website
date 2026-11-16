@@ -60,6 +60,11 @@
       MRS_LOCAL_SAVE: 'تعذّر الحفظ على هذا الجهاز. فعّل التخزين المحلي ثم حاول مرة أخرى.',
       MRS_UPLOAD: 'تعذّر رفع الملف. حاول مرة أخرى.',
       MRS_FILE_TOO_LARGE: 'حجم الملف أكبر من 25 ميغابايت.',
+      // organisation logo (20261202000100): PNG / JPEG / WEBP, 1 MB at most
+      MRS_LOGO_TYPE: 'صيغة الشعار غير مدعومة. استخدم صورة PNG أو JPG أو WEBP.',
+      MRS_LOGO_TOO_LARGE: 'حجم الشعار أكبر من 1 ميغابايت.',
+      // the 12-hour session cap (MARSA_CONFIG.sessionMaxHours)
+      MRS_SESSION_EXPIRED: 'انتهت مدة الجلسة. سجّل الدخول مرة أخرى.',
       MRS_EXTRACTION_DUPLICATE: 'هذا الملف محفوظ من قبل في المستندات المقروءة (للمعاملة نفسها). افتحه من «السجل» بدلًا من حفظه مرة أخرى.',
       MRS_EXTRACTION_VOIDED: 'هذا السجل مُلغى ولا يمكن تعديله.',
       MRS_EXTRACTION_ATTACHED: 'ربط السجل بمعاملة أو بمستند لا يمكن تغييره بعد تعيينه.',
@@ -554,6 +559,10 @@
         MRS_OVER_ALLOCATED: 'The allocations exceed the line net; an allocation never doubles the invoice (remaining: {f}).',
         MRS_OVERPAID: 'The amount exceeds what remains of the total (remaining: {f}).',
         MRS_EXPORT: 'The export file could not be created. Try again.',
+        // organisation logo (20261202000100) + the session cap
+        MRS_LOGO_TYPE: 'This logo format is not supported. Use a PNG, JPG or WEBP image.',
+        MRS_LOGO_TOO_LARGE: 'The logo is larger than 1 MB.',
+        MRS_SESSION_EXPIRED: 'Your session has ended. Sign in again.',
         // MFA (docs/online/MFA_SPEC.md §6)
         MRS_MFA_REQUIRED: 'This action requires two-step verification. Complete it and try again.',
         MFA_INVALID_CODE: 'The code is wrong or expired. Enter the current code from the app.',
@@ -1245,7 +1254,119 @@
   }
   function getSession() {
     return online(function (c) { return c.auth.getSession().then(function (r) { return { data: r.data ? r.data.session : null, error: r.error }; }); },
-      function () { return ok(null); });
+      function () { return ok(null); }).then(function (r) {
+      if (!r || r.error) return r;
+      if (!r.data) { capExpiresAt = null; if (capTimer) { clearTimeout(capTimer); capTimer = null; } return r; }
+      return sessionCap(r.data).then(function (expired) { return expired ? ok(null) : r; });
+    });
+  }
+
+  /* ---- session cap (the old system's 12-hour sessions) ----
+     MARSA_CONFIG.sessionMaxHours: absent / invalid → 12; 0 → no cap. A session is counted from ITS OWN sign-in: the
+     earliest amr[].timestamp of its access token (written once per session by Auth and kept across token refreshes;
+     user.last_sign_in_at only when the token has no amr — that one moves on every sign-in of the user on any device).
+     The device clock is corrected by the token's iat / exp (sessionClockOffset). A session older than the cap is signed
+     out on THIS device (scope local) the next time getSession() runs, or when the timer set at its expiry fires. App pages
+     then go to login.html?expired=1&next=<page[#route]>#staff|#client; login.html and public pages only sign out (no
+     redirect, no loop). An e-mail link (reset / invite / confirmation) signs in a NEW session, so it starts its own count:
+     no page or URL is exempt. */
+  var SESSION_MAX_HOURS = (function () {
+    var v = cfg.sessionMaxHours;
+    if (v === undefined || v === null || v === '') return 12;
+    var n = Number(v);
+    return (isFinite(n) && n >= 0) ? n : 12;
+  })();
+  var CAP_APP_PAGES = ['admin.html', 'portal.html', 'platform.html', 'ocr.html', 'bulk-upload.html', 'help.html'];
+  var CAP_STORAGE_KEY = 'marsa_auth';   // = createClient auth.storageKey
+  var CAP_RETRY_MS = 30000;
+  function pageFile() {
+    var p = '';
+    try { p = String(location.pathname || ''); } catch (e) { p = ''; }
+    return p.slice(p.lastIndexOf('/') + 1) || 'index.html';
+  }
+  var capTimer = null, capExpiresAt = null, capExpiring = null;
+  // ms since epoch (server time) of the sign-in this session counts from, or null when unknown
+  function sessionSignedInAt(session) {
+    var c = jwtClaims(session), first = null;
+    (c && Array.isArray(c.amr) ? c.amr : []).forEach(function (x) {
+      var s = x && typeof x === 'object' ? Number(x.timestamp) : NaN;
+      if (isFinite(s) && s > 0 && (first === null || s * 1000 < first)) first = s * 1000;
+    });
+    if (first !== null) return first;
+    var u = session && session.user;
+    var t = u && u.last_sign_in_at ? Date.parse(u.last_sign_in_at) : NaN;
+    return isFinite(t) ? t : null;
+  }
+  // ms to add to Date.now() to get (at least approximately) the server time. A token is never issued in the future
+  // (iat > now → the device is behind by at least that) and a token getSession() hands out is not expired yet
+  // (now > exp → the device is ahead by at least that); otherwise 0.
+  function sessionClockOffset(session) {
+    var c = jwtClaims(session), now = Date.now();
+    var iat = c ? Number(c.iat) * 1000 : NaN, exp = c ? Number(c.exp) * 1000 : NaN;
+    if (isFinite(iat) && iat > now) return iat - now;
+    if (isFinite(exp) && exp > 0 && now > exp) return exp - now;
+    return 0;
+  }
+  function sessionExpiryOf(session) {
+    if (!SESSION_MAX_HOURS) return null;
+    var t = sessionSignedInAt(session);
+    return t === null ? null : t + SESSION_MAX_HOURS * 3600000;
+  }
+  function expiredHref() {
+    var page = pageFile(), h = '';
+    try { h = String(location.hash || ''); } catch (e) { h = ''; }
+    if (CAP_APP_PAGES.indexOf(page) === -1) page = 'admin.html';
+    if (!/^#[A-Za-z0-9/_-]{1,120}$/.test(h)) h = '';
+    return 'login.html?expired=1&next=' + encodeURIComponent(page + h) + (page === 'portal.html' ? '#client' : '#staff');
+  }
+  // signs out locally; a failed logout call (offline / 5xx keeps the stored session in supabase-js) → the stored
+  // session is removed here, and the session counts as ended only once getSession() no longer returns it
+  function expireSession() {
+    if (capExpiring) return capExpiring;
+    if (capTimer) { clearTimeout(capTimer); capTimer = null; }
+    capExpiring = online(function (c) {
+      clearUserState();
+      return c.auth.signOut({ scope: 'local' }).then(function (r) {
+        if (!r || !r.error) return { data: true, error: null };
+        try { localStorage.removeItem(CAP_STORAGE_KEY); } catch (e) { /* storage blocked */ }
+        return c.auth.getSession().then(function (g) {
+          return { data: !(g && g.data && g.data.session), error: null };
+        }, function () { return { data: false, error: null }; });
+      }, function () {
+        try { localStorage.removeItem(CAP_STORAGE_KEY); } catch (e) { /* storage blocked */ }
+        return { data: false, error: null };
+      });
+    }).then(function (r) {
+      capExpiring = null; capExpiresAt = null;
+      if (!r || r.data !== true) {
+        // not gone yet: this page still treats it as signed out, and tries again shortly
+        capTimer = setTimeout(function () { capTimer = null; getSession(); }, CAP_RETRY_MS);
+        return true;
+      }
+      if (CAP_APP_PAGES.indexOf(pageFile()) !== -1) {
+        try { location.replace(expiredHref()); } catch (e) { /* blocked navigation: the page gates stay (signed out) */ }
+      }
+      return true;
+    });
+    return capExpiring;
+  }
+  // → Promise<true> when the session was over the cap (and is now signed out), <false> otherwise (a timer is set at its expiry)
+  function sessionCap(session) {
+    if (!SESSION_MAX_HOURS || !session) return Promise.resolve(false);
+    var exp = sessionExpiryOf(session);
+    capExpiresAt = exp;
+    if (exp === null) return Promise.resolve(false);   // no sign-in time known: not capped
+    var left = exp - (Date.now() + sessionClockOffset(session));
+    if (left <= 0) return expireSession();
+    if (capTimer) clearTimeout(capTimer);
+    // re-checked through getSession() at the expiry (setTimeout caps at 2^31-1 ms; a longer cap is re-armed then)
+    capTimer = setTimeout(function () { capTimer = null; getSession(); }, Math.min(left + 1000, 2147483647));
+    return Promise.resolve(false);
+  }
+  // ISO time (server clock) the current session ends under the cap (after getSession() ran), or null (no cap / unknown / signed out)
+  function sessionExpiresAt(session) {
+    var exp = session ? sessionExpiryOf(session) : capExpiresAt;
+    return exp === null || exp === undefined ? null : new Date(exp).toISOString();
   }
   // cb(event, session) — returns an unsubscribe function (no-op in demo)
   function onAuth(cb) {
@@ -2457,6 +2578,86 @@
         try { base = new URL(cfg.supabaseUrl).origin; if (new URL(u, base).origin !== base) u = null; } catch (e) { u = null; }
         return u ? ok(u) : fail('MRS_INVALID', 'signed_url');
       });
+  }
+
+  /* ------------------------------------------------------------------
+     Organisation logo (20261202000100): private bucket "org-assets", object '<org_id>/logo-<ms>.<png|jpg|webp>' (≤ 1 MB),
+     path kept in organizations.settings.logo_path (admin_update_org via updateOrg). my_context() returns it as
+     organizations[].logo_path and memberships[] / clients[] .org_logo_path; the page shows orgLogoUrl(path) (signed, short-lived).
+     Read: members / portal users of the org; upload / remove: the org admin (storage.objects policies).
+     ------------------------------------------------------------------ */
+  var LOGO_BUCKET = 'org-assets';
+  var LOGO_MAX_BYTES = 1048576;
+  var LOGO_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+  var LOGO_PATH_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$/;
+  function logoPathOk(p) { return typeof p === 'string' && LOGO_PATH_RE.test(p) && p.indexOf('..') === -1; }
+  // the logo path of org oid in a my_context() result (null when none)
+  function orgLogoPathOf(ctx, oid) {
+    if (!ctx || !oid) return null;
+    var rows = [].concat(ctx.organizations || []).map(function (o) { return { org_id: o.org_id, p: o.logo_path }; })
+      .concat([].concat(ctx.memberships || [], ctx.clients || []).map(function (m) { return { org_id: m.org_id, p: m.org_logo_path }; }));
+    for (var i = 0; i < rows.length; i++) if (rows[i].org_id === oid && logoPathOk(rows[i].p)) return rows[i].p;
+    return null;
+  }
+  // → {data: signed URL (on our own Supabase origin) | null when path is empty, error}
+  function orgLogoUrl(path, expiresIn) {
+    if (path === null || path === undefined || path === '') return Promise.resolve(ok(null));
+    if (!logoPathOk(path)) return Promise.resolve(fail('MRS_INVALID', 'logo_path'));
+    var secs = Math.min(Math.max(parseInt(expiresIn, 10) || 600, 60), 3600);
+    return online(function (c) { return c.storage.from(LOGO_BUCKET).createSignedUrl(path, secs); })
+      .then(function (r) {
+        if (r.error) return r;
+        // only ever show a signed URL on our own Supabase project (no open redirect / foreign image via API data)
+        var u = r.data && r.data.signedUrl, base = '';
+        try { base = new URL(cfg.supabaseUrl).origin; if (new URL(u, base).origin !== base) u = null; } catch (e) { u = null; }
+        return u ? ok(u) : fail('MRS_INVALID', 'signed_url');
+      });
+  }
+  function currentLogoPath(oid) {
+    return myContext(true).then(function (r) { return r.error ? r : ok(orgLogoPathOf(r.data, oid)); });
+  }
+  function removeLogoObject(path) {
+    if (!logoPathOk(path)) return Promise.resolve(ok(null));
+    return online(function (c) { return c.storage.from(LOGO_BUCKET).remove([path]); });
+  }
+  // org admin: validate (type / size) → upload '<org_id>/logo-<ms>.<ext>' → settings.logo_path → the previous object removed
+  // (best effort). → {data: {logo_path, org}, error}; a failed path update removes the new object again.
+  function uploadOrgLogo(oid, file) {
+    if (!configured) return demoOnly();
+    if (!isUuid(oid)) return Promise.resolve(fail('MRS_INVALID', 'organization'));
+    if (!file) return Promise.resolve(fail('MRS_REQUIRED', 'logo_path'));
+    var ext = LOGO_TYPES[String(file.type || '').toLowerCase()];
+    if (!ext) return Promise.resolve(fail('MRS_LOGO_TYPE'));
+    if (!(file.size > 0) || file.size > LOGO_MAX_BYTES) return Promise.resolve(fail('MRS_LOGO_TOO_LARGE'));
+    var path = String(oid).toLowerCase() + '/logo-' + Date.now() + '.' + ext, old = null;
+    return currentLogoPath(oid).then(function (cur) {
+      old = cur.error ? null : cur.data;
+      return online(function (c) { return c.storage.from(LOGO_BUCKET).upload(path, file, { upsert: false, contentType: file.type, cacheControl: '3600' }); });
+    }).then(function (u) {
+      if (u.error) return { data: null, error: mkErr('MRS_UPLOAD', null, u.error.raw || u.error) };
+      return updateOrg(oid, { settings: { logo_path: path } }).then(function (r) {
+        if (r.error) return removeLogoObject(path).then(function () { return r; });
+        ctxCache = null;
+        var done = ok({ logo_path: path, org: r.data });
+        if (!old || old === path || String(old).split('/')[0] !== path.split('/')[0]) return done;
+        return removeLogoObject(old).then(function () { return done; });
+      });
+    });
+  }
+  // org admin: settings.logo_path removed, then its object (best effort) → {data: {logo_path: null, org}, error}
+  function removeOrgLogo(oid) {
+    if (!configured) return demoOnly();
+    if (!isUuid(oid)) return Promise.resolve(fail('MRS_INVALID', 'organization'));
+    return currentLogoPath(oid).then(function (cur) {
+      var old = cur.error ? null : cur.data;
+      return updateOrg(oid, { settings: { logo_path: null } }).then(function (r) {
+        if (r.error) return r;
+        ctxCache = null;
+        var done = ok({ logo_path: null, org: r.data });
+        if (!old || String(old).split('/')[0] !== String(oid).toLowerCase()) return done;
+        return removeLogoObject(old).then(function () { return done; });
+      });
+    });
   }
   function classifyDocument(id, classification, status, note) {
     return online(function (c) {
@@ -4623,6 +4824,8 @@
     requestEmailOtp: requestEmailOtp, verifyEmailOtp: verifyEmailOtp,
     resetPassword: resetPassword, updatePassword: updatePassword,
     onAuth: onAuth, currentUser: currentUser, getSession: getSession,
+    // session cap (MARSA_CONFIG.sessionMaxHours, default 12; 0 = none): hours, and the ISO end of the current session (or null)
+    sessionMaxHours: function () { return SESSION_MAX_HOURS; }, sessionExpiresAt: sessionExpiresAt,
     mfaFactors: mfaFactors, mfaAal: mfaAal, mfaEnroll: mfaEnroll, mfaVerify: mfaVerify, mfaUnenroll: mfaUnenroll, mfaState: mfaState,
     myContext: myContext, myMemberships: myMemberships, myRole: myRole, hasRole: hasRole, isStaff: isStaff, orgId: orgId,
     isPlatformAdmin: isPlatformAdmin, activeOrgId: activeOrgId, setActiveOrg: setActiveOrg, setMyLocale: setMyLocale,
@@ -4693,6 +4896,8 @@
     listContainers: listContainers, addContainer: addContainer, updateContainer: updateContainer,
     // documents
     listDocuments: listDocuments, uploadDocument: uploadDocument, documentUrl: documentUrl,
+    // organisation logo (20261202000100, bucket org-assets)
+    orgLogoUrl: orgLogoUrl, uploadOrgLogo: uploadOrgLogo, removeOrgLogo: removeOrgLogo, orgLogoPathOf: orgLogoPathOf,
     classifyDocument: classifyDocument, setDocumentVisibility: setDocumentVisibility, voidDocument: voidDocument,
     // bulk import
     createImportBatch: createImportBatch, addImportRows: addImportRows, listImportRows: listImportRows,

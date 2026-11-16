@@ -86,6 +86,50 @@ html[dir="ltr"] .shell-org-select { padding-inline: 10px 30px; }
 .shell-org-name .icon { flex: none; width: 14px; height: 14px; color: var(--teal); }
 .shell-org-name-text { min-width: 0; overflow-wrap: anywhere; }
 .adm-me > div { min-width: 0; }
+/* [data-shell-orgname] org logo (img.shell-org-logo, signed URL): shown once loaded, then it replaces the building icon */
+.shell-org-logo { flex: none; display: block; width: auto; height: 22px; max-width: 72px; object-fit: contain; border-radius: 4px; }
+.shell-org-logo[hidden] { display: none; }
+.shell-org-name.has-logo > .icon { display: none; }
+/* admin.js «شعار المؤسسة» card: preview + file input + actions */
+.adm-logo-box { display: grid; gap: 12px; min-width: 0; }
+.adm-logo-preview { display: flex; align-items: center; justify-content: center; min-height: 96px; max-width: 100%; padding: 12px; border: 1px dashed var(--border-strong); border-radius: var(--r); background: var(--bg); }
+.adm-logo-img { display: block; max-width: 100%; max-height: 120px; width: auto; height: auto; object-fit: contain; }
+.adm-logo-img[hidden], .adm-logo-empty[hidden] { display: none; }
+.adm-logo-empty { margin: 0; text-align: center; }
+.adm-logo-box input[type="file"] { max-width: 100%; min-width: 0; }
+
+/* «القائمة» (app-shell.js setupNavToggle): admin.html .adm-nav as a side menu / phone drawer. RTL-safe (logical sides);
+   without the toggle (.shell-nav-side / .shell-nav-open absent) the original horizontal bar is unchanged. */
+.shell-nav-toggle .icon { width: 16px; height: 16px; }
+.shell-nav-close { display: none; }
+.adm-app.shell-nav-side .adm-nav-list, .adm-app.shell-nav-open .adm-nav-list {
+  display: flex; flex-direction: column; align-items: stretch; width: 100%; padding: 6px; white-space: normal; border-radius: var(--r);
+}
+.adm-app.shell-nav-side .adm-nav-link, .adm-app.shell-nav-open .adm-nav-link {
+  display: flex; justify-content: space-between; padding: 10px 14px; border-radius: var(--r-sm); overflow-wrap: anywhere;
+}
+.adm-app.shell-nav-side .adm-nav-ext, .adm-app.shell-nav-open .adm-nav-ext { flex-direction: column; align-items: stretch; }
+.adm-app.shell-nav-side .adm-nav-list > li:not(.adm-nav-ext) + .adm-nav-ext::before,
+.adm-app.shell-nav-open .adm-nav-list > li:not(.adm-nav-ext) + .adm-nav-ext::before { width: auto; height: 1px; margin: 4px 0; }
+@media (min-width: 768px) {
+  .adm-app.shell-nav-side:not([hidden]) { display: grid; grid-template-columns: minmax(190px, 240px) minmax(0, 1fr); column-gap: 20px; align-items: start; }
+  .adm-app.shell-nav-side > * { grid-column: 1 / -1; min-width: 0; }
+  .adm-app.shell-nav-side > .adm-nav {
+    grid-column: 1; position: sticky; top: calc(var(--header-h) + 12px); max-height: calc(100vh - var(--header-h) - 24px);
+    margin-bottom: 22px; overflow-x: hidden; overflow-y: auto;
+  }
+  .adm-app.shell-nav-side > .adm-view { grid-column: 2; }
+}
+@media (max-width: 767px) {
+  .adm-app.shell-nav-side .adm-nav { display: none; }
+  .adm-app.shell-nav-open .adm-nav {
+    display: block; position: fixed; inset-block: 0; inset-inline-start: 0; z-index: 1110; width: min(300px, 86vw);
+    margin: 0; padding: 12px; overflow-x: hidden; overflow-y: auto; background: #fff; box-shadow: var(--shadow-lg);
+  }
+  .adm-app.shell-nav-open .shell-nav-close { display: flex; align-items: center; justify-content: center; margin-block-end: 8px; margin-inline-start: auto; }
+  .adm-app.shell-nav-open .adm-nav-list { border: 0; padding: 0; }
+}
+.shell-nav-backdrop { position: fixed; inset: 0; z-index: 1100; background: rgba(5, 30, 59, .5); }
 
 /* == 02 BUTTON EXTRAS (variants style.css does not have) ============== */
 .btn-danger { background: var(--danger); color: #fff; border-color: var(--danger); }

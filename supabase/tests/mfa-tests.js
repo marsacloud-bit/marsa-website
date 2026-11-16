@@ -291,6 +291,8 @@ async function secPreflight() {
   const h1 = await hashes();
   let ok = true;
   for (let i = 0; i < 2; i++) ok = (await runFile(MFA_FILE, true)) && ok;
+  // later phases that re-create an MFA-file function (my_context) are re-pasted straight after, as all_migrations.sql says
+  for (const f of ['20261202000100_org_logo.sql']) if (fs.existsSync(path.join(MIG_DIR, f))) ok = (await runFile(path.join(MIG_DIR, f), true)) && ok;
   await check('re-applied twice more on the full DB: applies, identical function hashes + ACLs, one schema_versions row', async () => {
     const h2 = await hashes();
     const n = await num(`SELECT count(*) n FROM public.schema_versions WHERE version = '20261109000100'`);

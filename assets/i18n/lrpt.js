@@ -118,7 +118,7 @@
     rx_tpl_empty: 'الموضوع ونص الرسالة مطلوبان.', rx_tpl_builtin_note: 'النص الافتراضي بالعربية ثم الإنجليزية. حفظ نص معدَّل يجعله نص المؤسسة لكل الطلبات الجديدة.',
     otp_title: 'الدخول برمز عبر البريد', otp_explain: 'يتيح للموظفين الدخول برمز يصل إلى بريدهم بدل كلمة المرور. مطفأ افتراضيًا، ويلزم تشغيله في المنصة وفي المؤسسة معًا.',
     otp_platform: 'مفتاح المنصة (إعداد الموقع)', otp_org: 'مفتاح المؤسسة', otp_on: 'مفعّل', otp_off: 'مطفأ',
-    otp_mfa_note: 'التحقق بخطوتين لا يتغير: جلسة الرمز لا تكفي لصلاحيات المدير حتى يُدخل رمز تطبيق التحقق. من ينتمي لعدة مؤسسات يلزم تفعيله في جميعها.',
+    otp_mfa_note: 'من ينتمي لعدة مؤسسات يلزم تفعيله في جميعها. الرمز يُرسَل إلى البريد، والجلسة تنتهي بعد المدة المحددة (12 ساعة افتراضيًا).',
     otp_turn_on: 'تفعيل الدخول بالرمز للمؤسسة', otp_turn_off: 'إيقاف الدخول بالرمز للمؤسسة', otp_now_on: 'فُعّل الدخول بالرمز للمؤسسة.', otp_now_off: 'أُوقف الدخول بالرمز للمؤسسة.',
     device_title: 'هذا الجهاز', device_rt_badge: 'إظهار مؤشر زمن الاستجابة', device_rt_note: 'يُحفظ في هذا المتصفح فقط.',
     // progress overlay / response badge / technical errors (app-shell.js)
@@ -256,7 +256,7 @@
     rx_tpl_empty: 'The subject and the message are required.', rx_tpl_builtin_note: 'The built-in text is Arabic, then English. Saving an edited text makes it the organization text for every new request.',
     otp_title: 'Sign-in with an e-mail code', otp_explain: 'Lets staff sign in with a code sent to their e-mail instead of the password. OFF by default; it must be on for the platform and the organization.',
     otp_platform: 'Platform switch (site configuration)', otp_org: 'Organization switch', otp_on: 'On', otp_off: 'Off',
-    otp_mfa_note: 'Two-step verification is unchanged: a code session is not enough for admin rights until the authenticator code is entered. A member of several organizations needs it on in all of them.',
+    otp_mfa_note: 'A member of several organizations needs it on in all of them. The code is sent by e-mail; the session ends after the set time (12 hours by default).',
     otp_turn_on: 'Allow code sign-in for the organization', otp_turn_off: 'Stop code sign-in for the organization', otp_now_on: 'Code sign-in is now allowed for the organization.', otp_now_off: 'Code sign-in is now stopped for the organization.',
     device_title: 'This device', device_rt_badge: 'Show the response-time badge', device_rt_note: 'Saved in this browser only.',
     p_working: 'Working…', p_eta: 'Expected about {s} s', p_elapsed: '{s} s elapsed', p_cancel: 'Cancel', p_cancelled: 'Stopped waiting. The server may still finish the request.',
