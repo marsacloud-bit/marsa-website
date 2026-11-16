@@ -150,7 +150,7 @@ async function secFile() {
       && /Down-path:/.test(s) && fns === 8 && pinned === 8) || J({ fns, pinned });
   });
   // later phases (each has its own suite) follow it, in order
-  const LATER_PHASES = ['20261202000100_org_logo.sql'];
+  const LATER_PHASES = ['20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql'];
   await check('this file is the latest migration (later phases excepted)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && J(later) === J(LATER_PHASES)) || 'later ' + J(later);

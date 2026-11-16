@@ -141,14 +141,22 @@ async function secFile() {
   await check('no aal2 / MFA requirement re-introduced (mfa_off stays in force)', () =>
     !/aal2|mfa_gated_roles\s*\(\)\s*RETURNS|mfa_required_for\s*\(uuid\)\s*RETURNS/.test(s.replace(/^--.*$/gm, '')) || 'aal2 found');
   await check('bucket: images only, no SVG', () => /ARRAY\['image\/png','image\/jpeg','image\/webp'\]/.test(s) && !/svg/i.test(s.replace(/^--.*$/gm, '')) || 'mime list');
-  await check('this file is the latest migration', () => migFiles().pop() === MIG || 'latest ' + migFiles().pop());
+  // later phases (each has its own suite) follow it, in order
+  const LATER_PHASES = ['20261203000100_draft_client_hidden.sql'];
+  await check('this file is the latest migration (later phases excepted)', () => {
+    const later = migFiles().filter(f => f > MIG);
+    return (migFiles().includes(MIG) && J(later) === J(LATER_PHASES)) || 'later ' + J(later);
+  });
   const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
-  await check('all_migrations.sql: appended verbatim under its header, last; the paste note names it', () => {
+  await check('all_migrations.sql: appended verbatim under its header (followed only by the later phases); the paste note names it', () => {
     const h = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(h);
+    const nx = all.indexOf('\n-- ===== migrations/', i + h.length);
+    const body = nx < 0 ? all.slice(i + h.length) : all.slice(i + h.length, nx);
     const order = (all.match(/^-- ===== migrations\/(\S+) =====$/gm) || []).map(l => l.split('/')[1].split(' ')[0]);
-    return (i > 0 && all.slice(i + h.length) === s && all.indexOf(h, i + 1) < 0 && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles()))
-      || 'not appended verbatim / no note / order';
+    const later = order.slice(order.indexOf(MIG) + 1);
+    return (i > 0 && body === s && all.indexOf(h, i + 1) < 0 && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles()) && J(later) === J(LATER_PHASES))
+      || 'not appended verbatim / no note / order / later ' + J(later);
   });
 }
 

@@ -42,7 +42,7 @@
 
       // reports view
       reports_title: 'التقارير', reports_sub: 'تقارير تشغيلية وتحليلية مع تصدير مطابق للفلاتر والإجماليات الظاهرة. التصدير يخضع لصلاحياتك نفسها ويُسجَّل.',
-      tab_transactions: 'المعاملات', tab_containers: 'الحاويات وإرجاع الفارغ', tab_trips: 'رحلات النقل', tab_margins: 'الربحية (تحليلي)', tab_costs: 'التكاليف (تحليلي)', tab_exports: 'سجل التصدير',
+      tab_transactions: 'المعاملات', tab_containers: 'الحاويات وإرجاع الفارغ', tab_trips: 'رحلات النقل', tab_movements: 'المواعيد والنقل', tab_payments: 'كشف السدادات', tab_margins: 'الربحية (تحليلي)', tab_costs: 'التكاليف (تحليلي)', tab_exports: 'سجل التصدير',
       analytical_banner: 'تحليلي — ليس رقمًا محاسبيًا رسميًا. الأرقام المحاسبية الرسمية للفواتير مصدرها دفترة.',
       rpt_empty_title: 'لا توجد بيانات', rpt_empty_text: 'لا توجد سجلات مطابقة لهذه الفلاتر ضمن صلاحياتك. جرّب مدى زمنيًا أوسع.',
       log_empty_title: 'لا توجد عمليات تصدير', log_empty_text: 'لم تُسجَّل أي عملية تصدير بهذه الفلاتر.', log_own_only: 'تظهر هنا عمليات التصدير التي قمت بها أنت فقط.',
@@ -117,7 +117,7 @@
       cdf_created: 'Added', cdf_return_deadline: 'Return deadline', cdf_returned_at: 'Returned', cdf_gate_out: 'Gate out',
 
       reports_title: 'Reports', reports_sub: 'Operational and analytical reports with exports that match the visible filters and totals. Exports follow your permissions and are logged.',
-      tab_transactions: 'Transactions', tab_containers: 'Containers & empty return', tab_trips: 'Transport trips', tab_margins: 'Profitability (analytical)', tab_costs: 'Costs (analytical)', tab_exports: 'Export log',
+      tab_transactions: 'Transactions', tab_containers: 'Containers & empty return', tab_trips: 'Transport trips', tab_movements: 'Appointments & transport', tab_payments: 'Payments report', tab_margins: 'Profitability (analytical)', tab_costs: 'Costs (analytical)', tab_exports: 'Export log',
       analytical_banner: 'Analytical — not an official accounting figure. Official invoice figures come from Daftra.',
       rpt_empty_title: 'No data', rpt_empty_text: 'No records match these filters within your permissions. Try a wider date range.',
       log_empty_title: 'No exports', log_empty_text: 'No export matches these filters.', log_own_only: 'Only the exports you made are shown here.',

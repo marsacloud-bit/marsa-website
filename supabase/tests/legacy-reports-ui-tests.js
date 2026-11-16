@@ -167,6 +167,26 @@ check('read only: no step-8 view calls a write RPC except the owner settings (se
 /* ================================================================ dictionary */
 section('dictionary lrpt (ar = en keys, {vars} parity, every key used exists) + label entries = the migration rows');
 const D = base.w.MarsaLrptDict, LB = base.w.MarsaLrptLabels;
+// 20261203000100 (bug): the #reports tab bar renders t('tab_' + k) for every TABS entry; «المواعيد والنقل» / «كشف السدادات»
+// showed the raw keys tab_movements / tab_payments
+check('every TABS entry of rpt/reports.js has a tab_<kind> label in assets/i18n/rpt.js (ar + en), and K.t resolves it', () => {
+  const m = SRC.reports.match(/var TABS = \[([^\]]*)\];/);
+  if (!m) return 'TABS not found';
+  const tabs = (m[1].match(/'([a-z_]+)'/g) || []).map(x => x.slice(1, -1));
+  const RD = base.w.MarsaRptDict || {};
+  const bad = tabs.filter(k => {
+    const ar = (RD.ar || {})['tab_' + k], en = (RD.en || {})['tab_' + k];
+    return typeof ar !== 'string' || !ar.trim() || !/[؀-ۿ]/.test(ar) || typeof en !== 'string' || !en.trim() || /[؀-ۿ]/.test(en)
+      || K.t('tab_' + k) === 'tab_' + k;
+  });
+  return (tabs.length >= 8 && tabs.includes('movements') && tabs.includes('payments') && bad.length === 0) || 'missing tab labels: ' + J(bad) + ' of ' + J(tabs);
+});
+check('tab_movements / tab_payments use the wording of the report titles (r_movements / r_payments)', () => {
+  const RD = base.w.MarsaRptDict || {};
+  return (RD.ar.tab_movements === 'المواعيد والنقل' && D.ar.r_movements.indexOf(RD.ar.tab_movements) >= 0
+    && RD.ar.tab_payments === D.ar.r_payments && D.en.r_movements.indexOf(RD.en.tab_movements) === 0 && RD.en.tab_payments === D.en.r_payments)
+    || J([RD.ar.tab_movements, RD.ar.tab_payments, RD.en.tab_movements, RD.en.tab_payments]);
+});
 check('ar and en have the same keys (and > 400 of them)', () => {
   const a = Object.keys(D.ar), e = Object.keys(D.en);
   return (a.length > 400 && a.length === e.length && a.every(k => k in D.en)) || J([a.filter(k => !(k in D.en)), e.filter(k => !(k in D.ar))]);
