@@ -354,9 +354,16 @@
         if (!b || typeof b.getBoundingClientRect !== 'function' || typeof window.innerWidth !== 'number') return;
         var r = b.getBoundingClientRect(), w = window.innerWidth, h = window.innerHeight || 0;
         if (w < 600) return;
-        var width = Math.min(320, w - 16), left = Math.min(Math.max(8, (document.documentElement.dir === 'rtl' ? r.right - width : r.left)), w - width - 8);
+        var rtl = document.documentElement.dir === 'rtl';
+        try { rtl = getComputedStyle(b).direction === 'rtl'; } catch (e2) { /* keep the page direction */ }
+        var width = Math.min(320, w - 16), left = Math.min(Math.max(8, (rtl ? r.right - width : r.left)), w - width - 8);
         node.style.position = 'fixed';
         node.style.width = width + 'px';
+        // owner report 2026-11-19: the CSS default inset-inline-start (= right in RTL) stayed set, and with left + right +
+        // width all given a right-to-left box ignores left, so the popover sat at the far right edge of the screen;
+        // clearing the other sides lets it open right under its column
+        node.style.right = 'auto';
+        node.style.bottom = 'auto';
         node.style.left = left + 'px';
         node.style.top = Math.max(8, Math.min(r.bottom + 4, h - 120)) + 'px';
       } catch (e) { /* keep the CSS default */ }

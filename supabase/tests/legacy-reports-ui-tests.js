@@ -269,6 +269,18 @@ check('admin.js: every #transactions (filtered, branch-only or plain) opens #reg
     && fn({ name: 'clients', query: 'status=new' }) === null && off({ name: 'transactions', query: 'status=new' }) === null && off({ name: 'transactions', query: '' }) === null
     && /history\.replaceState\(null, '', '#register' \+ \(rq \? '\?' \+ rq : ''\)\)/.test(SRC.admin) && /href: '#register', 'data-act': 'open-register'/.test(SRC.admin)) || 'redirect';
 });
+// owner report 2026-11-19: in RTL the popover sat at the far right edge (the CSS inset-inline-start = right stayed set,
+// and a right-to-left box with left + right + width ignores left) → place() clears right / bottom and opens under the column
+check('colfilter place(): fixed, width, right = auto, bottom = auto, then left (opens right under its column in RTL)', () => {
+  const m = /function place\(node, b\) \{([\s\S]*?)\n    \}/.exec(SRC.colfilter);
+  if (!m) return 'no place()';
+  const node = { style: {} }, b = { getBoundingClientRect: () => ({ left: 300, right: 320, bottom: 200 }) };
+  const g = { innerWidth: 1600, innerHeight: 900 };
+  const fn = new Function('window', 'document', 'getComputedStyle', 'return function (node, b) {' + m[1] + '};')(g, { documentElement: { dir: 'rtl' } }, () => ({ direction: 'rtl' }));
+  fn(node, b);
+  return (node.style.position === 'fixed' && node.style.right === 'auto' && node.style.bottom === 'auto' && node.style.left === '8px' && node.style.width === '320px'
+    && node.style.top === '204px') || J(node.style);
+});
 check('lrpt.css: phone width — grid / stack children min-width 0, the column filter is a bottom sheet below 600 px, td row tones (beat the striped tr), print tones, no dark theme', () =>
   (/\.lrpt-register > \*, \.lrpt-recon > \*[^{]*\{ min-width: 0; \}/.test(CSS) && /@media \(max-width: 599px\) \{[\s\S]*?\.cf-pop \{ inset-inline: 8px; inset-block-start: auto; inset-block-end: 8px;/.test(CSS)
     && /\.rpt-table tbody tr\.lrpt-stage-released > td \{ background-color:/.test(CSS) && /td\.is-tone-danger \{ background: #F8D7DA/.test(CSS)

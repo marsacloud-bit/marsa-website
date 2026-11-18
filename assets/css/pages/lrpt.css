@@ -177,3 +177,24 @@
 .lrpt-ctrs[tabindex]:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .lrpt-dft-no { color: #15803d; font-weight: 800; white-space: nowrap; }
 .lrpt-dft-draft { color: #1d4ed8; font-weight: 700; white-space: nowrap; }
+
+/* ---- Owner request 2026-11-19: a calmer, lighter «المعاملات» table ----
+   light header (no dark navy band), the label and a small filter button on one line, words never split inside a
+   name (no «Supplie / s»), tighter cells so every column fits a wide screen without sideways scrolling */
+.lrpt-statement .rpt-table thead th {
+  background: #F3F5F7; color: var(--text, #1f2937); border: 1px solid var(--border); border-block-end: 2px solid var(--border-strong, #cfd6dd);
+  padding: 8px 6px; font-size: var(--fs-sm); vertical-align: middle; min-inline-size: 0;
+}
+.lrpt-statement .rpt-table th.has-cf .rpt-th-label { display: inline; margin: 0; }
+.lrpt-statement .rpt-table thead .cf-btn {
+  inline-size: 18px; block-size: 18px; margin-inline-start: 4px; border: 1px solid transparent; border-radius: 4px;
+  background: transparent; color: var(--muted); font-size: 11px;
+}
+.lrpt-statement .rpt-table thead .cf-btn:hover, .lrpt-statement .rpt-table thead .cf-btn:focus-visible {
+  background: #fff; border-color: var(--border-strong, #cfd6dd); color: var(--text, #1f2937);
+}
+.lrpt-statement .rpt-table thead .cf-btn.is-active { background: var(--teal); border-color: var(--teal); color: #fff; }
+.lrpt-statement .rpt-table tbody td { padding: 7px 6px; font-size: var(--fs-sm); overflow-wrap: normal; word-break: normal; hyphens: none; }
+.lrpt-statement .rpt-table tbody td:nth-child(2) { min-inline-size: 140px; }
+.lrpt-statement .rpt-table tbody tr:hover > td { background-color: #F7FAF9; }
+.lrpt-statement .rpt-table .is-nowrap { white-space: nowrap; }   /* dates / numbers stay on one line */
