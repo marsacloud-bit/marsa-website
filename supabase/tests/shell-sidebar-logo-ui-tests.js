@@ -16,8 +16,9 @@
       then removeOrgLogo(org) + event.
     * «القائمة» (app-shell.js): button first in .adm-topbar-actions with aria-controls, aria-pressed (wide: layout) /
       aria-expanded (phone: drawer); drawer open = role=dialog + aria-modal, the page outside inert; default = the
-      horizontal bar (no class, nothing stored); toggle → side menu, stored per device ('marsa_nav_layout'), restored
-      on the next load, toggles back; a throwing localStorage keeps the default; every nav item / data-nav-id is the
+      side menu (owner decision 2026-11-18; nothing stored); toggle → horizontal bar, stored per device
+      ('marsa_nav_layout' = 'top'), restored on the next load, toggles back; nav groups (daily first and open, «الإعدادات»
+      last and closed, heading click stored in 'marsa_nav_groups', the open item's group opens); a throwing localStorage keeps the default; every nav item / data-nav-id is the
       same in both layouts; phone width: overlay drawer + backdrop, focus moves in, Esc / backdrop / item click /
       close button close it, focus goes back to the button; widening the window closes it.
     * static: ES5 in the new code, localStorage only inside try, ar + en for every new key, RTL-safe CSS (logical
@@ -364,16 +365,13 @@ function key(P, k) { P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: k
     const btn = P.d.querySelector('.shell-nav-toggle');
     await check('button «القائمة» is first in .adm-topbar-actions, type=button', () =>
       (btn && btn.parentNode.classList.contains('adm-topbar-actions') && btn.parentNode.firstElementChild === btn && btn.type === 'button' && btn.textContent.trim() === 'القائمة') || (btn && btn.outerHTML));
-    await check('aria-controls names the nav container (given an id); wide: aria-pressed=false, no aria-expanded (nothing is hidden)', () =>
-      (wrap.id && btn.getAttribute('aria-controls') === wrap.id && btn.getAttribute('aria-pressed') === 'false' && !btn.hasAttribute('aria-expanded')) || btn.outerHTML);
-    await check('default = horizontal bar: no layout class, nothing stored', () =>
-      (!app.classList.contains('shell-nav-side') && !app.classList.contains('shell-nav-open') && P.w.localStorage.getItem('marsa_nav_layout') === null) || app.className);
+    // owner decision 2026-11-18 (docs/owner/sections-decisions.md): the grouped side menu is the default, the bar is the stored choice
+    await check('aria-controls names the nav container (given an id); wide: aria-pressed=true (side menu), no aria-expanded (nothing is hidden)', () =>
+      (wrap.id && btn.getAttribute('aria-controls') === wrap.id && btn.getAttribute('aria-pressed') === 'true' && !btn.hasAttribute('aria-expanded')) || btn.outerHTML);
+    await check('default = side menu (.shell-nav-side), nothing stored', () =>
+      (app.classList.contains('shell-nav-side') && !app.classList.contains('shell-nav-open') && P.w.localStorage.getItem('marsa_nav_layout') === null) || app.className);
     const before = navIds(P);
     await check('nav has its items (admin role)', () => before.length > 10 || J(before));
-    btn.click();
-    await check('click → side menu (.shell-nav-side), aria-pressed=true, stored per device', () =>
-      (app.classList.contains('shell-nav-side') && btn.getAttribute('aria-pressed') === 'true' && !btn.hasAttribute('aria-expanded') && P.w.localStorage.getItem('marsa_nav_layout') === 'side') || app.className);
-    await check('same nav items + hrefs in the side menu', () => J(navIds(P)) === J(before) || J(navIds(P)));
     await check('no backdrop / drawer on a wide screen', () => !P.d.querySelector('.shell-nav-backdrop') && !app.classList.contains('shell-nav-open') || 'drawer opened');
     P.w.MarsaShell.setBadge('transactions', 7);
     await check('badges still paint in the side menu', () => {
@@ -381,8 +379,12 @@ function key(P, k) { P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: k
       return (a && a.textContent === '7') || 'no badge';
     });
     btn.click();
-    await check('click again → back to the horizontal bar, stored value removed', () =>
-      (!app.classList.contains('shell-nav-side') && btn.getAttribute('aria-pressed') === 'false' && P.w.localStorage.getItem('marsa_nav_layout') === null) || app.className);
+    await check('click → horizontal bar, aria-pressed=false, stored per device (top)', () =>
+      (!app.classList.contains('shell-nav-side') && btn.getAttribute('aria-pressed') === 'false' && !btn.hasAttribute('aria-expanded') && P.w.localStorage.getItem('marsa_nav_layout') === 'top') || app.className);
+    await check('same nav items + hrefs in the horizontal bar', () => J(navIds(P)) === J(before) || J(navIds(P)));
+    btn.click();
+    await check('click again → back to the side menu, stored value removed', () =>
+      (app.classList.contains('shell-nav-side') && btn.getAttribute('aria-pressed') === 'true' && P.w.localStorage.getItem('marsa_nav_layout') === null) || app.className);
     P.w.MarsaI18n.setLang && P.w.MarsaI18n.setLang('en');
     await settle(20);
     await check('English: the button says Menu (one button only)', () => (P.d.querySelectorAll('.shell-nav-toggle').length === 1 && P.d.querySelector('.shell-nav-toggle').textContent.trim() === 'Menu') || P.d.querySelector('.shell-nav-toggle').textContent);
@@ -390,15 +392,51 @@ function key(P, k) { P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: k
   {
     const P = page({ store: { marsa_nav_layout: 'side' } });
     await settle(80);
-    await check('stored side layout is restored on load', () => (P.d.getElementById('adm-app').classList.contains('shell-nav-side') && P.d.querySelector('.shell-nav-toggle').getAttribute('aria-pressed') === 'true') || 'not restored');
+    await check('an old stored side layout stays the side menu', () => (P.d.getElementById('adm-app').classList.contains('shell-nav-side') && P.d.querySelector('.shell-nav-toggle').getAttribute('aria-pressed') === 'true') || 'not side');
+  }
+  {
+    const P = page({ store: { marsa_nav_layout: 'top' } });
+    await settle(80);
+    await check('stored horizontal bar is restored on load', () => (!P.d.getElementById('adm-app').classList.contains('shell-nav-side') && P.d.querySelector('.shell-nav-toggle').getAttribute('aria-pressed') === 'false') || 'not restored');
   }
   {
     const P = page({ badStorage: true });
     await settle(80);
     const btn = P.d.querySelector('.shell-nav-toggle'), app = P.d.getElementById('adm-app');
-    await check('blocked localStorage: page boots, default bar', () => (!P.errors.length && btn && !app.classList.contains('shell-nav-side')) || J(P.errors));
+    await check('blocked localStorage: page boots, default side menu', () => (!P.errors.length && btn && app.classList.contains('shell-nav-side')) || J(P.errors));
     btn.click();
-    await check('blocked localStorage: toggle still works for this view', () => app.classList.contains('shell-nav-side') || 'no toggle');
+    await check('blocked localStorage: toggle still works for this view', () => !app.classList.contains('shell-nav-side') || 'no toggle');
+  }
+  {
+    // owner decision 2026-11-18: groups under headings that fold; daily work first and open, «الإعدادات» last
+    const P = page();
+    await settle(80);
+    const groups = Array.prototype.map.call(P.d.querySelectorAll('#adm-nav > li.adm-nav-group'), g => g.getAttribute('data-nav-group'));
+    const g = id => P.d.querySelector('#adm-nav > li.adm-nav-group[data-nav-group="' + id + '"]');
+    const inGroup = (id, item) => !!(g(id) && g(id).querySelector('.adm-nav-sub [data-nav-id="' + item + '"]'));
+    await check('groups in order: daily first, settings last (admin role)', () => (groups[0] === 'daily' && groups.indexOf('settings') === groups.length - 1 && groups.indexOf('settings') > 0) || J(groups));
+    await check('items sit in their groups (dashboard / transactions → daily, org / members / audit / errors → settings)', () =>
+      (inGroup('daily', 'dashboard') && inGroup('daily', 'transactions') && ['org', 'members', 'audit', 'errors'].every(x => inGroup('settings', x))) || J(groups));
+    const btnOf = id => g(id).querySelector('.adm-nav-group-btn');
+    await check('heading buttons: aria-controls names the item list, Arabic labels, daily open, settings closed by default', () =>
+      (btnOf('daily').getAttribute('aria-controls') === g('daily').querySelector('.adm-nav-sub').id && btnOf('daily').textContent.trim() === 'العمل اليومي'
+        && btnOf('settings').textContent.trim() === 'الإعدادات' && btnOf('daily').getAttribute('aria-expanded') === 'true'
+        && btnOf('settings').getAttribute('aria-expanded') === 'false' && g('settings').classList.contains('is-collapsed')) || g('settings').outerHTML.slice(0, 200));
+    btnOf('settings').click();
+    await check('a heading click opens its group and is stored per device', () =>
+      (!g('settings').classList.contains('is-collapsed') && btnOf('settings').getAttribute('aria-expanded') === 'true'
+        && JSON.parse(P.w.localStorage.getItem('marsa_nav_groups') || '{}').settings === true) || P.w.localStorage.getItem('marsa_nav_groups'));
+    btnOf('settings').click();
+    P.w.location.hash = '#org';
+    await settle(40);
+    await check('opening a closed group\'s item opens that group (stored choice unchanged)', () =>
+      (!g('settings').classList.contains('is-collapsed') && JSON.parse(P.w.localStorage.getItem('marsa_nav_groups') || '{}').settings === false) || g('settings').className);
+  }
+  {
+    const P = page({ hash: '#org', store: { marsa_nav_groups: '{"daily":false}' } });
+    await settle(80);
+    const g = P.d.querySelector('#adm-nav > li.adm-nav-group[data-nav-group="daily"]');
+    await check('a stored closed group stays closed on load (unless its item is open)', () => g.classList.contains('is-collapsed') || g.className);
   }
   {
     const P = page({ narrow: true });

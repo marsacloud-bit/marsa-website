@@ -47,8 +47,9 @@
                                 (MarsaApi.orgLogoPathOf → orgLogoUrl, signed) its <img> replaces the icon once it loaded;
                                 no path / a failed URL or image → name only. 'marsa:orglogochange' re-reads the context.
      Staff dashboard nav (admin.html .adm-nav > #adm-nav): a «القائمة» button (.shell-nav-toggle, first in
-                                .adm-topbar-actions) switches the same nav between the horizontal bar (default) and a
-                                side menu on the start side (localStorage 'marsa_nav_layout' = 'side', per device). On a
+                                .adm-topbar-actions) switches the same nav between a side menu on the start side (default
+                                since the owner decision of 2026-11-18) and the horizontal bar (localStorage
+                                'marsa_nav_layout' = 'top', per device). On a
                                 phone (≤ 767px) it opens the nav as an overlay drawer (backdrop, Esc / backdrop / item
                                 click close it, focus kept inside, aria-expanded / aria-controls).
      [data-shell-signout] / [data-shell-signout-all]   buttons (an empty one is filled with icon + label)
@@ -1073,8 +1074,8 @@
   });
 
   /* ------------------------------------------------------------------
-     Staff dashboard nav layout: «القائمة» toggles admin.html's .adm-nav between the horizontal bar (default, nothing
-     changes for users who never press it) and a side menu on the start side (right in RTL), remembered per device
+     Staff dashboard nav layout: «القائمة» toggles admin.html's .adm-nav between a side menu on the start side (right in
+     RTL; the default since the owner decision of 2026-11-18) and the horizontal bar, remembered per device
      (localStorage 'marsa_nav_layout', try/catch). Phone (≤ 767px): the button opens the same nav as an overlay drawer
      with a backdrop; Esc / backdrop / an item click / the close button close it; Tab stays inside while it is open, and
      while it is open the nav is a modal dialog (role=dialog + aria-modal, its own aria-label) with everything outside it
@@ -1083,11 +1084,13 @@
      ------------------------------------------------------------------ */
   var NAV_LAYOUT_KEY = 'marsa_nav_layout', NARROW_Q = '(max-width: 767px)';
   var navUi = { app: null, wrap: null, btn: null, close: null, backdrop: null, release: null, unInert: null, open: false, mq: null };
-  function readNavLayout() { try { return localStorage.getItem(NAV_LAYOUT_KEY) === 'side' ? 'side' : 'top'; } catch (e) { return 'top'; } }
-  var navLayout = 'top';
+  // Owner decision 2026-11-18 (docs/owner/sections-decisions.md): the grouped side menu is the default; the horizontal
+  // bar is the choice a user stores ('top'). An old stored 'side' stays side.
+  function readNavLayout() { try { return localStorage.getItem(NAV_LAYOUT_KEY) === 'top' ? 'top' : 'side'; } catch (e) { return 'side'; } }
+  var navLayout = 'side';
   function saveNavLayout(v) {
-    navLayout = v === 'side' ? 'side' : 'top';
-    try { if (navLayout === 'side') localStorage.setItem(NAV_LAYOUT_KEY, 'side'); else localStorage.removeItem(NAV_LAYOUT_KEY); } catch (e) { /* this view only */ }
+    navLayout = v === 'top' ? 'top' : 'side';
+    try { if (navLayout === 'top') localStorage.setItem(NAV_LAYOUT_KEY, 'top'); else localStorage.removeItem(NAV_LAYOUT_KEY); } catch (e) { /* this view only */ }
   }
   function isNarrow() {
     try { return !!(window.matchMedia && window.matchMedia(NARROW_Q).matches); } catch (e) { return false; }

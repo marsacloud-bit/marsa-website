@@ -131,6 +131,34 @@ html[dir="ltr"] .shell-org-select { padding-inline: 10px 30px; }
 }
 .shell-nav-backdrop { position: fixed; inset: 0; z-index: 1100; background: rgba(5, 30, 59, .5); }
 
+/* Nav groups (admin.js buildNav, owner decision 2026-11-18): li.adm-nav-group > button.adm-nav-group-btn + ul.adm-nav-sub.
+   Side menu / drawer: a heading per group that folds its items (.is-collapsed). Horizontal bar: the groups dissolve
+   (display: contents) so the items sit in one row as before, every item shown, no headings. */
+.adm-nav-sub { list-style: none; margin: 0; padding: 0; }
+.adm-app:not(.shell-nav-side):not(.shell-nav-open) .adm-nav-group,
+.adm-app:not(.shell-nav-side):not(.shell-nav-open) .adm-nav-sub { display: contents; }
+.adm-app:not(.shell-nav-side):not(.shell-nav-open) .adm-nav-group-btn { display: none; }
+.adm-nav-group-btn {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; margin: 0; padding: 8px 14px;
+  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-xs, 12px);
+  font-weight: 800; letter-spacing: .02em; text-align: start; cursor: pointer;
+}
+.adm-nav-group-btn:hover { color: var(--text); background: var(--bg); }
+.adm-nav-group-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+.adm-nav-group-btn .icon { width: 16px; height: 16px; flex: none; transition: transform .2s; }
+.adm-nav-group.is-collapsed > .adm-nav-group-btn .icon { transform: rotate(90deg); }
+[dir="ltr"] .adm-nav-group.is-collapsed > .adm-nav-group-btn .icon { transform: rotate(-90deg); }
+.adm-app.shell-nav-side .adm-nav-group.is-collapsed > .adm-nav-sub,
+.adm-app.shell-nav-open .adm-nav-group.is-collapsed > .adm-nav-sub { display: none; }
+.adm-app.shell-nav-side .adm-nav-group + .adm-nav-group,
+.adm-app.shell-nav-open .adm-nav-group + .adm-nav-group { margin-block-start: 4px; padding-block-start: 4px; border-block-start: 1px solid var(--border); }
+.adm-app.shell-nav-side .adm-nav-sub > li + li,
+.adm-app.shell-nav-open .adm-nav-sub > li + li { margin-block-start: 2px; }
+.adm-app.shell-nav-side .adm-nav-sub .adm-nav-ext::before,
+.adm-app.shell-nav-open .adm-nav-sub .adm-nav-ext::before { content: none; }
+.adm-app.shell-nav-side .adm-nav-group + .adm-nav-ext,
+.adm-app.shell-nav-open .adm-nav-group + .adm-nav-ext { margin-block-start: 4px; padding-block-start: 4px; border-block-start: 1px solid var(--border); }
+
 /* == 02 BUTTON EXTRAS (variants style.css does not have) ============== */
 .btn-danger { background: var(--danger); color: #fff; border-color: var(--danger); }
 .btn-danger:hover { background: #A0252E; border-color: #A0252E; color: #fff; }

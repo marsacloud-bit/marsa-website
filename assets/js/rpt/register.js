@@ -109,7 +109,10 @@
 
     U.clear(root);
     root.classList.add('ops-view', 'rpt-view', 'lrpt-register', 'lrpt-statement');
-    root.appendChild(U.head(lt('reg_title'), lt('reg_sub'), [el('a', { class: 'btn btn-sm btn-ghost', href: '#attention_rules', text: lt('rules_link') })]));
+    // owner decision 2026-11-18: this is the one «المعاملات» screen, so «معاملة جديدة» (admin.js txNew via opsApi.newTx) lives here too
+    var newTxBtn = typeof api.newTx === 'function'
+      ? U.btn(api.t('admin.txnew_btn'), 'btn-primary', function () { api.newTx(); }, { 'data-act': 'new-tx' }) : null;
+    root.appendChild(U.head(lt('reg_title'), lt('reg_sub'), [el('a', { class: 'btn btn-sm btn-ghost', href: '#attention_rules', text: lt('rules_link') }), newTxBtn].filter(Boolean)));
     if (!K.hasFn(api, 'reportTransactions')) { root.appendChild(U.alertBox('warning', t('api_missing', { fn: 'reportTransactions' }))); return; }
     var bannerBox = el('div', { class: 'lrpt-banner-box', 'aria-live': 'polite' });
     var dftBox = el('div', { class: 'lrpt-dft-banner-box', 'aria-live': 'polite' });

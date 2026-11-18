@@ -15,7 +15,7 @@
   'use strict';
   var ar = {
     // nav / shared
-    nav_register: 'كشف المعاملات', nav_fasah_recon: 'المطابقة الشهرية مع فسح', nav_rules: 'قواعد المتابعة', nav_changes: 'سجل العمليات',
+    nav_register: 'المعاملات', nav_fasah_recon: 'المطابقة الشهرية مع فسح', nav_rules: 'قواعد المتابعة', nav_changes: 'سجل العمليات',
     open_register: 'كشف المعاملات', all: 'الكل', apply: 'تطبيق', older: 'الأقدم', yes: 'نعم', no: 'لا', api_missing_fn: 'هذه الميزة غير متاحة بعد في واجهة الاتصال ({fn}).',
     err_range: 'تاريخ «من» يجب ألا يتجاوز تاريخ «إلى».', cancelled_load: 'أُلغي الانتظار. لم تتغير النتائج المعروضة.',
     // column filter (rpt/colfilter.js)
@@ -26,7 +26,7 @@
     cf_clear_all: 'مسح تصفية الأعمدة', cf_shown: 'معروض {n} من {m} صفًا في هذه الصفحة (الإجمالي {total}) بعد تصفية الأعمدة',
     cf_crit: 'تصفية العمود: {c}', cf_page_note: 'تصفية الأعمدة تعمل على الصفحة المحمّلة ({n} صف). استخدم الفلاتر المتقدمة لتضييق النتائج على الخادم.',
     // register
-    reg_title: 'كشف المعاملات', reg_sub: 'بحث في 23 حقلًا، فلاتر متقدمة وفلاتر أعمدة، شارات التأخير، وحالة دفترة لقرّاء المالية.',
+    reg_title: 'المعاملات', reg_sub: 'كل المعاملات في جدول واحد: ابحث، أو صفِّ من رأس أي عمود، واضغط على أي صف لفتح المعاملة.',
     rules_link: 'قواعد المتابعة', quick_label: 'فلاتر سريعة', q_all: 'الكل', q_late: 'المتأخرة فقط', q_critical: 'الحرجة فقط', q_daftra_draft: 'مسودات دفترة فقط',
     q_re_export: 'إعادة تصدير', q_roro: 'Ro-Ro', adv_filters: 'فلاتر متقدمة', f_q_reg_ph: 'رقم المعاملة، العميل، البيان، البوليصة، الحاوية، الباخرة، المشغل…',
     f_client_code: 'كود العميل في دفترة', f_client_category: 'فئة العميل', cat_airport: 'مطار', cat_port: 'ميناء', cat_shared: 'مشترك',
@@ -160,7 +160,7 @@
     code_billing_sync_state_idle: 'لم تُرسل', code_billing_sync_state_pending: 'بانتظار الإرسال', code_billing_sync_state_in_flight: 'قيد الإرسال', code_billing_sync_state_synced: 'متزامنة', code_billing_sync_state_unknown: 'غير معروفة', code_billing_sync_state_conflict: 'تعارض', code_billing_sync_state_error: 'خطأ',
   };
   var en = {
-    nav_register: 'Transactions statement', nav_fasah_recon: 'Monthly Fasah reconciliation', nav_rules: 'Follow-up rules', nav_changes: 'Operations log',
+    nav_register: 'Transactions', nav_fasah_recon: 'Monthly Fasah reconciliation', nav_rules: 'Follow-up rules', nav_changes: 'Operations log',
     open_register: 'Transactions statement', all: 'All', apply: 'Apply', older: 'Older', yes: 'Yes', no: 'No', api_missing_fn: 'This feature is not available in the data layer yet ({fn}).',
     err_range: '"From" must not be after "To".', cancelled_load: 'Stopped waiting. The results shown did not change.',
     cf_open: 'Filter the «{c}» column', cf_open_active: 'Filter the «{c}» column (active)', cf_title: 'Filter: {c}', cf_search: 'Search values',
@@ -169,7 +169,7 @@
     cf_year: 'Year {y}', cf_month: 'Month {m}', cf_toggle: 'Show / hide', cf_sep: ', ',
     cf_clear_all: 'Clear column filters', cf_shown: '{n} of {m} rows on this page shown (total {total}) after the column filters',
     cf_crit: 'Column filter: {c}', cf_page_note: 'Column filters work on the loaded page ({n} rows). Use the advanced filters to narrow the results on the server.',
-    reg_title: 'Transactions statement', reg_sub: 'A 23-field search, advanced and column filters, attention badges, and the Daftra state for finance readers.',
+    reg_title: 'Transactions', reg_sub: 'Every transaction in one table: search, filter from any column header, and click a row to open the transaction.',
     rules_link: 'Follow-up rules', quick_label: 'Quick filters', q_all: 'All', q_late: 'Late only', q_critical: 'Critical only', q_daftra_draft: 'Daftra drafts only',
     q_re_export: 'Re-export', q_roro: 'Ro-Ro', adv_filters: 'Advanced filters', f_q_reg_ph: 'Reference, client, declaration, B/L, container, vessel, operator…',
     f_client_code: 'Daftra client code', f_client_category: 'Client category', cat_airport: 'Airport', cat_port: 'Port', cat_shared: 'Shared',

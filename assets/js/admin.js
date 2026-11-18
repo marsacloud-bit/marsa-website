@@ -346,6 +346,7 @@
       clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
       alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
       chevron: '<path d="m9 18 6-6-6-6"/>',   // points back in RTL; flipped for LTR in CSS
+      'chevron-down': '<path d="m6 9 6 6 6-6"/>',   // nav group fold (same in RTL and LTR)
       activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
       arrow: '<path d="M7 17 17 7M7 7h10v10"/>',
       x: '<path d="M6 6l12 12M18 6 6 18"/>'
@@ -777,7 +778,10 @@
       MarsaApi: api, label: opsLabel, fmtDate: fmtWhen, fmtMoney: fmtMoney, fmtNumber: fmtCount,
       who: who, isEn: isEn, errText: apiErr, newIdemKey: newKey,
       // G6a: the raw ?query of the current hash (module views keep it, see route()) and its parsed form
-      query: parseHash().query, hashQuery: hashQuery
+      query: parseHash().query, hashQuery: hashQuery,
+      // owner decision 2026-11-18: the register (the merged «المعاملات») offers «معاملة جديدة» like the old list did;
+      // null when the user may not create one (the same rule as the old list's button)
+      newTx: branchesFor(R.opsWriter).length > 0 ? function () { txNew(); } : null
     };
   }
   // '#search?container_no=MSCU1&status=transport&status=appointment' → { container_no: 'MSCU1', status: ['transport', 'appointment'] }
@@ -913,18 +917,77 @@
     'inbox', 'contacts', 'templates', 'channels',
     'costs', 'payables', 'payments', 'custody', 'margins', 'demurrage', 'billing', 'daftra',
     'org', 'branches', 'members', 'requirements', 'attention_rules', 'audit', 'changes', 'errors', 'legacy_import'];
+  // Owner decision 2026-11-18 (docs/owner/sections-decisions.md, ق1/ق2): the nav is grouped under headings that fold
+  // open / closed, daily work first and one «الإعدادات» group last. Every view keeps its own role rule (a group shows
+  // only when the user may open at least one of its items). 'ext:<id>' = a staff page elsewhere (MarsaShell.navItems()).
+  // A view no group names lands in 'more'. 'transactions' only shows when the register module is missing (the owner
+  // merged the old list into the register; #transactions still works and opens the register, see route()).
+  var NAV_GROUPS = [
+    { id: 'daily', items: ['dashboard', 'register', 'transactions', 'requests', 'clients', 'alerts', 'schedule'] },
+    { id: 'ops', items: ['exceptions', 'parties', 'ext:ocr', 'ext:bulk', 'imports'] },
+    { id: 'finance', items: ['payments', 'custody', 'costs', 'payables', 'demurrage', 'margins', 'billing'] },
+    { id: 'msg', items: ['inbox', 'messages', 'contacts'] },
+    { id: 'reports', items: ['search', 'reports', 'fasah_recon', 'changes'] },
+    { id: 'settings', items: ['org', 'branches', 'members', 'requirements', 'attention_rules', 'daftra', 'channels', 'templates', 'audit', 'errors', 'legacy_import'] },
+    { id: 'more', items: [] }
+  ];
+  var NAV_OPEN_DEFAULT = { daily: true };
+  var NAV_GROUPS_KEY = 'marsa_nav_groups';   // per device: {groupId: true|false} of the groups the user opened / closed
+  function readNavGroups() {
+    try { var o = JSON.parse(localStorage.getItem(NAV_GROUPS_KEY) || '{}'); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; }
+  }
+  function saveNavGroups(o) { try { localStorage.setItem(NAV_GROUPS_KEY, JSON.stringify(o)); } catch (e) { /* this view only */ } }
+  function registerMerged() { return !!opsView('register') && allowedViews().some(function (v) { return v.id === 'register'; }); }
+  function navGroupOf(id) {
+    for (var i = 0; i < NAV_GROUPS.length; i++) if (NAV_GROUPS[i].items.indexOf(id) !== -1) return NAV_GROUPS[i].id;
+    return 'more';
+  }
+  function setNavGroupOpen(li, open) {
+    li.classList.toggle('is-collapsed', !open);
+    var b = li.querySelector('.adm-nav-group-btn');
+    if (b) b.setAttribute('aria-expanded', String(!!open));
+  }
   function buildNav() {
     if (!nav) return;
     nav.textContent = '';
-    var rank = function (v) { var i = NAV_ORDER.indexOf(v.id); return i === -1 ? NAV_ORDER.length : i; };
-    allowedViews().slice().sort(function (a, b) { return rank(a) - rank(b); }).forEach(function (v) {
-      nav.appendChild(el('li', null, el('a', { class: 'adm-nav-link', href: '#' + v.id, 'data-view': v.id, 'data-nav-id': v.id, text: viewLabel(v.id) })));
+    var merged = registerMerged();
+    var links = {};   // item id → <a>
+    allowedViews().forEach(function (v) {
+      if (v.id === 'transactions' && merged) return;
+      links[v.id] = el('a', { class: 'adm-nav-link', href: '#' + v.id, 'data-view': v.id, 'data-nav-id': v.id, text: viewLabel(v.id) });
     });
     var items = [];
     if (SH && typeof SH.navItems === 'function') { try { items = SH.navItems() || []; } catch (e) { items = []; } }
+    var tail = [];   // staff pages no group names (help, platform): after the groups, as before
     items.filter(function (n) { return n && !n.local && NAV_EXTERNAL.indexOf(n.id) !== -1 && /^[a-z-]+\.html$/.test(n.page || ''); }).forEach(function (n) {
-      nav.appendChild(el('li', { class: 'adm-nav-ext' }, el('a', { class: 'adm-nav-link', href: n.href, 'data-nav-id': n.id, text: n.label })));
+      var a = el('a', { class: 'adm-nav-link', href: n.href, 'data-nav-id': n.id, text: n.label });
+      if (navGroupOf('ext:' + n.id) === 'more') tail.push(a); else links['ext:' + n.id] = a;
     });
+    var byGroup = {};
+    NAV_GROUPS.forEach(function (g) { byGroup[g.id] = g.items.filter(function (id) { return links[id]; }); });
+    var rank = function (id) { var i = NAV_ORDER.indexOf(id); return i === -1 ? NAV_ORDER.length : i; };
+    Object.keys(links).filter(function (id) { return navGroupOf(id) === 'more'; })
+      .sort(function (a, b) { return rank(a) - rank(b); }).forEach(function (id) { byGroup.more.push(id); });
+    var state = readNavGroups();
+    NAV_GROUPS.forEach(function (g) {
+      var ids = byGroup[g.id];
+      if (!ids.length) return;
+      var subId = 'adm-nav-g-' + g.id;
+      var btn = el('button', { type: 'button', class: 'adm-nav-group-btn', 'aria-controls': subId },
+        [el('span', { class: 'adm-nav-group-label', text: t('nav_grp_' + g.id) }), svgIcon('chevron-down')]);
+      var sub = el('ul', { class: 'adm-nav-sub', id: subId }, ids.map(function (id) {
+        return el('li', id.indexOf('ext:') === 0 ? { class: 'adm-nav-ext' } : null, links[id]);
+      }));
+      var li = el('li', { class: 'adm-nav-group', 'data-nav-group': g.id }, [btn, sub]);
+      setNavGroupOpen(li, Object.prototype.hasOwnProperty.call(state, g.id) ? !!state[g.id] : !!NAV_OPEN_DEFAULT[g.id]);
+      btn.addEventListener('click', function () {
+        var open = li.classList.contains('is-collapsed');
+        setNavGroupOpen(li, open);
+        var s = readNavGroups(); s[g.id] = open; saveNavGroups(s);
+      });
+      nav.appendChild(li);
+    });
+    tail.forEach(function (a) { nav.appendChild(el('li', { class: 'adm-nav-ext' }, a)); });
     if (SH && typeof SH.setBadge === 'function') { try { SH.setBadge('alerts'); SH.setBadge('inbox'); } catch (e) { /* helper optional */ } }
   }
   var orgWrap = document.getElementById('adm-org-switch-wrap');
@@ -975,12 +1038,17 @@
     document.title = title + ' | ' + t('doc_title_suffix');
   }
   function setNav(id) {
+    // the transaction detail (#tx/<id>) belongs to the merged «المعاملات» item (the register) when it is there
+    if (id === 'transactions' && nav && !nav.querySelector('[data-nav-id="transactions"]') && registerMerged()) id = 'register';
     if (SH && typeof SH.setActive === 'function') { try { SH.setActive(id); } catch (e) { /* helper optional */ } }
     if (!nav) return;
     Array.prototype.forEach.call(nav.querySelectorAll('[data-nav-id]'), function (a) {
       var on = a.getAttribute('data-nav-id') === id;
       a.classList.toggle('is-active', on);
       if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+      // the active item's group opens (this view only; the stored open / closed choice is not changed)
+      var g = on && a.closest ? a.closest('.adm-nav-group') : null;
+      if (g && g.classList.contains('is-collapsed')) setNavGroupOpen(g, true);
     });
     // keep the active pill in view on narrow screens (the bar scrolls sideways)
     var cur = nav.querySelector('.adm-nav-link.is-active');
@@ -1020,10 +1088,11 @@
   }
   // legacy step 8: a filtered #transactions link (the dashboard tiles: ?status= / ?stage= / ?daftra_state= / ?attention=) opens the
   // transactions register (assets/js/rpt/register.js, #register) with the same query; plain #transactions keeps this list
+  // Owner decision 2026-11-18: the old list and the register are one «المعاملات» item, so every #transactions (with or
+  // without a query) opens the register when the user may open it; only a missing register module keeps the old list.
   function registerRedirect(r) {
-    if (r.name !== 'transactions' || !r.query || !opsView('register')) return null;
-    var q = r.query.split('&').filter(function (p) { return /^(status|stage|daftra_state|attention|branchId)=./.test(p); });
-    if (!q.some(function (p) { return !/^branchId=/.test(p); })) return null;
+    if (r.name !== 'transactions' || r.id || !registerMerged()) return null;
+    var q = (r.query || '').split('&').filter(function (p) { return /^(status|stage|daftra_state|attention|branchId)=./.test(p); });
     return q.join('&');
   }
   function route(keepDialog) {
@@ -1031,7 +1100,7 @@
     var r = parseHash(), name = r.name, id = r.id;
     var rq = registerRedirect(r);
     if (rq != null) {
-      try { history.replaceState(null, '', '#register?' + rq); } catch (e) { /* ignore */ }
+      try { history.replaceState(null, '', '#register' + (rq ? '?' + rq : '')); } catch (e) { /* ignore */ }
       r = parseHash(); if (r.name !== 'register') r = { name: 'register', id: null, query: rq };
       name = r.name; id = null;
     }

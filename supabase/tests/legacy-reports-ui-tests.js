@@ -255,16 +255,19 @@ check('app-shell NAV: register / fasah_recon (staff), attention_rules (staff), c
     && /\{ id: 'changes', key: 'lrpt\.nav_changes', href: 'admin\.html#changes', icon: 'history', allow: R\.auditRead \}/.test(SRC.shell)
     && (SRC.shell.match(/'lrpt\.nav_register':/g) || []).length === 2
     && /'transactions', 'register',/.test(SRC.admin) && /'reports', 'fasah_recon',/.test(SRC.admin) && /'attention_rules', 'audit', 'changes',/.test(SRC.admin)) || 'nav');
-check('admin.js: a filtered #transactions?status|stage|daftra_state|attention link opens #register (module loaded), plain / branch-only #transactions stays; the list links the register', () => {
+// owner decision 2026-11-18 (docs/owner/sections-decisions.md): the old list is merged into the register «المعاملات»,
+// so every #transactions (with or without a query) opens #register while the register is there; #tx/<id> is untouched
+check('admin.js: every #transactions (filtered, branch-only or plain) opens #register when it is there, only the known filters travel; #tx/<id> and a missing register keep the old route', () => {
   const m = /function registerRedirect\(r\) \{([\s\S]*?)\n  \}/.exec(SRC.admin);
   if (!m) return 'no registerRedirect';
-  const fn = new Function('opsView', 'return function (r) {' + m[1] + '};')(() => true);
-  const off = new Function('opsView', 'return function (r) {' + m[1] + '};')(() => null);
+  const fn = new Function('registerMerged', 'return function (r) {' + m[1] + '};')(() => true);
+  const off = new Function('registerMerged', 'return function (r) {' + m[1] + '};')(() => false);
   return (fn({ name: 'transactions', query: 'status=new' }) === 'status=new' && fn({ name: 'transactions', query: 'stage=released&branchId=x' }) === 'stage=released&branchId=x'
     && fn({ name: 'transactions', query: 'daftra_state=draft' }) === 'daftra_state=draft' && fn({ name: 'transactions', query: 'attention=any&evil=1' }) === 'attention=any'
-    && fn({ name: 'transactions', query: 'status=' }) === null && fn({ name: 'transactions', query: 'branchId=abc' }) === null && fn({ name: 'transactions', query: '' }) === null
-    && fn({ name: 'clients', query: 'status=new' }) === null && off({ name: 'transactions', query: 'status=new' }) === null
-    && /history\.replaceState\(null, '', '#register\?' \+ rq\)/.test(SRC.admin) && /href: '#register', 'data-act': 'open-register'/.test(SRC.admin)) || 'redirect';
+    && fn({ name: 'transactions', query: 'status=' }) === '' && fn({ name: 'transactions', query: 'branchId=abc' }) === 'branchId=abc' && fn({ name: 'transactions', query: '' }) === ''
+    && fn({ name: 'transactions' }) === '' && fn({ name: 'transactions', id: 'x', query: '' }) === null
+    && fn({ name: 'clients', query: 'status=new' }) === null && off({ name: 'transactions', query: 'status=new' }) === null && off({ name: 'transactions', query: '' }) === null
+    && /history\.replaceState\(null, '', '#register' \+ \(rq \? '\?' \+ rq : ''\)\)/.test(SRC.admin) && /href: '#register', 'data-act': 'open-register'/.test(SRC.admin)) || 'redirect';
 });
 check('lrpt.css: phone width — grid / stack children min-width 0, the column filter is a bottom sheet below 600 px, td row tones (beat the striped tr), print tones, no dark theme', () =>
   (/\.lrpt-register > \*, \.lrpt-recon > \*[^{]*\{ min-width: 0; \}/.test(CSS) && /@media \(max-width: 599px\) \{[\s\S]*?\.cf-pop \{ inset-inline: 8px; inset-block-start: auto; inset-block-end: 8px;/.test(CSS)
@@ -734,6 +737,17 @@ function rtApi(calls, rows) {
     const rq = calls.filter(c => c[0] === 'rt').pop();
     check('#register?reset=1 opens the statement unfiltered (the remembered vessel filter dropped) and the hash loses reset', () =>
       (rq && J(Object.keys(rq[1]).sort()) === J(['limit', 'offset']) && !/reset/.test(ctx.location.hash)) || J([rq, ctx.location.hash]));
+    // owner decision 2026-11-18: the register is the one «المعاملات» screen → «معاملة جديدة» (opsApi.newTx) sits in its header
+    let opened = 0;
+    const r4 = ctx.document.createElement('div'); ctx.document.body.appendChild(r4);
+    await R.render(r4, mkApi(ctx, rtApi(calls), ['clearance_staff'], { newTx: () => { opened++; } })); await settle(20);
+    const nb = r4.querySelector('[data-act="new-tx"]');
+    if (nb) nb.click();
+    check('«معاملة جديدة» in the register header when opsApi.newTx is given; a click calls it once', () =>
+      (nb && nb.textContent === 'admin.txnew_btn' && /btn-primary/.test(nb.className) && opened === 1) || (nb ? nb.outerHTML : 'no button'));
+    const r5 = ctx.document.createElement('div'); ctx.document.body.appendChild(r5);
+    await R.render(r5, mkApi(ctx, rtApi(calls), ['accountant'], { newTx: null })); await settle(20);
+    check('no «معاملة جديدة» when opsApi.newTx is null (no right to create)', () => !r5.querySelector('[data-act="new-tx"]') || 'button shown');
   }
   {
     const ctx = context(), calls = [];
