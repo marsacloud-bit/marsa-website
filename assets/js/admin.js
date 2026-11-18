@@ -917,20 +917,31 @@
     'inbox', 'contacts', 'templates', 'channels',
     'costs', 'payables', 'payments', 'custody', 'margins', 'demurrage', 'billing', 'daftra',
     'org', 'branches', 'members', 'requirements', 'attention_rules', 'audit', 'changes', 'errors', 'legacy_import'];
-  // Owner decision 2026-11-18 (docs/owner/sections-decisions.md, ق1/ق2): the nav is grouped under headings that fold
-  // open / closed, daily work first and one «الإعدادات» group last. Every view keeps its own role rule (a group shows
-  // only when the user may open at least one of its items). 'ext:<id>' = a staff page elsewhere (MarsaShell.navItems()).
-  // A view no group names lands in 'more'. 'transactions' only shows when the register module is missing (the owner
-  // merged the old list into the register; #transactions still works and opens the register, see route()).
+  // Owner decision 2026-11-19 (docs/owner/sections-decisions.md, the nine headings of the sections list): the nav is
+  // grouped under headings that fold open / closed, in the order of that list. Every view keeps its own role rule (a
+  // group shows only when the user may open at least one of its items). 'ext:<id>' = a staff page elsewhere
+  // (MarsaShell.navItems()); 'page:<id>' = a client-portal tab or a public site page (NAV_PAGES, open to every staff
+  // member: the portal itself decides what a staff account sees there). A view no group names lands in 'more'.
+  // 'transactions' only shows when the register module is missing (the owner merged the old list into the register;
+  // #transactions still works and opens the register, see route()).
   var NAV_GROUPS = [
-    { id: 'daily', items: ['dashboard', 'register', 'transactions', 'requests', 'clients', 'alerts', 'schedule'] },
-    { id: 'ops', items: ['exceptions', 'parties', 'ext:ocr', 'ext:bulk', 'imports'] },
-    { id: 'finance', items: ['payments', 'custody', 'costs', 'payables', 'demurrage', 'margins', 'billing'] },
-    { id: 'msg', items: ['inbox', 'messages', 'contacts'] },
-    { id: 'reports', items: ['search', 'reports', 'fasah_recon', 'changes'] },
-    { id: 'settings', items: ['org', 'branches', 'members', 'requirements', 'attention_rules', 'daftra', 'channels', 'templates', 'audit', 'errors', 'legacy_import'] },
+    { id: 'daily', items: ['dashboard', 'requests', 'register', 'transactions', 'clients', 'messages', 'imports'] },
+    { id: 'ops', items: ['alerts', 'schedule', 'exceptions', 'parties'] },
+    { id: 'reports', items: ['search', 'reports', 'fasah_recon'] },
+    { id: 'msg', items: ['inbox', 'contacts', 'templates', 'channels'] },
+    { id: 'finance', items: ['costs', 'payables', 'payments', 'custody', 'margins', 'demurrage', 'billing', 'daftra'] },
+    { id: 'settings', items: ['org', 'branches', 'members', 'requirements', 'attention_rules', 'audit', 'changes', 'errors', 'legacy_import'] },
+    { id: 'pages', items: ['ext:bulk', 'ext:ocr', 'ext:help', 'ext:platform'] },
+    { id: 'portal', items: ['page:p_tx', 'page:p_containers', 'page:p_invoices', 'page:p_req', 'page:p_link', 'page:p_profile'] },
+    { id: 'site', items: ['page:s_home', 'page:s_services', 'page:s_calculator', 'page:s_tracking', 'page:s_request', 'page:s_about', 'page:s_contact', 'page:s_login'] },
     { id: 'more', items: [] }
   ];
+  var NAV_PAGES = {
+    p_tx: 'portal.html#tx', p_containers: 'portal.html#containers', p_invoices: 'portal.html#invoices', p_req: 'portal.html#req',
+    p_link: 'portal.html#link', p_profile: 'portal.html#profile',
+    s_home: 'index.html', s_services: 'services.html', s_calculator: 'calculator.html', s_tracking: 'tracking.html',
+    s_request: 'request.html', s_about: 'about.html', s_contact: 'contact.html', s_login: 'login.html'
+  };
   var NAV_OPEN_DEFAULT = { daily: true };
   var NAV_GROUPS_KEY = 'marsa_nav_groups';   // per device: {groupId: true|false} of the groups the user opened / closed
   function readNavGroups() {
@@ -951,23 +962,22 @@
     if (!nav) return;
     nav.textContent = '';
     var merged = registerMerged();
-    // owner decision 2026-11-18 (ق3): the top-bar search field is the way in to search (its palette ends with
-    // «البحث المتقدم» → #search?q=…), so the #search item leaves the menu while that field is there; #search still opens
-    var topSearch = searchInTopbar();
     var links = {};   // item id → <a>
     allowedViews().forEach(function (v) {
       if (v.id === 'transactions' && merged) return;
-      if (v.id === 'search' && topSearch) return;
-      links[v.id] = el('a', { class: 'adm-nav-link', href: '#' + v.id, 'data-view': v.id, 'data-nav-id': v.id, text: viewLabel(v.id) });
+      links[v.id] = el('a', { class: 'adm-nav-link', href: '#' + v.id, 'data-view': v.id, 'data-nav-id': v.id, text: navLabel(v.id) });
     });
     var items = [];
     if (SH && typeof SH.navItems === 'function') { try { items = SH.navItems() || []; } catch (e) { items = []; } }
-    var tail = [];   // staff pages no group names (platform): after the groups, as before
+    var tail = [];   // staff pages no group names: after the groups
     var help = null;
     items.filter(function (n) { return n && !n.local && NAV_EXTERNAL.indexOf(n.id) !== -1 && /^[a-z-]+\.html$/.test(n.page || ''); }).forEach(function (n) {
-      if (n.id === 'help') { help = n; return; }   // owner decision 2026-11-18 (ق7): a «؟» button in the top bar instead
+      if (n.id === 'help') help = n;   // also the «؟» button in the top bar (ق7)
       var a = el('a', { class: 'adm-nav-link', href: n.href, 'data-nav-id': n.id, text: n.label });
       if (navGroupOf('ext:' + n.id) === 'more') tail.push(a); else links['ext:' + n.id] = a;
+    });
+    Object.keys(NAV_PAGES).forEach(function (k) {
+      links['page:' + k] = el('a', { class: 'adm-nav-link', href: NAV_PAGES[k], 'data-nav-id': 'page_' + k, text: t('nav_page_' + k) });
     });
     placeHelpButton(help);
     var byGroup = {};
@@ -998,10 +1008,26 @@
     if (SH && typeof SH.setBadge === 'function') { try { SH.setBadge('alerts'); SH.setBadge('inbox'); } catch (e) { /* helper optional */ } }
     refreshRequestsBadge();
   }
-  // the top bar holds the shell's search field (#adm-search, data-shell-search) and the shell can open it
-  function searchInTopbar() {
-    var b = document.getElementById('adm-search');
-    return !!(b && b.hasAttribute('data-shell-search') && SH && typeof SH.openSearch === 'function');
+  // Owner decision 2026-11-19: the menu names the accounting program the org is connected to («إعدادات دفترة», later
+  // «إعدادات قيود», «إعدادات أودو»…), never a fixed program in the billing item. Today the only connector is Daftra
+  // (supabase/functions/daftra-sync, views #billing / #daftra), so the provider is 'daftra'; a second connector adds its
+  // id here (from the org's settings) and its name key 'admin.acct_name_<id>'.
+  function accountingProvider() { return 'daftra'; }
+  // Owner report 2026-11-19: a menu click jumped the page to its very top (the big page title), away from the menu and
+  // the work area. Now a new section only scrolls up to the top of the work area when that top is out of sight above;
+  // when it is already visible nothing moves (the menu stays where the user left it).
+  function scrollToView() {
+    try {
+      var box = app && !app.hidden ? app : view;
+      var r = box.getBoundingClientRect();
+      var hh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--header-h')) || 0;
+      if (r.top < hh) window.scrollBy(0, r.top - hh - 12);
+    } catch (e) { /* old browsers: stay where we are */ }
+  }
+  function navLabel(id) {
+    if (id === 'daftra') return t('nav_acct_settings', { name: t('acct_name_' + accountingProvider()) });
+    if (id === 'billing') return t('nav_billing');
+    return viewLabel(id);
   }
   // «؟» (owner decision 2026-11-18, ق7): the user guide as a small round button in the top bar, only when the shell
   // offers the help item to this user (same role rule as the old menu link); rebuilt with the nav (language / org change)
@@ -1159,7 +1185,7 @@
     var seq = ++S.renderSeq;
     view.setAttribute('aria-busy', 'true');
     view.innerHTML = loadingBox();
-    if (!keepDialog) { try { window.scrollTo(0, 0); } catch (e) { /* ignore */ } }
+    if (!keepDialog) scrollToView();
     var fn = {
       dashboard: renderDashboard, requests: renderRequests, request: renderRequest, transactions: renderTransactions,
       tx: renderTx, clients: renderClients, client: renderClient, messages: renderMessages, imports: renderImports,

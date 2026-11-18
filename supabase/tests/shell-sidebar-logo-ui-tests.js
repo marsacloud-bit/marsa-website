@@ -416,13 +416,23 @@ function key(P, k) { P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: k
     const groups = Array.prototype.map.call(P.d.querySelectorAll('#adm-nav > li.adm-nav-group'), g => g.getAttribute('data-nav-group'));
     const g = id => P.d.querySelector('#adm-nav > li.adm-nav-group[data-nav-group="' + id + '"]');
     const inGroup = (id, item) => !!(g(id) && g(id).querySelector('.adm-nav-sub [data-nav-id="' + item + '"]'));
-    await check('groups in order: daily first, settings last (admin role)', () => (groups[0] === 'daily' && groups.indexOf('settings') === groups.length - 1 && groups.indexOf('settings') > 0) || J(groups));
+    // owner decision 2026-11-19: the nine headings of the sections list, in its order (views of modules not loaded here are absent)
+    const ORDER = ['daily', 'ops', 'reports', 'msg', 'finance', 'settings', 'pages', 'portal', 'site'];
+    await check('groups in the owner order: daily first, then … settings, staff pages, client portal, website pages (admin role)', () =>
+      (groups[0] === 'daily' && J(groups.slice(-2)) === J(['portal', 'site']) && groups.every((g, i) => i === 0 || ORDER.indexOf(groups[i - 1]) < ORDER.indexOf(g))
+        && groups.indexOf('settings') > 0) || J(groups));
+    await check('client portal (6 tabs) and website pages (8) are links to their pages', () => {
+      const hrefs = id => Array.prototype.map.call(g(id).querySelectorAll('a'), a => a.getAttribute('href'));
+      return (J(hrefs('portal')) === J(['portal.html#tx', 'portal.html#containers', 'portal.html#invoices', 'portal.html#req', 'portal.html#link', 'portal.html#profile'])
+        && J(hrefs('site')) === J(['index.html', 'services.html', 'calculator.html', 'tracking.html', 'request.html', 'about.html', 'contact.html', 'login.html'])
+        && g('portal').querySelector('a').textContent === 'معاملاتي' && g('site').querySelector('a').textContent === 'الرئيسية') || J([hrefs('portal'), hrefs('site')]);
+    });
     await check('items sit in their groups (dashboard / transactions → daily, org / members / audit / errors → settings)', () =>
       (inGroup('daily', 'dashboard') && inGroup('daily', 'transactions') && ['org', 'members', 'audit', 'errors'].every(x => inGroup('settings', x))) || J(groups));
     const btnOf = id => g(id).querySelector('.adm-nav-group-btn');
     await check('heading buttons: aria-controls names the item list, Arabic labels, daily open, settings closed by default', () =>
       (btnOf('daily').getAttribute('aria-controls') === g('daily').querySelector('.adm-nav-sub').id && btnOf('daily').textContent.trim() === 'العمل اليومي'
-        && btnOf('settings').textContent.trim() === 'الإعدادات' && btnOf('daily').getAttribute('aria-expanded') === 'true'
+        && btnOf('settings').textContent.trim() === 'الإدارة والإعدادات' && btnOf('daily').getAttribute('aria-expanded') === 'true'
         && btnOf('settings').getAttribute('aria-expanded') === 'false' && g('settings').classList.contains('is-collapsed')) || g('settings').outerHTML.slice(0, 200));
     btnOf('settings').click();
     await check('a heading click opens its group and is stored per device', () =>
@@ -442,11 +452,10 @@ function key(P, k) { P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: k
     await check('search field: #adm-search sits in .adm-topbar itself (not the buttons row), wide class, Arabic hint, shown when signed in', () =>
       (s && s.parentNode === top && s.classList.contains('shell-search-field') && !s.hidden
         && s.querySelector('.shell-search-text').textContent === 'ابحث برقم بوليصة أو حاوية أو بيان أو اسم عميل…') || (s && s.outerHTML.slice(0, 220)));
-    await check('the #search item is not in the menu while the field is there', () => !P.d.querySelector('#adm-nav [data-nav-id="search"]') || 'search in nav');
     const help = P.d.querySelector('.adm-topbar-actions .adm-help-btn');
-    await check('«؟» help button in the top-bar actions (href help.html, labelled), not in the menu', () =>
+    await check('«؟» help button in the top-bar actions (href help.html, labelled); the guide also stays under «صفحات الموظفين المستقلة»', () =>
       (help && help.getAttribute('href') === 'help.html' && help.textContent.trim() === '؟' && !!help.getAttribute('aria-label')
-        && !P.d.querySelector('#adm-nav [data-nav-id="help"]') && P.d.querySelectorAll('.adm-help-btn').length === 1) || (help ? help.outerHTML : 'no help button'));
+        && !!P.d.querySelector('#adm-nav [data-nav-group="pages"] [data-nav-id="help"]') && P.d.querySelectorAll('.adm-help-btn').length === 1) || (help ? help.outerHTML : 'no help button'));
     await check('«الطلبات الواردة» shows the count of new requests', () => {
       const b = P.d.querySelector('#adm-nav [data-nav-id="requests"] .nav-count');
       return (b && b.textContent === '4') || 'no badge';
