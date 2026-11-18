@@ -19,7 +19,7 @@
       view_members: 'الأعضاء والدعوات', view_audit: 'سجل التدقيق', view_errors: 'أخطاء الواجهة',
       // nav groups (owner decision 2026-11-18, docs/owner/sections-decisions.md)
       nav_grp_daily: 'العمل اليومي', nav_grp_ops: 'العمليات', nav_grp_finance: 'المالية', nav_grp_msg: 'المراسلات',
-      nav_grp_reports: 'التقارير', nav_grp_settings: 'الإعدادات', nav_grp_more: 'أقسام أخرى',
+      nav_grp_reports: 'التقارير', nav_grp_settings: 'الإعدادات', nav_grp_more: 'أقسام أخرى', help_btn: 'دليل الاستخدام',
       // roles
       role_client: 'عميل', role_clearance_staff: 'موظف تخليص', role_transport_staff: 'موظف نقل', role_accountant: 'محاسب',
       role_accounts_manager: 'مدير حسابات', role_operations_manager: 'مدير عمليات', role_branch_manager: 'مدير فرع',
@@ -242,7 +242,7 @@
       view_messages: 'Contact messages', view_imports: 'Import history', view_org: 'Organization', view_branches: 'Branches',
       view_members: 'Members & invitations', view_audit: 'Audit log', view_errors: 'Client errors',
       nav_grp_daily: 'Daily work', nav_grp_ops: 'Operations', nav_grp_finance: 'Finance', nav_grp_msg: 'Messaging',
-      nav_grp_reports: 'Reports', nav_grp_settings: 'Settings', nav_grp_more: 'More sections',
+      nav_grp_reports: 'Reports', nav_grp_settings: 'Settings', nav_grp_more: 'More sections', help_btn: 'User guide',
       role_client: 'Client', role_clearance_staff: 'Clearance staff', role_transport_staff: 'Transport staff', role_accountant: 'Accountant',
       role_accounts_manager: 'Accounts manager', role_operations_manager: 'Operations manager', role_branch_manager: 'Branch manager',
       role_supervisor: 'Supervisor', role_admin: 'Organization admin',

@@ -951,18 +951,25 @@
     if (!nav) return;
     nav.textContent = '';
     var merged = registerMerged();
+    // owner decision 2026-11-18 (ق3): the top-bar search field is the way in to search (its palette ends with
+    // «البحث المتقدم» → #search?q=…), so the #search item leaves the menu while that field is there; #search still opens
+    var topSearch = searchInTopbar();
     var links = {};   // item id → <a>
     allowedViews().forEach(function (v) {
       if (v.id === 'transactions' && merged) return;
+      if (v.id === 'search' && topSearch) return;
       links[v.id] = el('a', { class: 'adm-nav-link', href: '#' + v.id, 'data-view': v.id, 'data-nav-id': v.id, text: viewLabel(v.id) });
     });
     var items = [];
     if (SH && typeof SH.navItems === 'function') { try { items = SH.navItems() || []; } catch (e) { items = []; } }
-    var tail = [];   // staff pages no group names (help, platform): after the groups, as before
+    var tail = [];   // staff pages no group names (platform): after the groups, as before
+    var help = null;
     items.filter(function (n) { return n && !n.local && NAV_EXTERNAL.indexOf(n.id) !== -1 && /^[a-z-]+\.html$/.test(n.page || ''); }).forEach(function (n) {
+      if (n.id === 'help') { help = n; return; }   // owner decision 2026-11-18 (ق7): a «؟» button in the top bar instead
       var a = el('a', { class: 'adm-nav-link', href: n.href, 'data-nav-id': n.id, text: n.label });
       if (navGroupOf('ext:' + n.id) === 'more') tail.push(a); else links['ext:' + n.id] = a;
     });
+    placeHelpButton(help);
     var byGroup = {};
     NAV_GROUPS.forEach(function (g) { byGroup[g.id] = g.items.filter(function (id) { return links[id]; }); });
     var rank = function (id) { var i = NAV_ORDER.indexOf(id); return i === -1 ? NAV_ORDER.length : i; };
@@ -989,6 +996,38 @@
     });
     tail.forEach(function (a) { nav.appendChild(el('li', { class: 'adm-nav-ext' }, a)); });
     if (SH && typeof SH.setBadge === 'function') { try { SH.setBadge('alerts'); SH.setBadge('inbox'); } catch (e) { /* helper optional */ } }
+    refreshRequestsBadge();
+  }
+  // the top bar holds the shell's search field (#adm-search, data-shell-search) and the shell can open it
+  function searchInTopbar() {
+    var b = document.getElementById('adm-search');
+    return !!(b && b.hasAttribute('data-shell-search') && SH && typeof SH.openSearch === 'function');
+  }
+  // «؟» (owner decision 2026-11-18, ق7): the user guide as a small round button in the top bar, only when the shell
+  // offers the help item to this user (same role rule as the old menu link); rebuilt with the nav (language / org change)
+  function placeHelpButton(n) {
+    var bar = app && app.querySelector('.adm-topbar-actions');
+    var old = bar && bar.querySelector('.adm-help-btn');
+    if (old) old.parentNode.removeChild(old);
+    if (!bar || !n) return;
+    var label = n.label || t('help_btn');
+    var a = el('a', { class: 'btn btn-sm btn-ghost btn-icon adm-help-btn', href: n.href, 'data-nav-id': 'help', title: label, 'aria-label': label },
+      el('span', { 'aria-hidden': 'true', text: '؟' }));
+    var anchor = bar.querySelector('#adm-refresh');
+    bar.insertBefore(a, anchor || null);
+  }
+  // owner decision 2026-11-18 (ق6): a count beside «الطلبات الواردة» = the active org's requests still «جديد»
+  // (one head count, RLS-scoped; no count / an error → no badge); refreshed with the nav and on every requests route
+  var reqBadge = { seq: 0 };
+  function refreshRequestsBadge() {
+    if (!SH || typeof SH.setBadge !== 'function') return;
+    var seq = ++reqBadge.seq;
+    if (!nav || !nav.querySelector('[data-nav-id="requests"]')) return;
+    L.count('service_requests', function (q) { return q.eq('status', 'new'); }).then(function (r) {
+      if (seq !== reqBadge.seq) return;
+      var n = r && !r.error && typeof r.data === 'number' ? r.data : null;
+      try { SH.setBadge('requests', n); } catch (e) { /* helper optional */ }
+    }, function () { /* no badge */ });
   }
   var orgWrap = document.getElementById('adm-org-switch-wrap');
   var orgSel = document.getElementById('adm-org-switch');
@@ -1115,6 +1154,7 @@
       try { history.replaceState(null, '', '#' + name); } catch (e) { /* ignore */ }
     }
     setNav(parent);
+    if (parent === 'requests') refreshRequestsBadge();   // a request was just reviewed / converted / rejected
     setPageTitle(viewLabel(parent), null);
     var seq = ++S.renderSeq;
     view.setAttribute('aria-busy', 'true');

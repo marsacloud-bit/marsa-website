@@ -1186,7 +1186,10 @@
       if (b.hasAttribute('data-shell-filled') || !b.firstChild) {
         clear(b).setAttribute('data-shell-filled', '');
         b.appendChild(icon('search'));
-        b.appendChild(el('span', { class: 'shell-search-text', text: t('search_button') }));
+        // data-shell-search="field" (admin.html top bar, owner decision 2026-11-18 ق3): looks like a search box with a hint
+        var field = b.getAttribute('data-shell-search') === 'field';
+        b.classList.toggle('shell-search-field', field);
+        b.appendChild(el('span', { class: 'shell-search-text', text: t(field ? 'search_field_hint' : 'search_button') }));
         b.appendChild(el('kbd', { class: 'shell-kbd', text: MAC ? '⌘K' : 'Ctrl K' }));
       }
     });

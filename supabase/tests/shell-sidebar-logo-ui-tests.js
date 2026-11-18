@@ -92,7 +92,9 @@ function page(opts) {
   }
   const orgRow = () => ({ id: state.active, slug: 'org-a', name_ar: 'مؤسسة الاختبار', name_en: 'Test Org', ref_prefix: 'TST', environment: 'staging',
     public_intake_enabled: true, default_locale: 'ar', is_active: true, settings: state.logoA ? { logo_path: state.logoA, brand_color: '#0b3a6e' } : { brand_color: '#0b3a6e' } });
-  const qb = { select() { return qb; }, eq() { return qb; }, order() { return qb; }, limit() { return qb; }, maybeSingle() { return Promise.resolve({ data: orgRow(), error: null }); } };
+  const qb = { select() { return qb; }, eq() { return qb; }, order() { return qb; }, limit() { return qb; }, maybeSingle() { return Promise.resolve({ data: orgRow(), error: null }); },
+    // head counts (admin.js L.count, e.g. the «الطلبات الواردة» badge) resolve the builder itself
+    then(res, rej) { return Promise.resolve({ data: null, error: opts.countErr || null, count: opts.reqCount == null ? 0 : opts.reqCount }).then(res, rej); } };
   const known = {
     isOnline: () => true,
     ready: () => ok(true),
@@ -431,6 +433,33 @@ function key(P, k) { P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: k
     await settle(40);
     await check('opening a closed group\'s item opens that group (stored choice unchanged)', () =>
       (!g('settings').classList.contains('is-collapsed') && JSON.parse(P.w.localStorage.getItem('marsa_nav_groups') || '{}').settings === false) || g('settings').className);
+  }
+  {
+    // owner decision 2026-11-18 (step 2): search field in the top bar, «؟» help button, «الطلبات الواردة» count
+    const P = page({ reqCount: 4 });
+    await settle(80);
+    const s = P.d.getElementById('adm-search'), top = P.d.querySelector('.adm-topbar');
+    await check('search field: #adm-search sits in .adm-topbar itself (not the buttons row), wide class, Arabic hint, shown when signed in', () =>
+      (s && s.parentNode === top && s.classList.contains('shell-search-field') && !s.hidden
+        && s.querySelector('.shell-search-text').textContent === 'ابحث برقم بوليصة أو حاوية أو بيان أو اسم عميل…') || (s && s.outerHTML.slice(0, 220)));
+    await check('the #search item is not in the menu while the field is there', () => !P.d.querySelector('#adm-nav [data-nav-id="search"]') || 'search in nav');
+    const help = P.d.querySelector('.adm-topbar-actions .adm-help-btn');
+    await check('«؟» help button in the top-bar actions (href help.html, labelled), not in the menu', () =>
+      (help && help.getAttribute('href') === 'help.html' && help.textContent.trim() === '؟' && !!help.getAttribute('aria-label')
+        && !P.d.querySelector('#adm-nav [data-nav-id="help"]') && P.d.querySelectorAll('.adm-help-btn').length === 1) || (help ? help.outerHTML : 'no help button'));
+    await check('«الطلبات الواردة» shows the count of new requests', () => {
+      const b = P.d.querySelector('#adm-nav [data-nav-id="requests"] .nav-count');
+      return (b && b.textContent === '4') || 'no badge';
+    });
+    P.w.MarsaI18n.setLang && P.w.MarsaI18n.setLang('en');
+    await settle(30);
+    await check('English: one «؟» button still (nav rebuilt), English hint', () =>
+      (P.d.querySelectorAll('.adm-help-btn').length === 1 && /Search a B\/L/.test(P.d.querySelector('#adm-search .shell-search-text').textContent)) || P.d.querySelector('#adm-search').textContent);
+  }
+  {
+    const P = page({ reqCount: 0 });
+    await settle(80);
+    await check('no badge when there are no new requests', () => !P.d.querySelector('#adm-nav [data-nav-id="requests"] .nav-count') || 'badge shown');
   }
   {
     const P = page({ hash: '#org', store: { marsa_nav_groups: '{"daily":false}' } });
