@@ -47,8 +47,9 @@ g3-cycle 70/0 · g7-e2e 98/0 · convert 124/0 · g7-isolation 311/0 · g7-second
 every *-ui / dom test .......... 0 failed (shell-sidebar 92, legacy-reports 189, legacy-tx-ui 98, …)
 ```
 
-ما زال يفشل وفشله سابق لهذا الفرع:
-- `antispam-tests`: `LATER_PHASES` فيه ناقصة منذ 20261114.
+`antispam-tests`: أُضيف `20261204000100_tx_stage_sets.sql` إلى قائمة الترحيلات اللاحقة المسموحة (الفحص كان يفشل بسبب الترحيل الجديد فقط)، وفحص الملفات فيه ينجح الآن. تشغيله الكامل لم يكتمل على جهاز المالك لامتلاء ذاكرة الجهاز (V8 "out of memory: Zone" عند تشغيل PGlite)، فيُعاد تشغيله لاحقًا.
+
+ما زال يفشل لأن أدواته غير موجودة على جهاز المالك (لا علاقة له بهذا الفرع):
 - `prod-env-tests` و`legacy-daftra-worker-tests`: تحتاجان `python3`.
 - `release-build-tests`: يحتاج `zip` و`shasum`.
 
