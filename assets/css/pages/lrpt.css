@@ -198,3 +198,7 @@
 .lrpt-statement .rpt-table tbody td:nth-child(2) { min-inline-size: 140px; }
 .lrpt-statement .rpt-table tbody tr:hover > td { background-color: #F7FAF9; }
 .lrpt-statement .rpt-table .is-nowrap { white-space: nowrap; }   /* dates / numbers stay on one line */
+/* owner note 2026-11-19: every header label on one line, label + filter button side by side, all centred vertically */
+.lrpt-statement .rpt-table thead th { white-space: nowrap; vertical-align: middle; font-size: 13px; line-height: 1.3; padding-block: 10px; }
+.lrpt-statement .rpt-table th.has-cf .rpt-th-label { display: inline-block; vertical-align: middle; }
+.lrpt-statement .rpt-table thead .cf-btn { vertical-align: middle; }
