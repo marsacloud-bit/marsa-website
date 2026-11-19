@@ -180,3 +180,29 @@ button.ops-kpi { font: inherit; color: inherit; width: 100%; cursor: pointer; }
 .adm-ctr-details .form-control { min-width: 8ch; text-transform: uppercase; }
 .adm-txnew-tools { justify-content: flex-end; margin-block-start: 12px; }
 @media (max-width: 640px) { .adm-txnew-tools .btn { width: 100%; } }
+
+/* Owner decision 2026-11-19 (transaction-stages-request.md, م1): the stage timeline like the owner's old system —
+   numbered circles joined by a line, the label under each, ✓ when done; the current step stands out; logical sides */
+.lx-timeline { list-style: none; margin: 0; padding: 14px 4px 6px; display: flex; align-items: flex-start; overflow-x: auto; }
+.lx-timeline > li { position: relative; flex: 1 1 0; min-inline-size: 92px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; padding-inline: 4px; }
+.lx-timeline > li::before { content: ""; position: absolute; inset-block-start: 15px; inset-inline-start: calc(-50% + 18px); inline-size: calc(100% - 36px); block-size: 2px; background: var(--border); }
+.lx-timeline > li:first-child::before { content: none; }
+.lx-timeline > li.is-done::before, .lx-timeline > li.is-current::before { background: var(--success); }
+.lx-timeline .lx-dot {
+  position: relative; z-index: 1; display: inline-grid; place-items: center; inline-size: 32px; block-size: 32px; border-radius: 50%;
+  border: 2px solid var(--border-strong, #cfd6dd); background: #fff; color: var(--muted); font-weight: 800; font-size: 13px;
+}
+.lx-timeline .lx-step-label { font-size: var(--fs-sm); font-weight: 700; color: var(--muted); line-height: 1.35; }
+.lx-timeline .lx-step-sub, .lx-timeline .lx-step-date { font-size: 11px; color: var(--muted); line-height: 1.3; }
+.lx-timeline > li.is-done .lx-dot { background: var(--success); border-color: var(--success); color: #fff; }
+.lx-timeline > li.is-done .lx-step-label { color: var(--text); }
+.lx-timeline > li.is-current .lx-dot { border-color: var(--teal); background: var(--teal); color: #fff; box-shadow: 0 0 0 4px rgba(20, 163, 168, .18); }
+.lx-timeline > li.is-current .lx-step-label { color: var(--text); font-weight: 800; }
+.lx-timeline > li.is-current .lx-step-sub { color: var(--teal); font-weight: 700; }
+.lx-timeline > li.is-skipped { opacity: .55; }
+.lx-timeline > li.is-skipped .lx-dot { border-style: dashed; }
+.lx-timeline.is-cancelled > li { opacity: .5; }
+.lx-timeline.is-cancelled .lx-step-label { text-decoration: line-through; }
+.lx-timeline .lx-draft-step .lx-dot { border-color: var(--warning, #d97706); color: var(--warning, #d97706); }
+.lx-timeline .lx-auto, .lx-timeline .lx-na { margin-block-start: 2px; }
+.lx-timeline > li.is-current .lx-auto { background: var(--info-bg, #e8f1fb); color: var(--info, #1f5fa8); }

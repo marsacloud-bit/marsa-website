@@ -344,6 +344,20 @@ section('review regressions');
       && dicts.ar['opslx.lc_na'] === 'لا تنطبق' && dicts.en['opslx.lc_na'] === 'N/A'
       && /THEN 'skipped'/.test(MIG) && /NOT \(v_tx\.cargo_unit_type = 'roro' AND l\.code IN \('appointment','empty_return'\)\)/.test(MIG)) || 'missing';
   });
+  // owner decision 2026-11-19 (docs/owner/transaction-stages-request.md, م1): the timeline groups the 10 server stages
+  check('stepper: the owner steps — 7 groups in order; current inside a group keeps its detail; Ro-Ro empty return skipped; draft first', () => {
+    const codes = ['new', 'in_progress', 'customs_declaration', 'appointment', 'transport', 'empty_return', 'operationally_complete', 'under_billing', 'billed', 'closed'];
+    const mk = (cur, skip) => codes.map((c, i) => ({ code: c, label_ar: c, state: (skip || []).indexOf(c) !== -1 ? 'skipped' : i < cur ? 'done' : i === cur ? 'current' : 'todo', reached_at: i <= cur ? '2026-11-1' + i : null }));
+    const g = P.groupStages(mk(4));
+    const g2 = P.groupStages(mk(7, ['appointment', 'empty_return']));
+    const g3 = P.groupStages([{ code: 'draft', state: 'draft' }].concat(mk(0)));
+    return (J(g.map(x => x.code)) === J(['o_new', 'o_active', 'o_opdone', 'o_empty', 'o_under_billing', 'o_billed', 'o_closed'])
+      && J(g.map(x => x.state)) === J(['done', 'done', 'current', 'todo', 'todo', 'todo', 'todo']) && g[2].detail.code === 'transport' && g[0].reached_at === '2026-11-10'
+      && g2[3].state === 'skipped' && g2[2].state === 'done' && g2[4].state === 'current' && g2[4].detail.code === 'under_billing'
+      && g3[0].state === 'draft' && g3[1].state === 'current' && !g3[1].detail === false
+      && P.ownerStepOf('billed').code === 'o_billed' && P.ownerStepOf('nope') === null
+      && dicts.ar['opslx.lc_o_active'] === 'نشطة' && dicts.ar['opslx.lc_o_under_billing'] === 'تحت الفوترة' && dicts.en['opslx.lc_o_closed'] === 'Finished') || J([g, g2.map(x => x.state)]);
+  });
   check('admin.css: dialog + settings-form errors become visible (.form-error is display:none by default)', () => {
     const CSS = fs.readFileSync(path.join(ROOT, 'assets/css/pages/admin.css'), 'utf8');
     return (/\.adm-dialog-error:not\(\[hidden\]\) \{ display: block; \}/.test(CSS) && /\.adm-org-form > \.form-error:not\(\[hidden\]\) \{ display: block; \}/.test(CSS)) || 'missing';

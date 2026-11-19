@@ -78,6 +78,8 @@
         roro_card: 'المركبة (Ro-Ro)', roro_card_hint: 'معاملة Ro-Ro لا تحمل حاويات ولا يلزمها إرجاع فارغ.',
         // stepper
         lc_draft: 'مسودة', lc_draft_title: 'معاملة مسودة: تُعتمد بعد البيان الجمركي ومطابقته مع الفاتورة والبوليصة',
+        lc_o_new: 'جديدة', lc_o_active: 'نشطة', lc_o_opdone: 'منتهية تشغيليًا', lc_o_empty: 'إرجاع الحاوية الفارغة', lc_o_under_billing: 'تحت الفوترة',
+        lc_o_billed: 'تمت الفوترة', lc_o_closed: 'منتهية',
         lc_title: 'مراحل المعاملة', lc_auto: 'تلقائي', lc_na: 'لا تنطبق', lc_na_title: 'لا تنطبق على معاملة Ro-Ro', lc_reached: 'منذ {d}', lc_failed: 'تعذّر تحميل المراحل: {e}',
         lc_next: 'المرحلة التالية: {s}', lc_next_manual: 'تُنقل يدويًا من بطاقة «الحالة»؛ لا تتقدم تلقائيًا.',
         lc_next_auto: 'تتقدم تلقائيًا عند الإجراء المناسب، ويمكن نقلها يدويًا من بطاقة «الحالة».',
@@ -187,6 +189,8 @@
         k_terminal: 'Terminal operator', k_mode: 'Transport mode', k_order: 'Transport order', k_transport_party: 'Transport company', k_decl_notes: 'Declaration notes',
         roro_card: 'Vehicle (Ro-Ro)', roro_card_hint: 'A Ro-Ro transaction carries no containers and needs no empty return.',
         lc_draft: 'Draft', lc_draft_title: 'Draft transaction: approved after the customs declaration and its match with the invoice and the B/L',
+        lc_o_new: 'New', lc_o_active: 'Active', lc_o_opdone: 'Operationally complete', lc_o_empty: 'Empty container return', lc_o_under_billing: 'Under billing',
+        lc_o_billed: 'Billed', lc_o_closed: 'Finished',
         lc_title: 'Transaction stages', lc_auto: 'Automatic', lc_na: 'N/A', lc_na_title: 'Does not apply to a Ro-Ro transaction', lc_reached: 'since {d}', lc_failed: 'The stages could not be loaded: {e}',
         lc_next: 'Next stage: {s}', lc_next_manual: 'Moved by hand from the "Status" card; never automatic.',
         lc_next_auto: 'Moves automatically on the matching action, or by hand from the "Status" card.',
@@ -768,18 +772,64 @@
     if (!isDraft) return list;
     return [{ code: 'draft', label_ar: 'مسودة', label_en: 'Draft', state: 'draft' }].concat(list);
   }
+  /* Owner decision 2026-11-19 (docs/owner/transaction-stages-request.md, step م1): the timeline shows the owner's
+     stages, each grouping one or more of the 10 server stages (tx_lifecycle keeps the detail; nothing changes in the
+     database): جديدة · نشطة · منتهية تشغيليًا · إرجاع الحاوية الفارغة · تحت الفوترة · تمت الفوترة · منتهية.
+     A later step (م2) moves the stage list into per-transaction-type settings; this map is then read from there. */
+  var OWNER_STEPS = [
+    { code: 'o_new', members: ['new', 'in_progress'] },
+    { code: 'o_active', members: ['customs_declaration'] },
+    { code: 'o_opdone', members: ['appointment', 'transport'] },
+    { code: 'o_empty', members: ['empty_return'] },
+    { code: 'o_under_billing', members: ['operationally_complete', 'under_billing'] },
+    { code: 'o_billed', members: ['billed'] },
+    { code: 'o_closed', members: ['closed'] }
+  ];
+  function ownerStepOf(code) {
+    for (var i = 0; i < OWNER_STEPS.length; i++) if (OWNER_STEPS[i].members.indexOf(code) !== -1) return OWNER_STEPS[i];
+    return null;
+  }
+  // tx_lifecycle stages → the owner's steps: current if a member is current; done if every member is done or does not
+  // apply (and one is done); skipped if none applies; else todo. The current member's own name stays as a detail line.
+  function groupStages(stages) {
+    var list = Array.isArray(stages) ? stages : [];
+    var draft = list.filter(function (s) { return s.state === 'draft'; });
+    var out = draft.slice();
+    OWNER_STEPS.forEach(function (g) {
+      var ms = list.filter(function (s) { return g.members.indexOf(s.code) !== -1; });
+      if (!ms.length) return;
+      var cur = ms.filter(function (s) { return s.state === 'current'; })[0];
+      var done = ms.filter(function (s) { return s.state === 'done'; });
+      var skipped = ms.filter(function (s) { return s.state === 'skipped'; });
+      var state = cur ? 'current' : skipped.length === ms.length ? 'skipped' : done.length && done.length + skipped.length === ms.length ? 'done' : 'todo';
+      var reached = ms.filter(function (s) { return s.reached_at; }).sort(function (a, b) { return String(a.reached_at).localeCompare(String(b.reached_at)); })[0];
+      var last = cur || done[done.length - 1] || null;
+      out.push({ code: g.code, state: state, members: ms, detail: cur && ms.length > 1 ? cur : null,
+        reached_at: reached ? reached.reached_at : null, reached_at_text: reached ? reached.reached_at_text : null,
+        auto: !!(last && last.auto), cause: last ? last.cause : null });
+    });
+    return out;
+  }
   function stageList(el, stages, cancelled) {
-    return el('ol', { class: 'adm-stages lx-stepper' + (cancelled ? ' is-cancelled' : ''), 'aria-label': T('lc_title') }, stages.map(function (s) {
+    var steps = groupStages(stages), n = 0;
+    return el('ol', { class: 'lx-timeline lx-stepper' + (cancelled ? ' is-cancelled' : ''), 'aria-label': T('lc_title') }, steps.map(function (s) {
       if (s.state === 'draft') {
-        return el('li', { class: 'is-current lx-draft-step', title: T('lc_draft_title') }, el('span', null, [T('lc_draft')]));
+        return el('li', { class: 'is-current lx-draft-step', title: T('lc_draft_title') }, [
+          el('span', { class: 'lx-dot', 'aria-hidden': 'true', text: '•' }), el('span', { class: 'lx-step-label', text: T('lc_draft') })]);
       }
+      n++;
       var cls = s.state === 'done' ? 'is-done' : s.state === 'current' ? 'is-current' : s.state === 'skipped' ? 'is-skipped' : '';
-      var label = (isEn() && s.label_en) || s.label_ar || s.code;
-      var title = [label, s.state === 'skipped' ? T('lc_na_title') : null, s.reached_at ? T('lc_reached', { d: s.reached_at_text }) : null, s.auto ? T('lc_auto') + (s.cause ? ' — ' + T('cause_' + s.cause) : '') : null].filter(Boolean).join(' · ');
-      return el('li', { class: cls, 'aria-current': s.state === 'current' ? 'step' : null, title: title }, el('span', null, [
-        label, s.auto ? el('small', { class: 'lx-auto', text: T('lc_auto') }) : null,
+      var label = T('lc_' + s.code);
+      var sub = s.detail ? ((isEn() && s.detail.label_en) || s.detail.label_ar || s.detail.code) : null;
+      var title = [label, sub, s.state === 'skipped' ? T('lc_na_title') : null, s.reached_at ? T('lc_reached', { d: s.reached_at_text }) : null, s.auto ? T('lc_auto') + (s.cause ? ' — ' + T('cause_' + s.cause) : '') : null].filter(Boolean).join(' · ');
+      return el('li', { class: cls, 'aria-current': s.state === 'current' ? 'step' : null, title: title, 'data-step': s.code }, [
+        el('span', { class: 'lx-dot', 'aria-hidden': 'true', text: s.state === 'done' ? '✓' : String(n) }),
+        el('span', { class: 'lx-step-label', text: label }),
+        sub ? el('small', { class: 'lx-step-sub', text: sub }) : null,
+        s.state !== 'todo' && s.state !== 'skipped' && s.reached_at_text ? el('small', { class: 'lx-step-date', text: s.reached_at_text }) : null,
+        s.auto && s.state !== 'todo' ? el('small', { class: 'lx-auto', text: T('lc_auto') }) : null,
         s.state === 'skipped' ? el('small', { class: 'lx-na', text: T('lc_na') }) : null
-      ]));
+      ]);
     }));
   }
   // host: an empty node at the top of the detail page; fallbackStages(): admin.js' static list (on an error)
@@ -804,6 +854,11 @@
           if (d.next) {
             var nx = d.stages.filter(function (s) { return s.code === d.next.code; })[0];
             var nlabel = nx ? ((isEn() && nx.label_en) || nx.label_ar) : lab(api, 'operational_status', d.next.code);
+            // owner stages (م1): name the next owner step; inside the same step (e.g. الموعد → النقل) keep the detail
+            var curStage = d.stages.filter(function (s) { return s.state === 'current'; })[0];
+            var gNext = ownerStepOf(d.next.code), gCur = curStage ? ownerStepOf(curStage.code) : null;
+            if (gNext && gNext !== gCur) nlabel = T('lc_' + gNext.code);
+            else if (gNext) nlabel = T('lc_' + gNext.code) + ' — ' + nlabel;
             notes.push(el('li', null, [el('strong', { text: T('lc_next', { s: nlabel }) }), ' ', T(nextManual(d) ? 'lc_next_manual' : 'lc_next_auto')]));
             if (d.next.containers_not_returned) notes.push(el('li', { text: T('lc_ctr_wait', { n: d.next.containers_not_returned }) }));
             if ((d.next.docs_missing || []).length) {
@@ -1065,10 +1120,11 @@
     VERSION: 'lx-ui-1',
     t: T, label: lab, isCancelled: function (tx) { return !!(tx && tx.cancelled_at); },
     txFields: txFields, dupCheck: dupCheck, dupPanel: dupPanel, stepper: stepper, withDraftStep: withDraftStep, cancelDialog: cancelDialog,
+    ownerStepOf: ownerStepOf, ownerSteps: OWNER_STEPS,
     detailRows: detailRows, hijriInfo: hijriInfo, gregorianToHijri: gregorianToHijri, portName: portName,
     pure: { legacyPatch: legacyPatch, dupMessages: dupMessages, cancelBlock: cancelBlock, cancelErrText: cancelErrText,
       movementPayload: movementPayload, hijriInfo: hijriInfo, normPhone: normPhone, normChassis: normChassis, normOrderNo: normOrderNo,
-      nextManual: nextManual, withDraftStep: withDraftStep }
+      nextManual: nextManual, withDraftStep: withDraftStep, groupStages: groupStages, ownerStepOf: ownerStepOf }
   };
   var MINE = [{ id: 'movements', order: 55, render: renderMovements }];
   var ids = MINE.map(function (s) { return s.id; });
