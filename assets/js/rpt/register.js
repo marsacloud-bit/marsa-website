@@ -199,8 +199,16 @@
       form.appendChild(el('div', { class: 'rpt-grid' }, F));
       form.appendChild(el('fieldset', { class: 'rpt-fieldset' }, [el('legend', { class: 'form-label', text: lt('f_declaration_status') }),
         K.checks('declaration_status', opt(DECL, function (c) { return K.lab('declaration_status', c, api); }), [].concat(S.declaration_status || []))]));
-      form.appendChild(el('fieldset', { class: 'rpt-fieldset' }, [el('legend', { class: 'form-label', text: t('f_status') }),
-        K.checks('operational_status', opt(K.STAGES, function (c) { return K.lab('operational_status', c, api); }), [].concat(S.operational_status || []))]));
+      // owner note 2026-11-19: the «الحالة» filter lists the owner's stages (as the timeline and the status column), each
+      // box standing for its internal stages (value "a,b", split on submit); a stage is ticked when all its stages are.
+      // Without ops/tx-legacy.js the 10 internal stages show, as before.
+      var LXo = window.MarsaOps && window.MarsaOps.legacyTx, OWN = LXo && Array.isArray(LXo.ownerSteps) ? LXo.ownerSteps : null;
+      var selSt = [].concat(S.operational_status || []);
+      var stBoxes = OWN
+        ? K.checks('operational_status', OWN.map(function (g) { return [g.members.join(','), LXo.t('lc_' + g.code)]; }),
+            OWN.filter(function (g) { return g.members.every(function (c) { return selSt.indexOf(c) !== -1; }); }).map(function (g) { return g.members.join(','); }))
+        : K.checks('operational_status', opt(K.STAGES, function (c) { return K.lab('operational_status', c, api); }), selSt);
+      form.appendChild(el('fieldset', { class: 'rpt-fieldset' }, [el('legend', { class: 'form-label', text: t('f_status') }), stBoxes]));
       form.appendChild(err);
       var apply = el('button', { type: 'submit', class: 'btn btn-primary btn-sm rpt-go', text: t('apply') });
       var reset = el('button', { type: 'button', class: 'btn btn-subtle btn-sm rpt-clear', text: t('clear') });
@@ -211,7 +219,11 @@
         var s = { offset: 0 }, E = form.elements;
         Object.keys(SCHEMA).forEach(function (k) {
           var type = SCHEMA[k];
-          if (type === 'codes') { s[k] = K.checkedValues(form, k); return; }
+          if (type === 'codes') {
+            s[k] = K.checkedValues(form, k);
+            if (k === 'operational_status') s[k] = s[k].reduce(function (acc, v) { return acc.concat(String(v).split(',')); }, []).filter(Boolean);
+            return;
+          }
           var c = E[k];
           if (!c) { if (S[k] != null) s[k] = S[k]; return; }
           var v = String(c.value || '').trim();
