@@ -241,7 +241,7 @@ async function secFile() {
       && !/\bUPDATE\s+public\./i.test(outside) && !/session_replication_role/.test(c) && !/sk-ant|https?:\/\//i.test(src)
       && !/msg_outbound|msg_replies|msg_jobs|net\.http|smtp/i.test(c.replace(/CREATE OR REPLACE FUNCTION app\.convert_delete_tables[\s\S]*?\$\$;/, ''))) || 'body';
   });
-  const LATER_PHASES = ['20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql'];
+  const LATER_PHASES = ['20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');

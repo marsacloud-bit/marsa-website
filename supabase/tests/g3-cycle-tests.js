@@ -365,9 +365,11 @@ async function cycle() {
   });
 
   section('8. completion + alerts auto-resolved');
-  await step('operationally_complete (no override needed)', async () => {
-    const r = await status('clrJ', C.tx, 'operationally_complete', null, newKey());
-    if (r.to !== 'operationally_complete' || r.docs_override !== null) throw new Error(JSON.stringify(r));
+  // owner decision 2026-11-19 (20261204000100_tx_stage_sets): the last verified return already moved the transaction on
+  // (operationally_complete → under_billing, no override)
+  await step('operationally_complete reached automatically after the last verified return (then under_billing)', async () => {
+    const s1 = (await one(`SELECT operational_status s FROM public.transactions WHERE id = $1`, [C.tx])).s;
+    if (s1 !== 'under_billing') throw new Error('expected under_billing, got ' + s1);
   });
   await check('refresh: no alert of the transaction is left open; every one resolved automatically', async () => {
     await refresh();
@@ -386,10 +388,10 @@ async function cycle() {
 async function compare() {
   section('9. every record compared: nothing lost, no duplicates');
   const tx = C.tx;
-  await check('one transaction for the request, at operationally_complete, B/L + active declaration mirrored', async () => {
+  await check('one transaction for the request, at under_billing (automatic since 2026-11-19), B/L + active declaration mirrored', async () => {
     const t = await q(`SELECT operational_status, bl_number, declaration_no, container_count FROM public.transactions WHERE request_id = $1`, [REQ]);
     const r = await one(`SELECT status FROM public.service_requests WHERE id = $1`, [REQ]);
-    return (t.length === 1 && t[0].operational_status === 'operationally_complete' && t[0].bl_number === BL
+    return (t.length === 1 && t[0].operational_status === 'under_billing' && t[0].bl_number === BL
       && t[0].declaration_no === 'CYC-0002' && t[0].container_count === 3 && r.status === 'converted') || JSON.stringify({ t, r });
   });
   await check('one client created, no duplicate from the second match', async () =>
@@ -440,12 +442,12 @@ async function compare() {
                         WHERE transaction_id = $1 GROUP BY 1`, [tx]);
     return (r.length >= 6 && r.every(x => x.n === 1 && x.ok)) || JSON.stringify(r);
   });
-  await check('status timeline: 6 forward moves in order, each a client-visible event, no override used', async () => {
+  await check('status timeline: 7 forward moves in order (the last two automatic since 2026-11-19), each a client-visible event, no override used', async () => {
     const r = (await q(`SELECT from_status, to_status FROM public.transaction_events WHERE transaction_id = $1 AND event_type = 'operational_status' ORDER BY id`, [tx]))
       .map(x => x.from_status + '>' + x.to_status);
     const ov = await count(`SELECT count(*)::int n FROM public.transaction_events WHERE transaction_id = $1 AND event_type = 'docs_override'`, [tx]);
     return (JSON.stringify(r) === JSON.stringify(['new>in_progress', 'in_progress>customs_declaration', 'customs_declaration>appointment',
-      'appointment>transport', 'transport>empty_return', 'empty_return>operationally_complete']) && ov === 0) || JSON.stringify({ r, ov });
+      'appointment>transport', 'transport>empty_return', 'empty_return>operationally_complete', 'operationally_complete>under_billing']) && ov === 0) || JSON.stringify({ r, ov });
   });
   await check('every appointment / trip / exception / declaration row has its own event (nothing silent)', async () => {
     const miss = await q(`
@@ -479,7 +481,7 @@ async function compare() {
       try { const r = await as('clientC', s); if (r.length) hidden.push(s); } catch (e) { /* permission denied = hidden */ }
     }
     const ev = (await as('clientC', `SELECT DISTINCT event_type FROM public.transaction_events WHERE transaction_id = $1 ORDER BY 1`, [tx])).map(x => x.event_type);
-    return (t.length === 1 && t[0].operational_status === 'operationally_complete' && c.length === 3
+    return (t.length === 1 && t[0].operational_status === 'under_billing' && c.length === 3
       && JSON.stringify(d.map(x => x.declaration_no + ':' + x.status)) === '["CYC-0001:replaced","CYC-0002:released"]'
       && b.length === 1 && b[0].bl_number === BL && hidden.length === 0
       && JSON.stringify(ev) === '["appointment","container_return","created","operational_status"]') || JSON.stringify({ t, c, d, b, hidden, ev });

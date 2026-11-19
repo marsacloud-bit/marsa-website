@@ -86,7 +86,7 @@
         lc_ctr_wait: 'حاويات لم يثبت إرجاعها بعد: {n}', lc_docs_missing: 'مستندات مطلوبة قبل هذه المرحلة: {list}',
         lc_last: 'المعاملة في آخر مرحلة.', lc_pending: 'متابعة إرجاع الفارغ: {list}',
         lc_follow: 'يلزم إثبات إرجاع الحاويات الفارغة (إيصال استلام فارغ مؤكّد أو إعفاء موثّق) قبل «منتهية تشغيليًا» والفوترة.',
-        lc_hint: 'تتقدم المرحلة للأمام فقط وعند إجراء من المستخدم: إضافة البيان، فسحه، تسجيل موعد، تسجيل نقلة، إثبات إرجاع الفارغ، الفوترة. «تحت الفوترة» و«مغلقة» لا تكونان تلقائيًا، ولا يُعتمد إثبات إرجاع الفارغ آليًا أبدًا.',
+        lc_hint: 'تتقدم المرحلة للأمام فقط وعند إجراء من المستخدم: إضافة البيان، فسحه، تسجيل موعد، تسجيل نقلة، إثبات إرجاع الفارغ، الفوترة. وبعد توثيق إرجاع كل الحاويات تنتقل المعاملة وحدها إلى «تحت الفوترة». «مغلقة» لا تكون تلقائيًا، ولا يُعتمد إثبات إرجاع الفارغ آليًا أبدًا.',
         cause_declaration: 'بإضافة البيان', cause_declaration_released: 'بفسح البيان', cause_appointment: 'بتسجيل موعد',
         cause_trip: 'بتسجيل نقلة', cause_container_return: 'بإثبات إرجاع الفارغ', cause_invoiced: 'بالفوترة', cause_movement: 'بحفظ حركة نقل',
         // cancel
@@ -197,7 +197,7 @@
         lc_ctr_wait: 'Containers without return proof: {n}', lc_docs_missing: 'Documents required before this stage: {list}',
         lc_last: 'The transaction is at its last stage.', lc_pending: 'Empty-return follow-up: {list}',
         lc_follow: 'Empty-return proof (a confirmed empty-return receipt or a documented waiver) is required before "operationally complete" and billing.',
-        lc_hint: 'Stages move forward only, and only on a user action: adding the declaration, its release, an appointment, a trip, empty-return proof, invoicing. "Under billing" and "Closed" are never automatic, and empty-return proof is never verified automatically.',
+        lc_hint: 'Stages move forward only, and only on a user action: adding the declaration, its release, an appointment, a trip, empty-return proof, invoicing. Once the return of every container is verified the transaction moves to "Under billing" by itself. "Closed" is never automatic, and empty-return proof is never verified automatically.',
         cause_declaration: 'declaration added', cause_declaration_released: 'declaration released', cause_appointment: 'appointment registered',
         cause_trip: 'trip registered', cause_container_return: 'empty-return proof', cause_invoiced: 'invoiced', cause_movement: 'movement saved',
         cancelled: 'Cancelled', cancelled_banner: 'This transaction was cancelled on {d}.', cancelled_reason: 'Reason: {r}',
@@ -403,7 +403,9 @@
   function nextManual(d) {
     var n = d && d.next;
     if (!n) return false;
-    return !!n.manual || n.code === 'in_progress' || (n.code === 'operationally_complete' && d.cargo_unit_type !== 'roro');
+    // step م2 (20261204000100): operationally_complete is automatic for a container transaction too (every return
+    // verified), so the server's manual flag decides (an older database still sends manual = true for it)
+    return !!n.manual || n.code === 'in_progress';
   }
 
   // why the cancel button is missing (null = allowed): can(roles) answers for the transaction's branch
@@ -791,10 +793,19 @@
   }
   // tx_lifecycle stages → the owner's steps: current if a member is current; done if every member is done or does not
   // apply (and one is done); skipped if none applies; else todo. The current member's own name stays as a detail line.
-  function groupStages(stages) {
+  // step م2 (20261204000100_tx_stage_sets): the server sends the applicable per-type set as tx_lifecycle.steps (same
+  // shape: code, label_ar / label_en, state, detail, reached_at, auto, cause, stages); those are used as they come. Without
+  // them (an older database) the steps are grouped here from OWNER_STEPS.
+  function groupStages(stages, serverSteps) {
     var list = Array.isArray(stages) ? stages : [];
     var draft = list.filter(function (s) { return s.state === 'draft'; });
     var out = draft.slice();
+    if (Array.isArray(serverSteps) && serverSteps.length) {
+      return out.concat(serverSteps.map(function (x) {
+        return { code: x.code, state: x.state || 'todo', label: (isEn() && x.label_en) || x.label_ar || null, detail: x.detail || null,
+          members: x.stages || [], reached_at: x.reached_at || null, reached_at_text: x.reached_at_text || null, auto: !!x.auto, cause: x.cause || null };
+      }));
+    }
     OWNER_STEPS.forEach(function (g) {
       var ms = list.filter(function (s) { return g.members.indexOf(s.code) !== -1; });
       if (!ms.length) return;
@@ -810,8 +821,8 @@
     });
     return out;
   }
-  function stageList(el, stages, cancelled) {
-    var steps = groupStages(stages), n = 0;
+  function stageList(el, stages, cancelled, serverSteps) {
+    var steps = groupStages(stages, serverSteps), n = 0;
     return el('ol', { class: 'lx-timeline lx-stepper' + (cancelled ? ' is-cancelled' : ''), 'aria-label': T('lc_title') }, steps.map(function (s) {
       if (s.state === 'draft') {
         return el('li', { class: 'is-current lx-draft-step', title: T('lc_draft_title') }, [
@@ -819,7 +830,7 @@
       }
       n++;
       var cls = s.state === 'done' ? 'is-done' : s.state === 'current' ? 'is-current' : s.state === 'skipped' ? 'is-skipped' : '';
-      var label = T('lc_' + s.code);
+      var label = s.label || T('lc_' + s.code);
       var sub = s.detail ? ((isEn() && s.detail.label_en) || s.detail.label_ar || s.detail.code) : null;
       var title = [label, sub, s.state === 'skipped' ? T('lc_na_title') : null, s.reached_at ? T('lc_reached', { d: s.reached_at_text }) : null, s.auto ? T('lc_auto') + (s.cause ? ' — ' + T('cause_' + s.cause) : '') : null].filter(Boolean).join(' · ');
       return el('li', { class: cls, 'aria-current': s.state === 'current' ? 'step' : null, title: title, 'data-step': s.code }, [
@@ -848,7 +859,8 @@
       } else {
         var d = r.data;
         d.stages.forEach(function (s) { if (s.reached_at) s.reached_at_text = fmtDate(api, s.reached_at, true); });
-        wrap.appendChild(stageList(el, withDraftStep(d.stages, !!tx.is_draft && !d.cancelled), !!d.cancelled));
+        (d.steps || []).forEach(function (s) { if (s.reached_at) s.reached_at_text = fmtDate(api, s.reached_at, true); });
+        wrap.appendChild(stageList(el, withDraftStep(d.stages, !!tx.is_draft && !d.cancelled), !!d.cancelled, d.steps));
         var notes = [];
         if (!d.cancelled) {
           if (d.next) {
@@ -856,9 +868,15 @@
             var nlabel = nx ? ((isEn() && nx.label_en) || nx.label_ar) : lab(api, 'operational_status', d.next.code);
             // owner stages (م1): name the next owner step; inside the same step (e.g. الموعد → النقل) keep the detail
             var curStage = d.stages.filter(function (s) { return s.state === 'current'; })[0];
-            var gNext = ownerStepOf(d.next.code), gCur = curStage ? ownerStepOf(curStage.code) : null;
-            if (gNext && gNext !== gCur) nlabel = T('lc_' + gNext.code);
-            else if (gNext) nlabel = T('lc_' + gNext.code) + ' — ' + nlabel;
+            var stepOf = function (code) {
+              var srv = (d.steps || []).filter(function (x) { return (x.stages || []).indexOf(code) !== -1; })[0];
+              if (srv) return { code: srv.code, label: (isEn() && srv.label_en) || srv.label_ar };
+              var g = ownerStepOf(code);
+              return g ? { code: g.code, label: T('lc_' + g.code) } : null;
+            };
+            var gNext = stepOf(d.next.code), gCur = curStage ? stepOf(curStage.code) : null;
+            if (gNext && (!gCur || gNext.code !== gCur.code)) nlabel = gNext.label;
+            else if (gNext) nlabel = gNext.label + ' — ' + nlabel;
             notes.push(el('li', null, [el('strong', { text: T('lc_next', { s: nlabel }) }), ' ', T(nextManual(d) ? 'lc_next_manual' : 'lc_next_auto')]));
             if (d.next.containers_not_returned) notes.push(el('li', { text: T('lc_ctr_wait', { n: d.next.containers_not_returned }) }));
             if ((d.next.docs_missing || []).length) {

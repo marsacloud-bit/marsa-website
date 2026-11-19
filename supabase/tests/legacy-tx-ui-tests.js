@@ -329,9 +329,11 @@ check('public_track returns cancelled + cancelled_at (the tracking page reads th
 section('review regressions');
 {
   const P = LX.pure;
-  check('stepper: next in_progress and container operationally_complete are manual; Ro-Ro operationally_complete and transport stay automatic', () =>
+  // owner decision 2026-11-19 (20261204000100): container operationally_complete is automatic too; the server flag decides
+  check('stepper: next in_progress is manual; operationally_complete follows the server flag (automatic since 2026-11-19); transport automatic', () =>
     (P.nextManual({ next: { code: 'in_progress', manual: false }, cargo_unit_type: 'container' }) === true
-      && P.nextManual({ next: { code: 'operationally_complete', manual: false }, cargo_unit_type: 'container' }) === true
+      && P.nextManual({ next: { code: 'operationally_complete', manual: false }, cargo_unit_type: 'container' }) === false
+      && P.nextManual({ next: { code: 'operationally_complete', manual: true }, cargo_unit_type: 'container' }) === true
       && P.nextManual({ next: { code: 'operationally_complete', manual: false }, cargo_unit_type: 'roro' }) === false
       && P.nextManual({ next: { code: 'transport', manual: false }, cargo_unit_type: 'container' }) === false
       && P.nextManual({ next: { code: 'under_billing', manual: true } }) === true && P.nextManual({ next: null }) === false) || 'manual');
@@ -343,6 +345,13 @@ section('review regressions');
     return (/s\.state === 'skipped' \? 'is-skipped'/.test(SRC) && /class: 'lx-na', text: T\('lc_na'\)/.test(SRC)
       && dicts.ar['opslx.lc_na'] === 'لا تنطبق' && dicts.en['opslx.lc_na'] === 'N/A'
       && /THEN 'skipped'/.test(MIG) && /NOT \(v_tx\.cargo_unit_type = 'roro' AND l\.code IN \('appointment','empty_return'\)\)/.test(MIG)) || 'missing';
+  });
+  check('stepper: server steps (tx_lifecycle.steps, 20261204000100) are used as they come, labels included; draft stays first', () => {
+    const g = P.groupStages([{ code: 'draft', state: 'draft' }, { code: 'new', state: 'current' }],
+      [{ code: 'r_new', label_ar: 'جديدة جدًا', label_en: 'Brand new', state: 'current', stages: ['new', 'in_progress'], detail: { code: 'new', label_ar: 'جديدة' } },
+       { code: 'r_done', label_ar: 'تم', state: 'todo', stages: ['closed'] }]);
+    return (J(g.map(x => x.code)) === J(['draft', 'r_new', 'r_done']) && g[1].label === 'جديدة جدًا' && g[1].detail.code === 'new' && g[2].state === 'todo'
+      && J(P.groupStages([{ code: 'new', state: 'current' }], []).map(x => x.code)) === J(['o_new'])) || J(g);
   });
   // owner decision 2026-11-19 (docs/owner/transaction-stages-request.md, م1): the timeline groups the 10 server stages
   check('stepper: the owner steps — 7 groups in order; current inside a group keeps its detail; Ro-Ro empty return skipped; draft first', () => {
