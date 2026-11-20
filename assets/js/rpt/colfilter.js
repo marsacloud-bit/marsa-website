@@ -94,6 +94,8 @@
     list.sort(function (a, b) {
       if (a.key === EMPTY) return 1;
       if (b.key === EMPTY) return -1;
+      // a column may give its own order (col.rank(key) → number; unknown keys last), e.g. the owner's stages in timeline order
+      if (typeof col.rank === 'function') { var ra = col.rank(a.key), rb = col.rank(b.key); ra = ra == null ? 1e9 : ra; rb = rb == null ? 1e9 : rb; if (ra !== rb) return ra - rb; }
       if (NUM_TYPES[col.type]) return (+a.key) - (+b.key);
       if (DATE_TYPES[col.type]) return a.key < b.key ? 1 : a.key > b.key ? -1 : 0;
       var x = norm(a.label), y = norm(b.label);

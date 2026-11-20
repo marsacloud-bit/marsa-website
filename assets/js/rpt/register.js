@@ -292,12 +292,43 @@
       if (!list.length) return K.NONE;
       var total = x.unit_count != null ? +x.unit_count : x.container_count != null ? +x.container_count : list.length;
       if (!(total >= list.length)) total = list.length;
-      var more = total - Math.min(list.length, 3);
-      var all = list.slice(0, 50).join('، ') + (total > list.length ? ' …' : '');
-      var box = el('span', more > 0 ? { class: 'lrpt-ctrs', tabindex: '0', title: all, 'aria-label': lt('ctr_tip', { n: K.fmtNum(total, 0), list: all }) } : { class: 'lrpt-ctrs' });
-      list.slice(0, 3).forEach(function (n) { box.appendChild(el('bdi', { dir: 'ltr', class: 'lrpt-ctrs-no', text: n })); });
-      if (more > 0) box.appendChild(el('span', { class: 'cell-sub', 'aria-hidden': 'true', text: '+' + K.fmtNum(more, 0) }));
+      // owner note 2026-11-20: one container number only; a «+N» button opens a small floating list of every number
+      // inside the same cell (the column stays narrow, the importer column gets the room)
+      var box = el('span', { class: 'lrpt-ctrs is-one' });
+      box.appendChild(el('bdi', { dir: 'ltr', class: 'lrpt-ctrs-no', text: list[0] }));
+      if (total > 1) {
+        var all = list.slice(0, 50).join('، ') + (total > list.length ? ' …' : '');
+        var more = el('button', { type: 'button', class: 'lrpt-ctr-more', 'aria-expanded': 'false', 'aria-haspopup': 'true',
+          'aria-label': lt('ctr_tip', { n: K.fmtNum(total, 0), list: all }), title: all }, [el('bdi', { dir: 'ltr', text: '+' + K.fmtNum(total - 1, 0) })]);
+        box.appendChild(more);
+        more.addEventListener('click', function (e) {
+          if (e && e.stopPropagation) e.stopPropagation();
+          var open = box.querySelector('.lrpt-ctr-pop');
+          closeCtrPops();
+          if (open) return;
+          var pop = el('span', { class: 'lrpt-ctr-pop', role: 'group', 'aria-label': lt('c_containers') });
+          list.slice(0, 50).forEach(function (n) { pop.appendChild(el('bdi', { dir: 'ltr', class: 'lrpt-ctrs-no', text: n })); });
+          if (total > list.length) pop.appendChild(el('span', { class: 'cell-sub', text: '…' }));
+          box.appendChild(pop);
+          more.setAttribute('aria-expanded', 'true');
+        });
+      }
       return box;
+    }
+    // one floating container list at a time; a click elsewhere or Escape closes it
+    function closeCtrPops() {
+      if (typeof document === 'undefined' || !document.querySelectorAll) return;
+      var ps = document.querySelectorAll('.lrpt-ctr-pop');
+      for (var i = 0; i < ps.length; i++) {
+        var b = ps[i].parentNode && ps[i].parentNode.querySelector('.lrpt-ctr-more');
+        if (b) b.setAttribute('aria-expanded', 'false');
+        if (ps[i].parentNode) ps[i].parentNode.removeChild(ps[i]);
+      }
+    }
+    if (typeof document !== 'undefined' && document.addEventListener && !window.__lrptCtrPopWired) {
+      window.__lrptCtrPopWired = true;
+      document.addEventListener('click', function (e) { var t0 = e && e.target; if (t0 && t0.closest && t0.closest('.lrpt-ctrs')) return; closeCtrPops(); });
+      document.addEventListener('keydown', function (e) { if (e && e.key === 'Escape') closeCtrPops(); });
     }
     function countNode(x) { var n = x.unit_count != null ? x.unit_count : x.container_count; return U.ltr(K.fmtNum(n == null ? 0 : n, 0)); }
     // «حالة المعاملة» + the late / critical badge under it (the legacy statement)
@@ -308,6 +339,13 @@
       var LXo = window.MarsaOps && window.MarsaOps.legacyTx;
       var g = LXo && typeof LXo.ownerStepOf === 'function' ? LXo.ownerStepOf(code) : null;
       return g ? LXo.t('lc_' + g.code) : K.lab('operational_status', code, api);
+    }
+    // owner note 2026-11-20: the «الحالة» filter lists the stages top to bottom in timeline order (cancelled last)
+    function statusRank(label) {
+      var LXo = window.MarsaOps && window.MarsaOps.legacyTx, OWN = LXo && Array.isArray(LXo.ownerSteps) ? LXo.ownerSteps : null;
+      if (OWN) { for (var i = 0; i < OWN.length; i++) if (LXo.t('lc_' + OWN[i].code) === label) return i; return null; }
+      var j = (K.STAGES || []).map(function (c) { return K.lab('operational_status', c, api); }).indexOf(label);
+      return j < 0 ? null : j;
     }
     function statusText(x) { return x.cancelled_at ? K.lab('transaction_state', 'cancelled', api) : ownerStageLabel(x.operational_status); }
     function statusNode(x) {
@@ -351,7 +389,7 @@
         { key: 'agent_name', label: lt('c_agent'), type: 'text', value: function (x) { return x.agent_name || x.shipping_line; } },
         { key: 'vessel', label: lt('c_vessel'), type: 'text', value: function (x) { return x.vessel; } },
         { key: 'operational_status', label: lt('c_tx_status'), type: 'text', value: statusText,
-          cell: statusNode }
+          cell: statusNode, rank: statusRank }
       ];
       // (owner, 2026-11-15: «كشف المعاملات» like the legacy statement) the stage / follow-up / employee / update columns are
       // no longer on screen: the stage tones the row, the follow-up badge sits under the status; the export file is unchanged

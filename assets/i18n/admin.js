@@ -27,7 +27,7 @@
       nav_page_s_home: 'الرئيسية', nav_page_s_services: 'خدماتنا', nav_page_s_calculator: 'حاسبة الرسوم', nav_page_s_tracking: 'تتبع الشحنة',
       nav_page_s_request: 'اطلب تخليص', nav_page_s_about: 'من نحن', nav_page_s_contact: 'تواصل معنا', nav_page_s_login: 'تسجيل الدخول',
       // the accounting program the org is connected to (admin.js accountingProvider); one name key per program
-      nav_acct_settings: 'إعدادات {name}', nav_billing: 'الفوترة', acct_name_daftra: 'دفترة',
+      nav_acct_settings: 'الربط المحاسبي', nav_billing: 'الفوترة', acct_name_daftra: 'دفترة',
       // roles
       role_client: 'عميل', role_clearance_staff: 'موظف تخليص', role_transport_staff: 'موظف نقل', role_accountant: 'محاسب',
       role_accounts_manager: 'مدير حسابات', role_operations_manager: 'مدير عمليات', role_branch_manager: 'مدير فرع',
@@ -256,7 +256,7 @@
       nav_page_p_link: 'Link a request', nav_page_p_profile: 'My profile',
       nav_page_s_home: 'Home', nav_page_s_services: 'Services', nav_page_s_calculator: 'Duty calculator', nav_page_s_tracking: 'Track a shipment',
       nav_page_s_request: 'Request clearance', nav_page_s_about: 'About us', nav_page_s_contact: 'Contact us', nav_page_s_login: 'Sign in',
-      nav_acct_settings: '{name} settings', nav_billing: 'Billing', acct_name_daftra: 'Daftra',
+      nav_acct_settings: 'Accounting link', nav_billing: 'Billing', acct_name_daftra: 'Daftra',
       role_client: 'Client', role_clearance_staff: 'Clearance staff', role_transport_staff: 'Transport staff', role_accountant: 'Accountant',
       role_accounts_manager: 'Accounts manager', role_operations_manager: 'Operations manager', role_branch_manager: 'Branch manager',
       role_supervisor: 'Supervisor', role_admin: 'Organization admin',

@@ -1008,8 +1008,8 @@
     if (SH && typeof SH.setBadge === 'function') { try { SH.setBadge('alerts'); SH.setBadge('inbox'); } catch (e) { /* helper optional */ } }
     refreshRequestsBadge();
   }
-  // Owner decision 2026-11-19: the menu names the accounting program the org is connected to («إعدادات دفترة», later
-  // «إعدادات قيود», «إعدادات أودو»…), never a fixed program in the billing item. Today the only connector is Daftra
+  // Owner decision 2026-11-20 (replaces 2026-11-19): the menu item is the generic «الربط المحاسبي» (accounting link), so
+  // the menu never suggests the platform works with one program only; the connected program's name shows inside the page. Today the only connector is Daftra
   // (supabase/functions/daftra-sync, views #billing / #daftra), so the provider is 'daftra'; a second connector adds its
   // id here (from the org's settings) and its name key 'admin.acct_name_<id>'.
   function accountingProvider() { return 'daftra'; }
