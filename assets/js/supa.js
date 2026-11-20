@@ -1980,6 +1980,18 @@
     o = o || {};
     return inActiveOrg(o.orgId, function (oid) { return rpc('driver_directory', { p_org: oid, p_q: q == null ? null : String(q) }); });
   }
+  // owner stage 3د (20261207000100): the «السائقون» directory → [{ id, full_name, phone, driver_class, license_no, is_active,
+  //   truck_plate, party { id, name_ar, name_en, phone, cr_number, contact_name } | null }] (staff; 500 rows, active first)
+  function listDriversDirectory(q, o) {
+    o = o || {};
+    return inActiveOrg(o.orgId, function (oid) { return rpc('list_drivers', { p_org: oid, p_q: q == null || q === '' ? null : String(q) }); });
+  }
+  // save one driver with its class, party and truck (transport writers): p = { id?, full_name, phone, driver_class,
+  //   carrier_id?, truck_plate?, license_no?, is_active? } → the driver as listDriversDirectory returns it
+  function saveDriverEntry(p, o) {
+    o = o || {};
+    return inActiveOrg(o.orgId, function (oid) { return rpc('save_driver', { p_org: oid, p: p || {} }); });
+  }
   // terminal operators for a port (mapped first; operators mapped to no port are included) → [{party_id, name_ar, name_en, mapped}]
   function portOperators(portCode, o) {
     o = o || {};
@@ -4925,7 +4937,7 @@
     listPayments: listPayments, txDisbursements: txDisbursements, checkPaymentDuplicates: checkPaymentDuplicates,
     matchPaymentTransaction: matchPaymentTransaction, saveCustodyEntry: saveCustodyEntry, voidCustodyEntry: voidCustodyEntry,
     listCustodyEntries: listCustodyEntries, custodyBalances: custodyBalances, clientCustodyBalance: clientCustodyBalance,
-    listServiceItems: listServiceItems, getServiceItemPrice: getServiceItemPrice, setServiceItemPrice: setServiceItemPrice, txStorageGate: txStorageGate, approveStorageOverride: approveStorageOverride, updateContainerStorage: updateContainerStorage,
+    listServiceItems: listServiceItems, getServiceItemPrice: getServiceItemPrice, setServiceItemPrice: setServiceItemPrice, txStorageGate: txStorageGate, approveStorageOverride: approveStorageOverride, updateContainerStorage: updateContainerStorage, listDriversDirectory: listDriversDirectory, saveDriverEntry: saveDriverEntry,
     // 20261201000100: legacy gaps (client category / Daftra code, follow-up employee)
     setClientLegacyFields: setClientLegacyFields, setTransactionResponsible: setTransactionResponsible, listAssignableStaff: listAssignableStaff,
     listContainers: listContainers, addContainer: addContainer, updateContainer: updateContainer,

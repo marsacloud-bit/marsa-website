@@ -160,7 +160,19 @@
       stg_override_title: 'موافقة على الحجز قبل السداد', stg_override_reason: 'سبب الموافقة', stg_override_btn: 'موافقة على الحجز قبل السداد',
       stg_override_hint: 'تُسجَّل الموافقة باسمك ووقتها وسببها. متابعة سداد الأرضيات تستمر.',
       stg_override_done: 'وافق {who} على حجز الموعد قبل السداد ({d}): {reason}', stg_override_ok: 'سُجّلت الموافقة.',
-      stg_override_short: 'اكتب السبب (3 أحرف على الأقل).', stg_none_ctr: 'لا توجد حاويات في هذه المعاملة بعد.', stg_err_amount: 'أدخل المبلغ بالأرقام (مثل 350 أو 350.50).', stg_err_state: 'اختر حالة الأرضيات.'
+      stg_override_short: 'اكتب السبب (3 أحرف على الأقل).', stg_none_ctr: 'لا توجد حاويات في هذه المعاملة بعد.', stg_err_amount: 'أدخل المبلغ بالأرقام (مثل 350 أو 350.50).', stg_err_state: 'اختر حالة الأرضيات.',
+      // owner stage 3د (20261207000100): «السائقون» (ops/drivers.js)
+      nav_drivers: 'السائقون', driver_class_individual: 'فردي', driver_class_company: 'تابع لمؤسسة أو شركة', driver_class_contractor: 'تابع لمتعهد',
+      drv2_title: 'السائقون', drv2_sub: 'كل السائقين في مكان واحد: الجوال، ورقم الشاحنة، والتصنيف، والجهة التي يتبعها.',
+      drv2_add: 'إضافة سائق', drv2_edit: 'تعديل السائق', drv2_saved: 'حُفظ السائق.', drv2_search: 'ابحث بالاسم أو الجوال أو رقم الشاحنة أو الجهة…',
+      drv2_intro: 'السائق التابع لمؤسسة أو شركة أو لمتعهد: اختر جهته من القائمة. الجهات تُضاف في «الجهات والناقلون» بنوع «ناقل».',
+      drv2_phone: 'رقم الجوال', drv2_phone_taken: 'يوجد سائق نشط بهذا الجوال.', drv2_plate: 'رقم الشاحنة', drv2_plate_hint: 'الشاحنة التي يعمل عليها الآن (تُضاف تلقائيًا إن لم تكن مسجّلة).',
+      drv2_class: 'التصنيف', drv2_class_pick: '— اختر التصنيف —', drv2_party: 'الجهة التي يتبعها (مؤسسة أو شركة أو متعهد)', drv2_party_pick: '— لا يوجد (فردي) —',
+      drv2_party_hint: 'تظهر هنا الجهات المسجّلة بنوع «ناقل». بيانات الجهة (الجوال والسجل التجاري والمسؤول) تُعدَّل من صفحتها.',
+      drv2_unclassified: 'غير مصنّف', drv2_cr: 'س.ت', drv2_col_name: 'السائق', drv2_col_phone: 'الجوال', drv2_col_plate: 'الشاحنة', drv2_col_class: 'التصنيف',
+      drv2_col_party: 'الجهة التابع لها', drv2_col_status: 'الحالة', drv2_empty_title: 'لا يوجد سائقون بعد',
+      drv2_empty_text: 'أضف السائقين هنا، أو يُضافون تلقائيًا عند قراءة بطاقة الموعد.', drv2_deact_title: 'إيقاف السائق',
+      drv2_deact_text: 'إيقاف «{name}»؟ لا يظهر في القوائم الجديدة، ويبقى سجله.'
     },
     en: {
       nav_group: 'Operations', nav_alerts: 'Alerts', nav_schedule: 'Daily schedule', nav_exceptions: 'Exceptions',
@@ -303,7 +315,19 @@
       stg_override_title: 'Approve booking before payment', stg_override_reason: 'Reason', stg_override_btn: 'Approve booking before payment',
       stg_override_hint: 'Your name, the time and the reason are recorded. The storage follow-up goes on.',
       stg_override_done: '{who} approved booking before payment ({d}): {reason}', stg_override_ok: 'Approval recorded.',
-      stg_override_short: 'Write the reason (at least 3 characters).', stg_none_ctr: 'No containers on this transaction yet.', stg_err_amount: 'Enter the amount in digits (e.g. 350 or 350.50).', stg_err_state: 'Choose the storage state.'
+      stg_override_short: 'Write the reason (at least 3 characters).', stg_none_ctr: 'No containers on this transaction yet.', stg_err_amount: 'Enter the amount in digits (e.g. 350 or 350.50).', stg_err_state: 'Choose the storage state.',
+      // owner stage 3د (20261207000100): «Drivers» (ops/drivers.js)
+      nav_drivers: 'Drivers', driver_class_individual: 'Individual', driver_class_company: 'Belongs to an establishment / company', driver_class_contractor: 'Belongs to a contractor',
+      drv2_title: 'Drivers', drv2_sub: 'Every driver in one place: mobile, truck plate, classification and the party it belongs to.',
+      drv2_add: 'Add a driver', drv2_edit: 'Edit the driver', drv2_saved: 'Driver saved.', drv2_search: 'Search by name, mobile, truck plate or party…',
+      drv2_intro: 'A driver who belongs to an establishment, a company or a contractor: choose that party from the list. Parties are added in «Parties & carriers» with the kind «Carrier».',
+      drv2_phone: 'Mobile', drv2_phone_taken: 'An active driver already has this mobile.', drv2_plate: 'Truck plate', drv2_plate_hint: 'The truck the driver works on now (added automatically if not registered).',
+      drv2_class: 'Classification', drv2_class_pick: '— Choose —', drv2_party: 'Party it belongs to (establishment, company or contractor)', drv2_party_pick: '— None (individual) —',
+      drv2_party_hint: 'Parties registered with the kind «Carrier» show here. Their details (mobile, CR, contact) are edited on their page.',
+      drv2_unclassified: 'Not classified', drv2_cr: 'CR', drv2_col_name: 'Driver', drv2_col_phone: 'Mobile', drv2_col_plate: 'Truck', drv2_col_class: 'Classification',
+      drv2_col_party: 'Party', drv2_col_status: 'Status', drv2_empty_title: 'No drivers yet',
+      drv2_empty_text: 'Add drivers here, or they are added automatically when an appointment card is read.', drv2_deact_title: 'Deactivate the driver',
+      drv2_deact_text: 'Deactivate «{name}»? Hidden from new lists; the history stays.'
     }
   };
   window.MarsaOpsDict = DICT;

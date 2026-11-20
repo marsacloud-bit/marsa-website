@@ -130,7 +130,7 @@
       // transaction page: cards
       tc_title: 'بطاقات المواعيد (TAS)', tc_read_link: 'قراءة بطاقات المواعيد', tc_none: 'لا توجد مسودة بطاقات مفتوحة.',
       tc_counts: 'بانتظار: {pending} · فشل: {failed} · معتمدة: {approved} · متجاهلة: {skipped}', tc_continue: 'متابعة المراجعة والاعتماد', tc_view: 'عرض المسودة',
-      tc_hint: 'حتى 20 بطاقة تُقرأ آليًا وتُراجع قبل أن تصبح حركات. خروج الحاوية الممتلئة فقط يصبح حركة.',
+      tc_storage_blocked: 'لا يُحجز الموعد قبل سداد فاتورة الأرضيات: سوِّها أولًا (أو احصل على موافقة المسؤول) من قسم «الأرضيات» في هذه الصفحة.', tc_hint: 'حتى 20 بطاقة تُقرأ آليًا وتُراجع قبل أن تصبح حركات. خروج الحاوية الممتلئة فقط يصبح حركة.',
       // transaction page: TASTO
       co_title: 'أمر نقل لشركة نقل (TASTO)', co_current: 'الأمر الحالي:', co_none: 'لا يوجد أمر نقل لشركة على هذه المعاملة.',
       co_note: 'تسجيل أمر النقل لشركة لا يلغي شرط إثبات إعادة الفارغ: تبقى المعاملة محتاجة إلى إيصال إعادة الفارغ (EIR) من شركة النقل مؤكدًا من موظف قبل «تحت الفوترة». ولا يغيّر الأمر مرحلة المعاملة.',
@@ -329,7 +329,7 @@
       rs_pending: 'Waiting for return', rs_evidence_submitted: 'Proof submitted', rs_returned_verified: 'Returned (verified)', rs_disputed: 'Disputed', rs_waived: 'Waived',
       tc_title: 'Appointment cards (TAS)', tc_read_link: 'Read appointment cards', tc_none: 'There is no open card draft.',
       tc_counts: 'waiting: {pending} · failed: {failed} · approved: {approved} · skipped: {skipped}', tc_continue: 'Continue the review and approval', tc_view: 'View the draft',
-      tc_hint: 'Up to 20 cards are read by AI and reviewed before they become movements. Only a full-container exit becomes a movement.',
+      tc_storage_blocked: 'No appointment before the storage invoice is paid: settle it (or get a manager approval) in the «Storage» section of this page first.', tc_hint: 'Up to 20 cards are read by AI and reviewed before they become movements. Only a full-container exit becomes a movement.',
       co_title: 'Transport company order (TASTO)', co_current: 'Current order:', co_none: 'This transaction has no transport company order.',
       co_note: 'Recording a company transport order does not remove the empty-return proof requirement: the transaction still needs the carrier’s empty-return receipt (EIR) confirmed by a staff member before “Under billing”. The order does not change the transaction stage.',
       co_company: 'Transport company', co_new_company: 'New company (type the name)', co_company_name: 'Transport company name', co_no: 'Transport order number',

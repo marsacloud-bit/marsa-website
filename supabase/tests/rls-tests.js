@@ -861,6 +861,8 @@ async function main() {
       'save_empty_return_deadline', 'list_empty_return_proofs', 'save_transport_carrier_order', 'tx_readiness',
       // storage gate (20261206000100): the gate state of a transaction + the manager approval to book before payment
       'tx_storage_gate', 'approve_storage_override',
+      // driver classes (20261207000100): the «السائقون» directory
+      'list_drivers', 'save_driver',
       // legacy pay (20261122000100): the payment register (four-eyes review, correct / void, attachments, the transaction panel,
       // the duplicate / transaction checks) and the client custody
       'record_payment_bundle', 'correct_payment', 'void_payment', 'review_payment', 'add_payment_documents', 'remove_payment_document',
@@ -885,7 +887,7 @@ async function main() {
       'legacy_import_commit', 'legacy_import_void', 'legacy_import_get_run', 'legacy_import_list_runs', 'legacy_import_list_rows',
       'legacy_import_skip_rows', 'legacy_import_queue_daftra', 'legacy_import_daftra_candidates'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 313) return 'expected list has ' + exp.length + ' names';   // + tx_storage_gate, approve_storage_override (20261206000100)
+    if (exp.length !== 315) return 'expected list has ' + exp.length + ' names';   // + tx_storage_gate, approve_storage_override (20261206000100)
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');

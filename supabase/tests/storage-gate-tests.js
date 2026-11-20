@@ -137,9 +137,12 @@ async function secFile() {
     const h = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(h);
     const order = (all.match(/^-- ===== migrations\/(\S+) =====$/gm) || []).map(l => l.split('/')[1].split(' ')[0]);
-    return (i > 0 && all.slice(i + h.length) === s && all.indexOf(h, i + 1) < 0 && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles())) || 'bundle';
+    const nx = all.indexOf('\n-- ===== migrations/', i + h.length);
+    const body = nx < 0 ? all.slice(i + h.length) : all.slice(i + h.length, nx);
+    return (i > 0 && (body === s || body + '\n' === s) && all.indexOf(h, i + 1) < 0 && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles())) || 'bundle';
   });
-  await check('this file is the latest migration', () => migFiles().pop() === MIG || 'latest ' + migFiles().pop());
+  const LATER_PHASES = ['20261207000100_driver_classes.sql'];
+  await check('this file is the latest migration (later phases excepted)', () => J(migFiles().filter(f => f > MIG)) === J(LATER_PHASES) || 'later ' + J(migFiles().filter(f => f > MIG)));
 }
 
 async function secRerun() {

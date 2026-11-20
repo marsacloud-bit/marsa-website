@@ -154,6 +154,12 @@
         body.appendChild(el('a', { href: cardsLink(tx.id), class: 'appt-tc-open', text: canWrite ? T('tc_continue') : T('tc_view') }));
       }
       body.appendChild(el('p', { class: 'form-hint', text: T('tc_hint') }));
+      // owner stage 3ج/3د (20261206000100): while a container's storage invoice is unpaid (Jeddah) the appointment is not
+      // recorded — say so here, above the reading link (the server refuses it anyway: MRS_STORAGE_UNPAID)
+      return call(api, 'txStorageGate', tx.id).then(function (g) {
+        if (!g || g.error || !g.data || !g.data.applies || !g.data.blocked) return;
+        body.insertBefore(el('div', { class: 'alert alert-danger appt-tc-storage', role: 'alert' }, el('div', { text: '✗ ' + T('tc_storage_blocked') })), body.firstChild);
+      });
     });
   }
 

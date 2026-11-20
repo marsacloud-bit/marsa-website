@@ -662,6 +662,9 @@ const NOT_EXERCISED = ['accept_invitation', 'ack_alert', 'import_commit', 'porta
   'resolve_exception', 'resolve_msg_send_unknown', 'retry_msg_send', 'review_cost_adjustment', 'review_msg_instruction', 'review_msg_template',
   'revoke_msg_authorization', 'set_demurrage_status', 'update_demurrage_case', 'update_demurrage_case[min]', 'void_charge_collection',
   'void_supplier_payment', 'save_bl[min]', 'save_msg_channel[min]', 'save_msg_contact[min]',
+  // driver classes (20261207000100): the [min] payload has no driver class (MRS_REQUIRED for B too); isolation of the
+  // directory (org, roles, anon) is asserted by driver-classes-tests.js
+  'save_driver[min]',
   // document matching (20261116000100): they take a match id (the builder sends a transaction id); isolation of the
   // matches (org, branch, client, anon) is asserted by doc-match-sql-tests.js
   'review_document_match', 'review_document_match[min]', 'void_document_match',

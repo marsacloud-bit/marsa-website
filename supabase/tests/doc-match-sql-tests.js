@@ -210,7 +210,7 @@ async function secFile() {
       && !/sk-ant|api\.anthropic\.com/i.test(src)) || 'body';
   });
   // later phases may follow this file (20261117000100 legacy_core: re-creates convert_delete_tables with party_ports)
-  const LATER_PHASES = ['20261117000100_legacy_core.sql', '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql'];
+  const LATER_PHASES = ['20261117000100_legacy_core.sql', '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql'];
   await check('this file is present; only the listed later phases follow it', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -871,7 +871,7 @@ async function secPackFile() {
       && /FUNCTION public\.void_document_match\(p_id uuid, p_reason text\) RETURNS jsonb/.test(src)) || 'body';
   });
   // later phases may follow this file (20261127000100 tx_draft_approval: transactions.approval_match_id → document_matches; no match object changed)
-  const PLATER = ['20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql'];
+  const PLATER = ['20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () =>
     migFiles().filter(f => f > PMIG).every(f => PLATER.includes(f)) || 'latest: ' + migFiles().pop());
   await check('all_migrations.sql holds this file verbatim (followed only by the listed later phases, in order) + a header line', () => {

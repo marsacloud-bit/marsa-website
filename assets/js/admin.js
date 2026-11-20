@@ -912,7 +912,7 @@
   // Each link carries data-nav-id so MarsaShell.setActive / setBadge('alerts') find it.
   var NAV_EXTERNAL = ['bulk', 'ocr', 'platform', 'help'];  // G7: help = the user guide (help.html), the "link from admin"
   // daily work → G3 operations → G6a reports & search → G6b messaging → G4 operating finance → G5 billing → management (unknown module views go last, stable)
-  var NAV_ORDER = ['dashboard', 'requests', 'transactions', 'register', 'clients', 'messages', 'imports', 'alerts', 'schedule', 'exceptions', 'parties',
+  var NAV_ORDER = ['dashboard', 'requests', 'transactions', 'register', 'clients', 'messages', 'imports', 'alerts', 'schedule', 'exceptions', 'parties', 'drivers',
     'search', 'reports', 'fasah_recon',
     'inbox', 'contacts', 'templates', 'channels',
     'costs', 'payables', 'payments', 'custody', 'margins', 'demurrage', 'billing', 'daftra',
@@ -926,7 +926,7 @@
   // #transactions still works and opens the register, see route()).
   var NAV_GROUPS = [
     { id: 'daily', items: ['dashboard', 'requests', 'register', 'transactions', 'clients', 'messages', 'imports'] },
-    { id: 'ops', items: ['alerts', 'schedule', 'exceptions', 'parties'] },
+    { id: 'ops', items: ['alerts', 'schedule', 'exceptions', 'parties', 'drivers'] },
     { id: 'reports', items: ['search', 'reports', 'fasah_recon'] },
     { id: 'msg', items: ['inbox', 'contacts', 'templates', 'channels'] },
     { id: 'finance', items: ['costs', 'payables', 'payments', 'custody', 'margins', 'demurrage', 'billing', 'daftra'] },
