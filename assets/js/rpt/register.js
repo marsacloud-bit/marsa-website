@@ -110,9 +110,14 @@
     U.clear(root);
     root.classList.add('ops-view', 'rpt-view', 'lrpt-register', 'lrpt-statement');
     // owner decision 2026-11-18: this is the one «المعاملات» screen, so «معاملة جديدة» (admin.js txNew via opsApi.newTx) lives here too
+    // owner note 2026-11-20 (3أ): a new transaction starts by reading its documents — «معاملة جديدة بالقراءة» (the one
+    // prominent action) opens ocr.html#new-tx (client first, then B/L + invoice + packing list); the manual form stays as a
+    // quieter «إدخال يدوي» (hidden, not removed)
     var newTxBtn = typeof api.newTx === 'function'
-      ? U.btn(api.t('admin.txnew_btn'), 'btn-primary', function () { api.newTx(); }, { 'data-act': 'new-tx' }) : null;
-    root.appendChild(U.head(lt('reg_title'), lt('reg_sub'), [el('a', { class: 'btn btn-sm btn-ghost', href: '#attention_rules', text: lt('rules_link') }), newTxBtn].filter(Boolean)));
+      ? U.btn(lt('new_tx_manual'), 'btn-ghost', function () { api.newTx(); }, { 'data-act': 'new-tx' }) : null;
+    var readTxBtn = typeof api.newTx === 'function'
+      ? el('a', { class: 'btn btn-sm btn-primary', href: 'ocr.html#new-tx', 'data-act': 'new-tx-read', text: lt('new_tx_read') }) : null;
+    root.appendChild(U.head(lt('reg_title'), lt('reg_sub'), [el('a', { class: 'btn btn-sm btn-ghost', href: '#attention_rules', text: lt('rules_link') }), newTxBtn, readTxBtn].filter(Boolean)));
     if (!K.hasFn(api, 'reportTransactions')) { root.appendChild(U.alertBox('warning', t('api_missing', { fn: 'reportTransactions' }))); return; }
     var bannerBox = el('div', { class: 'lrpt-banner-box', 'aria-live': 'polite' });
     var dftBox = el('div', { class: 'lrpt-dft-banner-box', 'aria-live': 'polite' });

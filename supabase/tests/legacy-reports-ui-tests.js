@@ -756,11 +756,14 @@ function rtApi(calls, rows) {
     await R.render(r4, mkApi(ctx, rtApi(calls), ['clearance_staff'], { newTx: () => { opened++; } })); await settle(20);
     const nb = r4.querySelector('[data-act="new-tx"]');
     if (nb) nb.click();
-    check('«معاملة جديدة» in the register header when opsApi.newTx is given; a click calls it once', () =>
-      (nb && nb.textContent === 'admin.txnew_btn' && /btn-primary/.test(nb.className) && opened === 1) || (nb ? nb.outerHTML : 'no button'));
+    check('owner 3أ: «معاملة جديدة بالقراءة» (primary link to ocr.html#new-tx) + the manual form as a quieter «إدخال يدوي»; a click calls it once', () => {
+      const rb = r4.querySelector('[data-act="new-tx-read"]');
+      return (nb && nb.textContent === 'إدخال يدوي' && !/btn-primary/.test(nb.className) && opened === 1
+        && rb && rb.getAttribute('href') === 'ocr.html#new-tx' && /btn-primary/.test(rb.className) && rb.textContent === 'معاملة جديدة بالقراءة') || (nb ? nb.outerHTML + (rb ? rb.outerHTML : ' no read button') : 'no button');
+    });
     const r5 = ctx.document.createElement('div'); ctx.document.body.appendChild(r5);
     await R.render(r5, mkApi(ctx, rtApi(calls), ['accountant'], { newTx: null })); await settle(20);
-    check('no «معاملة جديدة» when opsApi.newTx is null (no right to create)', () => !r5.querySelector('[data-act="new-tx"]') || 'button shown');
+    check('no «معاملة جديدة» when opsApi.newTx is null (no right to create)', () => (!r5.querySelector('[data-act="new-tx"]') && !r5.querySelector('[data-act="new-tx-read"]')) || 'button shown');
   }
   {
     const ctx = context(), calls = [];

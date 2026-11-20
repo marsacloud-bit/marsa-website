@@ -372,7 +372,7 @@
       }, function () { syncGate(); return false; });
     }
     function syncGate() {
-      var show = ONLINE && STAFF && AI.enabled;
+      var show = ONLINE && STAFF && (AI.enabled || !!NT);
       // a result on screen stays visible (it can still be exported / saved) even if access changed meanwhile
       section.hidden = !show && !S.result;
       showRemaining();
@@ -483,10 +483,11 @@
     function needed() { return SLOTS.filter(function (k) { return S.slots[k].file && S.slots[k].status !== 'done'; }).length; }
     function syncRun() {
       var b = $('ocr-match-run');
-      var ok = !!(S.slots.invoice.file && S.slots.bl.file) && !S.running && ONLINE && STAFF && AI.enabled;
+      var ok = !!(S.slots.invoice.file && S.slots.bl.file) && !S.running && ONLINE && STAFF && AI.enabled && (!NT || !!NT.clientId);
       var n = needed();
       b.disabled = !ok || (n === 0 && !!S.result);
       $('ocr-match-reset').disabled = S.running;
+      if (NT) { var nq = $('ocr-nt-q'), ns = $('ocr-nt-client'), lock = !!(S.running || S.saving || (S.draft && S.draft.txId)); if (nq) nq.disabled = lock; if (ns) ns.disabled = lock; }
     }
     SLOTS.forEach(function (k) {
       var inp = $('ocr-match-file-' + k), drop = qsa('[data-drop="' + k + '"]')[0];
@@ -2091,6 +2092,7 @@
     function renderDraftPanel() {
       var box = $('ocr-mx-draft');
       if (!box) return;
+      if (NT) renderNewTx();
       var D = S.draft, block = draftBlock();
       box.textContent = '';
       if (block === 'hide' && !(D && D.txId)) { box.hidden = true; return; }
@@ -2107,6 +2109,8 @@
       }
       box.appendChild(el('p', 'text-sm text-muted', T('mx_draft_lead')));
       if (block) { var w = el('div', 'alert alert-warning', block); w.setAttribute('role', 'note'); box.appendChild(w); return; }
+      // new transaction from documents (3أ): the next step opens by itself once the report allows a draft
+      if (NT && NT.clientId && (!D || !D.open) && !(D && D.autoOpened)) { draftState().autoOpened = true; openDraft(); return; }
       if (!D || !D.open) {
         var b = el('button', 'btn btn-secondary', T('mx_draft_btn')); b.type = 'button'; b.id = 'ocr-mx-draft-btn';
         b.disabled = !!S.saving;
@@ -2115,6 +2119,7 @@
         return;
       }
       var form = el('div', 'form ocr-mx-draft-form');
+      if (NT && NT.clientId) ntClientBlock(form, D);
       // the client (importer): the consignee matched against the clients, or a new client with that name
       var cs = el('select', 'form-control'); cs.id = 'ocr-mx-client';
       var cands = D.match && Array.isArray(D.match.candidates) ? D.match.candidates : [];
@@ -2124,8 +2129,9 @@
       if (D.clientId && !cands.some(function (c) { return c.client_id === D.clientId; })) opt(cs, D.clientId, D.newName || T('mx_draft_client_new_made'), D.clientSel === D.clientId);
       opt(cs, '__new', T('mx_draft_client_new'), D.clientSel === '__new' || !D.clientSel);
       cs.addEventListener('change', function () { D.clientSel = cs.value; nameWrap.hidden = cs.value !== '__new'; });
-      form.appendChild(field(T('mx_draft_client'), cs, 'ocr-mx-client'));
-      if (D.match && D.match.state) form.appendChild(el('p', 'text-xs text-muted', T('mx_draft_match_' + D.match.state, { name: D.matchName || '' })));
+      var csWrap = field(T('mx_draft_client'), cs, 'ocr-mx-client');
+      form.appendChild(csWrap);
+      if (D.match && D.match.state && !NT) form.appendChild(el('p', 'text-xs text-muted', T('mx_draft_match_' + D.match.state, { name: D.matchName || '' })));
       var nm = el('input', 'form-control'); nm.id = 'ocr-mx-client-name'; nm.type = 'text'; nm.maxLength = 160; nm.value = D.newName || ''; nm.dir = 'auto';
       nm.addEventListener('input', function () { D.newName = nm.value; });
       var nameWrap = field(T('mx_draft_client_name'), nm, 'ocr-mx-client-name');
@@ -2135,6 +2141,8 @@
       cb.addEventListener('change', function () { D.confirmClient = cb.checked; });
       cc.appendChild(cb); cc.appendChild(el('span', null, ' ' + T('mx_draft_client_confirm')));
       form.appendChild(cc);
+      // the client was chosen before reading: no picker here; the confirmation only when the name is not yet this client's
+      if (NT && NT.clientId) { csWrap.hidden = true; nameWrap.hidden = true; cc.hidden = ntMatchState(D) === 'ok'; }
       // operation / mode
       var os = el('select', 'form-control'); os.id = 'ocr-mx-op';
       opt(os, 'import', T('mx_draft_op_import'), D.operation !== 'export'); opt(os, 'export', T('mx_draft_op_export'), D.operation === 'export');
@@ -2186,6 +2194,7 @@
     function openDraft() {
       var D = draftState();
       D.open = true; D.error = '';
+      if (NT && NT.clientId) { D.clientSel = NT.clientId; D.clientId = NT.clientId; }
       var bl = plainFields(S.slots.bl), inv = plainFields(S.slots.invoice);
       D.matchName = P.importerName(bl, inv);
       if (!D.newName) D.newName = D.matchName;
@@ -2217,6 +2226,7 @@
         if (String(D.newName || '').trim().length < 2) { D.error = T('mx_draft_need_client'); renderDraftPanel(); return; }
       }
       if (D.roro && !String(D.chassis || '').trim()) { D.error = T('mx_draft_need_chassis'); renderDraftPanel(); return; }
+      if (NT && ntMatchState(D) !== 'ok' && !D.confirmClient) { D.error = T('nt_need_confirm'); renderDraftPanel(); return; }
       runDraft('new', null);
     }
     // the client of a new draft: the chosen one, or a new client created with the importer's name
@@ -2478,7 +2488,155 @@
         showError(T('mx_sm_failed', { msg: errMsg(e) }));
       });
     }
+    /* ---------------------------------------------------------------
+       ocr.html#new-tx (owner note 2026-11-20, stage 3أ): a new transaction starts by reading its documents.
+       1) the employee chooses the client (Arabic name) first; 2) the B/L + commercial invoice (+ packing list, optional)
+       are read and compared; the importer name read from them is checked against the chosen client's known names
+       (match_client_v2): a name not yet known for this client — or known for another client — needs the employee's
+       confirmation, which teaches the system the name (confirm_client on createDraftTransaction); 3) the preliminary
+       customs declaration step is shown but disabled (it exists only after the transaction is submitted in Fasah; it is
+       read later on the transaction page). The draft panel then opens by itself with the chosen client.
+       --------------------------------------------------------------- */
+    var NT = null;   // { clientId, name, hidden: [nodes hidden while in this mode] }
+    function ntMatchState(D) {
+      if (!NT || !NT.clientId) return 'ok';
+      if (!D || !D.matchName) return 'noname';
+      var m = D.match;
+      if (!m) return 'pending';
+      var cands = Array.isArray(m.candidates) ? m.candidates : [];
+      if (m.preselect === NT.clientId) return 'ok';
+      if (m.preselect && m.preselect !== NT.clientId) return 'other';
+      return cands.some(function (c) { return c.client_id === NT.clientId; }) ? 'near' : 'none';
+    }
+    function ntClientBlock(form, D) {
+      var box = el('div', 'ocr-nt-client');
+      box.appendChild(el('p', 'ocr-nt-client-name', T('nt_client_chosen', { name: NT.name || '' })));
+      var st = ntMatchState(D), cands = D.match && Array.isArray(D.match.candidates) ? D.match.candidates : [];
+      var other = st === 'other' ? cands.filter(function (c) { return c.client_id === D.match.preselect; })[0] : null;
+      var tone = st === 'ok' ? 'alert-success' : st === 'other' ? 'alert-danger' : st === 'pending' ? 'alert-info' : 'alert-warning';
+      var msg = T('nt_match_' + st, { name: D.matchName || '', other: other ? (L(other, 'name') || other.name_ar || other.name_en || '') : '' });
+      var a = el('div', 'alert ' + tone + ' ocr-nt-match');
+      a.setAttribute('role', st === 'other' ? 'alert' : 'note');
+      a.appendChild(el('span', 'ocr-nt-mark', st === 'ok' ? '✓ ' : st === 'other' ? '✗ ' : st === 'pending' ? '' : '! '));
+      a.appendChild(el('span', null, msg));
+      box.appendChild(a);
+      form.appendChild(box);
+    }
+    function ntBox() {
+      var card = $('ocr-match-card');
+      var box = $('ocr-nt');
+      if (!box && card) {
+        box = el('div', 'ocr-nt'); box.id = 'ocr-nt';
+        var head = card.querySelector('.ocr-block-head');
+        if (head && head.nextSibling) card.insertBefore(box, head.nextSibling); else card.appendChild(box);
+      }
+      return box;
+    }
+    function ntStep(n, title, state, extra) {
+      var li = el('li', 'ocr-nt-step is-' + state);
+      li.appendChild(el('span', 'ocr-nt-num', state === 'done' ? '✓' : String(n)));
+      var body = el('div', 'ocr-nt-body');
+      body.appendChild(el('strong', 'ocr-nt-title', title));
+      if (extra) body.appendChild(extra);
+      li.appendChild(body);
+      return li;
+    }
+    function renderNewTx() {
+      var box = ntBox();
+      if (!box) return;
+      box.textContent = '';
+      if (!NT) { box.hidden = true; return; }
+      box.hidden = false;
+      box.appendChild(el('p', 'text-sm text-muted', T('nt_lead')));
+      if (ONLINE && STAFF && !AI.enabled) {
+        var off = el('div', 'alert alert-warning', T('nt_ai_off')); off.setAttribute('role', 'note'); box.appendChild(off);
+      }
+      var D = S.draft, made = !!(D && D.txId);
+      var ol = el('ol', 'ocr-nt-steps');
+      // 1) the client
+      var pick = el('div', 'ocr-nt-pick');
+      var q = el('input', 'form-control'); q.type = 'search'; q.id = 'ocr-nt-q'; q.maxLength = 60; q.autocomplete = 'off'; q.dir = 'auto';
+      q.placeholder = T('nt_client_search'); q.setAttribute('aria-label', T('nt_client_search'));
+      var sel = el('select', 'form-control'); sel.id = 'ocr-nt-client'; sel.setAttribute('aria-label', T('nt_client_label'));
+      var fillSel = function (rows) {
+        sel.textContent = '';
+        opt(sel, '', T('nt_client_pick'), !NT.clientId);
+        var seen = false;
+        (rows || []).forEach(function (c) {
+          var nm = c.name_ar || c.name_en || '';
+          opt(sel, c.id, nm + (c.name_en && c.name_ar ? ' — ' + c.name_en : ''), NT.clientId === c.id);
+          if (NT.clientId === c.id) seen = true;
+        });
+        if (NT.clientId && !seen) opt(sel, NT.clientId, NT.name || NT.clientId, true);
+      };
+      var load = function () {
+        if (!(ONLINE && STAFF && has('listClients'))) { fillSel([]); return; }
+        var term = q.value.trim();
+        activeOrg().then(function (oid) { return API.listClients({ orgId: oid || undefined, search: term || undefined, limit: 100 }); })
+          .then(function (r) { if (NT) { NT.rows = r && !r.error && Array.isArray(r.data) ? r.data : []; fillSel(NT.rows); } }, function () { if (NT) fillSel([]); });
+      };
+      var tmr = null;
+      q.value = NT.q || '';
+      q.addEventListener('input', function () { NT.q = q.value; clearTimeout(tmr); tmr = setTimeout(load, 300); });
+      sel.addEventListener('change', function () {
+        if (S.running || S.saving || made) return;
+        var o = sel.options[sel.selectedIndex];
+        NT.clientId = sel.value || null; NT.name = sel.value && o ? String(o.textContent).split(' — ')[0] : '';
+        // a client changed after the reading: the draft panel starts again with the new client
+        if (S.draft && !S.draft.txId) { S.draft.match = null; S.draft.open = false; S.draft.autoOpened = false; S.draft.confirmClient = false; S.draft.clientSel = ''; S.draft.clientId = null; }
+        renderNewTx(); syncRun();
+        if (S.result) renderDraftPanel();
+      });
+      q.disabled = sel.disabled = !!(S.running || S.saving || made);
+      pick.appendChild(q); pick.appendChild(sel);
+      if (!NT.clientId) pick.appendChild(el('p', 'form-hint', T('nt_client_first')));
+      ol.appendChild(ntStep(1, T('nt_step_client'), NT.clientId ? 'done' : 'active', pick));
+      // 2) the B/L + invoice (+ packing list)
+      var s2 = made ? 'done' : NT.clientId ? 'active' : 'waiting';
+      var hint2 = el('p', 'form-hint', made ? T('nt_step_docs_done', { ref: D.ref || '' }) : T('nt_step_docs_hint'));
+      ol.appendChild(ntStep(2, T('nt_step_docs'), s2, hint2));
+      // 3) the preliminary customs declaration: disabled here
+      var b3 = el('button', 'btn btn-secondary btn-sm', T('nt_step_decl_btn')); b3.type = 'button'; b3.disabled = true; b3.id = 'ocr-nt-decl';
+      var w3 = el('div'); w3.appendChild(b3); w3.appendChild(el('p', 'form-hint', T('nt_step_decl_hint')));
+      ol.appendChild(ntStep(3, T('nt_step_decl'), 'locked', w3));
+      box.appendChild(ol);
+      fillSel(NT.rows || []);
+      if (!NT.rows) load();
+    }
+    function ntHide(node) { if (node && !node.hidden) { node.hidden = true; NT.hidden.push(node); } }
+    function openNewTx() {
+      if (!(ONLINE && STAFF)) return;   // signed out / not staff: the page stays as it is (its own sign-in notes)
+      if (!NT) {
+        NT = { clientId: null, name: '', hidden: [] };
+        // one screen for this task: the single reader, the other sections and the link-to-a-transaction form step aside
+        qsa('main > section.section').forEach(function (sec) { if (sec !== section) ntHide(sec); });
+        ntHide(qsa('[data-slot="declaration"]')[0]);
+        var form = qsa('#ocr-match-save .ocr-save-form')[0]; ntHide(form);
+        ntHide($('ocr-match-save-btn'));
+        ntHide(qsa('#ocr-match-save .ocr-save-title')[0]);
+        ntHide(qsa('#ocr-match-save > p')[0]);
+        var h1 = $('page-title'); if (h1) { NT.h1 = h1.textContent; h1.textContent = T('nt_title'); }
+        ntHide(qsa('.page-hero .lead')[0]);
+        ntHide(qsa('#ocr-match-card > .ocr-block-head')[0]);
+        section.classList.add('is-new-tx');
+      }
+      syncGate();
+      renderNewTx();
+      syncRun();
+      if (section.scrollIntoView) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    function closeNewTx() {
+      if (!NT) return;
+      NT.hidden.forEach(function (n) { n.hidden = false; });
+      var h1 = $('page-title'); if (h1 && NT.h1) h1.textContent = NT.h1;
+      section.classList.remove('is-new-tx');
+      NT = null;
+      renderNewTx();
+      syncGate(); syncRun();
+    }
     function routeHash() {
+      if (/^#new-tx$/i.test(window.location.hash || '')) { openNewTx(); return; }
+      if (NT) closeNewTx();
       var id = P.parseMatchId(window.location.hash);
       if (id) { if (!(S.saved.match && S.saved.match.id === id && S.result)) openSavedMatch(id); return; }
       var r = P.parseMatchTx(window.location.hash);
