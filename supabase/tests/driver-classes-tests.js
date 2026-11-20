@@ -230,7 +230,7 @@ async function secUi() {
   ctx.window.window = ctx.window; vm.createContext(ctx);
   vm.runInContext(src, ctx, { filename: 'drivers.js' });
   const D = ctx.window.MarsaOps && ctx.window.MarsaOps.drivers, V = ctx.window.MarsaOps && ctx.window.MarsaOps.views && ctx.window.MarsaOps.views.drivers;
-  await check('drivers.js registers #drivers (staff, ops.nav_drivers)', () => (D && D.VERSION === 'drv2-1' && V && V.allow === 'staff' && V.titleKey === 'ops.nav_drivers' && typeof V.render === 'function') || 'view');
+  await check('drivers.js registers #drivers (staff, ops.nav_drivers)', () => (D && D.VERSION === 'drv2-2' && V && V.allow === 'staff' && V.titleKey === 'ops.nav_drivers' && typeof V.render === 'function') || 'view');
   await check('driverRow: an individual drops the party; a company keeps it; empty plate / licence → null; the id on an edit', () => {
     const a = D.pure.driverRow({ full_name: ' سالم ', phone: '055', driver_class: 'individual', carrier_id: 'x', truck_plate: ' ', license_no: '' });
     const b = D.pure.driverRow({ full_name: 'خالد', phone: '055', driver_class: 'company', carrier_id: 'c1', truck_plate: 'AB1' }, 'id1');
@@ -244,6 +244,20 @@ async function secUi() {
     const d2 = { full_name: 'محمد', driver_class: null, is_active: false };
     return (D.pure.matches(U, d1, { q: 'النقل', cls: '' }) && !D.pure.matches(U, d2, { q: '', cls: '' }) && D.pure.matches(U, d2, { q: '', cls: '_none', inactive: true })
       && !D.pure.matches(U, d1, { q: '', cls: 'individual' })) || 'matches';
+  });
+  // owner, 20 Nov 2026: «سائق جديد — اختر تصنيفه» on #tx right after the appointment card is read
+  await check('#tx section driver_classify (order 52) lists only the transaction unclassified active drivers', () => {
+    const S = (ctx.window.MarsaOps.txSections || []).filter(x => x && x.id === 'driver_classify');
+    const dir = [{ id: 'a', driver_class: null, is_active: true }, { id: 'b', driver_class: 'individual', is_active: true },
+      { id: 'c', driver_class: null, is_active: false }, { id: 'd', driver_class: null, is_active: true }];
+    const u = D.pure.unclassifiedOf([{ driver_id: 'a' }, { driver_id: 'b' }, { driver_id: null }], [{ driver_id: 'c' }], dir);
+    return (S.length === 1 && S[0].order === 52 && typeof S[0].render === 'function' && u.length === 1 && u[0].id === 'a') || JSON.stringify(u);
+  });
+  await check('classifyRow: class required; company / contractor need a party; individual drops it; the truck is kept', () => {
+    const d = { id: 'x', full_name: 'محمد', phone: '0559998888', license_no: null };
+    const e1 = D.pure.classifyRow(d, '', null), e2 = D.pure.classifyRow(d, 'contractor', ''), ok1 = D.pure.classifyRow(d, 'contractor', 'p1'), ok2 = D.pure.classifyRow(d, 'individual', 'p1');
+    return (e1.error === 'drv2_err_class' && e2.error === 'drv2_err_party' && ok1.row.carrier_id === 'p1' && ok1.row.driver_class === 'contractor' && ok1.row.id === 'x'
+      && !('truck_plate' in ok1.row) && ok2.row.carrier_id === null && ok2.row.is_active === true) || JSON.stringify([e1, e2, ok1, ok2]);
   });
   await check('wiring: nav item in «التشغيل» after «الجهات والناقلون» (admin.js + app-shell.js); admin.html loads drivers.js before admin.js; sw.js precaches it; supa.js exports the two calls', () => {
     const ad = fs.readFileSync(path.join(ROOT, 'assets/js/admin.js'), 'utf8'), sh = fs.readFileSync(path.join(ROOT, 'assets/js/app-shell.js'), 'utf8');

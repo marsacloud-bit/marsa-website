@@ -145,7 +145,98 @@
     return load();
   }
 
-  Ops.drivers = { VERSION: 'drv2-1', pure: { driverRow: driverRow, matches: matches } };
+  // pure: the drivers of this transaction (appointments + trips) that have no classification yet
+  function unclassifiedOf(appts, trips, dir) {
+    var ids = {};
+    (appts || []).concat(trips || []).forEach(function (x) { if (x && x.driver_id) ids[x.driver_id] = true; });
+    return (dir || []).filter(function (d) { return d && ids[d.id] && !d.driver_class && d.is_active !== false; });
+  }
+  // pure: the row a «classify now» line sends → { row } | { error }
+  function classifyRow(d, cls, carrierId) {
+    if (CLASSES.indexOf(cls) === -1) return { error: 'drv2_err_class' };
+    if (cls !== 'individual' && !carrierId) return { error: 'drv2_err_party' };
+    var row = driverRow({ full_name: d.full_name, phone: d.phone, driver_class: cls, carrier_id: carrierId, license_no: d.license_no, is_active: true }, d.id);
+    delete row.truck_plate;   // keep the truck as it is
+    return { row: row };
+  }
+
+  /* ---------- #tx: «سائق جديد — اختر تصنيفه» right after the appointment card is read (owner, 20 Nov 2026) ----------
+     Shown only to transport writers, only while a driver of this transaction (appointment or trip) is not classified.
+     The card does not say whether the driver is individual / company / contractor, so the employee picks it here
+     instead of going back to «السائقون» later. */
+  function renderTxClassify(root, tx, api) {
+    var U = Ops.ui;
+    if (!U || !tx || api.cancelled || tx.cancelled_at) return null;
+    var A = api.MarsaApi || api;
+    if (!A || typeof A.listDriversDirectory !== 'function' || typeof A.saveDriverEntry !== 'function') return null;
+    if (typeof api.can === 'function' && !api.can('transportWriter', tx.branch_id)) return null;
+    var el = U.el, t = U.t;
+    var card = el('section', { class: 'app-card adm-card ops-tx-card drv2-tx-card', 'aria-live': 'polite', hidden: true });
+    root.appendChild(card);
+    return Promise.all([
+      U.call(api, 'listAppointments', { txId: tx.id }), U.call(api, 'listTrips', { txId: tx.id })
+    ]).then(function (r) {
+      var appts = r[0].error ? [] : U.rowsOf(r[0].data), trips = r[1].error ? [] : U.rowsOf(r[1].data);
+      if (!appts.concat(trips).some(function (x) { return x && x.driver_id; })) return;
+      return Promise.all([U.call(api, 'listDriversDirectory', null), U.call(api, 'listParties', { kind: 'carrier', limit: 500 })]).then(function (r2) {
+        if (r2[0].error) return;   // before the migration: nothing to show
+        var list = unclassifiedOf(appts, trips, U.rowsOf(r2[0].data));
+        var carriers = r2[1] && !r2[1].error ? U.rowsOf(r2[1].data).filter(function (c) { return c.is_active !== false; }) : [];
+        if (!list.length) return;
+        paint(list, carriers);
+      });
+    });
+    function paint(list, carriers) {
+      card.textContent = '';
+      card.hidden = false;
+      card.appendChild(el('header', { class: 'app-card-head adm-card-head' }, [el('h3', { class: 'app-card-title', text: t('drv2_tx_title') })]));
+      var body = el('div', { class: 'app-card-body adm-card-body' });
+      card.appendChild(body);
+      body.appendChild(el('p', { class: 'text-sm text-muted', text: t('drv2_tx_lead') }));
+      var left = list.length;
+      list.forEach(function (d) {
+        var sid = 'drv2-c-' + d.id, pid = 'drv2-p-' + d.id;
+        var sel = el('select', { class: 'form-control', id: sid });
+        [['', t('drv2_class_pick')]].concat(CLASSES.map(function (c) { return [c, U.lab('driver_class', c)]; })).forEach(function (o) {
+          sel.appendChild(el('option', { value: o[0], text: o[1] }));
+        });
+        var party = el('select', { class: 'form-control', id: pid });
+        [['', t('drv2_party_pick')]].concat(carriers.map(function (c) { return [c.id, U.partyName(c) + (c.phone ? ' — ' + c.phone : '')]; })).forEach(function (o) {
+          party.appendChild(el('option', { value: o[0], text: o[1] }));
+        });
+        var partyGrp = el('div', { class: 'form-group', hidden: true }, [el('label', { class: 'form-label', for: pid, text: t('drv2_party') }), party,
+          el('span', { class: 'form-hint' }, [t('drv2_tx_party_hint') + ' ', el('a', { href: '#parties', text: t('drv2_tx_party_link') })])]);
+        sel.addEventListener('change', function () { partyGrp.hidden = !sel.value || sel.value === 'individual'; });
+        var msg = el('p', { class: 'form-hint', role: 'status' });
+        var btn = el('button', { class: 'btn btn-sm btn-primary', type: 'button', text: t('save') });
+        var box = el('div', { class: 'drv2-tx-row', 'data-id': d.id }, [
+          el('div', { class: 'drv2-tx-who' }, [el('span', { class: 'cell-main', text: d.full_name || '' }), d.phone ? U.ltr(d.phone) : null,
+            d.truck_plate ? el('bdi', { dir: 'ltr', class: 'drv2-plate', text: d.truck_plate }) : null, U.pill('warning', t('drv2_unclassified'))].filter(Boolean)),
+          el('div', { class: 'drv2-tx-grid' }, [el('div', { class: 'form-group' }, [el('label', { class: 'form-label', for: sid, text: t('drv2_class') }), sel]), partyGrp]),
+          el('div', { class: 'adm-card-actions' }, [btn]), msg]);
+        btn.addEventListener('click', function () {
+          var c = classifyRow(d, sel.value, sel.value === 'individual' ? null : party.value);
+          if (c.error) { msg.textContent = t(c.error); return; }
+          btn.disabled = true; msg.textContent = '';
+          U.call(api, 'saveDriverEntry', c.row).then(function (res) {
+            btn.disabled = false;
+            if (res.error) { msg.textContent = U.errMsg(res.error, api); return; }
+            U.toast(api, t('drv2_saved'), 'success');
+            box.parentNode.removeChild(box);
+            left -= 1;
+            if (!left) card.hidden = true;
+          });
+        });
+        body.appendChild(box);
+      });
+    }
+  }
+  var TXS = [{ id: 'driver_classify', order: 52, render: renderTxClassify }];
+  Ops.txSections = Array.isArray(Ops.txSections) ? Ops.txSections : [];
+  for (var i = Ops.txSections.length - 1; i >= 0; i--) { if (Ops.txSections[i] && Ops.txSections[i].id === 'driver_classify') Ops.txSections.splice(i, 1); }
+  TXS.forEach(function (s) { Ops.txSections.push(s); });
+
+  Ops.drivers = { VERSION: 'drv2-2', pure: { driverRow: driverRow, matches: matches, unclassifiedOf: unclassifiedOf, classifyRow: classifyRow } };
   Ops.views.drivers = { allow: 'staff', titleKey: 'ops.nav_drivers', icon: 'user',
     render: function (root, api) { if (!Ops.ui) return noKit(root); return renderList(root, api); } };
 })();

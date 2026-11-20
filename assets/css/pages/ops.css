@@ -236,3 +236,9 @@ button.ops-kpi { font: inherit; color: inherit; width: 100%; cursor: pointer; }
 .stg-override { border-block-start: 1px dashed var(--border-strong, #cfd6dd); margin-block-start: 12px; padding-block-start: 10px; display: flex; flex-direction: column; gap: 6px; }
 .stg-override-title { margin: 0; font-size: var(--fs-sm, .95rem); }
 .stg-override-done { margin: 8px 0 0; padding: 6px 10px; border-radius: 8px; background: #EEF6F1; border: 1px solid #B9DCC6; font-size: var(--fs-sm, .9rem); }
+/* ---- owner stage 3د (2026-11-20): «سائق جديد — اختر تصنيفه» on #tx (ops/drivers.js) ---- */
+.drv2-tx-row { border: 1px solid #F2D675; background: #FFFBEB; border-radius: 10px; padding: 10px 12px; margin-block: 10px; min-width: 0; }
+.drv2-tx-who { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-block-end: 6px; }
+.drv2-tx-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px; }
+@media (max-width: 640px) { .drv2-tx-grid { grid-template-columns: 1fr; } }
+.drv2-plate { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
