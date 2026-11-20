@@ -4,7 +4,7 @@
    Contract: docs/online/LEGACY_DOCS_AR.md + LEGACY_DECL_AR.md (migration 20261127000100_tx_draft_approval.sql).
    Loaded after tx-appt.js, before admin.js. Section 'draft_approval' (order 4, placement 'top': above the readiness
    banner), shown only while the transaction is a DRAFT (tx.is_draft), or as one line «معتمدة بتاريخ …» after its approval:
-     * badge «مسودة — بانتظار البيان الجمركي» (no declaration yet: the staff enter it in Fasah, Fasah issues the
+     * badge «مسودة — بانتظار البيان التحضيري» (no declaration yet: the staff enter it in Fasah, Fasah issues the
        declaration) with «ارفع البيان الجمركي» → ocr.html#decl-tx=<id> and «كشف إدخال فسح» (ops/fasah-sheet.js);
      * badge «مسودة — بانتظار المطابقة والاعتماد» once a declaration reading is approved: «مطابقة البيان مع الفاتورة
        والبوليصة» → ocr.html#match-tx=<id>&decl=<extraction>, the summary of the latest three-way match (overall + counts)
@@ -77,6 +77,25 @@
   }
   function errText(api, e) { return api && typeof api.errText === 'function' ? api.errText(e) : ((e && e.message) || String(e)); }
 
+  // owner stage 3ب (2026-11-20): the same four steps as «معاملة جديدة بالقراءة» (ocr.html#new-tx) continue here — the
+  // client and the documents done, the preliminary declaration the current step (read → match → approve), the appointment
+  // card + transport still locked, with the storage-invoice reminder
+  function stepsStrip(el, v) {
+    var step = function (n, key, state, extra) {
+      return el('li', { class: 'txd-step is-' + state }, [
+        el('span', { class: 'txd-step-num', 'aria-hidden': 'true', text: state === 'done' ? '✓' : String(n) }),
+        el('div', { class: 'txd-step-body' }, [el('strong', { class: 'txd-step-title', text: T(key) }),
+          el('span', { class: 'ops-sr', text: ' — ' + T('txd_step_state_' + state) }), extra || null])
+      ]);
+    };
+    return el('ol', { class: 'txd-steps', 'aria-label': T('txd_steps_label') }, [
+      step(1, 'txd_step_client', 'done'),
+      step(2, 'txd_step_docs', 'done'),
+      step(3, 'txd_step_decl', 'active', el('span', { class: 'txd-step-hint', text: T(v.stage === 'await_decl' ? 'txd_step_decl_hint_read' : 'txd_step_decl_hint_match') })),
+      step(4, 'txd_step_appt', 'locked', el('span', { class: 'txd-step-remind', role: 'note', text: '! ' + T('txd_step_appt_storage') }))
+    ]);
+  }
+
   function renderDraft(root, tx, api) {
     // nothing to show for a transaction that was never a draft (the column is false / absent on an older database)
     if (!tx || (!tx.is_draft && !tx.approved_at)) return null;
@@ -120,6 +139,7 @@
       var body = el('div', { class: 'app-card-body adm-card-body' });
       card.appendChild(body);
       body.appendChild(el('p', { class: 'text-sm', text: T('txd_lead_' + v.stage) }));
+      body.appendChild(stepsStrip(el, v));
       if (v.stage !== 'ready') return;
       var m = v.match;
       body.appendChild(el('p', { class: 'txd-match' }, [
@@ -159,7 +179,7 @@
     return load();
   }
 
-  OPS.txDraft = { VERSION: 'txd-1', t: T, pure: { draftView: draftView, approvePayload: approvePayload, uploadLink: uploadLink, matchLink: matchLink } };
+  OPS.txDraft = { VERSION: 'txd-1', t: T, pure: { draftView: draftView, approvePayload: approvePayload, uploadLink: uploadLink, matchLink: matchLink, stepsStrip: stepsStrip } };
   var MINE = [{ id: 'draft_approval', order: 4, placement: 'top', render: renderDraft }];
   var ids = MINE.map(function (s) { return s.id; });
   for (var i = OPS.txSections.length - 1; i >= 0; i--) {

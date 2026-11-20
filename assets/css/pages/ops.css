@@ -206,3 +206,18 @@ button.ops-kpi { font: inherit; color: inherit; width: 100%; cursor: pointer; }
 .lx-timeline .lx-draft-step .lx-dot { border-color: var(--warning, #d97706); color: var(--warning, #d97706); }
 .lx-timeline .lx-auto, .lx-timeline .lx-na { margin-block-start: 2px; }
 .lx-timeline > li.is-current .lx-auto { background: var(--info-bg, #e8f1fb); color: var(--info, #1f5fa8); }
+
+/* ---- owner stage 3ب (2026-11-20): the transaction steps on the draft card (ops/tx-draft.js), same look as ocr.html#new-tx ---- */
+.txd-steps { list-style: none; margin: 10px 0 12px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.txd-step { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.txd-step-num {
+  flex: none; inline-size: 28px; block-size: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 13px; border: 2px solid var(--border-strong, #cfd6dd); background: #fff; color: var(--muted);
+}
+.txd-step.is-done .txd-step-num { border-color: #15803d; background: #15803d; color: #fff; }
+.txd-step.is-active .txd-step-num { border-color: var(--teal); color: var(--teal); }
+.txd-step-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.txd-step-title { font-size: var(--fs-sm, .95rem); }
+.txd-step.is-locked > .txd-step-num, .txd-step.is-locked .txd-step-title { opacity: .65; }
+.txd-step-hint { color: var(--muted); font-size: var(--fs-sm, .9rem); }
+.txd-step-remind { padding: 6px 10px; border-radius: 8px; background: #FEF6D8; border: 1px solid #F2D675; color: #6B5300; font-size: var(--fs-sm, .9rem); }

@@ -104,7 +104,18 @@ check('ocr.css: the steps box styles (.ocr-nt, numbered circles, done / locked)'
   const css = rd('assets/css/pages/ocr.css');
   return /\.ocr-nt \{/.test(css) && /\.ocr-nt-step\.is-done \.ocr-nt-num/.test(css) && /\.ocr-nt-step\.is-locked/.test(css) || 'css';
 });
-check('sw.js: VERSION comment names stage 3أ', () => /VERSION = '[^']+';\s+\/\/ owner reorg stage 3أ/.test(rd('sw.js')) || 'version');
+check('sw.js: VERSION comment names the owner stage 3 work', () => /VERSION = '[^']+';\s+\/\/ owner reorg stage 3/.test(rd('sw.js')) && /stage 3أ/.test(rd('sw.js')) || 'version');
+
+// stage 3ب: the same steps continue on the draft card of the transaction page
+const TDsrc = rd('assets/js/ops/tx-draft.js'), DE = rd('assets/i18n/decl.js');
+check('tx-draft.js: the steps strip — client + documents done, the declaration the current step, the appointment card locked with the storage reminder', () =>
+  /step\(1, 'txd_step_client', 'done'\)/.test(TDsrc) && /step\(2, 'txd_step_docs', 'done'\)/.test(TDsrc) && /step\(3, 'txd_step_decl', 'active'/.test(TDsrc)
+  && /step\(4, 'txd_step_appt', 'locked', el\('span', \{ class: 'txd-step-remind'/.test(TDsrc) && /body\.appendChild\(stepsStrip\(el, v\)\)/.test(TDsrc) || 'strip');
+check('i18n/decl.js: «قراءة البيان التحضيري» button + the step labels in Arabic and English', () =>
+  /txd_upload: 'قراءة البيان التحضيري'/.test(DE) && /txd_upload: 'Read the preliminary declaration'/.test(DE)
+  && ['txd_steps_label', 'txd_step_client', 'txd_step_docs', 'txd_step_decl', 'txd_step_appt', 'txd_step_state_done', 'txd_step_state_active', 'txd_step_state_locked',
+    'txd_step_decl_hint_read', 'txd_step_decl_hint_match', 'txd_step_appt_storage'].every(k => DE.split('\n').filter(line => line.indexOf(k + ': \'') !== -1).length === 2) || 'labels');
+check('ops.css: the steps strip styles', () => /\.txd-steps \{/.test(rd('assets/css/pages/ops.css')) && /\.txd-step-remind/.test(rd('assets/css/pages/ops.css')) || 'css');
 
 console.log('');
 if (nFail) { console.log('FAILURES:'); fails.forEach(f => console.log('  - ' + f)); console.log('FAILED — ' + nPass + ' passed, ' + nFail + ' failed'); process.exit(1); }
