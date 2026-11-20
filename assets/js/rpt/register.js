@@ -109,7 +109,10 @@
 
     U.clear(root);
     root.classList.add('ops-view', 'rpt-view', 'lrpt-register', 'lrpt-statement');
-    root.appendChild(U.head(lt('reg_title'), lt('reg_sub'), [el('a', { class: 'btn btn-sm btn-ghost', href: '#attention_rules', text: lt('rules_link') })]));
+    // owner decision 2026-11-18: this is the one «المعاملات» screen, so «معاملة جديدة» (admin.js txNew via opsApi.newTx) lives here too
+    var newTxBtn = typeof api.newTx === 'function'
+      ? U.btn(api.t('admin.txnew_btn'), 'btn-primary', function () { api.newTx(); }, { 'data-act': 'new-tx' }) : null;
+    root.appendChild(U.head(lt('reg_title'), lt('reg_sub'), [el('a', { class: 'btn btn-sm btn-ghost', href: '#attention_rules', text: lt('rules_link') }), newTxBtn].filter(Boolean)));
     if (!K.hasFn(api, 'reportTransactions')) { root.appendChild(U.alertBox('warning', t('api_missing', { fn: 'reportTransactions' }))); return; }
     var bannerBox = el('div', { class: 'lrpt-banner-box', 'aria-live': 'polite' });
     var dftBox = el('div', { class: 'lrpt-dft-banner-box', 'aria-live': 'polite' });
@@ -196,8 +199,16 @@
       form.appendChild(el('div', { class: 'rpt-grid' }, F));
       form.appendChild(el('fieldset', { class: 'rpt-fieldset' }, [el('legend', { class: 'form-label', text: lt('f_declaration_status') }),
         K.checks('declaration_status', opt(DECL, function (c) { return K.lab('declaration_status', c, api); }), [].concat(S.declaration_status || []))]));
-      form.appendChild(el('fieldset', { class: 'rpt-fieldset' }, [el('legend', { class: 'form-label', text: t('f_status') }),
-        K.checks('operational_status', opt(K.STAGES, function (c) { return K.lab('operational_status', c, api); }), [].concat(S.operational_status || []))]));
+      // owner note 2026-11-19: the «الحالة» filter lists the owner's stages (as the timeline and the status column), each
+      // box standing for its internal stages (value "a,b", split on submit); a stage is ticked when all its stages are.
+      // Without ops/tx-legacy.js the 10 internal stages show, as before.
+      var LXo = window.MarsaOps && window.MarsaOps.legacyTx, OWN = LXo && Array.isArray(LXo.ownerSteps) ? LXo.ownerSteps : null;
+      var selSt = [].concat(S.operational_status || []);
+      var stBoxes = OWN
+        ? K.checks('operational_status', OWN.map(function (g) { return [g.members.join(','), LXo.t('lc_' + g.code)]; }),
+            OWN.filter(function (g) { return g.members.every(function (c) { return selSt.indexOf(c) !== -1; }); }).map(function (g) { return g.members.join(','); }))
+        : K.checks('operational_status', opt(K.STAGES, function (c) { return K.lab('operational_status', c, api); }), selSt);
+      form.appendChild(el('fieldset', { class: 'rpt-fieldset' }, [el('legend', { class: 'form-label', text: t('f_status') }), stBoxes]));
       form.appendChild(err);
       var apply = el('button', { type: 'submit', class: 'btn btn-primary btn-sm rpt-go', text: t('apply') });
       var reset = el('button', { type: 'button', class: 'btn btn-subtle btn-sm rpt-clear', text: t('clear') });
@@ -208,7 +219,11 @@
         var s = { offset: 0 }, E = form.elements;
         Object.keys(SCHEMA).forEach(function (k) {
           var type = SCHEMA[k];
-          if (type === 'codes') { s[k] = K.checkedValues(form, k); return; }
+          if (type === 'codes') {
+            s[k] = K.checkedValues(form, k);
+            if (k === 'operational_status') s[k] = s[k].reduce(function (acc, v) { return acc.concat(String(v).split(',')); }, []).filter(Boolean);
+            return;
+          }
           var c = E[k];
           if (!c) { if (S[k] != null) s[k] = S[k]; return; }
           var v = String(c.value || '').trim();
@@ -286,8 +301,18 @@
     }
     function countNode(x) { var n = x.unit_count != null ? x.unit_count : x.container_count; return U.ltr(K.fmtNum(n == null ? 0 : n, 0)); }
     // «حالة المعاملة» + the late / critical badge under it (the legacy statement)
+    // owner decision 2026-11-19 (transaction-stages-request.md, م1): the status shows the owner's stage (جديدة · نشطة ·
+    // منتهية تشغيليًا · إرجاع الحاوية الفارغة · تحت الفوترة · تمت الفوترة · منتهية) from ops/tx-legacy.js; the server
+    // stage stays in the tooltip. Without that module the server stage label shows, as before.
+    function ownerStageLabel(code) {
+      var LXo = window.MarsaOps && window.MarsaOps.legacyTx;
+      var g = LXo && typeof LXo.ownerStepOf === 'function' ? LXo.ownerStepOf(code) : null;
+      return g ? LXo.t('lc_' + g.code) : K.lab('operational_status', code, api);
+    }
+    function statusText(x) { return x.cancelled_at ? K.lab('transaction_state', 'cancelled', api) : ownerStageLabel(x.operational_status); }
     function statusNode(x) {
-      var st = x.cancelled_at ? U.pill('danger', K.lab('transaction_state', 'cancelled', api)) : U.pill('brand', K.lab('operational_status', x.operational_status, api));
+      var st = x.cancelled_at ? U.pill('danger', K.lab('transaction_state', 'cancelled', api)) : U.pill('brand', ownerStageLabel(x.operational_status));
+      if (!x.cancelled_at) st.title = K.lab('operational_status', x.operational_status, api);
       var a = x.attention && x.attention.level ? attentionNode(x) : null;
       return a ? el('span', { class: 'lrpt-stcell' }, [st, a]) : st;
     }
@@ -325,7 +350,7 @@
         { key: 'operator_name', label: lt('c_operator'), type: 'text', value: function (x) { return x.operator_name; } },
         { key: 'agent_name', label: lt('c_agent'), type: 'text', value: function (x) { return x.agent_name || x.shipping_line; } },
         { key: 'vessel', label: lt('c_vessel'), type: 'text', value: function (x) { return x.vessel; } },
-        { key: 'operational_status', label: lt('c_tx_status'), type: 'text', value: function (x) { return x.cancelled_at ? K.lab('transaction_state', 'cancelled', api) : K.lab('operational_status', x.operational_status, api); },
+        { key: 'operational_status', label: lt('c_tx_status'), type: 'text', value: statusText,
           cell: statusNode }
       ];
       // (owner, 2026-11-15: «كشف المعاملات» like the legacy statement) the stage / follow-up / employee / update columns are

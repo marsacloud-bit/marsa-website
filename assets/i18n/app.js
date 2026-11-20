@@ -23,7 +23,7 @@
       demo_text: 'النسخة المتصلة غير مفعّلة على هذا الموقع، فلا توجد أقسام حساب.',
       sign_in: 'تسجيل الدخول',
       // command palette
-      search_button: 'بحث', search_aria: 'فتح لوحة البحث والأوامر (Ctrl+K)',
+      search_button: 'بحث', search_field_hint: 'ابحث برقم بوليصة أو حاوية أو بيان أو اسم عميل…', search_aria: 'فتح لوحة البحث والأوامر (Ctrl+K)',
       cmdk_label: 'لوحة البحث والأوامر', cmdk_input_label: 'ابحث في الأقسام والمعاملات والعملاء والطلبات',
       cmdk_placeholder: 'اكتب قسمًا أو رقمًا مرجعيًا أو بوليصة أو بيانًا أو حاوية أو عميلًا…',
       cmdk_nav: 'انتقال', cmdk_actions: 'إجراءات', cmdk_tx: 'المعاملات', cmdk_clients: 'العملاء', cmdk_requests: 'الطلبات',
@@ -64,7 +64,7 @@
       signed_out_text: 'Sign in to see the sections available to your account.',
       demo_text: 'The online version is not enabled on this site, so there are no account sections.',
       sign_in: 'Sign in',
-      search_button: 'Search', search_aria: 'Open search and commands (Ctrl+K)',
+      search_button: 'Search', search_field_hint: 'Search a B/L, container, declaration or client name…', search_aria: 'Open search and commands (Ctrl+K)',
       cmdk_label: 'Search and commands', cmdk_input_label: 'Search sections, transactions, clients and requests',
       cmdk_placeholder: 'Type a section, reference, B/L, declaration, container or client…',
       cmdk_nav: 'Go to', cmdk_actions: 'Actions', cmdk_tx: 'Transactions', cmdk_clients: 'Clients', cmdk_requests: 'Requests',

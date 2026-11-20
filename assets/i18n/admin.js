@@ -17,6 +17,17 @@
       view_dashboard: 'نظرة عامة', view_requests: 'الطلبات الواردة', view_transactions: 'المعاملات', view_clients: 'العملاء',
       view_messages: 'رسائل التواصل', view_imports: 'سجل الاستيراد', view_org: 'المؤسسة', view_branches: 'الفروع',
       view_members: 'الأعضاء والدعوات', view_audit: 'سجل التدقيق', view_errors: 'أخطاء الواجهة',
+      // nav groups (owner decision 2026-11-18, docs/owner/sections-decisions.md)
+      // the nine headings of docs/owner/sections-decisions.md (owner decision 2026-11-19)
+      nav_grp_daily: 'العمل اليومي', nav_grp_ops: 'العمليات', nav_grp_reports: 'التقارير والبحث', nav_grp_msg: 'المراسلات',
+      nav_grp_finance: 'المالية', nav_grp_settings: 'الإدارة والإعدادات', nav_grp_pages: 'صفحات الموظفين المستقلة',
+      nav_grp_portal: 'بوابة العميل', nav_grp_site: 'صفحات الموقع', nav_grp_more: 'أقسام أخرى', help_btn: 'دليل الاستخدام',
+      nav_page_p_tx: 'معاملاتي', nav_page_p_containers: 'حاوياتي', nav_page_p_invoices: 'فواتيري', nav_page_p_req: 'طلباتي',
+      nav_page_p_link: 'ربط طلب', nav_page_p_profile: 'ملفي',
+      nav_page_s_home: 'الرئيسية', nav_page_s_services: 'خدماتنا', nav_page_s_calculator: 'حاسبة الرسوم', nav_page_s_tracking: 'تتبع الشحنة',
+      nav_page_s_request: 'اطلب تخليص', nav_page_s_about: 'من نحن', nav_page_s_contact: 'تواصل معنا', nav_page_s_login: 'تسجيل الدخول',
+      // the accounting program the org is connected to (admin.js accountingProvider); one name key per program
+      nav_acct_settings: 'إعدادات {name}', nav_billing: 'الفوترة', acct_name_daftra: 'دفترة',
       // roles
       role_client: 'عميل', role_clearance_staff: 'موظف تخليص', role_transport_staff: 'موظف نقل', role_accountant: 'محاسب',
       role_accounts_manager: 'مدير حسابات', role_operations_manager: 'مدير عمليات', role_branch_manager: 'مدير فرع',
@@ -238,6 +249,14 @@
       view_dashboard: 'Overview', view_requests: 'Incoming requests', view_transactions: 'Transactions', view_clients: 'Clients',
       view_messages: 'Contact messages', view_imports: 'Import history', view_org: 'Organization', view_branches: 'Branches',
       view_members: 'Members & invitations', view_audit: 'Audit log', view_errors: 'Client errors',
+      nav_grp_daily: 'Daily work', nav_grp_ops: 'Operations', nav_grp_reports: 'Reports & search', nav_grp_msg: 'Messaging',
+      nav_grp_finance: 'Finance', nav_grp_settings: 'Administration & settings', nav_grp_pages: 'Standalone staff pages',
+      nav_grp_portal: 'Client portal', nav_grp_site: 'Website pages', nav_grp_more: 'More sections', help_btn: 'User guide',
+      nav_page_p_tx: 'My transactions', nav_page_p_containers: 'My containers', nav_page_p_invoices: 'My invoices', nav_page_p_req: 'My requests',
+      nav_page_p_link: 'Link a request', nav_page_p_profile: 'My profile',
+      nav_page_s_home: 'Home', nav_page_s_services: 'Services', nav_page_s_calculator: 'Duty calculator', nav_page_s_tracking: 'Track a shipment',
+      nav_page_s_request: 'Request clearance', nav_page_s_about: 'About us', nav_page_s_contact: 'Contact us', nav_page_s_login: 'Sign in',
+      nav_acct_settings: '{name} settings', nav_billing: 'Billing', acct_name_daftra: 'Daftra',
       role_client: 'Client', role_clearance_staff: 'Clearance staff', role_transport_staff: 'Transport staff', role_accountant: 'Accountant',
       role_accounts_manager: 'Accounts manager', role_operations_manager: 'Operations manager', role_branch_manager: 'Branch manager',
       role_supervisor: 'Supervisor', role_admin: 'Organization admin',

@@ -297,3 +297,7 @@ a.adm-mini-row:focus-visible { outline: none; box-shadow: var(--ring); }
   .adm-dlg-confirm { flex-wrap: wrap; padding-inline: 16px; }
   .adm-window-note, .adm-chips-row, .adm-list-foot { padding-inline: 14px; }
 }
+
+/* Owner request 2026-11-19: the staff work area uses the full screen width (the 1200px page container left large
+   empty margins on wide screens and squeezed the transactions table), keeping the side gutter */
+.adm-section > .container { max-width: none; }

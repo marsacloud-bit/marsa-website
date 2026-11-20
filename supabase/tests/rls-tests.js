@@ -645,6 +645,9 @@ const TENANT_TABLES = [
   ['transaction_bls',    `SELECT bl_id::text id FROM public.transaction_bls WHERE org_id = $1 LIMIT 1`, 'bl_id::text', 'is_primary = is_primary'],
   // G3 operations (20261103000200); transport_trips: explicit columns only (cost / sell outside the SELECT grant)
   ['document_requirements', `SELECT id::text id FROM public.document_requirements WHERE org_id = $1 LIMIT 1`, 'id::text', 'note = note'],
+  // owner stages (20261204000100): per-org stage sets and their steps
+  ['tx_stage_sets', `SELECT id::text id FROM public.tx_stage_sets WHERE org_id = $1 LIMIT 1`, 'id::text', 'note = note'],
+  ['tx_stage_steps', `SELECT id::text id FROM public.tx_stage_steps WHERE org_id = $1 LIMIT 1`, 'id::text', 'label_ar = label_ar'],
   ['port_appointments',  `SELECT id::text id FROM public.port_appointments WHERE org_id = $1 LIMIT 1`,  'id::text',  'status = status'],
   ['transport_trips',    `SELECT id::text id FROM public.transport_trips WHERE org_id = $1 LIMIT 1`,    'id::text',  'status = status'],
   ['operational_exceptions', `SELECT id::text id FROM public.operational_exceptions WHERE org_id = $1 LIMIT 1`, 'id::text', 'status = status'],
@@ -731,6 +734,9 @@ async function main() {
   try { await importFixtures();
   await rxFixtures(); pass('legacy import fixtures: one run + one staged row per org'); }
   catch (e) { fail('legacy import fixtures', errText(e)); return finish(); }
+  // owner stages (20261204000100): the seed orgs are created after the migrations, so they get their default set here
+  try { await db.exec(`SELECT app.seed_tx_stage_sets(o.id) FROM public.organizations o`); pass('owner stages fixtures: a default stage set (7 steps) per org'); }
+  catch (e) { fail('owner stages fixtures', errText(e)); return finish(); }
 
   /* ---------------------------------------------------------------- catalog */
   section('catalog: RLS, grants, function privileges');
@@ -1029,6 +1035,7 @@ async function main() {
     ['list_alerts', `SELECT public.list_alerts('${A}', '{}')`],
     ['refresh_alerts', `SELECT public.refresh_alerts('${A}')`],
     ['app.seed_document_requirements', `SELECT app.seed_document_requirements('${A}')`],
+    ['app.seed_tx_stage_sets', `SELECT app.seed_tx_stage_sets('${A}')`],
     ['app.refresh_all_alerts', `SELECT app.refresh_all_alerts()`],
     // G4
     ['tx_costs', `SELECT public.tx_costs('${TX1}')`],
