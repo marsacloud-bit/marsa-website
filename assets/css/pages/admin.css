@@ -316,3 +316,8 @@ a.adm-mini-row:focus-visible { outline: none; box-shadow: var(--ring); }
 .adm-txtab-flag.is-warning { background: #d4a106; }
 .adm-txpanel > * + * { margin-block-start: 14px; }
 @media (max-width: 640px) { .adm-txtab { padding: 8px 10px; font-size: .9rem; } }
+/* owner reorg: «إضافة مستند آخر» folded under one button in the documents card */
+.adm-upload-more { margin-block-start: 12px; }
+.adm-upload-more > summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.adm-upload-more > summary::-webkit-details-marker { display: none; }
+.adm-upload-more[open] > summary { margin-block-end: 10px; }

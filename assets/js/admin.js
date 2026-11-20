@@ -881,7 +881,7 @@
   var TX_TAB_OF = { completeness: 'summary', checklist: 'summary', declarations: 'docs', declaration_reading: 'docs', bls: 'docs',
     shipment_docs: 'docs', containers: 'containers', storage: 'containers', appointments: 'transport', appointment_cards: 'transport',
     driver_classify: 'transport', movements: 'transport', carrier_order: 'transport', trips: 'transport', empty_return: 'return', exceptions: 'log',
-    'fin-payments': 'finance', 'fin-costs': 'finance', 'fin-margin': 'finance', 'bill-invoices': 'finance', 'msg-thread': 'log', 'audit-trail': 'log' };
+    'fin-payments': 'finance', 'fin-pay-docs': 'docs', 'fin-costs': 'finance', 'fin-margin': 'finance', 'bill-invoices': 'finance', 'msg-thread': 'log', 'audit-trail': 'log' };
   var TX_TAB_OF_STAGE = { 'new': 'docs', in_progress: 'docs', customs_declaration: 'docs', appointment: 'transport', transport: 'transport', empty_return: 'return' };
   function txTabStore(id, v) {
     var k = 'mrs.txtab.' + id;
@@ -2548,14 +2548,17 @@
         // documents
         var upload = '';
         if (canAt(t.branch_id, R.staff)) {
-          upload = '<form class="adm-upload" data-form="doc-upload" data-tx="' + esc(t.id) + '">' +
+          // owner reorg: a later document only — the first ones come from «معاملة جديدة بالقراءة»; folded until asked for
+          upload = '<details class="adm-upload-more"><summary class="btn btn-sm btn-secondary">' + icon('plus') + esc(tl('txdoc_add_other')) + '</summary>' +
+            '<p class="form-hint">' + esc(tl('txdoc_add_hint')) + '</p>' +
+            '<form class="adm-upload" data-form="doc-upload" data-tx="' + esc(t.id) + '">' +
             field({ name: 'file', label: 'الملف', type: 'file', req: true, attrs: ' accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.xlsx,.csv"' }) +
             field({ name: 'kind', label: 'نوع المستند (كما ورد)', type: 'select', options: opts('document_kind', 'other') }) +
             field({ name: 'visibility', label: 'الظهور', type: 'select', options: opts('visibility', 'internal') }) +
             field({ name: 'source', label: 'المصدر', type: 'select', options: opts('doc_source', 'staff_scan', false, ['upload', 'staff_scan', 'email', 'whatsapp']) }) +
             field({ name: 'sourceRef', label: 'مرجع المصدر (اختياري)', attrs: ' maxlength="255"', hint: 'مثل: اسم المرسل أو رقم الرسالة' }) +
             '<button class="btn btn-primary btn-sm" type="submit">رفع المستند</button></form>' +
-            '<p class="form-hint">الحد الأقصى 25 ميغابايت. الأصل يُحفظ كما هو مع بصمته (SHA-256)، والتصحيح يكون برفع نسخة جديدة أو إلغاء المستند مع ذكر السبب.</p>';
+            '<p class="form-hint">الحد الأقصى 25 ميغابايت. الأصل يُحفظ كما هو مع بصمته (SHA-256)، والتصحيح يكون برفع نسخة جديدة أو إلغاء المستند مع ذكر السبب.</p></details>';
         }
         var voidToggle = '<label class="check adm-voided-toggle"><input type="checkbox" data-act="toggle-voided"' + (S.showVoided ? ' checked' : '') + '> إظهار المستندات الملغاة</label>';
         html += card('المستندات', (res[1].error ? alertBox('danger', errText(res[1].error)) : docsTable(docs, { tx: t })) + upload, voidToggle, 'adm-txc-docs');

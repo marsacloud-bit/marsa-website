@@ -235,6 +235,7 @@
       txnew_code_none: 'لا يوجد كود', txnew_cat_hint: 'يُعبّأ من ملف العميل المختار؛ إن غيّرته يُحدَّث ملف العميل بعد إنشاء المعاملة.',
       txnew_warn_cat: 'تعذّر تحديث تصنيف العميل ({e})',
       // owner reorg (20 Nov 2026): the transaction page tabs
+      txdoc_add_other: 'إضافة مستند آخر', txdoc_add_hint: 'للمستندات التي تصل لاحقًا. مستندات بداية المعاملة تُرفع وتُقرأ من «معاملة جديدة بالقراءة».',
       txtab_aria: 'أقسام المعاملة', txtab_summary: 'الملخص', txtab_docs: 'المستندات', txtab_containers: 'الحاويات والأرضيات', txtab_transport: 'الموعد والنقل',
       txtab_return: 'إرجاع الفارغ', txtab_finance: 'المالية', txtab_log: 'السجل', txtab_flag_danger: 'فيه أمر متأخر أو يمنع الإجراء', txtab_flag_warning: 'فيه أمر يحتاج مراجعة',
       tx_responsible: 'الموظف المتابع', tx_responsible_hint: 'موظفو المؤسسة على مستوى المؤسسة وموظفو فرع المعاملة.',
@@ -484,6 +485,7 @@
       txnew_code_none: 'No code', txnew_cat_hint: 'Filled from the chosen client; if you change it, the client file is updated after the transaction is created.',
       txnew_warn_cat: 'The client category could not be updated ({e})',
       // owner reorg (20 Nov 2026): the transaction page tabs
+      txdoc_add_other: 'Add another document', txdoc_add_hint: 'For documents that arrive later. The first documents are uploaded and read from «New transaction from documents».',
       txtab_aria: 'Transaction sections', txtab_summary: 'Summary', txtab_docs: 'Documents', txtab_containers: 'Containers & storage', txtab_transport: 'Appointment & transport',
       txtab_return: 'Empty return', txtab_finance: 'Finance', txtab_log: 'Log', txtab_flag_danger: 'something is late or blocks the next step', txtab_flag_warning: 'something needs review',
       tx_responsible: 'Follow-up employee', tx_responsible_hint: 'Org-wide staff and the staff of the transaction\'s branch.',

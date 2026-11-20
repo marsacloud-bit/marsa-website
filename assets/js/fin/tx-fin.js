@@ -87,7 +87,9 @@
         pay_count: 'عدد السدادات', pay_total: 'إجمالي حصة المعاملة', pay_pending: 'بانتظار المراجعة', pay_rejected: 'مرفوضة', pay_last: 'آخر سداد',
         pay_custody: 'رصيد عهدة العميل', pay_add: 'إضافة سداد', pay_all: 'كل سدادات المعاملة', pay_empty: 'لا توجد سدادات مسجلة لهذه المعاملة.',
         pay_ref: 'السداد', pay_date: 'التاريخ', pay_service: 'البند', pay_share: 'حصة المعاملة', pay_method: 'الطريقة والتمويل', pay_review: 'المراجعة',
-        pay_beneficiary: 'المستفيد', pay_shared: 'سداد مشترك', pay_docs: 'مرفقات: {n}', pay_by_movement: 'حسب نوع الحركة',
+        pay_beneficiary: 'المستفيد', pay_shared: 'سداد مشترك', pay_docs: 'مرفقات: {n}',
+        pdoc_title: 'مرفقات السدادات', pdoc_hint: 'إيصالات السداد وفواتير الجهات المرفقة بسدادات هذه المعاملة. المبالغ في تبويب «المالية».',
+        pdoc_file: 'الملف', pdoc_role: 'النوع', pdoc_payment: 'السداد', pdoc_date: 'تاريخ السداد', pdoc_open: 'فتح', pdoc_some_failed: 'تعذّر تحميل مرفقات بعض السدادات.', pay_by_movement: 'حسب نوع الحركة',
         // collections
         col_title: 'تسجيل تحصيل من العميل', col_amount: 'المبلغ', col_date: 'تاريخ التحصيل', col_method: 'الطريقة', col_ref: 'المرجع',
         col_file: 'ملف الإثبات (اختياري)', col_need: 'أدخل مرجعًا أو أرفق ملف الإثبات.', col_saved: 'سُجّل التحصيل (إثبات فقط، ليس سند قبض).',
@@ -180,7 +182,9 @@
         pay_count: 'Payments', pay_total: 'Total share of this transaction', pay_pending: 'Awaiting review', pay_rejected: 'Rejected', pay_last: 'Last payment',
         pay_custody: 'Client custody balance', pay_add: 'Add payment', pay_all: 'All payments of this transaction', pay_empty: 'No payments recorded for this transaction.',
         pay_ref: 'Payment', pay_date: 'Date', pay_service: 'Item', pay_share: 'Transaction share', pay_method: 'Method & funding', pay_review: 'Review',
-        pay_beneficiary: 'Beneficiary', pay_shared: 'Shared payment', pay_docs: 'Attachments: {n}', pay_by_movement: 'By movement type',
+        pay_beneficiary: 'Beneficiary', pay_shared: 'Shared payment', pay_docs: 'Attachments: {n}',
+        pdoc_title: 'Payment attachments', pdoc_hint: 'Payment receipts and entity invoices attached to the payments of this transaction. Amounts are in the «Finance» tab.',
+        pdoc_file: 'File', pdoc_role: 'Type', pdoc_payment: 'Payment', pdoc_date: 'Paid on', pdoc_open: 'Open', pdoc_some_failed: 'The attachments of some payments could not be loaded.', pay_by_movement: 'By movement type',
         col_title: 'Record client collection', col_amount: 'Amount', col_date: 'Collection date', col_method: 'Method', col_ref: 'Reference',
         col_file: 'Evidence file (optional)', col_need: 'Enter a reference or attach the evidence file.', col_saved: 'Collection recorded (evidence only, not a receipt).',
         col_void: 'Void collection', col_voided: 'Collection voided.', col_list: 'Collections', col_void_title: 'Void collection {a}',
@@ -976,12 +980,76 @@
     }, 'fin-tx-payments');
   }
 
+  /* ==================================================================
+     79 — payment attachments (owner reorg): the files of this transaction's payments, listed in the «المستندات» tab
+     so every document of the transaction is in one place. Finance readers only; no amounts here.
+     A shared payment: only the files of this transaction's line (or of the whole payment).
+     ================================================================== */
+  // pure: items of tx_disbursements + get_payment details → [{ id, name, role, path, payId, payRef, paidAt }]
+  function payDocRows(items, details) {
+    var out = [], seen = {};
+    (items || []).forEach(function (it) {
+      var d = details[it.id];
+      if (!d || !Array.isArray(d.documents)) return;
+      d.documents.forEach(function (x) {
+        if (!x || x.removed_at || !x.storage_path || seen[x.id]) return;
+        if (x.allocation_id && x.allocation_id !== it.allocation_id) return;
+        seen[x.id] = true;
+        out.push({ id: x.id, name: x.original_name || '', role: x.role, path: x.storage_path, payId: it.id, payRef: it.ref || String(it.id).slice(0, 8), paidAt: it.paid_at });
+      });
+    });
+    return out;
+  }
+  function renderPayDocs(root, tx, api) {
+    if (!api.can('finRead', tx.branch_id)) return null;
+    var k = kit(api), el = k.el;
+    var body = el('div', { class: 'ops-tx-body' }, el('p', { class: 'text-sm text-muted', text: k.t('loading') }));
+    var card = k.card(k.t('pdoc_title'), body, null, 'fin-tx-paydocs');
+    card.hidden = true;
+    root.appendChild(card);
+    return M(api, 'txDisbursements')(tx.id).then(function (r) {
+      if (r.error) return;
+      var items = k.rows(r.data || {}).filter(function (it) { return +it.document_count > 0; }).slice(0, 40);
+      if (!items.length) return;
+      var details = {}, failed = false, ids = {};
+      items.forEach(function (it) { ids[it.id] = true; });
+      return Promise.all(Object.keys(ids).map(function (id) {
+        return M(api, 'getPayment')(id).then(function (g) { if (g.error || !g.data) failed = true; else details[id] = g.data; });
+      })).then(function () {
+        var rows = payDocRows(items, details);
+        if (!rows.length && !failed) return;
+        body.textContent = '';
+        body.appendChild(el('p', { class: 'form-hint', text: k.t('pdoc_hint') }));
+        if (failed) body.appendChild(k.alert('warning', k.t('pdoc_some_failed')));
+        body.appendChild(k.table([k.t('pdoc_file'), k.t('pdoc_role'), k.t('pdoc_payment'), k.t('pdoc_date'), ''], rows.map(function (x) {
+          var open = k.btn(k.t('pdoc_open'), 'btn-ghost', function () {
+            M(api, 'financeDocumentUrl')(x.path, 300).then(function (u) {
+              var url = u && !u.error && u.data && (u.data.signedUrl || u.data.url || (typeof u.data === 'string' ? u.data : null));
+              if (url) { try { window.open(url, '_blank', 'noopener'); } catch (e) { /* popup blocked */ } }
+              else if (u && u.error) api.toast(api.errText(u.error), 'error');
+            });
+          }, { 'data-paydoc': x.id });
+          return el('tr', { 'data-paydoc-row': x.id }, [
+            el('td', null, el('bdi', { text: x.name })),
+            el('td', { text: payLabel(api, 'role', x.role) }),
+            el('td', null, el('a', { class: 'ops-ref', href: '#payments/' + x.payId }, el('bdi', { dir: 'ltr', text: x.payRef }))),
+            el('td', { text: payDay(x.paidAt) }),
+            el('td', null, open)
+          ]);
+        }), k.t('none')));
+        card.hidden = false;
+      });
+    });
+  }
+
   var MINE = [
     { id: 'fin-payments', order: 78, render: renderPayments },
+    { id: 'fin-pay-docs', order: 79, render: renderPayDocs },
     { id: 'fin-costs', order: 80, render: renderCosts },
     { id: 'fin-margin', order: 85, render: renderMargin }
   ];
   var have = {};
   OPS.txSections.forEach(function (s) { if (s && s.id) have[s.id] = true; });
   MINE.forEach(function (s) { if (!have[s.id]) OPS.txSections.push(s); });
+  OPS.finTxDocs = { pure: { payDocRows: payDocRows } };
 })();
