@@ -2495,7 +2495,8 @@
        (match_client_v2): a name not yet known for this client — or known for another client — needs the employee's
        confirmation, which teaches the system the name (confirm_client on createDraftTransaction); 3) the preliminary
        customs declaration step is shown but disabled (it exists only after the transaction is submitted in Fasah; it is
-       read later on the transaction page). The draft panel then opens by itself with the chosen client.
+       read later on the transaction page); 4) the appointment card + transport step likewise (after the operational work
+       and the exit permit, whose document is not read — owner note 2026-11-20). The draft panel then opens by itself with the chosen client.
        --------------------------------------------------------------- */
     var NT = null;   // { clientId, name, hidden: [nodes hidden while in this mode] }
     function ntMatchState(D) {
@@ -2599,6 +2600,11 @@
       var b3 = el('button', 'btn btn-secondary btn-sm', T('nt_step_decl_btn')); b3.type = 'button'; b3.disabled = true; b3.id = 'ocr-nt-decl';
       var w3 = el('div'); w3.appendChild(b3); w3.appendChild(el('p', 'form-hint', T('nt_step_decl_hint')));
       ol.appendChild(ntStep(3, T('nt_step_decl'), 'locked', w3));
+      // 4) the appointment card + transport (owner note 2026-11-20): after the operational work and the exit permit; read
+      // later from the transaction page (appointment, transport, driver)
+      var b4 = el('button', 'btn btn-secondary btn-sm', T('nt_step_appt_btn')); b4.type = 'button'; b4.disabled = true; b4.id = 'ocr-nt-appt';
+      var w4 = el('div'); w4.appendChild(b4); w4.appendChild(el('p', 'form-hint', T('nt_step_appt_hint')));
+      ol.appendChild(ntStep(4, T('nt_step_appt'), 'locked', w4));
       box.appendChild(ol);
       fillSel(NT.rows || []);
       if (!NT.rows) load();

@@ -58,9 +58,10 @@ check('syncGate: the section shows for staff in the mode even when AI reading is
   /ONLINE && STAFF && \(AI\.enabled \|\| !!NT\)/.test(fnBody('syncGate')) && /nt_ai_off/.test(fnBody('renderNewTx')) || 'gate');
 
 const rn = fnBody('renderNewTx');
-check('renderNewTx: three steps — the client (search + list from listClients), the documents, the declaration disabled', () =>
+check('renderNewTx: four steps — the client (search + list from listClients), the documents, the declaration and the appointment card disabled', () =>
   /ntStep\(1, T\('nt_step_client'\)/.test(rn) && /ntStep\(2, T\('nt_step_docs'\)/.test(rn) && /ntStep\(3, T\('nt_step_decl'\), 'locked'/.test(rn)
-  && /b3\.disabled = true/.test(rn) && /API\.listClients\(/.test(rn) || 'steps');
+  && /b3\.disabled = true/.test(rn) && /API\.listClients\(/.test(rn)
+  && /ntStep\(4, T\('nt_step_appt'\), 'locked'/.test(rn) && /b4\.disabled = true/.test(rn) || 'steps');
 check('renderNewTx: changing the client after a reading resets the draft panel (match, confirmation, client)', () =>
   /S\.draft\.match = null; S\.draft\.open = false; S\.draft\.autoOpened = false; S\.draft\.confirmClient = false;/.test(rn) || 'reset');
 
@@ -91,7 +92,7 @@ check('ntMatchState: not found at all → none', () => st({ clientId: C1 }, { ma
 // labels
 const I = rd('assets/i18n/ocr.js'), L = rd('assets/i18n/lrpt.js');
 const keys = ['nt_title', 'nt_lead', 'nt_ai_off', 'nt_step_client', 'nt_client_search', 'nt_client_label', 'nt_client_pick', 'nt_client_first', 'nt_step_docs',
-  'nt_step_docs_hint', 'nt_step_docs_done', 'nt_step_decl', 'nt_step_decl_btn', 'nt_step_decl_hint', 'nt_client_chosen', 'nt_match_ok', 'nt_match_near',
+  'nt_step_docs_hint', 'nt_step_docs_done', 'nt_step_decl', 'nt_step_decl_btn', 'nt_step_decl_hint', 'nt_step_appt', 'nt_step_appt_btn', 'nt_step_appt_hint', 'nt_client_chosen', 'nt_match_ok', 'nt_match_near',
   'nt_match_none', 'nt_match_other', 'nt_match_noname', 'nt_match_pending', 'nt_need_confirm'];
 check('i18n/ocr.js: every nt_* label in Arabic and English', () => {
   const miss = keys.filter(k => (I.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length !== 2);
