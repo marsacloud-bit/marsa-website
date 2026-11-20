@@ -60,6 +60,7 @@ vm.runInContext(rd('assets/js/ops/tx-legacy.js'), ctx, { filename: 'tx-legacy.js
 const LX = win.MarsaOps && win.MarsaOps.legacyTx;
 const P = LX && LX.pure;
 const MIG = rd('supabase/migrations/20261118000100_legacy_tx.sql');
+const MIG_SETS = rd('supabase/migrations/20261204000100_tx_stage_sets.sql');
 const CORE = rd('supabase/migrations/20261117000100_legacy_core.sql');
 
 /* ================================================================ wrapper */
@@ -337,6 +338,17 @@ section('review regressions');
       && P.nextManual({ next: { code: 'operationally_complete', manual: false }, cargo_unit_type: 'roro' }) === false
       && P.nextManual({ next: { code: 'transport', manual: false }, cargo_unit_type: 'container' }) === false
       && P.nextManual({ next: { code: 'under_billing', manual: true } }) === true && P.nextManual({ next: null }) === false) || 'manual');
+  // owner decision 2026-11-20: «تحت الفوترة» and «مغلقة» are always by hand — never «تتقدم تلقائيًا», whatever the server flag
+  check('owner decision 2026-11-20: next under_billing / closed is manual even when a database sends manual = false (lc_next_auto never shown for them)', () =>
+    (P.nextManual({ next: { code: 'under_billing', manual: false }, cargo_unit_type: 'container' }) === true
+      && P.nextManual({ next: { code: 'under_billing', manual: false }, cargo_unit_type: 'roro' }) === true
+      && P.nextManual({ next: { code: 'closed', manual: false } }) === true
+      && P.nextManual({ next: { code: 'empty_return', manual: false }, cargo_unit_type: 'container' }) === false) || 'auto');
+  check('owner decision 2026-11-20: lc_hint (ar + en) says «تحت الفوترة» and «مغلقة» are done by hand and never automatic', () => {
+    const a = dicts.ar['opslx.lc_hint'] || '', e = dicts.en['opslx.lc_hint'] || '';
+    return (/«تحت الفوترة» و«مغلقة» يدويتان دائمًا/.test(a) && /لا تنتقل إليهما وحدها أبدًا/.test(a) && !/وحدها إلى «تحت الفوترة»/.test(a) && /غير الموثّق يمنع الفوترة/.test(a)
+      && /"Under billing" and "Closed" are always moved by hand/.test(e) && /never moves there by itself/.test(e) && !/by itself\. "Closed"/.test(e)) || [a, e];
+  });
   check('SQL tx_lifecycle: manual covers in_progress and container operationally_complete', () =>
     (/'manual', v_next IN \('in_progress','under_billing','closed'\)/.test(MIG) && /v_next = 'operationally_complete' AND coalesce\(v_tx\.cargo_unit_type, 'container'\) <> 'roro'/.test(MIG)) || 'missing');
 
@@ -366,6 +378,16 @@ section('review regressions');
       && g3[0].state === 'draft' && g3[1].state === 'current' && !g3[1].detail === false
       && P.ownerStepOf('billed').code === 'o_billed' && P.ownerStepOf('nope') === null
       && dicts.ar['opslx.lc_o_active'] === 'نشطة' && dicts.ar['opslx.lc_o_under_billing'] === 'تحت الفوترة' && dicts.en['opslx.lc_o_closed'] === 'Finished') || J([g, g2.map(x => x.state)]);
+  });
+  check('owner order (request stages 3 → 4): appointment / transport → «منتهية تشغيليًا» before «إرجاع الحاوية الفارغة»; same grouping as app.default_stage_steps(); the server set is used as it comes', () => {
+    const own = LX.ownerSteps.map(g => g.code + '=' + g.members.join(','));
+    const m = /FUNCTION app\.default_stage_steps\(\)[\s\S]*?\) AS v\(/.exec(MIG_SETS);
+    const sql = m ? [...m[0].matchAll(/\('(o_\w+)',[^\n]*ARRAY\[([^\]]*)\]\)/g)].map(x => x[1] + '=' + x[2].replace(/'|\s/g, '')) : [];
+    const srv = [{ code: 'o_opdone', stages: ['appointment', 'transport'], state: 'current' }];
+    return (P.ownerStepOf('appointment').code === 'o_opdone' && P.ownerStepOf('transport').code === 'o_opdone' && P.ownerStepOf('customs_declaration').code === 'o_active'
+      && P.ownerStepOf('empty_return').code === 'o_empty' && P.ownerStepOf('operationally_complete').code === 'o_under_billing'
+      && J(own) === J(sql) && !('usableSteps' in P)
+      && J(P.groupStages([{ code: 'appointment', state: 'current' }], srv).map(x => x.code + ':' + x.state)) === J(['o_opdone:current'])) || J({ own, sql });
   });
   check('admin.css: dialog + settings-form errors become visible (.form-error is display:none by default)', () => {
     const CSS = fs.readFileSync(path.join(ROOT, 'assets/css/pages/admin.css'), 'utf8');

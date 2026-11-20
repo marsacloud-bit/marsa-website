@@ -19,7 +19,16 @@
    * «مسودات دفترة: N» (finance readers): report_transactions totals.by_daftra_state.draft of the same filters; its button
      applies the «مسودات دفترة فقط» quick filter. A click anywhere on a row opens the transaction (#tx/<id>, the ref link's
      target) unless it lands on a link / button / field / the container list or ends a text selection; the ref link stays the
-     keyboard target. #register?reset=1 (the dashboard «إجمالي المعاملات» tile) opens the statement with no filters.
+     keyboard target. #register?reset=1 (the dashboard «إجمالي المعاملات» tile; admin.js sends every plain #transactions here)
+     opens the statement with no filters.
+   * «الحالة» (owner stages, value "a,b" per box): a single internal status from a deep link (#register?status=transport)
+     is kept exactly — its box shows partly ticked (indeterminate) with a «حالة محددة: …» chip and a clear button, and a
+     submit keeps it unless the user ticks / unticks that box.
+   * «مسودة» (the old list's draft filter, 20261127000100): ?draft=only | approved, a quick chip and the «مسودة» pill. The
+     report_transactions RPC has no draft key (app.only_keys would reject it) and no is_draft in its rows, so the live drafts'
+     ids come from listTransactions({draft: 'only'}) and the filter applies to the loaded page (+ the export rows); an
+     is_draft on a row (a later server) is used as it comes. The drafts list is read once (limit DRAFT_CAP); a full answer
+     shows a warning (draft_capped) because drafts beyond it would count as approved.
    * Read only. Strings: 'lrpt' (assets/i18n/lrpt.js). Data → textContent / createElement only.
    ========================================================================== */
 (function () {
@@ -46,6 +55,8 @@
   };
   // the dashboard tiles / admin.js redirect speak status / stage / daftra / branchId
   var ALIAS = { status: 'operational_status', stage: 'declaration_status', daftra: 'daftra_state', branchId: 'branch_id' };
+  var DRAFT = ['only', 'approved'];   // ?draft= (client side, see the header)
+  var DRAFT_CAP = 500;                // listTransactions limit for the live drafts
   var ST = null, CF_STATE = null, ST_ORG = null;   // the filters belong to the org they were set in (ST_ORG)
 
   function count(v) { var s = String(v == null ? '' : v).trim(); return /^\d{1,4}$/.test(s) ? s : ''; }
@@ -58,6 +69,8 @@
       var val = type === 'count' ? count(v) : K.Q[type](v);
       if (type === 'codes' ? val.length : val !== '') { s[k] = val; any = true; }
     });
+    var dr = q ? (Array.isArray(q.draft) ? q.draft[0] : q.draft) : '';
+    if (DRAFT.indexOf(String(dr || '')) !== -1) { s.draft = String(dr); any = true; }
     if (q && q.offset) s.offset = K.Q.int(q.offset);
     return any ? s : null;
   }
@@ -68,8 +81,20 @@
       if (v == null || v === '' || (Array.isArray(v) && !v.length)) return;
       o[k === 'operational_status' ? 'status' : k === 'declaration_status' ? 'stage' : k] = v;
     });
+    if (DRAFT.indexOf(S.draft) !== -1) o.draft = S.draft;
     if (S.offset) o.offset = S.offset;
     return o;
+  }
+  // the drafts filter on loaded rows: drafts = { id: true } (listTransactions draft 'only'); a row's own is_draft wins
+  function isDraftRow(x, drafts) { return !!x && (x.is_draft === true || (x.is_draft == null && !!(drafts && drafts[x.id]))); }
+  function draftFilter(list, mode, drafts) {
+    if (DRAFT.indexOf(mode) === -1) return list;
+    return (list || []).filter(function (x) { return mode === 'only' ? isDraftRow(x, drafts) : !isDraftRow(x, drafts); });
+  }
+  // «الحالة» boxes (owner stages): the selection per box → 'all' | 'some' (with the selected members) | 'none'
+  function groupSel(members, sel) {
+    var on = members.filter(function (c) { return sel.indexOf(c) !== -1; });
+    return { state: on.length && on.length === members.length ? 'all' : on.length ? 'some' : 'none', on: on };
   }
   function toFilters(S, finRead) {
     var f = {};
@@ -105,7 +130,7 @@
     if (fromHash) { ST = Object.assign({ offset: 0 }, fromHash); CF_STATE = null; }
     if (!ST) ST = { offset: 0 };
     var S = ST;
-    var ctx = { finRead: finRead, clients: [], members: [] };
+    var ctx = { finRead: finRead, clients: [], members: [], drafts: {}, draftsOk: false, draftsCapped: false };
 
     U.clear(root);
     root.classList.add('ops-view', 'rpt-view', 'lrpt-register', 'lrpt-statement');
@@ -125,8 +150,14 @@
       var M = api && api.MarsaApi;
       return Promise.all([
         U.call(api, 'listClients', { orgId: api && api.orgId, limit: 500 }),
-        M && typeof M.listMemberships === 'function' ? U.call(api, 'listMemberships', api && api.orgId) : null
+        M && typeof M.listMemberships === 'function' ? U.call(api, 'listMemberships', api && api.orgId) : null,
+        // the live drafts (20261127000100) — the «مسودة» pill and filter; report_transactions does not carry is_draft
+        M && typeof M.listTransactions === 'function' ? U.call(api, 'listTransactions', { orgId: api && api.orgId, draft: 'only', cancelled: 'exclude', limit: DRAFT_CAP }) : null
       ]).then(function (res) {
+        ctx.drafts = {}; ctx.draftsOk = !!(res[2] && !res[2].error);
+        // the drafts list is read once with limit DRAFT_CAP: a full answer may miss drafts → said on screen (draft_capped)
+        ctx.draftsCapped = ctx.draftsOk && U.rowsOf(res[2].data).length >= DRAFT_CAP;
+        if (ctx.draftsOk) U.rowsOf(res[2].data).forEach(function (x) { if (x && x.id && x.is_draft !== false) ctx.drafts[x.id] = true; });
         ctx.clients = res[0] && !res[0].error ? U.rowsOf(res[0].data) : [];
         var seen = {};
         ctx.members = res[1] && !res[1].error ? U.rowsOf(res[1].data).filter(function (m) {
@@ -148,7 +179,8 @@
       { id: 'critical', key: 'attention', value: 'critical', label: 'q_critical' },
       { id: 'daftra_draft', key: 'daftra_state', value: 'draft', label: 'q_daftra_draft', fin: true },
       { id: 're_export', key: 'transaction_type', value: 're_export', label: 'q_re_export' },
-      { id: 'roro', key: 'cargo_unit_type', value: 'roro', label: 'q_roro' }
+      { id: 'roro', key: 'cargo_unit_type', value: 'roro', label: 'q_roro' },
+      { id: 'drafts', key: 'draft', value: 'only', label: 'q_drafts' }
     ];
     function drawQuick() {
       U.clear(quickBox);
@@ -188,6 +220,7 @@
         K.field(lt('f_unit'), K.select('cargo_unit_type', [['', t('all')], ['container', K.lab('cargo_unit_type', 'container', api)], ['roro', K.lab('cargo_unit_type', 'roro', api)]], S.cargo_unit_type)),
         K.field(lt('f_tx_type'), K.select('transaction_type', [['', t('all')], ['normal', K.lab('transaction_type', 'normal', api)], ['re_export', K.lab('transaction_type', 're_export', api)]], S.transaction_type)));
       if (finRead) F.push(K.field(lt('f_daftra_state'), K.select('daftra_state', [['', t('all')]].concat(opt(DAFTRA_STATES, function (c) { return K.famLab('tx_daftra_state', 'lrpt', 'dft_state', c); })), S.daftra_state)));
+      F.push(K.field(lt('f_draft'), K.select('draft', [['', t('all')], ['only', lt('f_draft_only')], ['approved', lt('f_draft_approved')]], S.draft)));
       F.push(K.field(lt('f_attention'), K.select('attention', [['', t('all')]].concat(opt(ATTENTION, function (c) { return lt('att_filter_' + c); })), S.attention)),
         K.field(t('f_date_field'), K.select('date_field', opt(DATE_FIELDS, function (c) { return K.lab('search_date_field', c, api) !== c ? K.lab('search_date_field', c, api) : lt('sdf_' + c); }), S.date_field || 'created')),
         K.field(t('f_from'), K.input('from', S.from, { type: 'date' })),
@@ -203,12 +236,38 @@
       // box standing for its internal stages (value "a,b", split on submit); a stage is ticked when all its stages are.
       // Without ops/tx-legacy.js the 10 internal stages show, as before.
       var LXo = window.MarsaOps && window.MarsaOps.legacyTx, OWN = LXo && Array.isArray(LXo.ownerSteps) ? LXo.ownerSteps : null;
+      // A deep link with a single internal status (#register?status=transport, a dashboard tile / bar) is kept as it is:
+      // its owner box shows partly ticked (indeterminate, data-partial = the exact codes) with a «حالة محددة: …» chip;
+      // ticking / unticking that box (or the chip's clear button) replaces the exact selection.
       var selSt = [].concat(S.operational_status || []);
       var stBoxes = OWN
         ? K.checks('operational_status', OWN.map(function (g) { return [g.members.join(','), LXo.t('lc_' + g.code)]; }),
-            OWN.filter(function (g) { return g.members.every(function (c) { return selSt.indexOf(c) !== -1; }); }).map(function (g) { return g.members.join(','); }))
+            OWN.filter(function (g) { return groupSel(g.members, selSt).state === 'all'; }).map(function (g) { return g.members.join(','); }))
         : K.checks('operational_status', opt(K.STAGES, function (c) { return K.lab('operational_status', c, api); }), selSt);
-      form.appendChild(el('fieldset', { class: 'rpt-fieldset' }, [el('legend', { class: 'form-label', text: t('f_status') }), stBoxes]));
+      var exact = [];
+      if (OWN) {
+        Array.prototype.forEach.call(stBoxes.querySelectorAll('input'), function (c) {
+          var cv = c.getAttribute('value') || c.value;
+          var g = OWN.filter(function (x) { return x.members.join(',') === cv; })[0], gs = g ? groupSel(g.members, selSt) : null;
+          if (!gs || gs.state !== 'some') return;
+          c.indeterminate = true;
+          c.setAttribute('data-partial', gs.on.join(','));
+          c.setAttribute('aria-checked', 'mixed');
+          exact = exact.concat(gs.on);
+          c.addEventListener('change', function () { c.indeterminate = false; c.removeAttribute('data-partial'); c.removeAttribute('aria-checked'); });
+        });
+      }
+      var stKids = [el('legend', { class: 'form-label', text: t('f_status') }), stBoxes];
+      if (exact.length) {
+        var clrSt = el('button', { type: 'button', class: 'btn btn-sm btn-ghost lrpt-st-exact-clear', 'data-act': 'clear-exact-status', text: lt('st_exact_clear') });
+        clrSt.addEventListener('click', function (e) {
+          e.preventDefault();
+          S.operational_status = selSt.filter(function (c) { return exact.indexOf(c) === -1; }); S.offset = 0; drawAll();
+        });
+        stKids.push(el('p', { class: 'chip lrpt-st-exact', role: 'status' }, [
+          el('span', { text: lt('st_exact', { list: exact.map(function (c) { return K.lab('operational_status', c, api); }).join(K.isEn() ? ', ' : '، ') }) }), clrSt]));
+      }
+      form.appendChild(el('fieldset', { class: 'rpt-fieldset' }, stKids));
       form.appendChild(err);
       var apply = el('button', { type: 'submit', class: 'btn btn-primary btn-sm rpt-go', text: t('apply') });
       var reset = el('button', { type: 'button', class: 'btn btn-subtle btn-sm rpt-clear', text: t('clear') });
@@ -220,8 +279,14 @@
         Object.keys(SCHEMA).forEach(function (k) {
           var type = SCHEMA[k];
           if (type === 'codes') {
-            s[k] = K.checkedValues(form, k);
-            if (k === 'operational_status') s[k] = s[k].reduce(function (acc, v) { return acc.concat(String(v).split(',')); }, []).filter(Boolean);
+            if (k !== 'operational_status') { s[k] = K.checkedValues(form, k); return; }
+            // a ticked box = its stages; a box still partly ticked (deep link, untouched) = the exact stages it stood for
+            var out = [];
+            Array.prototype.forEach.call(form.querySelectorAll('input[type=checkbox][name="operational_status"]'), function (c) {
+              var v = c.checked ? (c.getAttribute('value') || c.value) : c.indeterminate ? (c.getAttribute('data-partial') || '') : '';
+              String(v).split(',').forEach(function (x) { if (x && out.indexOf(x) === -1) out.push(x); });
+            });
+            s[k] = out;
             return;
           }
           var c = E[k];
@@ -229,6 +294,8 @@
           var v = String(c.value || '').trim();
           s[k] = type === 'text' ? v.slice(0, 80) : type === 'count' ? count(v) : type === 'pcode' ? K.Q.pcode(v) : v;
         });
+        var dv = E.draft ? String(E.draft.value || '') : (S.draft || '');
+        s.draft = DRAFT.indexOf(dv) !== -1 ? dv : '';
         var badCount = ['containers_min', 'containers_max'].filter(function (k) { var c = E[k]; return c && String(c.value || '').trim() && !s[k]; })[0];
         var msg = badCount ? lt('err_count') : validate(K, s);
         err.hidden = !msg; err.textContent = msg || '';
@@ -238,7 +305,7 @@
         load();
       });
       var open = ['client_code', 'client_category', 'port_code', 'vessel', 'operator_q', 'agent_q', 'employee_id', 'containers_min', 'containers_max', 'declaration_status', 'operational_status',
-        'from', 'to', 'q', 'declaration_no', 'bl_number', 'container_no', 'client_id', 'client_q'].some(function (k) { var v = S[k]; return v != null && v !== '' && !(Array.isArray(v) && !v.length); });
+        'from', 'to', 'q', 'declaration_no', 'bl_number', 'container_no', 'client_id', 'client_q', 'draft'].some(function (k) { var v = S[k]; return v != null && v !== '' && !(Array.isArray(v) && !v.length); });
       var det = el('details', { class: 'app-card ops-card lrpt-adv' }, [el('summary', { class: 'lrpt-adv-sum', text: lt('adv_filters') }), el('div', { class: 'app-card-body' }, form)]);
       det.open = !!open;
       formBox.appendChild(det);
@@ -302,7 +369,7 @@
     function countNode(x) { var n = x.unit_count != null ? x.unit_count : x.container_count; return U.ltr(K.fmtNum(n == null ? 0 : n, 0)); }
     // «حالة المعاملة» + the late / critical badge under it (the legacy statement)
     // owner decision 2026-11-19 (transaction-stages-request.md, م1): the status shows the owner's stage (جديدة · نشطة ·
-    // منتهية تشغيليًا · إرجاع الحاوية الفارغة · تحت الفوترة · تمت الفوترة · منتهية) from ops/tx-legacy.js; the server
+    // إرجاع الحاوية الفارغة · منتهية تشغيليًا · تحت الفوترة · تمت الفوترة · منتهية) from ops/tx-legacy.js; the server
     // stage stays in the tooltip. Without that module the server stage label shows, as before.
     function ownerStageLabel(code) {
       var LXo = window.MarsaOps && window.MarsaOps.legacyTx;
@@ -335,6 +402,7 @@
         { key: 'ref', label: lt('c_ref'), type: 'text', value: function (x) { return x.ref; }, cell: function (x) {
           return el('span', { class: 'lrpt-refcell' }, [K.txLinkCell(x.id, x.ref),
             x.cancelled_at ? U.pill('danger', K.lab('transaction_state', 'cancelled', api)) : null,
+            !x.cancelled_at && isDraftRow(x, ctx.drafts) ? el('span', { class: 'lrpt-draft-pill' }, U.pill('warning', lt('draft_pill'))) : null,
             x.transaction_type === 're_export' ? U.pill('warning', K.lab('transaction_type', 're_export', api)) : null,
             x.cargo_unit_type === 'roro' ? U.pill('info', 'Ro-Ro') : null]);
         } },
@@ -466,8 +534,16 @@
       var clearCf = el('button', { type: 'button', class: 'btn btn-sm btn-ghost rpt-cf-clear', text: lt('cf_clear_all'), hidden: true });
       clearCf.addEventListener('click', function (e) { e.preventDefault(); if (cf) cf.clearAll(); });
       var bar = K.exportBar({ api: api, def: def, ctx: { finRead: finRead }, total: total, getFilters: function () { return lastFilters; },
-        getRowFilter: function () { return cf && cf.active() ? cf.apply : null; },
-        getCriteria: function () { return cf && cf.active() ? cf.describe().map(function (p) { return [lt('cf_crit', { c: p[0] }), p[1]]; }) : null; } });
+        getRowFilter: function () {
+          var dOn = DRAFT.indexOf(S.draft) !== -1, cOn = !!(cf && cf.active());
+          if (!dOn && !cOn) return null;
+          return function (list) { var l = draftFilter(list, S.draft, ctx.drafts); return cOn ? cf.apply(l) : l; };
+        },
+        getCriteria: function () {
+          var c = cf && cf.active() ? cf.describe().map(function (p) { return [lt('cf_crit', { c: p[0] }), p[1]]; }) : [];
+          if (DRAFT.indexOf(S.draft) !== -1) c.unshift([lt('f_draft'), lt('f_draft_' + S.draft)]);
+          return c.length ? c : null;
+        } });
       body.appendChild(el('div', { class: 'rpt-result-head' }, [el('div', { class: 'rpt-count-box' }, [countP, clearCf]),
         el('div', { class: 'lrpt-export' }, [el('span', { class: 'lrpt-export-title text-xs text-muted', text: lt('followup_export') }), bar])]));
       var tableBox = el('div', { class: 'lrpt-reg-table' });
@@ -475,18 +551,23 @@
       body.appendChild(tableBox);
       function paint() {
         U.clear(tableBox);
-        var shown = cf ? cf.apply(items) : items, on = cf ? cf.active() : 0;
-        countP.textContent = on ? lt('cf_shown', { n: K.fmtNum(shown.length, 0), m: K.fmtNum(items.length, 0), total: K.fmtNum(total, 0) }) : t('results_n', { n: K.fmtNum(total, 0) });
-        clearCf.hidden = !on;
+        var dOn = DRAFT.indexOf(S.draft) !== -1, base = draftFilter(items, S.draft, ctx.drafts);
+        var shown = cf ? cf.apply(base) : base, cOn = cf ? cf.active() : 0, on = cOn || dOn;
+        countP.textContent = cOn ? lt('cf_shown', { n: K.fmtNum(shown.length, 0), m: K.fmtNum(items.length, 0), total: K.fmtNum(total, 0) })
+          : dOn ? lt('draft_shown', { n: K.fmtNum(shown.length, 0), m: K.fmtNum(items.length, 0), total: K.fmtNum(total, 0) }) : t('results_n', { n: K.fmtNum(total, 0) });
+        clearCf.hidden = !cOn;
         var totals = on ? [] : [{ ref: K.t('total_n', { n: K.fmtNum(tt.count != null ? tt.count : total, 0) }), unit_count: tt.units != null ? +tt.units : null,
           operational_status: lt('att_totals', { c: K.fmtNum((tt.attention || {}).critical || 0, 0), w: K.fmtNum((tt.attention || {}).warning || 0, 0) }) }];
         tableBox.appendChild(U.card(null, K.reportTable(cols, shown, totals, ctx, { caption: lt('reg_title'), rowId: function (x) { return x.id; }, rowClass: rowClass,
           thExtra: cf ? function (c) { return cf.button(c.key); } : null }), null, { flush: true, cls: 'lrpt-table-card' }));
       }
       paint();
+      if (DRAFT.indexOf(S.draft) !== -1 && !ctx.draftsOk) body.appendChild(U.alertBox('warning', lt('draft_unavailable')));
+      if (ctx.draftsOk && ctx.draftsCapped) body.appendChild(U.alertBox('warning', lt('draft_capped', { n: K.fmtNum(DRAFT_CAP, 0) })));
       var pg = K.pager(total, PAGE, S.offset || 0, function (o) { S.offset = o; load(); });
       if (pg) body.appendChild(pg);
       if (total > PAGE) body.appendChild(el('p', { class: 'text-xs text-muted lrpt-page-note', text: lt('cf_page_note', { n: K.fmtNum(PAGE, 0) }) }));
+      if (total > PAGE && DRAFT.indexOf(S.draft) !== -1) body.appendChild(el('p', { class: 'text-xs text-muted lrpt-page-note lrpt-draft-note', text: lt('draft_page_note', { n: K.fmtNum(PAGE, 0) }) }));
     }
     function drawAll() { drawQuick(); drawForm(); return load(); }
 
@@ -499,6 +580,6 @@
     render: function (root, api) { return render(root, api); },
     // test hooks
     _state: function () { return ST; }, _reset: function () { ST = null; CF_STATE = null; ST_ORG = null; },
-    _pure: { fromQuery: fromQuery, toQuery: toQuery, toFilters: toFilters, SCHEMA: SCHEMA, ALIAS: ALIAS }
+    _pure: { fromQuery: fromQuery, toQuery: toQuery, toFilters: toFilters, SCHEMA: SCHEMA, ALIAS: ALIAS, draftFilter: draftFilter, groupSel: groupSel }
   };
 })();

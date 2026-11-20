@@ -1325,11 +1325,21 @@
       .replace(/[ً-ْـ]/g, '')            // tashkeel + tatweel
       .replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه').trim();
   }
+  // Owner decision 2026-11-18: the old list (#transactions) and the register are one «المعاملات» item, so the palette
+  // lists it once: the register entry is dropped while 'transactions' is offered (admin.js sends #transactions to the
+  // register, unfiltered), and its names stay searchable on that one entry («كشف المعاملات» still finds it).
+  var NAV_MERGED = { register: 'transactions' };
   function navMatches(q) {
-    var out = [], nq = norm(q);
-    visibleNav().forEach(function (g) {
+    var out = [], nq = norm(q), vis = visibleNav(), shown = {};
+    vis.forEach(function (g) { g.items.forEach(function (it) { shown[it.id] = it; }); });
+    vis.forEach(function (g) {
       g.items.forEach(function (it) {
-        var hay = [navLabel(it), navLabel(it, 'ar'), navLabel(it, 'en'), it.id].map(norm).join(' ');
+        if (NAV_MERGED[it.id] && shown[NAV_MERGED[it.id]]) return;
+        var words = [navLabel(it), navLabel(it, 'ar'), navLabel(it, 'en'), it.id];
+        Object.keys(NAV_MERGED).forEach(function (m) {
+          if (NAV_MERGED[m] === it.id && shown[m]) words.push(navLabel(shown[m]), navLabel(shown[m], 'ar'), navLabel(shown[m], 'en'), m);
+        });
+        var hay = words.map(norm).join(' ');
         if (!nq || hay.indexOf(nq) !== -1) out.push({ group: 'nav', title: navLabel(it), sub: groupLabel(g), icon: it.icon, href: itemHref(it) });
       });
     });

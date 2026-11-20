@@ -494,18 +494,29 @@ async function secLifecycle() {
     await mkTrip('jed', { transaction_id: X.l1, container_id: X.l1c });
     return (await st(X.l1)) === 'transport' && (await autoEvents(X.l1)).pop().payload.cause === 'trip';
   });
-  // owner decision 2026-11-19 (20261204000100_tx_stage_sets, docs/owner/transaction-stages-request.md): once every container's
-  // return is verified / waived the transaction goes on to the accountant by itself (empty_return → operationally_complete →
-  // under_billing, cause all_returned); before that rule operationally_complete and under_billing were manual only
-  await check('container return recorded (waiver by a senior role) → empty_return, then (every container waived) operationally_complete and under_billing automatically', async () => {
+  // owner decision 2026-11-20 (CLAUDE.md, docs/owner/transaction-stages-request.md): «تحت الفوترة» stays MANUAL, never
+  // automatic — the last verified / waived return moves nothing past empty_return
+  await check('container return recorded (waiver by a senior role) → empty_return, never operationally_complete (manual step)', async () => {
     await as('opsm', `UPDATE public.containers SET return_status = 'waived', waiver_reason = 'استثناء اختبار' WHERE id = $1`, [X.l1c]);
-    const e = (await autoEvents(X.l1)).slice(-3);
-    return ((await st(X.l1)) === 'under_billing' && J(e.map(x => x.to_status)) === J(['empty_return', 'operationally_complete', 'under_billing'])
-      && J(e.map(x => x.payload.cause)) === J(['container_return', 'all_returned', 'all_returned'])) || J({ st: await st(X.l1), e });
+    return ((await st(X.l1)) === 'empty_return' && (await autoEvents(X.l1)).pop().payload.cause === 'container_return') || await st(X.l1);
   });
-  await check('invoice issued while under_billing (reached automatically) → billed', async () => {
+  await check('manual operationally_complete still works (gate passes: every container waived)', async () =>
+    (await setStatus('jed', X.l1, 'operationally_complete')).to === 'operationally_complete');
+  await check('nothing auto-moves into under_billing; financial invoiced while operationally_complete → no billed', async () => {
     await asWorker(`UPDATE public.transactions SET financial_status = 'invoiced' WHERE id = $1`, [X.l1]);
-    return (await st(X.l1)) === 'billed' || await st(X.l1);
+    return (await st(X.l1)) === 'operationally_complete';
+  });
+  await check('guard (owner 2026-11-20): advance_tx_status refuses under_billing and closed for every cause (all_returned included); no automatic event ever reaches them', async () => {
+    const t = await mkTx('jed', {});
+    await q(`UPDATE public.transactions SET operational_status = 'operationally_complete' WHERE id = $1`, [t]);
+    const r = [];
+    for (const c of ['all_returned', 'container_return', 'trip', 'invoiced', 'declaration_released']) {
+      r.push((await one(`SELECT app.advance_tx_status($1, 'under_billing', $2) x`, [t, c])).x);
+      r.push((await one(`SELECT app.advance_tx_status($1, 'closed', $2) x`, [t, c])).x);
+    }
+    const ev = await num(`SELECT count(*) n FROM public.transaction_events WHERE event_type = 'operational_status'
+                              AND to_status IN ('under_billing','closed') AND coalesce((payload ->> 'auto')::boolean, false)`);
+    return (r.every(x => x === 'operationally_complete') && (await st(t)) === 'operationally_complete' && ev === 0) || J({ r, ev });
   });
   await check('invoice issued while under_billing → billed (cause invoiced; the G5 worker as service_role)', async () => {
     const t = await mkTx('jed', {});
@@ -602,21 +613,20 @@ async function secLifecycle() {
     const r = await lifecycle('jed', X.cancelledTx);
     return (r.cancelled === true && r.cancelled_at && r.next === null && r.operational_status === 'closed') || J(r);
   });
-  // owner decision 2026-11-19: operationally_complete is automatic for a container transaction too (every return verified)
-  await check('review: next in_progress is manual; next operationally_complete on a container transaction is automatic (owner 2026-11-19)', async () => {
+  await check('review: next operationally_complete is manual on a container transaction, in_progress is manual', async () => {
     const t = await mkTx('jed', {});
     await addCtr('jed', t, 'LIFU0000013');
     const a = (await lifecycle('jed', t)).next;
     await q(`UPDATE public.transactions SET operational_status = 'empty_return' WHERE id = $1`, [t]);
     const b = (await lifecycle('jed', t)).next;
-    return (a.code === 'in_progress' && a.manual === true && b.code === 'operationally_complete' && b.manual === false) || J({ a, b });
+    return (a.code === 'in_progress' && a.manual === true && b.code === 'operationally_complete' && b.manual === true) || J({ a, b });
   });
-  await check('next under_billing (container: automatic since 2026-11-19) reports the containers not returned', async () => {
+  await check('next under_billing is manual and reports the containers not returned', async () => {
     const t = await mkTx('jed', {});
     await addCtr('jed', t, 'LIFU0000003');
     await q(`UPDATE public.transactions SET operational_status = 'operationally_complete' WHERE id = $1`, [t]);
     const r = await lifecycle('jed', t);
-    return (r.next.code === 'under_billing' && r.next.manual === false && r.next.containers_not_returned === 1 && r.follow_up_required === true) || J(r.next);
+    return (r.next.code === 'under_billing' && r.next.manual === true && r.next.containers_not_returned === 1 && r.follow_up_required === true) || J(r.next);
   });
   await check('Ro-Ro stepper: appointment + empty_return are skipped (never todo / done) and next never points at them', async () => {
     const t = await mkTx('jed', { bl_number: 'RORO-STEP', cargo_unit_type: 'roro', chassis_no: 'VIN0003' });

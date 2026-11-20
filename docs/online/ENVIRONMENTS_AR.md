@@ -1,6 +1,8 @@
 # البيئات والأسرار والنشر — مرسى (مرساة كلاود)
 
-> **الحالة:** توجد اليوم بيئتان فقط تعملان: التطوير المحلي، وبيئة **Staging** ببيانات اختبار. **لا توجد بيئة إنتاج بعد**، وإنشاؤها قرار للمالك له شروط مسبقة (القسم 3).
+> **الحالة (تحديث 20 نوفمبر 2026):** منذ **12 نوفمبر 2026** صار `marsacloud.com` ومشروع Supabase الذي خلفه (`cgzhidyxfpksfckwmauq`) هما **الإنتاج**: حُوِّل المشروع التجريبي في مكانه بقرار المالك (2026-11-08)، ولا توجد بيئة Staging منفصلة. انظر [`CONVERT_IN_PLACE_AR.md`](CONVERT_IN_PLACE_AR.md) و[`PRODUCTION_CUTOVER_AR.md`](PRODUCTION_CUTOVER_AR.md).
+> فيه **بيانات حقيقية**، ومعها بيانات اختبار معلَّمة بوضوح (عملاء «تجريبي — …»، بوالص `TESTBL…`، حاويات `TSTU…`) تُحذف بـ `supabase/seed/test_data_cleanup.sql`. **أي ترحيل أو نشر إليه يحتاج موافقة صريحة من المالك ونسخة احتياطية قبله.**
+> ما يأتي أدناه عن «Staging ببيانات وهمية» و«الإنتاج غير موجود» يصف الوضع قبل 12 نوفمبر 2026، ويُقرأ على أنه عن هذا المشروع نفسه (الإنتاج الآن). النشر للإنتاج من `scripts/build-release.sh --in-place` (انظر `CONVERT_IN_PLACE_AR.md`)، والنسخ اليدوي في القسم 4.1 مرجع قديم.
 > مراجع: [`ARCHITECTURE.md`](ARCHITECTURE.md) (المعمارية)، [`SETUP_AR.md`](SETUP_AR.md) (تجهيز Staging)، [`BACKUP_RESTORE_AR.md`](BACKUP_RESTORE_AR.md) (النسخ الاحتياطي والاسترجاع)، [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) (طريقة العمل).
 
 ## 1) نظرة عامة
@@ -9,8 +11,8 @@
 |---|---|---|---|---|
 | **Demo (عرض محلي)** | الملفات مباشرة أو `http://127.0.0.1:8000` | لا شيء — `localStorage` في المتصفح | ما يُدخله المستخدم على جهازه | قائمة |
 | **Dev / Local PGlite** | خادم محلي `python3 -m http.server` | PGlite ‏(Postgres 16 في الذاكرة) داخل الاختبارات فقط | بيانات `seed.sql` + بيانات الاختبارات، تُمسح بعد كل تشغيل | قائمة |
-| **Staging** | `https://marsacloud.com` على Hostinger، مفتوح بلا كلمة مرور للموقع منذ 2026-11-04 (الدخول عبر حسابات مرسى فقط، ومحجوب عن محركات البحث) | مشروع Supabase التجريبي (المعرّف `cgzhidyxfpksfckwmauq`) | بيانات وهمية فقط (`@example.com`) — `organizations.environment = 'staging'` | قائمة، الهدف الحالي |
-| **Production** | لم يُحدد | مشروع Supabase منفصل (مستقبلًا) | بيانات حقيقية | **غير موجودة** |
+| **Staging (قبل 2026-11-12) ← الإنتاج الآن** | `https://marsacloud.com` على Hostinger، مفتوح بلا كلمة مرور للموقع منذ 2026-11-04 (الدخول عبر حسابات مرسى فقط، ومحجوب عن محركات البحث) | مشروع Supabase التجريبي (المعرّف `cgzhidyxfpksfckwmauq`) | كانت وهمية فقط؛ منذ 2026-11-12 بيانات حقيقية + بيانات اختبار معلَّمة «تجريبي — » — `organizations.environment = 'production'` | **الإنتاج** |
+| **Production (مشروع منفصل)** | — | لم يُنشأ؛ استُبدل بالتحويل في المكان (`CONVERT_IN_PLACE_AR.md`) | — | **لن يُنشأ حاليًا** |
 
 القاعدة الحاكمة: **كل بيئة لها مشروع Supabase مستقل ومفاتيح مستقلة.** لا تُشارك قاعدة بيانات بين Staging والإنتاج، ولا تُنسخ بيانات حقيقية إلى Staging.
 
@@ -92,7 +94,7 @@ rsync -a --delete \
   --exclude '.htaccess' --exclude '.htpasswd' --exclude '_headers' --exclude 'robots.txt' \
   --include 'docs/' --include 'docs/guide/***' --exclude 'docs/**' \
   --exclude 'supabase/' --exclude 'scripts/' --exclude '.github/' \
-  --exclude 'CONTRIBUTING.md' --exclude 'README.md' --exclude '.gitignore' \
+  --exclude 'CONTRIBUTING.md' --exclude 'README.md' --exclude 'CLAUDE.md' --exclude '.gitignore' \
   --exclude 'assets/js/config.example.js' \
   /tmp/marsa-export/ ~/Downloads/marsa-deploy/
 grep -rn "sb_secret_\|service_role" ~/Downloads/marsa-deploy/assets/js/config.js && echo "STOP: secret key in config.js"
@@ -100,9 +102,10 @@ cd ~/Downloads/marsa-deploy && zip -r -X ~/Downloads/marsa-releases/marsa-releas
 ```
 (أنشئ المجلد `~/Downloads/marsa-releases` مرة واحدة. ملفات الإصدار خارج المستودع، و`.gitignore` يمنع `marsa-release-*.zip` احتياطًا.)
 
-**منذ G7 (القرار G7-19):** المجلد `docs/guide/` (أدلة المستخدم `ar/` و`en/` التي تعرضها صفحة `help.html`) **يُنشر** مع الموقع، وبقية `docs/` (مثل `docs/online/` و`docs/import-templates/` و`docs/partials.md`) تبقى مستثناة. تحقق بعد `rsync`:
+**منذ G7 (القرار G7-19):** المجلد `docs/guide/` (أدلة المستخدم `ar/` و`en/` التي تعرضها صفحة `help.html`) **يُنشر** مع الموقع، وبقية `docs/` (مثل `docs/online/` و`docs/owner/` بملفات Word التي فيه، و`docs/import-templates/` و`docs/partials.md`) تبقى مستثناة بالقاعدة `--exclude 'docs/**'`. ولا يُنشر أي ملف `.md` في جذر المستودع (`README.md` و`CONTRIBUTING.md` و`CLAUDE.md`). تحقق بعد `rsync`:
 ```bash
 ls ~/Downloads/marsa-deploy/docs/            # guide only
+ls ~/Downloads/marsa-deploy/*.md 2>/dev/null   # nothing (no README / CONTRIBUTING / CLAUDE)
 ls ~/Downloads/marsa-deploy/docs/guide/ar ~/Downloads/marsa-deploy/docs/guide/en   # index admin ops finance client-portal platform (.md)
 ```
 إن قرر المالك لاحقًا عدم نشر أي شيء من `docs/` تُنقل الأدلة إلى `assets/guide/` (قرار مفتوح في `G7_SPEC.md`).
@@ -121,7 +124,8 @@ ls ~/Downloads/marsa-deploy/docs/guide/ar ~/Downloads/marsa-deploy/docs/guide/en
 
 ## 5) قائمة فحص قبل كل نشر
 - [ ] الاختبارات ناجحة (`rls-tests.js`، `g2-tests.js`، `restore-drill.js`، و`node --check` لملفات JS المعدّلة).
-- [ ] نسخة احتياطية من Staging أُخذت قبل أي ترحيل جديد.
-- [ ] الترحيلات الجديدة طُبّقت على Staging قبل رفع الواجهة التي تعتمد عليها.
+- [ ] موافقة صريحة من المالك على النشر أو الترحيل (القاعدة هي الإنتاج منذ 2026-11-12).
+- [ ] نسخة احتياطية من قاعدة البيانات (`scripts/backup-staging.sh`؛ اسمه قديم) ومن `public_html` أُخذت قبل أي ترحيل أو نشر جديد.
+- [ ] الترحيلات الجديدة طُبّقت على قاعدة البيانات (الإنتاج) قبل رفع الواجهة التي تعتمد عليها.
 - [ ] `config.js` في نسخة النشر يحتوي المفتاح العام فقط.
 - [ ] الإصدار السابق محفوظ، و`.htaccess` لم يتغير.

@@ -182,6 +182,24 @@ async function secSeed() {
     const need = ['new','in_progress','customs_declaration','appointment','transport','empty_return','operationally_complete','under_billing','billed','closed','cancelled'];
     return need.every(s => by[s] > 0) || J(by);
   });
+  // the seed's status plan, exactly (owner decision 2026-11-20: «تحت الفوترة» stays manual — the last waived return must
+  // not move a transaction on by itself, so empty_return keeps its 7 and the later stages their own counts)
+  await check('per-status spread = the plan: new 6, in_progress 6, customs_declaration 10, appointment 7, transport 9, empty_return 7, operationally_complete 6, under_billing 5, billed 3, closed 1, cancelled 1 (61)', async () => {
+    const by = seedRow.transactions_by_status;
+    const plan = { new: 6, in_progress: 6, customs_declaration: 10, appointment: 7, transport: 9, empty_return: 7,
+      operationally_complete: 6, under_billing: 5, billed: 3, closed: 1, cancelled: 1 };
+    const got = {};
+    for (const k of Object.keys(by)) got[k] = Number(by[k]);
+    const keys = Object.keys(got).sort(), want = Object.keys(plan).sort();
+    return (J(keys) === J(want) && want.every(k => got[k] === plan[k]) && Number(seedRow.transactions) === 61) || J({ got, plan });
+  });
+  await check('no automatic move past empty_return during the seed (every operationally_complete / under_billing / billed / closed event was a hand move)', async () => {
+    const r = await one(`SELECT count(*) n FROM transaction_events e JOIN transactions t ON t.id = e.transaction_id
+                          WHERE t.bl_number LIKE 'TESTBL%' AND e.event_type = 'operational_status'
+                            AND e.to_status IN ('operationally_complete','under_billing','billed','closed')
+                            AND coalesce((e.payload ->> 'auto')::boolean, false)`);
+    return Number(r.n) === 0 || J(r);
+  });
   await check('statuses match the data: appointment ⇒ appointment(s) and no trip; transport+ (containers) ⇒ trips; complete+ ⇒ all returned', async () => {
     const r = await one(`
       SELECT count(*) FILTER (WHERE t.operational_status = 'appointment' AND (NOT EXISTS (SELECT 1 FROM port_appointments a WHERE a.transaction_id = t.id)

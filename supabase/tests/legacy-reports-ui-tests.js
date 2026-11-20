@@ -158,7 +158,7 @@ check('modules registered: views register / fasah_recon / changes / attention_ru
 check('read only: no step-8 view calls a write RPC except the owner settings (setStatusAgingRules / setEmailOtpLogin; + setEmptyReturnRules / setReturnExtensionTemplate of 20261128000100) and the export log', () => {
   const ui = SRC.register + SRC.recon + SRC.audit + SRC.colfilter;
   const calls = (ui.match(/U\.call\(api, '([a-zA-Z]+)'/g) || []).map(s => s.replace(/U\.call\(api, '|'/g, ''));
-  const allowed = ['reportTransactions', 'txAttention', 'listClients', 'listMemberships', 'reportFasahScope', 'logReportExport', 'auditTrail'];
+  const allowed = ['reportTransactions', 'txAttention', 'listClients', 'listMemberships', 'listTransactions', 'reportFasahScope', 'logReportExport', 'auditTrail'];
   const rulesCalls = (SRC.rules.match(/U\.call\(api, '([a-zA-Z]+)'/g) || []).map(s => s.replace(/U\.call\(api, '|'/g, ''));
   return (calls.every(c => allowed.indexOf(c) !== -1) && J([...new Set(rulesCalls)].sort()) === J(['getEmptyReturnRules', 'getStatusAgingRules', 'setEmailOtpLogin', 'setEmptyReturnRules', 'setReturnExtensionTemplate', 'setStatusAgingRules'])
     && !/approve[A-Z]\w*\(|aiExtract|createBilling|pushDaftra|createDaftraDraft/.test(ui)) || J([calls, rulesCalls]);
@@ -257,18 +257,23 @@ check('app-shell NAV: register / fasah_recon (staff), attention_rules (staff), c
     && /'transactions', 'register',/.test(SRC.admin) && /'reports', 'fasah_recon',/.test(SRC.admin) && /'attention_rules', 'audit', 'changes',/.test(SRC.admin)) || 'nav');
 // owner decision 2026-11-18 (docs/owner/sections-decisions.md): the old list is merged into the register «المعاملات»,
 // so every #transactions (with or without a query) opens #register while the register is there; #tx/<id> is untouched
-check('admin.js: every #transactions (filtered, branch-only or plain) opens #register when it is there, only the known filters travel; #tx/<id> and a missing register keep the old route', () => {
+// review fix 2026-11-20: a plain #transactions (menu, KPI tiles «المعاملات المفتوحة» / «مستندات», «عرض الكل», ?status=) opens it UNFILTERED (reset=1)
+check('admin.js: every #transactions (filtered, branch-only or plain) opens #register when it is there, only the known filters travel, a plain / branch-only one with reset=1; #tx/<id> and a missing register keep the old route', () => {
   const m = /function registerRedirect\(r\) \{([\s\S]*?)\n  \}/.exec(SRC.admin);
   if (!m) return 'no registerRedirect';
   const fn = new Function('registerMerged', 'return function (r) {' + m[1] + '};')(() => true);
   const off = new Function('registerMerged', 'return function (r) {' + m[1] + '};')(() => false);
   return (fn({ name: 'transactions', query: 'status=new' }) === 'status=new' && fn({ name: 'transactions', query: 'stage=released&branchId=x' }) === 'stage=released&branchId=x'
     && fn({ name: 'transactions', query: 'daftra_state=draft' }) === 'daftra_state=draft' && fn({ name: 'transactions', query: 'attention=any&evil=1' }) === 'attention=any'
-    && fn({ name: 'transactions', query: 'status=' }) === '' && fn({ name: 'transactions', query: 'branchId=abc' }) === 'branchId=abc' && fn({ name: 'transactions', query: '' }) === ''
-    && fn({ name: 'transactions' }) === '' && fn({ name: 'transactions', id: 'x', query: '' }) === null
+    && fn({ name: 'transactions', query: 'status=' }) === 'reset=1' && fn({ name: 'transactions', query: 'branchId=abc' }) === 'reset=1&branchId=abc' && fn({ name: 'transactions', query: '' }) === 'reset=1'
+    && fn({ name: 'transactions' }) === 'reset=1' && fn({ name: 'transactions', id: 'x', query: '' }) === null && fn({ name: 'transactions', query: 'status=transport&status=appointment' }) === 'status=transport&status=appointment'
     && fn({ name: 'clients', query: 'status=new' }) === null && off({ name: 'transactions', query: 'status=new' }) === null && off({ name: 'transactions', query: '' }) === null
     && /history\.replaceState\(null, '', '#register' \+ \(rq \? '\?' \+ rq : ''\)\)/.test(SRC.admin) && /href: '#register', 'data-act': 'open-register'/.test(SRC.admin)) || 'redirect';
 });
+check('admin.js: the KPI tiles «المعاملات المفتوحة» / «مستندات» / «عرض الكل» stay plain #transactions links (→ reset=1); a transaction\'s back link returns to the register as the user left it', () =>
+  (/label: t\('kpi_tx_open'\)[^\n]*href: '#transactions'/.test(SRC.admin) && /label: t\('kpi_docs'\)[^\n]*href: '#transactions'/.test(SRC.admin) && /href: '#transactions\?status=', text: t\('see_all'\)/.test(SRC.admin)
+    && /function txBackHref\(\) \{ return registerMerged\(\) \? '#register' : '#transactions'; \}/.test(SRC.admin) && (SRC.admin.match(/head\([^\n]*txBackHref\(\)\)/g) || []).length === 2
+    && /actions, txBackHref\(\)\);/.test(SRC.admin)) || 'links');
 // owner report 2026-11-19: in RTL the popover sat at the far right edge (the CSS inset-inline-start = right stayed set,
 // and a right-to-left box with left + right + width ignores left) → place() clears right / bottom and opens under the column
 check('colfilter place(): fixed, width, right = auto, bottom = auto, then left (opens right under its column in RTL)', () => {
@@ -602,9 +607,9 @@ function rtApi(calls, rows) {
       const b = root.querySelector('.lrpt-banner');
       return (b && /alert-danger/.test(b.className) && /1 معاملة متأخرة و1 تحتاج متابعة/.test(b.textContent) && /تجاوز آخر موعد لإعادة الفارغ: 1/.test(b.textContent) && !!b.querySelector('.lrpt-late-toggle')) || textOf(b);
     });
-    check('quick filters: all, late, critical, Daftra drafts (finance reader), re-export, Ro-Ro; «الكل» pressed', () => {
+    check('quick filters: all, late, critical, Daftra drafts (finance reader), re-export, Ro-Ro, drafts (review fix 2026-11-20); «الكل» pressed', () => {
       const q = root.querySelectorAll('[data-quick]').map(b => b.getAttribute('data-quick'));
-      return (J(q) === J(['all', 'late', 'critical', 'daftra_draft', 're_export', 'roro']) && root.querySelector('[data-quick="all"]').getAttribute('aria-pressed') === 'true') || J(q);
+      return (J(q) === J(['all', 'late', 'critical', 'daftra_draft', 're_export', 'roro', 'drafts']) && root.querySelector('[data-quick="all"]').getAttribute('aria-pressed') === 'true') || J(q);
     });
     const trs = () => root.querySelectorAll('.lrpt-table-card tbody tr');
     check('table: 3 rows, stage row tones + the attention stripe class, the Daftra column for a finance reader, a totals row', () => {
@@ -777,6 +782,110 @@ function rtApi(calls, rows) {
       const det = root.querySelector('.lrpt-adv');
       return (det && det.open === true && root.querySelectorAll('.rpt-field').every(g => !!g.querySelector('label'))) || 'adv';
     });
+  }
+
+  {
+    // review fix 2026-11-20 (1): the «الحالة» boxes stand for the owner stages ("a,b"); a deep link with ONE internal status
+    // (#register?status=transport, a dashboard tile / bar) is kept exactly — partly ticked box + «حالة محددة» chip
+    // the owner's grouping (same as ops/tx-legacy.js OWNER_STEPS and app.default_stage_steps())
+    const STEPS = [{ code: 'o_new', members: ['new', 'in_progress'] }, { code: 'o_active', members: ['customs_declaration'] },
+      { code: 'o_opdone', members: ['appointment', 'transport'] }, { code: 'o_empty', members: ['empty_return'] }, { code: 'o_under_billing', members: ['operationally_complete', 'under_billing'] },
+      { code: 'o_billed', members: ['billed'] }, { code: 'o_closed', members: ['closed'] }];
+    const LBL = { lc_o_new: 'جديدة', lc_o_active: 'نشطة', lc_o_empty: 'إرجاع الحاوية الفارغة', lc_o_opdone: 'منتهية تشغيليًا', lc_o_under_billing: 'تحت الفوترة', lc_o_billed: 'تمت الفوترة', lc_o_closed: 'منتهية' };
+    const stub = () => ({ ownerSteps: STEPS, t: k => LBL[k] || k, ownerStepOf: c => STEPS.filter(g => g.members.indexOf(c) !== -1)[0] || null });
+    const ctx = context(), calls = [];
+    ctx.w.MarsaOps.legacyTx = stub();
+    const R = ctx.w.MarsaOps.views.register; R._reset();
+    const show = async (q) => { calls.length = 0; const root = ctx.document.createElement('div'); ctx.document.body.appendChild(root);
+      await R.render(root, mkApi(ctx, rtApi(calls), ['clearance_staff'], { hashQuery: () => q })); await settle(20); return root; };
+    const box = (root, v) => root.querySelectorAll('input').filter(c => c.getAttribute('name') === 'operational_status' && c.getAttribute('value') === v)[0];
+    // the fake DOM does not reflect value="" attributes to .value: pin the selects' empty options before a submit
+    const submit = async root => { root.querySelectorAll('option').forEach(o => { if (o.getAttribute('value') != null) o.value = o.getAttribute('value'); });
+      root.querySelector('form.rpt-filters').dispatch('submit'); await settle(20); };
+    const lastRt = () => calls.filter(c => c[0] === 'rt').pop();
+    let root = await show({ status: 'transport' });
+    const act = box(root, 'appointment,transport');
+    check('?status=transport: sent exactly (operational_status transport), the «منتهية تشغيليًا» box partly ticked (indeterminate, aria-checked mixed, data-partial), not checked', () =>
+      (lastRt() && lastRt()[1].operational_status === 'transport' && act && act.checked === false && act.indeterminate === true && act.getAttribute('data-partial') === 'transport'
+        && act.getAttribute('aria-checked') === 'mixed' && box(root, 'new,in_progress').indeterminate !== true) || J([lastRt(), act && act.attrs]));
+    check('… a «حالة محددة: …» chip names the exact status, with a clear button; the advanced filters are open', () => {
+      const chip = root.querySelector('.lrpt-st-exact');
+      return (chip && /حالة محددة: النقل/.test(chip.textContent) && !!chip.querySelector('[data-act="clear-exact-status"]') && root.querySelector('.lrpt-adv').open === true) || textOf(chip);
+    });
+    await submit(root);
+    check('… «تطبيق» with the box untouched keeps the exact status (not dropped, not widened to the whole stage)', () =>
+      (lastRt() && lastRt()[1].operational_status === 'transport' && /status=transport/.test(ctx.location.hash) && !/appointment/.test(ctx.location.hash)) || J([lastRt(), ctx.location.hash]));
+    root = await show({ status: 'transport' });
+    { const b = box(root, 'appointment,transport'); b.checked = true; b.dispatch('change'); }   // a user tick (the browser clears indeterminate)
+    await submit(root);
+    check('… ticking that box then «تطبيق» selects the whole stage (its 2 internal statuses)', () =>
+      (lastRt() && J(lastRt()[1].operational_status) === J(['appointment', 'transport'])) || J(lastRt()));
+    root = await show({ status: 'transport' });
+    root.querySelector('[data-act="clear-exact-status"]').click(); await settle(20);
+    check('… the chip\'s clear button drops the exact status (reload with no status filter, no chip)', () =>
+      (lastRt() && !('operational_status' in lastRt()[1]) && !root.querySelector('.lrpt-st-exact')) || J(lastRt()));
+    root = await show({ status: ['transport', 'appointment'] });
+    check('a whole stage from the address (all its statuses) is a plain ticked box, no chip', () => {
+      const b = box(root, 'appointment,transport');
+      return (b.checked === true && b.indeterminate !== true && !root.querySelector('.lrpt-st-exact')) || J(b.attrs);
+    });
+    const P = R._pure;
+    check('pure groupSel: all / some (+ the selected members) / none', () =>
+      (P.groupSel(['a', 'b'], ['a', 'b']).state === 'all' && P.groupSel(['a', 'b'], ['b']).state === 'some' && J(P.groupSel(['a', 'b'], ['b', 'x']).on) === J(['b']) && P.groupSel(['a'], []).state === 'none') || 'groupSel');
+  }
+  {
+    // review fix 2026-11-20 (2): the old list's «مسودة» filter + pill in the merged register. report_transactions has no
+    // draft key (app.only_keys) and no is_draft, so the drafts come from listTransactions({draft:'only'}); never sent to it
+    const ctx = context(), calls = [];
+    const A = Object.assign(rtApi(calls), { listTransactions: o => { calls.push(['lt', o]); return ok([{ id: TX2, ref: 'T-2', is_draft: true }]); } });
+    const R = ctx.w.MarsaOps.views.register; R._reset();
+    const show = async (q, api) => { calls.length = 0; const root = ctx.document.createElement('div'); ctx.document.body.appendChild(root);
+      await R.render(root, mkApi(ctx, api || A, ['clearance_staff'], { hashQuery: () => q || {} })); await settle(20); return root; };
+    const trs = root => root.querySelectorAll('.lrpt-table-card tbody tr');
+    let root = await show();
+    const lt0 = calls.filter(c => c[0] === 'lt')[0];
+    check('the live drafts are read once: listTransactions({orgId, draft: only, cancelled: exclude, limit: 500})', () =>
+      (lt0 && lt0[1].draft === 'only' && lt0[1].cancelled === 'exclude' && lt0[1].orgId === ORG && lt0[1].limit === 500) || J(calls.filter(c => c[0] !== 'rt' && c[0] !== 'att')));
+    check('the «مسودة» pill sits in the ref cell of the draft row only', () => {
+      const r = trs(root), pill = i => !!r[i].querySelector('.lrpt-draft-pill');
+      return (r.length === 3 && !pill(0) && pill(1) && !pill(2) && /مسودة/.test(r[1].querySelector('.lrpt-draft-pill').textContent)) || r.map(x => x.textContent);
+    });
+    check('a «المسودات فقط» quick chip and a «مسودة» select (الكل / المسودات فقط / المعتمدة فقط) in the advanced filters', () => {
+      const sel = root.querySelector('[name="draft"]');
+      return (root.querySelector('[data-quick="drafts"]') && sel && J(sel.options.map(o => o.getAttribute('value'))) === J(['', 'only', 'approved'])) || (sel ? J(sel.options.map(o => o.getAttribute('value'))) : 'no draft filter');
+    });
+    root.querySelector('[data-quick="drafts"]').click(); await settle(20);
+    const rq = calls.filter(c => c[0] === 'rt').pop();
+    check('«المسودات فقط»: draft=only in the hash, NOT sent to report_transactions, only the draft row shown, the count says so, no totals row', () =>
+      (/draft=only/.test(ctx.location.hash) && rq && !('draft' in rq[1]) && trs(root).length === 1 && /T-2/.test(trs(root)[0].textContent)
+        && /بعد تصفية «مسودة»/.test(root.querySelector('.rpt-count').textContent) && !root.querySelector('.lrpt-table-card tfoot .rpt-total-row')
+        && root.querySelector('[data-quick="drafts"]').getAttribute('aria-pressed') === 'true') || J([ctx.location.hash, rq, trs(root).length]));
+    root = await show({ draft: 'approved' });
+    check('?draft=approved: the two non-draft rows (draft=approved stays in the hash)', () =>
+      (trs(root).length === 2 && !trs(root).some(r => /T-2/.test(r.textContent)) && /draft=approved/.test(ctx.location.hash)) || trs(root).length);
+    R._reset();
+    root = await show({ draft: 'evil' });
+    check('an unknown ?draft= value is ignored (all rows)', () => trs(root).length === 3 || trs(root).length);
+    const P = R._pure;
+    check('pure: fromQuery / toQuery keep draft (only | approved); toFilters never sends it; draftFilter prefers a row\'s own is_draft', () => {
+      const s = P.fromQuery(K, { draft: 'only' });
+      return (s && s.draft === 'only' && P.toQuery({ draft: 'approved' }).draft === 'approved' && !('draft' in P.toFilters({ draft: 'only' }, true))
+        && J(P.draftFilter([{ id: 'a', is_draft: false }, { id: 'b' }], 'only', { a: true, b: true }).map(x => x.id)) === J(['b'])
+        && P.draftFilter([{ id: 'a' }], '', {}).length === 1) || J(s);
+    });
+    const Abad = Object.assign(rtApi(calls), { listTransactions: () => err('MRS_NETWORK') });
+    root = await show({ draft: 'only' }, Abad);
+    check('the drafts list could not be read + ?draft=only: a clear warning (no silent empty table)', () =>
+      (root.querySelectorAll('.alert').some(a => /تعذّر تحميل قائمة المسودات/.test(a.textContent))) || root.querySelectorAll('.alert').map(a => a.textContent));
+    const many = Array.from({ length: 500 }, (_, i) => ({ id: '00000000-0000-4000-8000-' + String(i).padStart(12, '0'), is_draft: true }));
+    root = await show({}, Object.assign(rtApi(calls), { listTransactions: () => ok(many) }));
+    check('the drafts list came back full (500 = the limit): a warning says some drafts may be missed', () =>
+      root.querySelectorAll('.alert').some(a => /المسودات المفتوحة أكثر من 500/.test(a.textContent)) || root.querySelectorAll('.alert').map(a => a.textContent));
+    root = await show({}, A);
+    check('… fewer drafts than the limit: no such warning', () => !root.querySelectorAll('.alert').some(a => /المسودات المفتوحة أكثر من/.test(a.textContent)) || 'warned');
+    check('lrpt.js: every new draft / exact-status key in ar and en', () =>
+      ['q_drafts', 'f_draft', 'f_draft_only', 'f_draft_approved', 'draft_pill', 'draft_shown', 'draft_page_note', 'draft_unavailable', 'draft_capped', 'st_exact', 'st_exact_clear']
+        .every(k => dicts.ar['lrpt.' + k] && dicts.en['lrpt.' + k]) || 'missing key');
   }
 
   {

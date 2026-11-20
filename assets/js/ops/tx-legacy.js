@@ -86,7 +86,7 @@
         lc_ctr_wait: 'حاويات لم يثبت إرجاعها بعد: {n}', lc_docs_missing: 'مستندات مطلوبة قبل هذه المرحلة: {list}',
         lc_last: 'المعاملة في آخر مرحلة.', lc_pending: 'متابعة إرجاع الفارغ: {list}',
         lc_follow: 'يلزم إثبات إرجاع الحاويات الفارغة (إيصال استلام فارغ مؤكّد أو إعفاء موثّق) قبل «منتهية تشغيليًا» والفوترة.',
-        lc_hint: 'تتقدم المرحلة للأمام فقط وعند إجراء من المستخدم: إضافة البيان، فسحه، تسجيل موعد، تسجيل نقلة، إثبات إرجاع الفارغ، الفوترة. وبعد توثيق إرجاع كل الحاويات تنتقل المعاملة وحدها إلى «تحت الفوترة». «مغلقة» لا تكون تلقائيًا، ولا يُعتمد إثبات إرجاع الفارغ آليًا أبدًا.',
+        lc_hint: 'تتقدم المرحلة للأمام فقط وعند إجراء من المستخدم: إضافة البيان، فسحه، تسجيل موعد، تسجيل نقلة، إثبات إرجاع الفارغ، الفوترة. «تحت الفوترة» و«مغلقة» يدويتان دائمًا (قرار المالك، 20 نوفمبر 2026): الموظف هو من ينقل المعاملة إليهما من بطاقة «الحالة»، ولا تنتقل إليهما وحدها أبدًا. ولا يُعتمد إثبات إرجاع الفارغ آليًا أبدًا، وإرجاع الفارغ غير الموثّق يمنع الفوترة.',
         cause_declaration: 'بإضافة البيان', cause_declaration_released: 'بفسح البيان', cause_appointment: 'بتسجيل موعد',
         cause_trip: 'بتسجيل نقلة', cause_container_return: 'بإثبات إرجاع الفارغ', cause_invoiced: 'بالفوترة', cause_movement: 'بحفظ حركة نقل',
         // cancel
@@ -197,7 +197,7 @@
         lc_ctr_wait: 'Containers without return proof: {n}', lc_docs_missing: 'Documents required before this stage: {list}',
         lc_last: 'The transaction is at its last stage.', lc_pending: 'Empty-return follow-up: {list}',
         lc_follow: 'Empty-return proof (a confirmed empty-return receipt or a documented waiver) is required before "operationally complete" and billing.',
-        lc_hint: 'Stages move forward only, and only on a user action: adding the declaration, its release, an appointment, a trip, empty-return proof, invoicing. Once the return of every container is verified the transaction moves to "Under billing" by itself. "Closed" is never automatic, and empty-return proof is never verified automatically.',
+        lc_hint: 'Stages move forward only, and only on a user action: adding the declaration, its release, an appointment, a trip, empty-return proof, invoicing. "Under billing" and "Closed" are always moved by hand (owner decision, 20 November 2026): a staff member moves the transaction there from the "Status" card; it never moves there by itself. Empty-return proof is never verified automatically, and an unverified empty return blocks billing.',
         cause_declaration: 'declaration added', cause_declaration_released: 'declaration released', cause_appointment: 'appointment registered',
         cause_trip: 'trip registered', cause_container_return: 'empty-return proof', cause_invoiced: 'invoiced', cause_movement: 'movement saved',
         cancelled: 'Cancelled', cancelled_banner: 'This transaction was cancelled on {d}.', cancelled_reason: 'Reason: {r}',
@@ -403,9 +403,10 @@
   function nextManual(d) {
     var n = d && d.next;
     if (!n) return false;
-    // step م2 (20261204000100): operationally_complete is automatic for a container transaction too (every return
-    // verified), so the server's manual flag decides (an older database still sends manual = true for it)
-    return !!n.manual || n.code === 'in_progress';
+    // step م2 (20261204000100): operationally_complete follows the server's manual flag (an older database sends
+    // manual = true for a container transaction). Owner decision 2026-11-20: «تحت الفوترة» (under_billing) and «مغلقة»
+    // (closed) are ALWAYS moved by hand, whatever a database says, so «تتقدم تلقائيًا» is never shown for them.
+    return !!n.manual || n.code === 'in_progress' || n.code === 'under_billing' || n.code === 'closed';
   }
 
   // why the cancel button is missing (null = allowed): can(roles) answers for the transaction's branch
@@ -778,6 +779,10 @@
      stages, each grouping one or more of the 10 server stages (tx_lifecycle keeps the detail; nothing changes in the
      database): جديدة · نشطة · منتهية تشغيليًا · إرجاع الحاوية الفارغة · تحت الفوترة · تمت الفوترة · منتهية.
      A later step (م2) moves the stage list into per-transaction-type settings; this map is then read from there. */
+  // The owner's own order (request stages 3 → 4): the exit appointment / transport are «منتهية تشغيليًا», BEFORE the
+  // empty return. Same grouping as app.default_stage_steps() (20261204000100). The register's «الحالة» column and
+  // filter (rpt/register.js) read this same map (ownerStepOf / ownerSteps). «تحت الفوترة» is reached by hand only
+  // (owner decision 2026-11-20); see the migration header (section 6) for the Ro-Ro operationally_complete case.
   var OWNER_STEPS = [
     { code: 'o_new', members: ['new', 'in_progress'] },
     { code: 'o_active', members: ['customs_declaration'] },

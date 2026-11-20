@@ -131,7 +131,7 @@ function page(opts) {
   w.addEventListener('marsa:orglogochange', e => events.push(e.detail));
   const errors = [];
   w.addEventListener('error', e => errors.push(String(e.message)));
-  ['assets/js/i18n.js', 'assets/i18n/admin.js', 'assets/i18n/app.js', 'assets/js/app-shell.js', 'assets/js/admin.js'].forEach(f => {
+  ['assets/js/i18n.js', 'assets/i18n/admin.js', 'assets/i18n/app.js'].concat(opts.extra || []).concat(['assets/js/app-shell.js', 'assets/js/admin.js']).forEach(f => {
     try { w.eval(rd(f) + '\n//# sourceURL=' + f); } catch (e) { errors.push(f + ': ' + e.message); }
   });
   // shell toasts land in the DOM; collect their text too
@@ -534,6 +534,26 @@ function key(P, k) { P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: k
     await settle(80);
     const ids = navIds(P).map(x => x.split('|')[0]);
     await check('permissions unchanged in the side menu (clearance staff: no org / members items)', () => (ids.length && ids.indexOf('org') === -1 && ids.indexOf('members') === -1 && ids.indexOf('transactions') !== -1) || J(ids));
+  }
+
+  section('Ctrl+K palette');
+  {
+    // review fix 2026-11-20: the register is named «المعاملات» too (lrpt.nav_register); the palette lists the item once
+    const P = page({ extra: ['assets/i18n/lrpt.js'] });
+    await settle(80);
+    const navTitles = () => Array.prototype.map.call(P.d.querySelectorAll('#cmdk-g-nav'), g => g.parentNode)
+      .reduce((a, box) => a.concat(Array.prototype.map.call(box.querySelectorAll('.cmdk-item-title'), n => n.textContent)), []);
+    P.w.MarsaShell.openPalette('');
+    await settle(20);
+    const all = navTitles();
+    await check('the palette lists «المعاملات» once (no second register entry, no «كشف المعاملات»)', () =>
+      (all.filter(x => x === 'المعاملات').length === 1 && all.indexOf('كشف المعاملات') === -1 && all.indexOf('العملاء') !== -1) || J(all));
+    P.w.MarsaShell.closePalette();
+    P.w.MarsaShell.openPalette('كشف');
+    await settle(20);
+    const found = navTitles();
+    await check('… the old name «كشف المعاملات» still finds that one entry', () => (J(found) === J(['المعاملات'])) || J(found));
+    P.w.MarsaShell.closePalette();
   }
 
   console.log('\nshell-sidebar-logo-ui-tests: ' + nPass + ' passed, ' + nFail + ' failed');

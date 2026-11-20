@@ -375,10 +375,6 @@ function cycleSteps(H, W, o, opts) {
       if (!r.every(x => x.return_status === 'returned_verified')) throw new Error(H.J(r));
     } },
     { id: 'complete', title: 'operationally complete', run: async () => {
-      // owner decision 2026-11-19 (20261204000100_tx_stage_sets): once every container's return is verified the
-      // transaction moves on by itself (operationally_complete → under_billing); the manual step is only needed before that
-      const s0 = (await H.q(`SELECT operational_status s FROM public.transactions WHERE id = $1`, [c.tx]))[0].s;
-      if (s0 === 'operationally_complete' || s0 === 'under_billing') return;
       const r = await A.status('clr', c.tx, 'operationally_complete');
       if (r.to !== 'operationally_complete') throw new Error(H.J(r));
     } },

@@ -1155,11 +1155,17 @@
   // transactions register (assets/js/rpt/register.js, #register) with the same query; plain #transactions keeps this list
   // Owner decision 2026-11-18: the old list and the register are one «المعاملات» item, so every #transactions (with or
   // without a query) opens the register when the user may open it; only a missing register module keeps the old list.
+  // Review fix (2026-11-20): a plain #transactions (the side menu, the KPI tiles «المعاملات المفتوحة» / «مستندات», «عرض
+  // الكل», an empty ?status=) opens the register UNFILTERED (reset=1, see rpt/register.js), never with the filters
+  // last used there; a branch-only link keeps its branch. A real filter (?status=X…) replaces the filters anyway.
   function registerRedirect(r) {
     if (r.name !== 'transactions' || r.id || !registerMerged()) return null;
     var q = (r.query || '').split('&').filter(function (p) { return /^(status|stage|daftra_state|attention|branchId)=./.test(p); });
+    if (!q.some(function (p) { return !/^branchId=/.test(p); })) q.unshift('reset=1');
     return q.join('&');
   }
+  // the «back» link of a transaction: the register as the user left it (its filters kept), else the old list
+  function txBackHref() { return registerMerged() ? '#register' : '#transactions'; }
   function route(keepDialog) {
     if (!keepDialog && dlg && dlg.open) closeDialog();
     var r = parseHash(), name = r.name, id = r.id;
@@ -2373,8 +2379,8 @@
       api.listEvents(id)
     ]).then(function (res) {
       var r = res[0], t = r.data;
-      if (r.error) return head('معاملة', '', '', '#transactions') + alertBox('danger', errText(r.error));
-      if (!t) return head('معاملة', '', '', '#transactions') + alertBox('warning', 'المعاملة غير موجودة أو لا تملك صلاحية عرضها.');
+      if (r.error) return head('معاملة', '', '', txBackHref()) + alertBox('danger', errText(r.error));
+      if (!t) return head('معاملة', '', '', txBackHref()) + alertBox('warning', 'المعاملة غير موجودة أو لا تملك صلاحية عرضها.');
       var docs = res[1].data || [], events = res[2].data || [];
       TX_CACHE[id] = { tx: t, docs: docs };
       var actorIds = events.map(function (e) { return e.actor; }).concat(docs.map(function (d) { return d.uploaded_by; }), docs.map(function (d) { return d.classified_by; }), [t.responsible_user_id]);
@@ -2392,7 +2398,7 @@
         var html = head('معاملة ' + ltr(t.ref) + (cancelled ? ' ' + pillHtml('danger', cancelledText()) : '') + (t.is_draft && !cancelled ? ' ' + pillHtml('warning', draftText()) : '') +
             (t.transaction_type === 're_export' ? ' ' + pillHtml('warning', opsLabel('transaction_type', 're_export')) : ''),
           esc(t.clients ? t.clients.name_ar : '') + (t.branches ? ' · ' + esc(t.branches.name_ar) : '') + ' · أُنشئت ' + fmtDate(t.created_at),
-          actions, '#transactions');
+          actions, txBackHref());
 
         // stages + status (legacy step 2: the tx_lifecycle stepper with the automatic moves + cancel, filled below)
         var order = ORDER.operational_status, cur = order.indexOf(t.operational_status);

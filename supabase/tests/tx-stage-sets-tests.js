@@ -10,9 +10,9 @@
   (seven owner steps per org, seeding once); RLS (staff read their org only, the admin writes, no DELETE, anon nothing);
   step validation (unknown / repeated internal code, code format); app.tx_stage_set_for (most specific active set wins);
   tx_lifecycle 'steps' / 'stage_set' (grouping, detail, Ro-Ro skipped, the fallback defaults of an org without a set);
-  the automatic move to billing (every container verified / waived → operationally_complete → under_billing, cause
-  all_returned; a pending proof or an open container stops at empty_return; Ro-Ro unchanged; under_billing for any other
-  cause refused); next.manual.
+  billing stays MANUAL (owner decision 2026-11-20): the last container waived / verified moves nothing past empty_return,
+  advance_tx_status refuses under_billing / closed for every cause, the finance role still moves it by hand (and an open
+  return still blocks it); next.manual reports reality.
 
   usage:
     NODE_PATH=/tmp/pgtest/node_modules node supabase/tests/tx-stage-sets-tests.js [/path/to/marsa-website] [--quiet]
@@ -48,6 +48,7 @@ const BR_B = 'deca0000-0000-4000-8000-0000000000b1';
 const CL_B = 'deca0000-0000-4000-8000-0000000000b3';
 const U = {
   admin: 'deca0000-0000-4000-8000-000000000001',    // admin of A
+  acc: 'deca0000-0000-4000-8000-000000000002',      // accountant of A, org-wide (finance role)
   opsm: 'deca0000-0000-4000-8000-000000000004',     // operations_manager of A, org-wide
   jed: 'deca0000-0000-4000-8000-000000000005',      // clearance_staff of A, JED only
   portal: 'deca0000-0000-4000-8000-000000000008',   // client user of CLIENT_A
@@ -118,16 +119,17 @@ async function catalog() {
 const FIXTURES = `
   INSERT INTO auth.users (id, email, email_confirmed_at) VALUES
     ('${U.admin}', 'admin@stages.example.com', now()), ('${U.opsm}', 'opsm@stages.example.com', now()),
+    ('${U.acc}', 'acc@stages.example.com', now()),
     ('${U.jed}', 'jed@stages.example.com', now()), ('${U.portal}', 'portal@stages.example.com', now()),
     ('${U.staffB}', 'staffb@stages.example.com', now());
-  INSERT INTO public.profiles (id, full_name) VALUES ('${U.admin}', 'admin'), ('${U.opsm}', 'opsm'), ('${U.jed}', 'jed'),
+  INSERT INTO public.profiles (id, full_name) VALUES ('${U.admin}', 'admin'), ('${U.acc}', 'acc'), ('${U.opsm}', 'opsm'), ('${U.jed}', 'jed'),
     ('${U.portal}', 'portal'), ('${U.staffB}', 'staffB') ON CONFLICT (id) DO NOTHING;
   INSERT INTO public.organizations (id, slug, name_ar, name_en, ref_prefix, environment)
     VALUES ('${B}', 'stages-org-b', 'مؤسسة ب', 'Stages org B', 'STB', 'staging') ON CONFLICT (id) DO NOTHING;
   INSERT INTO public.branches (id, org_id, code, name_ar) VALUES ('${BR_B}', '${B}', 'RUH', 'فرع الرياض');
   INSERT INTO public.clients (id, org_id, client_type, name_ar, phone) VALUES ('${CL_B}', '${B}', 'business', 'عميل ب', '0509990000');
   INSERT INTO public.memberships (user_id, org_id, branch_id, role) VALUES
-    ('${U.admin}', '${A}', NULL, 'admin'), ('${U.opsm}', '${A}', NULL, 'operations_manager'),
+    ('${U.admin}', '${A}', NULL, 'admin'), ('${U.acc}', '${A}', NULL, 'accountant'), ('${U.opsm}', '${A}', NULL, 'operations_manager'),
     ('${U.jed}', '${A}', '${JED}', 'clearance_staff'), ('${U.staffB}', '${B}', NULL, 'admin');
   INSERT INTO public.client_users (org_id, client_id, user_id, role) VALUES ('${A}', '${CLIENT_A}', '${U.portal}', 'owner');
 `;
@@ -144,6 +146,7 @@ const addDecl = (tx, no) => rpc('jed', `SELECT public.add_declaration($1, $2, $3
 const declStatus = (id, s) => rpc('jed', `SELECT public.set_declaration_status($1, $2) r`, [id, s]);
 const mkTrip = p => rpc('jed', `SELECT public.create_trip($1, $2) r`, [p, newKey()]);
 const lifecycle = (who, tx) => rpc(who, `SELECT public.tx_lifecycle($1) r`, [tx]);
+const setStatus = (who, tx, s) => rpc(who, `SELECT public.set_transaction_status($1, $2, NULL, $3) r`, [tx, s, newKey()]);
 const waive = c => as('opsm', `UPDATE public.containers SET return_status = 'waived', waiver_reason = 'اختبار' WHERE id = $1`, [c]);
 const autoEvents = tx => q(`SELECT to_status, payload FROM public.transaction_events
                              WHERE transaction_id = $1 AND event_type = 'operational_status' AND (payload ->> 'auto')::boolean ORDER BY id`, [tx]);
@@ -158,10 +161,12 @@ async function toTransport(bl, ctrs) {
   return { t, ids };
 }
 let docSeq = 0;
-async function evidenceDoc(tx) {
+// confirmed = a staff-confirmed empty return receipt (the only proof returned_verified accepts)
+async function evidenceDoc(tx, confirmed) {
   const id = 'decadddd-0000-4000-8000-' + String(++docSeq).padStart(12, '0');
   await q(`INSERT INTO public.documents (id, org_id, transaction_id, kind, storage_path, sha256, original_name, size_bytes, uploaded_by)
            VALUES ($1, $2, $3, 'empty_return_receipt', $4, $5, 'r.pdf', 10, $6)`, [id, A, tx, A + '/' + tx + '/' + id + '/r.pdf', 'c'.repeat(64), U.jed]);
+  if (confirmed) await q(`UPDATE public.documents SET classification = 'empty_return_receipt', classification_status = 'confirmed' WHERE id = $1`, [id]);
   return id;
 }
 
@@ -172,7 +177,11 @@ async function secFile() {
   await check('migration: preflight on draft_client_hidden (20261203000100), schema_versions row, no BEGIN/COMMIT, down-path, every function pins search_path', () => {
     const fns = (s.match(/CREATE OR REPLACE FUNCTION/g) || []).length, pinned = (s.match(/SET search_path = ''/g) || []).length;
     return (/version = '20261203000100'/.test(s) && /VALUES \('20261204000100', 'tx_stage_sets'\)/.test(s) && !/^\s*(BEGIN|COMMIT)\s*;/im.test(s)
-      && /Down-path:/.test(s) && fns === 9 && pinned === 9) || J({ fns, pinned });
+      && /Down-path:/.test(s) && fns === 7 && pinned === 7) || J({ fns, pinned });
+  });
+  await check('billing stays manual (owner 2026-11-20): the file re-creates neither app.advance_tx_status nor app.tg_containers_legacy_tx, no all_returned cause', () => {
+    const code = s.replace(/^\s*--.*$/gm, '');
+    return (!/FUNCTION app\.advance_tx_status/.test(code) && !/FUNCTION app\.tg_containers_legacy_tx/.test(code) && !/all_returned/.test(code)) || 'automatic billing code found';
   });
   await check('no value list for transaction kinds: operation / mode / transaction_type / cargo_unit_type are format checks only', () =>
     (/operation\s+text CHECK \(operation ~ '\^\[a-z\]/.test(s) && /cargo_unit_type\s+text CHECK \(cargo_unit_type ~ /.test(s)
@@ -298,25 +307,28 @@ async function secSteps() {
   });
 }
 
-/* ------------------------------------------------------------------ 5. automatic move to billing */
+/* ------------------------------------------------------------------ 5. billing stays manual */
 async function secBilling() {
-  section('5. automatic move to billing (every container verified / waived)');
-  await check('one container waived → empty_return → operationally_complete → under_billing (causes container_return, all_returned ×2)', async () => {
+  section('5. billing stays manual (owner decision 2026-11-20)');
+  await check('last (only) container waived → empty_return, never operationally_complete / under_billing', async () => {
     const { t, ids } = await toTransport('BILL-1', ['BILU0000001']);
     await waive(ids[0]);
-    const e = (await autoEvents(t)).slice(-3);
+    const e = await autoEvents(t);
     const r = await lifecycle('jed', t);
     const by = Object.fromEntries(r.steps.map(x => [x.code, x.state]));
-    return ((await st(t)) === 'under_billing' && J(e.map(x => x.to_status)) === J(['empty_return', 'operationally_complete', 'under_billing'])
-      && J(e.map(x => x.payload.cause)) === J(['container_return', 'all_returned', 'all_returned'])
-      && by.o_empty === 'done' && by.o_under_billing === 'current') || J({ s: await st(t), e, by });
+    return ((await st(t)) === 'empty_return' && e[e.length - 1].payload.cause === 'container_return'
+      && !e.some(x => ['operationally_complete', 'under_billing', 'billed', 'closed'].includes(x.to_status))
+      && by.o_empty === 'current' && by.o_under_billing === 'todo') || J({ s: await st(t), e: e.map(x => x.to_status), by });
   });
-  await check('two containers, one waived → stays at empty_return; the second waived → under_billing', async () => {
+  await check('two containers, both returned (one waived, the last verified with its proof) → stays at empty_return, no move to under_billing', async () => {
     const { t, ids } = await toTransport('BILL-2', ['BILU0000002', 'BILU0000003']);
     await waive(ids[0]);
-    const mid = await st(t);
-    await waive(ids[1]);
-    return (mid === 'empty_return' && (await st(t)) === 'under_billing') || J({ mid, end: await st(t) });
+    const doc = await evidenceDoc(t, true);
+    await as('opsm', `UPDATE public.containers SET return_status = 'returned_verified', evidence_document_id = $2 WHERE id = $1`, [ids[1], doc]);
+    const rs = (await q(`SELECT return_status r FROM public.containers WHERE transaction_id = $1 ORDER BY container_no`, [t])).map(x => x.r);
+    const e = await autoEvents(t);
+    return ((await st(t)) === 'empty_return' && J(rs) === J(['waived', 'returned_verified'])
+      && !e.some(x => ['operationally_complete', 'under_billing'].includes(x.to_status))) || J({ s: await st(t), rs, e: e.map(x => x.to_status) });
   });
   await check('a proof still pending verification (evidence_submitted) stops at empty_return', async () => {
     const { t, ids } = await toTransport('BILL-3', ['BILU0000004']);
@@ -324,43 +336,69 @@ async function secBilling() {
     await as('opsm', `UPDATE public.containers SET return_status = 'evidence_submitted', evidence_document_id = $2 WHERE id = $1`, [ids[0], doc]);
     return (await st(t)) === 'empty_return' || await st(t);
   });
-  await check('container_count above the containers entered keeps the gate closed (one entered of two, waived) → empty_return', async () => {
-    const t = await mkTx('jed', { bl_number: 'BILL-4', container_count: 2 });
-    const c = await addCtr(t, 'BILU0000005');
-    const d = (await addDecl(t, 'BILL-4-D')).id;
-    await declStatus(d, 'released');
-    await mkTrip({ transaction_id: t, container_id: c });
-    await waive(c);
-    return (await st(t)) === 'empty_return' || await st(t);
+  await check('the finance role still moves it by hand: operations → operationally_complete, then the accountant → under_billing', async () => {
+    const { t, ids } = await toTransport('BILL-4', ['BILU0000005']);
+    await waive(ids[0]);
+    const b = await setStatus('opsm', t, 'operationally_complete');
+    const c = await code(() => setStatus('jed', t, 'under_billing'));
+    const d = await setStatus('acc', t, 'under_billing');
+    const last = (await q(`SELECT to_status, payload FROM public.transaction_events WHERE transaction_id = $1 AND event_type = 'operational_status' ORDER BY id DESC LIMIT 1`, [t]))[0];
+    return (b.to === 'operationally_complete' && /^MRS_FORBIDDEN/.test(c) && d.to === 'under_billing' && (await st(t)) === 'under_billing'
+      && last.to_status === 'under_billing' && !last.payload.auto) || J({ b, c, d, last });
   });
-  await check('under_billing for any other cause is refused (forward-only engine; closed stays manual)', async () => {
+  await check('an empty return not verified still blocks billing by hand (accountant → MRS_CONTAINERS_NOT_RETURNED)', async () => {
     const t = await mkTx('jed', { bl_number: 'BILL-5' });
+    const c = await addCtr(t, 'BILU0000008');
+    const doc = await evidenceDoc(t);
+    await as('opsm', `UPDATE public.containers SET return_status = 'evidence_submitted', evidence_document_id = $2 WHERE id = $1`, [c, doc]);
     await q(`UPDATE public.transactions SET operational_status = 'operationally_complete' WHERE id = $1`, [t]);
-    const a = (await one(`SELECT app.advance_tx_status($1, 'under_billing', 'trip') x`, [t])).x;
-    const b = (await one(`SELECT app.advance_tx_status($1, 'closed', 'all_returned') x`, [t])).x;
-    return (a === 'operationally_complete' && b === 'operationally_complete') || J({ a, b });
+    const r = await code(() => setStatus('acc', t, 'under_billing'));
+    return (/^MRS_CONTAINERS_NOT_RETURNED/.test(r) && (await st(t)) === 'operationally_complete') || r;
+  });
+  await check('advance_tx_status refuses under_billing and closed for every cause (all_returned included)', async () => {
+    const t = await mkTx('jed', { bl_number: 'BILL-6' });
+    await q(`UPDATE public.transactions SET operational_status = 'operationally_complete' WHERE id = $1`, [t]);
+    const r = [];
+    for (const c of ['all_returned', 'container_return', 'trip', 'invoiced']) {
+      r.push((await one(`SELECT app.advance_tx_status($1, 'under_billing', $2) x`, [t, c])).x);
+      r.push((await one(`SELECT app.advance_tx_status($1, 'closed', $2) x`, [t, c])).x);
+    }
+    return (r.every(x => x === 'operationally_complete') && (await autoEvents(t)).length === 0) || J(r);
   });
   await check('owner SQL (no JWT claims) never auto-moves: a waiver written by owner SQL leaves the stage alone', async () => {
-    const { t, ids } = await toTransport('BILL-6', ['BILU0000006']);
+    const { t, ids } = await toTransport('BILL-7', ['BILU0000006']);
     await q(`UPDATE public.containers SET return_status = 'waived', waiver_reason = 'مالك' WHERE id = $1`, [ids[0]]);
     return (await st(t)) === 'transport' || await st(t);
   });
-  await check('next.manual: in_progress manual; operationally_complete / under_billing automatic for containers; under_billing manual for Ro-Ro', async () => {
-    const t = await mkTx('jed', { bl_number: 'BILL-7' });
-    await addCtr(t, 'BILU0000007');
+  await check('next.manual: in_progress manual; operationally_complete manual for containers (open or all returned); under_billing / closed manual for every kind', async () => {
+    const t = await mkTx('jed', { bl_number: 'BILL-8' });
+    const c = await addCtr(t, 'BILU0000007');
     const a = (await lifecycle('jed', t)).next;
     await q(`UPDATE public.transactions SET operational_status = 'empty_return' WHERE id = $1`, [t]);
     const b = (await lifecycle('jed', t)).next;
+    await waive(c);
+    const b2 = (await lifecycle('jed', t)).next;
     await q(`UPDATE public.transactions SET operational_status = 'operationally_complete' WHERE id = $1`, [t]);
-    const c = (await lifecycle('jed', t)).next;
+    const cc = (await lifecycle('jed', t)).next;
+    await q(`UPDATE public.transactions SET operational_status = 'billed' WHERE id = $1`, [t]);
+    const e = (await lifecycle('jed', t)).next;
     const ro = await mkTx('jed', { bl_number: 'BILL-RORO', cargo_unit_type: 'roro', chassis_no: 'VINBILL01' });
     await q(`UPDATE public.transactions SET operational_status = 'operationally_complete' WHERE id = $1`, [ro]);
     const d = (await lifecycle('jed', ro)).next;
-    return (a.code === 'in_progress' && a.manual && b.code === 'operationally_complete' && !b.manual && c.code === 'under_billing' && !c.manual
-      && d.code === 'under_billing' && d.manual) || J({ a, b, c, d });
+    return (a.code === 'in_progress' && a.manual && b.code === 'operationally_complete' && b.manual && b2.code === 'operationally_complete' && b2.manual
+      && cc.code === 'under_billing' && cc.manual && d.code === 'under_billing' && d.manual && e.code === 'closed' && e.manual) || J({ a, b, b2, cc, d, e });
+  });
+  await check('next.manual Ro-Ro: operationally_complete automatic while the release is still to come, manual once released (nothing moves it any more)', async () => {
+    const ro = await mkTx('jed', { bl_number: 'BILL-RORO2', cargo_unit_type: 'roro', chassis_no: 'VINBILL02' });
+    const dd = (await addDecl(ro, 'BILL-RORO2-D')).id;
+    await q(`UPDATE public.transactions SET operational_status = 'transport' WHERE id = $1`, [ro]);
+    const a = (await lifecycle('jed', ro)).next;
+    await q(`UPDATE public.customs_declarations SET status = 'released' WHERE id = $1`, [dd]);
+    const b = (await lifecycle('jed', ro)).next;
+    return (a.code === 'operationally_complete' && a.manual === false && b.code === 'operationally_complete' && b.manual === true) || J({ a, b });
   });
   await check('tx_lifecycle stays staff-only (client user → MRS_NOT_FOUND; anon cannot execute)', async () => {
-    const t = await mkTx('jed', { bl_number: 'BILL-8' });
+    const t = await mkTx('jed', { bl_number: 'BILL-9' });
     const a = await code(() => lifecycle('portal', t));
     const b = await code(() => as('anon', `SELECT public.tx_lifecycle($1)`, [t]));
     return (a === 'MRS_NOT_FOUND transaction' && b === 'perm') || J({ a, b });

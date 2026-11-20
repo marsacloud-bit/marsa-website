@@ -216,11 +216,9 @@ const EXPECT = {
   bl: { events: ['bl:updated'], audit: ['bills_of_lading UPDATE'] },
   appointment: { events: ['appointment:created', 'appointment:confirmed'], audit: [] },
   trip: { events: ['trip:created', 'trip:status loaded→delivered'], audit: ['containers UPDATE'] },
-  // owner decision 2026-11-19 (20261204000100_tx_stage_sets): the last verified return moves the transaction on by itself
-  // (empty_return → operationally_complete → under_billing); the «complete» step has nothing left to do
-  empty_return: { events: ['container_return pending→returned_verified', 'operational_status empty_return→operationally_complete',
-    'operational_status operationally_complete→under_billing'], audit: ['containers UPDATE', 'documents INSERT', 'transactions UPDATE'] },
-  complete: { empty: true },
+  empty_return: { events: ['container_return pending→returned_verified'], audit: ['containers UPDATE', 'documents INSERT'] },
+  // owner decision 2026-11-20: the last verified return moves nothing past empty_return; «complete» is the manual step
+  complete: { events: ['operational_status empty_return→operationally_complete'], audit: ['transactions UPDATE'] },
   supplier_invoice: { events: ['finance:allocation_proposed', 'finance:allocation_approved'], audit: ['cost_allocations INSERT', 'finance_documents INSERT'] },
   client_charges: { events: ['finance:charge_created', 'finance:charge_status draft→approved'], audit: ['client_charges INSERT'] },
   billing_intent: { events: ['billing:intent_created', 'billing:lines_added'], audit: ['billing_intents INSERT', 'billing_intent_lines INSERT'] },
@@ -238,8 +236,7 @@ const EXPECT = {
   x_appt_transport: { events: ['operational_status appointment→transport', 'operational_status transport→empty_return'], audit: ['containers UPDATE'] },
   x_multi_container: { events: ['container_return pending→waived', 'container_return pending→returned_verified'], audit: ['containers UPDATE'] },
   x_late_return: { events: ['finance:demurrage_created', 'exception:created'], audit: ['demurrage_cases INSERT'] },
-  x_late_receipt: { events: ['exception:status open→resolved', 'operational_status empty_return→operationally_complete',
-    'operational_status operationally_complete→under_billing'], audit: [] }
+  x_late_receipt: { events: ['exception:status open→resolved', 'operational_status empty_return→operationally_complete'], audit: [] }
 };
 async function evStep(group, s, fn, expect) {
   const snap = await L.snapshot(H, A);
@@ -420,9 +417,8 @@ async function exceptions(W) {
     await as('A_trn', `UPDATE public.containers SET return_status = 'returned_verified' WHERE id = $1`, [x.ct[1].id]);
     await api.R('trn', `SELECT public.resolve_exception($1, 'resolved', 'سُددت رسوم التأخير') r`, [x.exc]);
     await api.R('clr', `SELECT public.resolve_exception($1, 'resolved', 'استُبدل البيان AEX-0002') r`, [x.excDecl]);
-    // owner decision 2026-11-19: the verified receipt of the last container moved it on to under_billing by itself
-    const s1 = (await one(`SELECT operational_status s FROM public.transactions WHERE id = $1`, [x.tx])).s;
-    if (s1 !== 'under_billing') throw new Error('expected under_billing after the last verified return, got ' + s1);
+    const r = await st('clr', 'operationally_complete');
+    if (r.to !== 'operationally_complete') throw new Error(J(r));
     await api.refresh();
     const a = await one(`SELECT status, resolution FROM public.operational_alerts WHERE dedupe_key = $1`, ['empty_return_overdue:' + x.ct[1].id]);
     if (!a || a.status !== 'resolved') throw new Error('overdue alert not resolved ' + J(a));

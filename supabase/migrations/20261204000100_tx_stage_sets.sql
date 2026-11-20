@@ -1,5 +1,5 @@
 -- =====================================================================
--- 20261204000100_tx_stage_sets — the owner's transaction stages as per-type SETTINGS + the automatic move to billing
+-- 20261204000100_tx_stage_sets — the owner's transaction stages as per-type SETTINGS (billing stays manual)
 -- (2026-11-19, owner request docs/owner/transaction-stages-request.md, step م2; branch owner/ui-reorg)
 --   The owner sees his stages (جديدة · نشطة · منتهية تشغيليًا · إرجاع الحاوية الفارغة · تحت الفوترة · تمت الفوترة ·
 --   منتهية), and future transaction kinds (air, export, transit) need their own sequences without a code or CHECK change.
@@ -20,12 +20,16 @@
 --   5. public.tx_lifecycle(tx) (20261118000100 body, re-created): the same keys + 'steps' (the applicable set's steps with
 --      done / current / todo / skipped, the first reached date, automatic flag, the current internal stage as 'detail')
 --      and 'stage_set' {id, name_ar, name_en}; next.manual follows 6.
---   6. the automatic move to billing (owner: «تنتقل المعاملة إلى المحاسب»): when the last container of a container
---      transaction reaches returned_verified / waived (a VERIFIED proof, never the AI reading alone), the transaction moves
---      on from empty_return to operationally_complete and then under_billing (cause 'all_returned'), still forward only and
---      still behind the document gate. app.advance_tx_status (20261118000100 body, re-created) accepts under_billing for
---      that cause only; closed stays manual; Ro-Ro is unchanged (its release → operationally_complete; billing by hand).
---      app.tg_containers_legacy_tx (20261118000100 body, re-created) runs the two extra moves.
+--   6. NO automatic move to billing (owner decision 2026-11-20: «تحت الفوترة» stays MANUAL, never automatic; «مغلقة»
+--      stays manual; an empty return that is not verified still blocks billing). app.advance_tx_status and
+--      app.tg_containers_legacy_tx are NOT re-created: the deployed 20261118000100 bodies stay (advance_tx_status refuses
+--      under_billing / closed whatever the cause; a container return moves to empty_return only). operationally_complete
+--      stays manual for a container transaction too (deployed behaviour): the request doc asks for «بطاقة الموعد ←
+--      منتهية تشغيليًا» (owner step o_opdone = internal appointment / transport, already automatic) and «إرجاع الفارغ ←
+--      الفوترة» (now manual by the owner's decision); the internal operationally_complete belongs to the owner step
+--      «تحت الفوترة» (o_under_billing), so moving there by itself would show «تحت الفوترة» automatically.
+--      next.manual reports reality: in_progress, under_billing, closed always manual; operationally_complete manual for a
+--      container transaction, and for Ro-Ro automatic only while its release (its one automatic path) has not happened.
 --   Stage 1 of the owner (new on B/L + invoice) and stage 2 (active on the preliminary declaration) already happen: a new
 --   transaction is 'new'; a declaration added → customs_declaration (20261118000100). The appointment card approval →
 --   appointment (inside «منتهية تشغيليًا»), a verified empty return → «إرجاع الحاوية الفارغة» (unchanged).
@@ -34,10 +38,10 @@
 --   CREATE OR REPLACE keeps each re-created function's privileges (tx_lifecycle: authenticated).
 --   Re-runnable (IF NOT EXISTS / CREATE OR REPLACE / DROP … IF EXISTS + CREATE / ON CONFLICT / seed only orgs without a set).
 --   Data: seeds one default stage set (7 steps) per existing organisation; changes no existing row.
---   Re-pasting 20261118000100 after this file brings back the manual-only billing step and drops 'steps' from
---   tx_lifecycle: re-paste this file straight after.
---   Down-path: re-create app.advance_tx_status, app.tg_containers_legacy_tx and public.tx_lifecycle from 20261118000100
---   and app.convert_keep_tables from 20261117000100 (their bodies, verbatim); DROP FUNCTION app.tx_stage_set_for(uuid), app.seed_tx_stage_sets(uuid),
+--   Re-pasting 20261118000100 after this file drops 'steps' / 'stage_set' from tx_lifecycle: re-paste this file
+--   straight after.
+--   Down-path: re-create public.tx_lifecycle from 20261118000100 and app.convert_keep_tables from 20261117000100 (their
+--   bodies, verbatim); DROP FUNCTION app.tx_stage_set_for(uuid), app.seed_tx_stage_sets(uuid),
 --   app.default_stage_steps(), app.tg_tx_stage_steps_before(), app.tg_tx_stage_sets_before(); DROP TABLE
 --   public.tx_stage_steps, public.tx_stage_sets; DELETE FROM public.schema_versions WHERE version = '20261204000100'.
 --   No BEGIN/COMMIT (the SQL editor wraps the run).
@@ -50,8 +54,8 @@ BEGIN
     RAISE EXCEPTION 'TX STAGE SETS preflight: apply draft_client_hidden first (schema_versions lacks 20261203000100)';
   END IF;
   IF to_regprocedure('public.tx_lifecycle(uuid)') IS NULL OR to_regprocedure('app.advance_tx_status(uuid,text,text)') IS NULL
-     OR to_regprocedure('app.tg_containers_legacy_tx()') IS NULL OR to_regprocedure('app.tg_audit()') IS NULL THEN
-    RAISE EXCEPTION 'TX STAGE SETS preflight: tx_lifecycle / advance_tx_status / tg_containers_legacy_tx (20261118000100) or tg_audit missing';
+     OR to_regprocedure('app.tg_audit()') IS NULL THEN
+    RAISE EXCEPTION 'TX STAGE SETS preflight: tx_lifecycle / advance_tx_status (20261118000100) or tg_audit missing';
   END IF;
 END $pre$;
 
@@ -235,92 +239,11 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
 $$;
 
 -- ---------------------------------------------------------------------
--- 6. automatic move to billing when every container's return is verified
--- ---------------------------------------------------------------------
--- app.advance_tx_status from 20261118000100, verbatim except: under_billing is accepted for the cause 'all_returned'
--- (the owner's «تنتقل المعاملة إلى المحاسب»); every other rule is unchanged (forward only, customs not skipped, the
--- container-return gate, the document gate, closed manual, billed only from under_billing).
-CREATE OR REPLACE FUNCTION app.advance_tx_status(p_tx uuid, p_target text, p_cause text) RETURNS text
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
-DECLARE
-  v_tx public.transactions; v_from int; v_to int; v_cap int; v_open int; v_code text;
-  v_bill_ok boolean := (p_cause = 'all_returned');
-BEGIN
-  SELECT * INTO v_tx FROM public.transactions t WHERE t.id = p_tx FOR UPDATE;
-  IF v_tx.id IS NULL THEN RETURN NULL; END IF;
-  IF v_tx.cancelled_at IS NOT NULL OR v_tx.operational_status = 'closed' THEN RETURN v_tx.operational_status; END IF;
-  v_from := app.code_sort('operational_status', v_tx.operational_status);
-  v_to := app.code_sort('operational_status', p_target);
-  IF v_to IS NULL OR p_target IN ('new','in_progress','closed') OR (p_target = 'under_billing' AND NOT v_bill_ok) THEN
-    RETURN v_tx.operational_status;
-  END IF;
-  IF p_target = 'billed' AND v_tx.operational_status <> 'under_billing' THEN RETURN v_tx.operational_status; END IF;
-  IF v_to <= v_from THEN RETURN v_tx.operational_status; END IF;
-  -- (review fix) no automatic move from before customs_declaration to past it without a live customs declaration: an
-  -- appointment, a trip or a movement on a new / in-progress transaction that has no declaration leaves its stage alone (set_transaction_status keeps its
-  -- role matrix and stage-skip rule for the manual path; the automatic path never jumps over customs)
-  IF v_from < app.code_sort('operational_status', 'customs_declaration')
-     AND v_to > app.code_sort('operational_status', 'customs_declaration')
-     AND NOT EXISTS (SELECT 1 FROM public.customs_declarations d
-                      WHERE d.transaction_id = v_tx.id AND d.status NOT IN ('cancelled','replaced')) THEN
-    RETURN v_tx.operational_status;
-  END IF;
-  -- the container-return gate (identical to set_transaction_status)
-  IF v_to >= app.code_sort('operational_status', 'operationally_complete') AND p_target <> 'billed' THEN
-    SELECT count(*) INTO v_open FROM public.containers c
-     WHERE c.transaction_id = v_tx.id AND c.return_status NOT IN ('returned_verified','waived');
-    v_open := greatest(v_open, coalesce(v_tx.container_count, 0)
-                               - (SELECT count(*) FROM public.containers c WHERE c.transaction_id = v_tx.id));
-    IF v_open > 0 THEN v_to := least(v_to, app.code_sort('operational_status', 'empty_return')); END IF;
-  END IF;
-  -- the document gate: stop before the first stage ahead whose mandatory documents are missing / unreviewed
-  SELECT min(x.stage_sort) - 1 INTO v_cap
-    FROM app.tx_requirements(v_tx.id) x
-   WHERE NOT x.is_optional AND x.status IN ('missing','unreviewed') AND x.stage_sort > v_from AND x.stage_sort <= v_to;
-  IF v_cap IS NOT NULL THEN v_to := least(v_to, v_cap); END IF;
-  IF v_to <= v_from THEN RETURN v_tx.operational_status; END IF;
-  SELECT l.code INTO v_code FROM public.status_labels l WHERE l.domain = 'operational_status' AND l.sort = v_to;
-  IF v_code IS NULL OR v_code = 'closed' OR (v_code = 'under_billing' AND NOT v_bill_ok) THEN RETURN v_tx.operational_status; END IF;
-  UPDATE public.transactions t SET operational_status = v_code, status_changed_at = now() WHERE t.id = v_tx.id;
-  INSERT INTO public.transaction_events (org_id, transaction_id, event_type, from_status, to_status, visible_to_client, actor, payload)
-  VALUES (v_tx.org_id, v_tx.id, 'operational_status', v_tx.operational_status, v_code, true, auth.uid(),
-          jsonb_build_object('direction', 'forward', 'auto', true, 'cause', p_cause));
-  RETURN v_code;
-END $$;
-
--- app.tg_containers_legacy_tx from 20261118000100 + : once no container of a container transaction is left without a
--- verified return (returned_verified / waived), move on to operationally_complete and under_billing (cause
--- 'all_returned'). An evidence_submitted proof (AI reading, not yet verified) still stops at empty_return.
-CREATE OR REPLACE FUNCTION app.tg_containers_legacy_tx() RETURNS trigger
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
-DECLARE v_st text; v_cargo text; v_count int; v_open int;
-BEGIN
-  IF NOT app.auto_lifecycle_on() OR NEW.return_status IS NOT DISTINCT FROM OLD.return_status
-     OR NEW.return_status NOT IN ('evidence_submitted','returned_verified','waived') THEN
-    RETURN NULL;
-  END IF;
-  SELECT t.operational_status, coalesce(t.cargo_unit_type, 'container'), t.container_count INTO v_st, v_cargo, v_count
-    FROM public.transactions t WHERE t.id = NEW.transaction_id;
-  IF app.code_sort('operational_status', v_st) < app.code_sort('operational_status', 'transport') THEN RETURN NULL; END IF;
-  PERFORM app.advance_tx_status(NEW.transaction_id, 'empty_return', 'container_return');
-  IF v_cargo = 'container' AND NEW.return_status IN ('returned_verified','waived') THEN
-    SELECT count(*) INTO v_open FROM public.containers c
-     WHERE c.transaction_id = NEW.transaction_id AND c.return_status NOT IN ('returned_verified','waived');
-    v_open := greatest(v_open, coalesce(v_count, 0) - (SELECT count(*) FROM public.containers c WHERE c.transaction_id = NEW.transaction_id));
-    IF v_open = 0 THEN
-      PERFORM app.advance_tx_status(NEW.transaction_id, 'operationally_complete', 'all_returned');
-      PERFORM app.advance_tx_status(NEW.transaction_id, 'under_billing', 'all_returned');
-    END IF;
-  END IF;
-  RETURN NULL;
-END $$;
-
--- ---------------------------------------------------------------------
 -- 5. tx_lifecycle + the owner steps
 -- ---------------------------------------------------------------------
--- public.tx_lifecycle from 20261118000100 + 'steps' / 'stage_set'; next.manual: in_progress and closed stay manual;
--- under_billing is manual only for Ro-Ro (container: automatic once every return is verified, 6.); operationally_complete
--- is automatic for both (Ro-Ro: release; container: every return verified).
+-- public.tx_lifecycle from 20261118000100 + 'steps' / 'stage_set'; next.manual (6.): in_progress, under_billing and closed
+-- always manual (no automatic move ever reaches them); operationally_complete manual on a container transaction, and on a
+-- Ro-Ro one once a declaration is released (its release trigger already ran, nothing moves it by itself any more).
 CREATE OR REPLACE FUNCTION public.tx_lifecycle(p_tx uuid) RETURNS jsonb
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
 DECLARE v_tx public.transactions; v_cur int; v_next text; v_open int; v_docs jsonb; v_pending jsonb;
@@ -407,8 +330,11 @@ BEGIN
     'steps', coalesce(v_steps, '[]'::jsonb),
     'stage_set', v_set_json,
     'next', CASE WHEN v_next IS NULL THEN NULL ELSE jsonb_build_object(
-        'code', v_next, 'manual', v_next IN ('in_progress','closed')
-                                  OR (v_next = 'under_billing' AND coalesce(v_tx.cargo_unit_type, 'container') = 'roro'),
+        'code', v_next, 'manual', v_next IN ('in_progress','under_billing','closed')
+                                  OR (v_next = 'operationally_complete'
+                                      AND (coalesce(v_tx.cargo_unit_type, 'container') <> 'roro'
+                                           OR EXISTS (SELECT 1 FROM public.customs_declarations d
+                                                       WHERE d.transaction_id = v_tx.id AND d.status = 'released'))),
         'containers_not_returned', CASE WHEN app.code_sort('operational_status', v_next)
                                             >= app.code_sort('operational_status', 'operationally_complete') THEN v_open ELSE 0 END,
         'docs_missing', v_docs) END,
