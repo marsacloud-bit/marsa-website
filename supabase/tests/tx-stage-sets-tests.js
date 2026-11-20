@@ -177,13 +177,16 @@ async function secFile() {
   await check('no value list for transaction kinds: operation / mode / transaction_type / cargo_unit_type are format checks only', () =>
     (/operation\s+text CHECK \(operation ~ '\^\[a-z\]/.test(s) && /cargo_unit_type\s+text CHECK \(cargo_unit_type ~ /.test(s)
       && !/operation IN \(/.test(s.replace(/^--.*$/gm, ''))) || 'value list found');
-  await check('this file is the latest migration', () => migFiles().pop() === MIG || 'latest ' + migFiles().pop());
+  const LATER_PHASES = ['20261205000100_service_item_price.sql'];
+  await check('this file is the latest migration (later phases excepted)', () => J(migFiles().filter(f => f > MIG)) === J(LATER_PHASES) || 'later ' + J(migFiles().filter(f => f > MIG)));
   const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
-  await check('all_migrations.sql: appended verbatim under its header, last; the paste note names it', () => {
+  await check('all_migrations.sql: appended verbatim under its header (followed only by the later phases); the paste note names it', () => {
     const h = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(h);
     const order = (all.match(/^-- ===== migrations\/(\S+) =====$/gm) || []).map(l => l.split('/')[1].split(' ')[0]);
-    return (i > 0 && all.slice(i + h.length) === s && all.indexOf(h, i + 1) < 0 && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles()))
+    const nx = all.indexOf('\n-- ===== migrations/', i + h.length);
+    const body = nx < 0 ? all.slice(i + h.length) : all.slice(i + h.length, nx);
+    return (i > 0 && (body === s || body === s + '\n' || body + '\n' === s) && all.indexOf(h, i + 1) < 0 && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles()))
       || 'not appended verbatim / no note / order';
   });
 }

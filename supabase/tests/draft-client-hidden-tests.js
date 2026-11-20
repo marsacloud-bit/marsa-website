@@ -255,7 +255,7 @@ async function secFile() {
       && /app\.is_bl_client from\s+(--\s+)?20261103000100/.test(s)) || 'is_bl_client body / down-path';
   });
   // later phases (each has its own suite) follow it, in order
-  const LATER_PHASES = ['20261204000100_tx_stage_sets.sql'];
+  const LATER_PHASES = ['20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql'];
   await check('this file is the latest migration (later phases excepted)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && J(later) === J(LATER_PHASES)) || 'later ' + J(later);

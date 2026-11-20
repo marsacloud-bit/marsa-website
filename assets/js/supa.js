@@ -2415,6 +2415,22 @@
       });
     });
   }
+  // owner stage 3ب (20261205000100): the default price of a service item (customs_clearance = the opening draft invoice line)
+  // f = { orgId?, code } → { id, code, name_ar, name_en, default_price } | null (an error before the migration: no column yet)
+  function getServiceItemPrice(f) {
+    f = f || {};
+    return inActiveOrg(f.orgId, function (oid) {
+      return online(function (c) {
+        return c.from('org_service_items').select('id,code,name_ar,name_en,default_price').eq('org_id', oid).eq('code', String(f.code || '')).maybeSingle();
+      });
+    });
+  }
+  // (id, price | null) → the row; RLS: the org admin / accounts manager only
+  function setServiceItemPrice(id, price) {
+    return online(function (c) {
+      return c.from('org_service_items').update({ default_price: price }).eq('id', id).select('id,code,default_price').single();
+    });
+  }
   // o = { orgId?, name (consignee block or name), vatNumber?, crNumber?, limit? } → { source_name, latin_key, candidates
   //   [{client_id, name_ar, name_en, confidence 0..100, method, review, reasons}], best {client_id, confidence, method} | null,
   //   suggested, conflict, confirmed:false, thresholds {suggest:90, review:70} }   (never links: confirm with confirmClientMatch)
@@ -4890,7 +4906,7 @@
     listPayments: listPayments, txDisbursements: txDisbursements, checkPaymentDuplicates: checkPaymentDuplicates,
     matchPaymentTransaction: matchPaymentTransaction, saveCustodyEntry: saveCustodyEntry, voidCustodyEntry: voidCustodyEntry,
     listCustodyEntries: listCustodyEntries, custodyBalances: custodyBalances, clientCustodyBalance: clientCustodyBalance,
-    listServiceItems: listServiceItems,
+    listServiceItems: listServiceItems, getServiceItemPrice: getServiceItemPrice, setServiceItemPrice: setServiceItemPrice,
     // 20261201000100: legacy gaps (client category / Daftra code, follow-up employee)
     setClientLegacyFields: setClientLegacyFields, setTransactionResponsible: setTransactionResponsible, listAssignableStaff: listAssignableStaff,
     listContainers: listContainers, addContainer: addContainer, updateContainer: updateContainer,

@@ -605,7 +605,7 @@ async function secFile() {
       && /'updateDraftInvoice' = ANY \(v_ops\) AND NOT app\.daftra_allow_update/.test(body) && /app\.rpt_today\(\)/.test(body)
       && !/review_status = 'approved'/.test(body)) || 'decisions');
   // later phases may follow this file (20261124000100 legacy_reports: re-creates readers of G6a / G3, never a step-7 function)
-  const LATER_PHASES = ['20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql'];
+  const LATER_PHASES = ['20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -862,7 +862,7 @@ async function secCustom() {
     const r = await rpc('admin', `SELECT public.test_daftra_custom_fields($1) r`, [t.id]);
     const n1 = await num(`SELECT count(*) n FROM public.billing_sync_jobs`);
     return (r1 === 'MRS_FORBIDDEN owner_only' && r2 === 'MRS_FORBIDDEN owner_only' && n0 === n1 && r.would_send === false && r.dry_run === true
-      && r.payload.po_number === t.ref && r.payload.custom_fields.cf_bl === t.bl && r.payload.opening_line.unit_price === 0
+      && r.payload.po_number === t.ref && r.payload.custom_fields.cf_bl === t.bl && r.payload.opening_line.unit_price === 500 /* 20261205000100: the catalogue price */
       && r.payload.opening_line.description === '' && r.payload.time_zone === 'Asia/Riyadh') || J({ r1, r2, r });
   });
 }
@@ -894,11 +894,11 @@ async function secOpening() {
     const r = await rpc('acc', `SELECT public.retry_daftra_opening($1, $2) r`, [opened.t.id, newKey()]);
     return ((await num(`SELECT count(*) n FROM public.billing_intents WHERE transaction_id = $1`, [opened.t.id])) === 1 && r.status === 'exists') || J(r);
   });
-  await check('the opening context: the clearance line at 0 SAR with an empty description, po_number = the transaction ref, the custom fields, the Riyadh date, no charge line', async () => {
+  await check('the opening context: the clearance line at the catalogue price (500 SAR by default, owner stage 3ب / 20261205000100) with an empty description, po_number = the transaction ref, the custom fields, the Riyadh date, no charge line', async () => {
     const ctx = await claimJob(opened.j.id);
     const today = (await one(`SELECT to_char((now() AT TIME ZONE 'Asia/Riyadh')::date, 'YYYY-MM-DD') d`)).d;
     const x = ctx.intent;
-    const okc = x.origin === 'opening' && x.opening_line.unit_price === 0 && x.opening_line.description === '' && x.opening_line.item_key === 'item:customs_clearance'
+    const okc = x.origin === 'opening' && x.opening_line.unit_price === 500 && x.opening_line.description === '' && x.opening_line.item_key === 'item:customs_clearance'
       && x.po_number === opened.t.ref && x.invoice_date === today && x.lines.length === 0 && x.custom_fields.payload.cf_bl === opened.t.bl
       && x.items.some(i => i.item_key === 'item:customs_clearance' && i.remote_product_code === '10x1') && x.client.external_id === 'dc-a';
     const h = H('open-1');

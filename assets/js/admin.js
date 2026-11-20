@@ -3501,6 +3501,51 @@
     }
     return card;
   }
+  // owner stage 3ب (2026-11-20, 20261205000100): «رسوم التخليص الافتراضية» — the price of the customs clearance line in the
+  // draft invoice opened in the accounting program when the preliminary declaration is approved (500 SAR by default).
+  // The org admin / accounts manager change it (RLS); others see it. Before the migration the column does not exist yet:
+  // the card says so instead of failing the page.
+  function clearancePriceCard() {
+    if (!api || typeof api.getServiceItemPrice !== 'function') return Promise.resolve(null);
+    var orgId = S.orgId;
+    return call('getServiceItemPrice', { orgId: orgId, code: 'customs_clearance' }).then(function (r) {
+      if (S.orgId !== orgId) return null;
+      if (r.error) {
+        var missing = /default_price/.test(String(r.error.message || '')) || r.error.code === '42703';
+        return dCard(t('price_title'), [dAlert(missing ? 'info' : 'warning', missing ? t('price_not_ready') : apiErr(r.error))]);
+      }
+      var row = r.data;
+      if (!row) return dCard(t('price_title'), [dAlert('warning', t('price_no_item'))]);
+      var canEdit = S.memberships.some(function (m) { return (m.role === 'admin' || m.role === 'accounts_manager') && !m.branch_id; });
+      var inp = el('input', { class: 'form-control num', id: 'adg-clearance-price', type: 'text', maxlength: '12', dir: 'ltr', lang: 'en', inputmode: 'decimal', autocomplete: 'off' });   // text, not number: a number field shows ٠-٩ in an Arabic browser; owner rule 0-9
+      inp.value = row.default_price == null ? '' : String(Number(row.default_price));
+      inp.disabled = !canEdit;
+      var msg = el('p', { class: 'form-hint', role: 'status' });
+      var btn = canEdit ? el('button', { class: 'btn btn-primary', type: 'button', text: T.common.save }) : null;
+      if (btn) btn.addEventListener('click', function () {
+        // Arabic-Indic / Persian digits and the Arabic decimal comma typed by habit are read as 0-9 and «.»
+        var raw = String(inp.value || '').trim().replace(/[٠-٩]/g, function (d) { return String(d.charCodeAt(0) - 0x0660); })
+          .replace(/[۰-۹]/g, function (d) { return String(d.charCodeAt(0) - 0x06F0); }).replace(/[٫,]/g, '.').replace(/\s/g, '');
+        var v = raw === '' ? null : (/^\d+(\.\d{1,2})?$/.test(raw) ? Number(raw) : NaN);
+        if (v !== null && (!isFinite(v) || v < 0 || v > 1000000)) { msg.textContent = t('price_invalid'); return; }
+        btn.disabled = true; msg.textContent = '';
+        call('setServiceItemPrice', row.id, v === null ? null : Math.round(v * 100) / 100).then(function (res) {
+          btn.disabled = false;
+          if (res.error) { msg.textContent = apiErr(res.error); return; }
+          toast(T.common.saved, 'success');
+          msg.textContent = t('price_saved');
+        });
+      });
+      return dCard(t('price_title'), [
+        el('div', { class: 'form-group' }, [
+          el('label', { class: 'form-label', for: 'adg-clearance-price', text: t('price_label') }), inp,
+          el('span', { class: 'form-hint', text: t('price_hint') })
+        ]),
+        canEdit ? null : el('p', { class: 'text-sm text-muted', text: t('price_read_only') }),
+        msg, btn ? el('div', { class: 'btn-group' }, [btn]) : null
+      ]);
+    });
+  }
   var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
   function renderOrg() {
     return L.getOrgRow(S.orgId).then(function (r) {
@@ -3563,7 +3608,9 @@
       });
       out.appendChild(dCard(t('org_settings'), [dAlert('info', t('org_settings_info')), form]));
       out.appendChild(orgLogoCard(st));
-      return aiSettingsCard().then(function (card) { if (card) out.appendChild(card); return out; });
+      return clearancePriceCard().then(function (pc) { if (pc) out.appendChild(pc); }).then(function () {
+        return aiSettingsCard().then(function (card) { if (card) out.appendChild(card); return out; });
+      });
     });
   }
 
