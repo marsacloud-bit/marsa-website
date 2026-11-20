@@ -2604,6 +2604,10 @@
       // later from the transaction page (appointment, transport, driver)
       var b4 = el('button', 'btn btn-secondary btn-sm', T('nt_step_appt_btn')); b4.type = 'button'; b4.disabled = true; b4.id = 'ocr-nt-appt';
       var w4 = el('div'); w4.appendChild(b4); w4.appendChild(el('p', 'form-hint', T('nt_step_appt_hint')));
+      // owner note 2026-11-20: the storage (groundage) invoice goes to the client before the appointment is booked
+      var r4 = el('p', 'ocr-nt-remind'); r4.setAttribute('role', 'note');
+      r4.appendChild(el('span', 'ocr-nt-mark', '! ')); r4.appendChild(el('span', null, T('nt_step_appt_storage')));
+      w4.appendChild(r4);
       ol.appendChild(ntStep(4, T('nt_step_appt'), 'locked', w4));
       box.appendChild(ol);
       fillSel(NT.rows || []);

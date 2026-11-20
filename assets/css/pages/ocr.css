@@ -825,7 +825,8 @@ button.ocr-mx-recent-open { background: none; border: 0; padding: 0; font: inher
 }
 .ocr-nt-step.is-active .ocr-nt-num { border-color: var(--teal); color: var(--teal); }
 .ocr-nt-step.is-done .ocr-nt-num { border-color: #15803d; background: #15803d; color: #fff; }
-.ocr-nt-step.is-locked, .ocr-nt-step.is-waiting { opacity: .65; }
+.ocr-nt-step.is-locked > .ocr-nt-num, .ocr-nt-step.is-waiting > .ocr-nt-num, .ocr-nt-step.is-locked .ocr-nt-title, .ocr-nt-step.is-waiting .ocr-nt-title,
+.ocr-nt-step.is-locked .btn, .ocr-nt-step.is-locked .form-hint, .ocr-nt-step.is-waiting .form-hint { opacity: .65; }   /* the storage reminder stays at full strength */
 .ocr-nt-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .ocr-nt-title { font-size: var(--fs-sm, .95rem); }
 .ocr-nt-pick { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px; max-inline-size: 720px; }
@@ -835,3 +836,4 @@ button.ocr-mx-recent-open { background: none; border: 0; padding: 0; font: inher
 .ocr-nt-client-name { margin: 0; font-weight: 800; }
 .ocr-nt-match { margin: 0; }
 .ocr-nt-mark { font-weight: 800; }
+.ocr-nt-remind { margin: 4px 0 0; padding: 6px 10px; border-radius: 8px; background: #FEF6D8; border: 1px solid #F2D675; color: #6B5300; font-size: var(--fs-sm, .9rem); }
