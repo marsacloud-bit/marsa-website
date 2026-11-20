@@ -117,6 +117,7 @@
       MRS_APPT_DRAFT_LIMIT: 'تجاوزت حد المسودة ({f}): 20 بطاقة و25 ميغابايت لكل معاملة كحد أقصى.',
       MRS_APPT_CARD_DUPLICATE: 'بطاقة الموعد هذه مقروءة من قبل ({f}): معتمدة في حركة قائمة، أو بانتظار الاعتماد في مسودة معاملة أخرى (يمكن نقل تلك المسودة إلى هنا).',
       MRS_APPT_CONTAINER_NOT_IN_TX: 'رقم الحاوية في البطاقة ليس من حاويات هذه المعاملة ({f}). اختر حاوية المعاملة أو أضفها قبل الاعتماد.',
+      MRS_STORAGE_UNPAID: 'لا يُحجز الموعد قبل سداد فاتورة الأرضيات للحاوية {f}. سجّل السداد في قسم «الأرضيات» بصفحة المعاملة، أو اطلب موافقة المسؤول.',
       MRS_APPT_PARTY_REQUIRED: 'حدد جهة النقل للبطاقة (مورد أو شركة نقل أو مباشر) واسمها قبل الاعتماد.',
       MRS_DATETIME_REQUIRED: 'أدخل التاريخ والوقت معًا ({f}): التاريخ وحده لا يكفي.',
       MRS_EMPTY_RETURN_CLOSED: 'إثبات إعادة الفارغ هذا مغلق ({f}): المعتمد لا يُعتمد مرة أخرى، والملغى لا يُعدَّل.',
@@ -513,6 +514,9 @@
       'MRS_BAD_TRANSITION:cancelled': 'هذا السجل ملغى ولا يقبل التعديل.',
       'MRS_BAD_TRANSITION:delivered': 'تم النقل لهذه الحركة؛ لا تُعدَّل بياناتها التشغيلية ولا تُلغى.',
       'MRS_FORBIDDEN:cost': 'قيمة النقل وعائد المؤسسة متاحان لصلاحيات المالية ومدير العمليات فقط.',
+      'MRS_STORAGE_UNPAID:transaction': 'لا يُحجز الموعد قبل سداد فواتير الأرضيات لحاويات هذه المعاملة، أو موافقة المسؤول.',
+      'MRS_FORBIDDEN:storage_override': 'الموافقة على حجز الموعد قبل سداد الأرضيات لمدير العمليات أو مدير الفرع أو المشرف أو مدير المؤسسة فقط.',
+      'MRS_CONFLICT:storage_override': 'توجد موافقة سابقة على حجز الموعد لهذه المعاملة.',
       'MRS_BAD_TRANSITION:same_status': 'المعاملة في هذه المرحلة بالفعل (ربما تقدّمت تلقائيًا). حدّث الصفحة.',
       // legacy step 3 (20261119000100)
       'MRS_NOT_FOUND:doc_batch': 'حزمة المستندات غير موجودة أو لا تملك صلاحية عرضها (المسودات مفصولة حسب الفرع).',
@@ -2413,6 +2417,21 @@
         if (f.active !== false) q = q.eq('is_active', true);
         return q.limit(500);
       });
+    });
+  }
+  // owner stage 3ج (20261206000100): the storage gate of a transaction → { applies, port_code, blocked, containers [{ id,
+  //   container_no, storage_state, storage_invoice_no, storage_amount, storage_sent_at, storage_paid_at, storage_note }],
+  //   override { reason, approved_by_name, approved_at } | null, can_override }
+  function txStorageGate(txId) { return rpc('tx_storage_gate', { p_tx: txId }); }
+  // the manager approval to book before the storage is paid (senior ops; reason 3 … 500)
+  function approveStorageOverride(txId, reason) { return rpc('approve_storage_override', { p_tx: txId, p_reason: String(reason || '') }); }
+  // a container's storage answer (transport writers, RLS): patch = { storage_state, storage_invoice_no?, storage_amount?, storage_note? }
+  function updateContainerStorage(id, patch) {
+    var allowed = ['storage_state', 'storage_invoice_no', 'storage_amount', 'storage_note'], row = {};
+    Object.keys(patch || {}).forEach(function (k) { if (allowed.indexOf(k) !== -1) row[k] = patch[k]; });
+    return online(function (c) {
+      return c.from('containers').update(row).eq('id', id)
+        .select('id,container_no,storage_state,storage_invoice_no,storage_amount,storage_sent_at,storage_paid_at,storage_note').single();
     });
   }
   // owner stage 3ب (20261205000100): the default price of a service item (customs_clearance = the opening draft invoice line)
@@ -4906,7 +4925,7 @@
     listPayments: listPayments, txDisbursements: txDisbursements, checkPaymentDuplicates: checkPaymentDuplicates,
     matchPaymentTransaction: matchPaymentTransaction, saveCustodyEntry: saveCustodyEntry, voidCustodyEntry: voidCustodyEntry,
     listCustodyEntries: listCustodyEntries, custodyBalances: custodyBalances, clientCustodyBalance: clientCustodyBalance,
-    listServiceItems: listServiceItems, getServiceItemPrice: getServiceItemPrice, setServiceItemPrice: setServiceItemPrice,
+    listServiceItems: listServiceItems, getServiceItemPrice: getServiceItemPrice, setServiceItemPrice: setServiceItemPrice, txStorageGate: txStorageGate, approveStorageOverride: approveStorageOverride, updateContainerStorage: updateContainerStorage,
     // 20261201000100: legacy gaps (client category / Daftra code, follow-up employee)
     setClientLegacyFields: setClientLegacyFields, setTransactionResponsible: setTransactionResponsible, listAssignableStaff: listAssignableStaff,
     listContainers: listContainers, addContainer: addContainer, updateContainer: updateContainer,

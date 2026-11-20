@@ -221,3 +221,18 @@ button.ops-kpi { font: inherit; color: inherit; width: 100%; cursor: pointer; }
 .txd-step.is-locked > .txd-step-num, .txd-step.is-locked .txd-step-title { opacity: .65; }
 .txd-step-hint { color: var(--muted); font-size: var(--fs-sm, .9rem); }
 .txd-step-remind { padding: 6px 10px; border-radius: 8px; background: #FEF6D8; border: 1px solid #F2D675; color: #6B5300; font-size: var(--fs-sm, .9rem); }
+
+/* ---- owner stage 3ج (2026-11-20): «الأرضيات» on #tx (ops/tx-storage.js) ---- */
+.stg-row { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-block: 10px; min-width: 0; }
+.stg-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-block-end: 6px; }
+.stg-no { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 700; }
+.stg-dot { inline-size: 24px; block-size: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; color: #fff; }
+.stg-dot.is-ok { background: #15803d; }
+.stg-dot.is-warn { background: #d4a106; }
+.stg-dot.is-bad { background: #b91c1c; }
+.stg-row-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, .8fr); gap: 8px; }
+@media (max-width: 640px) { .stg-row-grid { grid-template-columns: 1fr; } }
+.stg-remind { margin: 4px 0; padding: 6px 10px; border-radius: 8px; background: #FEF6D8; border: 1px solid #F2D675; color: #6B5300; font-size: var(--fs-sm, .9rem); }
+.stg-override { border-block-start: 1px dashed var(--border-strong, #cfd6dd); margin-block-start: 12px; padding-block-start: 10px; display: flex; flex-direction: column; gap: 6px; }
+.stg-override-title { margin: 0; font-size: var(--fs-sm, .95rem); }
+.stg-override-done { margin: 8px 0 0; padding: 6px 10px; border-radius: 8px; background: #EEF6F1; border: 1px solid #B9DCC6; font-size: var(--fs-sm, .9rem); }

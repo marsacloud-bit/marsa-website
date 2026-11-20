@@ -148,7 +148,19 @@
       doc_certificate_of_origin: 'شهادة المنشأ', doc_saber_certificate: 'شهادة سابر', doc_customs_declaration: 'البيان الجمركي',
       doc_delivery_order: 'إذن التسليم', doc_appointment: 'الموعد', doc_container_delivery_eir: 'إيصال تسليم الحاوية (EIR)',
       doc_empty_return_note: 'إشعار إرجاع الفارغ', doc_empty_return_receipt: 'إيصال إرجاع الفارغ', doc_operator_invoice: 'فاتورة المشغل',
-      doc_government_doc: 'مستند حكومي', doc_import_file: 'ملف استيراد', doc_other: 'أخرى'
+      doc_government_doc: 'مستند حكومي', doc_import_file: 'ملف استيراد', doc_other: 'أخرى',
+      // owner stage 3ج (20261206000100): storage (groundage) invoice per container + the appointment gate (ops/tx-storage.js)
+      stg_title: 'الأرضيات', stg_lead: 'في هذا الميناء لا يُحجز موعد الحاوية قبل سداد فاتورة الأرضيات. سجّل حالة كل حاوية.',
+      stg_state_null: '— لم تُحدَّد بعد —', stg_state_none: 'لا توجد أرضيات', stg_state_issued: 'صدرت فاتورة — لم تُرسل للعميل',
+      stg_state_sent: 'أُرسلت للعميل — بانتظار السداد', stg_state_paid: 'سُددت',
+      stg_ctr: 'الحاوية', stg_state: 'حالة الأرضيات', stg_invoice: 'رقم الفاتورة', stg_amount: 'المبلغ (ريال)', stg_save: 'حفظ',
+      stg_saved: 'حُفظت حالة الأرضيات.', stg_blocked: 'لا يُحجز الموعد قبل سداد فاتورة الأرضيات.', stg_open: 'الأرضيات مسواة: يمكن حجز الموعد.', stg_open_override: 'يمكن حجز الموعد بموافقة المسؤول، والأرضيات لم تُسدد بعد: تابع العميل حتى يسدد.',
+      stg_sent_on: 'أُرسلت {d}', stg_paid_on: 'سُددت {d}',
+      stg_remind_issued: 'أرسل فاتورة الأرضيات إلى العميل ليسددها.', stg_remind_sent: 'تابع العميل حتى يسدد فاتورة الأرضيات.',
+      stg_override_title: 'موافقة على الحجز قبل السداد', stg_override_reason: 'سبب الموافقة', stg_override_btn: 'موافقة على الحجز قبل السداد',
+      stg_override_hint: 'تُسجَّل الموافقة باسمك ووقتها وسببها. متابعة سداد الأرضيات تستمر.',
+      stg_override_done: 'وافق {who} على حجز الموعد قبل السداد ({d}): {reason}', stg_override_ok: 'سُجّلت الموافقة.',
+      stg_override_short: 'اكتب السبب (3 أحرف على الأقل).', stg_none_ctr: 'لا توجد حاويات في هذه المعاملة بعد.', stg_err_amount: 'أدخل المبلغ بالأرقام (مثل 350 أو 350.50).', stg_err_state: 'اختر حالة الأرضيات.'
     },
     en: {
       nav_group: 'Operations', nav_alerts: 'Alerts', nav_schedule: 'Daily schedule', nav_exceptions: 'Exceptions',
@@ -279,7 +291,19 @@
       doc_certificate_of_origin: 'Certificate of origin', doc_saber_certificate: 'SABER certificate', doc_customs_declaration: 'Customs declaration',
       doc_delivery_order: 'Delivery order', doc_appointment: 'Appointment', doc_container_delivery_eir: 'Container delivery EIR',
       doc_empty_return_note: 'Empty return note', doc_empty_return_receipt: 'Empty return receipt', doc_operator_invoice: 'Operator invoice',
-      doc_government_doc: 'Government document', doc_import_file: 'Import file', doc_other: 'Other'
+      doc_government_doc: 'Government document', doc_import_file: 'Import file', doc_other: 'Other',
+      // owner stage 3ج (20261206000100): storage (groundage) invoice per container + the appointment gate (ops/tx-storage.js)
+      stg_title: 'Storage', stg_lead: 'At this port no appointment is booked before the storage invoice is paid. Record the state of each container.',
+      stg_state_null: '— not answered —', stg_state_none: 'No storage invoice', stg_state_issued: 'Invoice issued — not sent to the client',
+      stg_state_sent: 'Sent to the client — awaiting payment', stg_state_paid: 'Paid',
+      stg_ctr: 'Container', stg_state: 'Storage state', stg_invoice: 'Invoice no.', stg_amount: 'Amount (SAR)', stg_save: 'Save',
+      stg_saved: 'Storage state saved.', stg_blocked: 'No appointment before the storage invoice is paid.', stg_open: 'Storage settled: the appointment can be booked.', stg_open_override: 'The appointment can be booked with a manager approval; the storage is not paid yet: follow up with the client.',
+      stg_sent_on: 'Sent {d}', stg_paid_on: 'Paid {d}',
+      stg_remind_issued: 'Send the storage invoice to the client to pay.', stg_remind_sent: 'Follow up with the client until the storage invoice is paid.',
+      stg_override_title: 'Approve booking before payment', stg_override_reason: 'Reason', stg_override_btn: 'Approve booking before payment',
+      stg_override_hint: 'Your name, the time and the reason are recorded. The storage follow-up goes on.',
+      stg_override_done: '{who} approved booking before payment ({d}): {reason}', stg_override_ok: 'Approval recorded.',
+      stg_override_short: 'Write the reason (at least 3 characters).', stg_none_ctr: 'No containers on this transaction yet.', stg_err_amount: 'Enter the amount in digits (e.g. 350 or 350.50).', stg_err_state: 'Choose the storage state.'
     }
   };
   window.MarsaOpsDict = DICT;

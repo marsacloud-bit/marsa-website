@@ -648,6 +648,9 @@ const TENANT_TABLES = [
   // owner stages (20261204000100): per-org stage sets and their steps
   ['tx_stage_sets', `SELECT id::text id FROM public.tx_stage_sets WHERE org_id = $1 LIMIT 1`, 'id::text', 'note = note'],
   ['tx_stage_steps', `SELECT id::text id FROM public.tx_stage_steps WHERE org_id = $1 LIMIT 1`, 'id::text', 'label_ar = label_ar'],
+  // storage gate (20261206000100): the ports where an unpaid storage invoice blocks the appointment; the manager overrides
+  ['storage_gate_ports', `SELECT id::text id FROM public.storage_gate_ports WHERE org_id = $1 LIMIT 1`, 'id::text', 'is_active = is_active'],
+  ['tx_storage_overrides', `SELECT id::text id FROM public.tx_storage_overrides WHERE org_id = $1 LIMIT 1`, 'id::text', 'reason = reason'],
   ['port_appointments',  `SELECT id::text id FROM public.port_appointments WHERE org_id = $1 LIMIT 1`,  'id::text',  'status = status'],
   ['transport_trips',    `SELECT id::text id FROM public.transport_trips WHERE org_id = $1 LIMIT 1`,    'id::text',  'status = status'],
   ['operational_exceptions', `SELECT id::text id FROM public.operational_exceptions WHERE org_id = $1 LIMIT 1`, 'id::text', 'status = status'],
@@ -737,6 +740,14 @@ async function main() {
   // owner stages (20261204000100): the seed orgs are created after the migrations, so they get their default set here
   try { await db.exec(`SELECT app.seed_tx_stage_sets(o.id) FROM public.organizations o`); pass('owner stages fixtures: a default stage set (7 steps) per org'); }
   catch (e) { fail('owner stages fixtures', errText(e)); return finish(); }
+  // storage gate (20261206000100): one manager override per org (the seed orgs get their SAJED gate row from the org trigger)
+  try {
+    await db.exec(`INSERT INTO public.tx_storage_overrides (org_id, transaction_id, reason, approved_by)
+                   SELECT t.org_id, t.id, 'اختبار', (SELECT m.user_id FROM public.memberships m WHERE m.org_id = t.org_id ORDER BY m.created_at LIMIT 1)
+                     FROM (SELECT DISTINCT ON (org_id) org_id, id FROM public.transactions ORDER BY org_id, created_at) t
+                   ON CONFLICT DO NOTHING`);
+    pass('storage gate fixtures: one override per org');
+  } catch (e) { fail('storage gate fixtures', errText(e)); return finish(); }
 
   /* ---------------------------------------------------------------- catalog */
   section('catalog: RLS, grants, function privileges');
@@ -848,6 +859,8 @@ async function main() {
       'appointment_card_state', 'save_appointment_draft', 'get_appointment_draft', 'cancel_appointment_draft', 'move_appointment_draft',
       'approve_appointment_draft', 'create_empty_return_proof', 'verify_empty_return_proof', 'void_empty_return_proof',
       'save_empty_return_deadline', 'list_empty_return_proofs', 'save_transport_carrier_order', 'tx_readiness',
+      // storage gate (20261206000100): the gate state of a transaction + the manager approval to book before payment
+      'tx_storage_gate', 'approve_storage_override',
       // legacy pay (20261122000100): the payment register (four-eyes review, correct / void, attachments, the transaction panel,
       // the duplicate / transaction checks) and the client custody
       'record_payment_bundle', 'correct_payment', 'void_payment', 'review_payment', 'add_payment_documents', 'remove_payment_document',
@@ -872,7 +885,7 @@ async function main() {
       'legacy_import_commit', 'legacy_import_void', 'legacy_import_get_run', 'legacy_import_list_runs', 'legacy_import_list_rows',
       'legacy_import_skip_rows', 'legacy_import_queue_daftra', 'legacy_import_daftra_candidates'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 311) return 'expected list has ' + exp.length + ' names';
+    if (exp.length !== 313) return 'expected list has ' + exp.length + ' names';   // + tx_storage_gate, approve_storage_override (20261206000100)
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');
