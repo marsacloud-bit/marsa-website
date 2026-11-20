@@ -234,6 +234,9 @@
       client_classification_internal: 'التصنيف الداخلي', col_daftra_code: 'كود دفترة', col_port_category: 'التصنيف',
       txnew_code_none: 'لا يوجد كود', txnew_cat_hint: 'يُعبّأ من ملف العميل المختار؛ إن غيّرته يُحدَّث ملف العميل بعد إنشاء المعاملة.',
       txnew_warn_cat: 'تعذّر تحديث تصنيف العميل ({e})',
+      // owner reorg (20 Nov 2026): the transaction page tabs
+      txtab_aria: 'أقسام المعاملة', txtab_summary: 'الملخص', txtab_docs: 'المستندات', txtab_containers: 'الحاويات والأرضيات', txtab_transport: 'الموعد والنقل',
+      txtab_return: 'إرجاع الفارغ', txtab_finance: 'المالية', txtab_log: 'السجل', txtab_flag_danger: 'فيه أمر متأخر أو يمنع الإجراء', txtab_flag_warning: 'فيه أمر يحتاج مراجعة',
       tx_responsible: 'الموظف المتابع', tx_responsible_hint: 'موظفو المؤسسة على مستوى المؤسسة وموظفو فرع المعاملة.',
       txnew_responsible_none: 'بدون موظف متابع', txnew_responsible_hint: 'أنت افتراضيًا؛ يمكن تغييره لاحقًا من «تعديل البيانات» في صفحة المعاملة.',
       staff_load_failed: 'تعذّر تحميل قائمة الموظفين ({e}).',
@@ -480,6 +483,9 @@
       lbl_client_port_category_airport: 'Airport', lbl_client_port_category_port: 'Port', lbl_client_port_category_shared: 'Shared',
       txnew_code_none: 'No code', txnew_cat_hint: 'Filled from the chosen client; if you change it, the client file is updated after the transaction is created.',
       txnew_warn_cat: 'The client category could not be updated ({e})',
+      // owner reorg (20 Nov 2026): the transaction page tabs
+      txtab_aria: 'Transaction sections', txtab_summary: 'Summary', txtab_docs: 'Documents', txtab_containers: 'Containers & storage', txtab_transport: 'Appointment & transport',
+      txtab_return: 'Empty return', txtab_finance: 'Finance', txtab_log: 'Log', txtab_flag_danger: 'something is late or blocks the next step', txtab_flag_warning: 'something needs review',
       tx_responsible: 'Follow-up employee', tx_responsible_hint: 'Org-wide staff and the staff of the transaction\'s branch.',
       txnew_responsible_none: 'No follow-up employee', txnew_responsible_hint: 'You by default; it can be changed later from "Edit details" on the transaction page.',
       staff_load_failed: 'The staff list could not be loaded ({e}).',

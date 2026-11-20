@@ -86,6 +86,8 @@
     function paint(v) {
       if (!v.show) { card.hidden = true; return; }
       card.hidden = false;
+      // the transaction tabs (admin.js txTabs) mark «الحاويات والأرضيات» from this
+      if (v.blocked || v.byOverride) card.setAttribute('data-tab-flag', v.blocked ? 'danger' : 'warning'); else card.removeAttribute('data-tab-flag');
       card.appendChild(el('header', { class: 'app-card-head adm-card-head' }, [el('h3', { class: 'app-card-title', text: T('stg_title') })]));
       var body = el('div', { class: 'app-card-body adm-card-body' });
       card.appendChild(body);

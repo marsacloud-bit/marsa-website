@@ -171,7 +171,7 @@
     if (!A || typeof A.listDriversDirectory !== 'function' || typeof A.saveDriverEntry !== 'function') return null;
     if (typeof api.can === 'function' && !api.can('transportWriter', tx.branch_id)) return null;
     var el = U.el, t = U.t;
-    var card = el('section', { class: 'app-card adm-card ops-tx-card drv2-tx-card', 'aria-live': 'polite', hidden: true });
+    var card = el('section', { class: 'app-card adm-card ops-tx-card drv2-tx-card', 'aria-live': 'polite', hidden: true, 'data-tab-flag': 'warning' });
     root.appendChild(card);
     return Promise.all([
       U.call(api, 'listAppointments', { txId: tx.id }), U.call(api, 'listTrips', { txId: tx.id })

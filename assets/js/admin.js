@@ -872,6 +872,97 @@
     });
   }
 
+  /* owner reorg (20 Nov 2026): the transaction page in tabs instead of one long scroll. The header, the stages and
+     the 'top' sections stay above; every card / section moves into its tab (nothing removed). A section may declare
+     { tab } itself; otherwise TX_TAB_OF decides; unknown ones go to «الملخص». The chosen tab is kept per transaction
+     for this browser session; the first visit opens the tab of the current stage. A tab shows a red ✗ / yellow !
+     while a shown node inside it carries data-tab-flag="danger" / "warning" (storage unpaid, driver not classified…). */
+  var TX_TABS = ['summary', 'docs', 'containers', 'transport', 'return', 'finance', 'log'];
+  var TX_TAB_OF = { completeness: 'summary', checklist: 'summary', declarations: 'docs', declaration_reading: 'docs', bls: 'docs',
+    shipment_docs: 'docs', containers: 'containers', storage: 'containers', appointments: 'transport', appointment_cards: 'transport',
+    driver_classify: 'transport', movements: 'transport', carrier_order: 'transport', trips: 'transport', empty_return: 'return', exceptions: 'log',
+    'fin-payments': 'finance', 'fin-costs': 'finance', 'fin-margin': 'finance', 'bill-invoices': 'finance', 'msg-thread': 'log', 'audit-trail': 'log' };
+  var TX_TAB_OF_STAGE = { 'new': 'docs', in_progress: 'docs', customs_declaration: 'docs', appointment: 'transport', transport: 'transport', empty_return: 'return' };
+  function txTabStore(id, v) {
+    var k = 'mrs.txtab.' + id;
+    try { if (v === undefined) return window.sessionStorage.getItem(k); window.sessionStorage.setItem(k, v); } catch (e) { /* private mode: no memory */ }
+    return null;
+  }
+  function txTabs(out, t, sections) {
+    var bar = el('div', { class: 'adm-txtabs', role: 'tablist', 'aria-label': tl('txtab_aria') });
+    var wrap = el('div', { class: 'adm-txtabs-wrap' }, [bar]);
+    var panels = {}, btns = {};
+    TX_TABS.forEach(function (k) {
+      var b = el('button', { class: 'adm-txtab', type: 'button', role: 'tab', id: 'txtab-' + k, 'aria-controls': 'txpanel-' + k, 'aria-selected': 'false', tabindex: '-1', 'data-txtab': k },
+        [el('span', { text: tl('txtab_' + k) }), el('span', { class: 'adm-txtab-flag', 'aria-hidden': 'true', hidden: true })]);
+      b.addEventListener('click', function () { show(k, true); });
+      bar.appendChild(b); btns[k] = b;
+      panels[k] = el('div', { class: 'adm-txpanel', role: 'tabpanel', id: 'txpanel-' + k, 'aria-labelledby': 'txtab-' + k, 'data-txtab-panel': k, hidden: true });
+      wrap.appendChild(panels[k]);
+    });
+    bar.addEventListener('keydown', function (e) {
+      var i = TX_TABS.indexOf(e.target && e.target.getAttribute && e.target.getAttribute('data-txtab'));
+      if (i === -1) return;
+      var rtl = (document.documentElement.getAttribute('dir') || 'rtl') === 'rtl', n = null;
+      if (e.key === 'ArrowLeft') n = rtl ? i + 1 : i - 1;
+      else if (e.key === 'ArrowRight') n = rtl ? i - 1 : i + 1;
+      else if (e.key === 'Home') n = 0; else if (e.key === 'End') n = TX_TABS.length - 1;
+      if (n === null) return;
+      e.preventDefault();
+      n = (n + TX_TABS.length) % TX_TABS.length;
+      show(TX_TABS[n], true); btns[TX_TABS[n]].focus();
+    });
+    function put(k, node) { if (node) panels[TX_TABS.indexOf(k) === -1 ? 'summary' : k].appendChild(node); }
+    put('summary', out.querySelector('.adm-txc-summary'));
+    Array.prototype.slice.call(out.querySelectorAll('.adm-txc-containers')).forEach(function (n) { put('containers', n); });
+    put('docs', out.querySelector('.adm-txc-docs'));
+    var logCard = out.querySelector('.adm-txc-log');
+    var list = Array.isArray(OPS.txSections) ? OPS.txSections : [];
+    Array.prototype.slice.call(sections.children).forEach(function (box) {
+      var id = box.getAttribute('data-section'), s = list.filter(function (x) { return x && x.id === id; })[0];
+      put((s && s.tab) || TX_TAB_OF[id] || 'summary', box);
+    });
+    put('log', logCard);
+    sections.parentNode.insertBefore(wrap, sections);
+    sections.parentNode.removeChild(sections);
+    function show(k, remember) {
+      TX_TABS.forEach(function (x) {
+        var on = x === k;
+        btns[x].setAttribute('aria-selected', on ? 'true' : 'false');
+        btns[x].tabIndex = on ? 0 : -1;
+        btns[x].classList.toggle('is-active', on);
+        panels[x].hidden = !on;
+      });
+      if (remember) txTabStore(t.id, k);
+    }
+    // a flag counts only while its node is shown inside the panel (a hidden card does not flag)
+    function flags() {
+      TX_TABS.forEach(function (k) {
+        var tone = null;
+        Array.prototype.slice.call(panels[k].querySelectorAll('[data-tab-flag]')).forEach(function (n) {
+          for (var p = n; p && p !== panels[k]; p = p.parentNode) { if (p.hidden) return; }
+          var f = n.getAttribute('data-tab-flag');
+          if (f === 'danger' || (f === 'warning' && !tone)) tone = f;
+        });
+        var fl = btns[k].querySelector('.adm-txtab-flag');
+        fl.hidden = !tone;
+        fl.className = 'adm-txtab-flag' + (tone ? ' is-' + tone : '');
+        fl.textContent = tone === 'danger' ? '✗' : tone === 'warning' ? '!' : '';
+        btns[k].setAttribute('aria-label', tl('txtab_' + k) + (tone ? ' — ' + tl('txtab_flag_' + tone) : ''));
+        // a tab with nothing to show for this transaction / role (finance for a clerk, empty return for Ro-Ro) hides
+        btns[k].hidden = !panels[k].textContent.trim() && !panels[k].querySelector('input, select, textarea, button, img, table') && btns[k].getAttribute('aria-selected') !== 'true';
+      });
+    }
+    if (typeof MutationObserver === 'function') {
+      var pend = false;
+      new MutationObserver(function () { if (pend) return; pend = true; setTimeout(function () { pend = false; flags(); }, 60); })
+        .observe(wrap, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden', 'data-tab-flag'] });
+    }
+    var saved = txTabStore(t.id);
+    show(TX_TABS.indexOf(saved) !== -1 ? saved : (TX_TAB_OF_STAGE[t.operational_status] || 'summary'), false);
+    flags();
+  }
+
   // client detail sections (legacy step 6: custody balance), sorted by order; each fails on its own
   function renderClientSections(host, client) {
     var list = (Array.isArray(OPS.clientSections) ? OPS.clientSections : []).filter(function (s) { return s && typeof s.render === 'function'; })
@@ -2432,12 +2523,12 @@
         } else {
           status += '<p class="text-sm text-muted">' + T.common.notAllowed + '</p>';
         }
-        html += '<div class="adm-cols adm-cols-wide">' + card('بيانات المعاملة', info + (LX ? '<div data-lx-details></div>' : '')) + card('الحالة', status) + '</div>';
+        html += '<div class="adm-cols adm-cols-wide adm-txc-summary">' + card('بيانات المعاملة', info + (LX ? '<div data-lx-details></div>' : '')) + card('الحالة', status) + '</div>';
 
         // containers (a Ro-Ro transaction carries a vehicle instead: no containers, no empty return)
         if (roro && LX) {
           html += card(esc(LX.t('roro_card')), kv([[LX.t('k_chassis'), ltr(t.chassis_no), true], [LX.t('k_plate'), ltr(t.vehicle_plate_no), true]]) +
-            '<p class="form-hint">' + esc(LX.t('roro_card_hint')) + '</p>');
+            '<p class="form-hint">' + esc(LX.t('roro_card_hint')) + '</p>', '', 'adm-txc-containers');
         } else {
         var cRows = (t.containers || []).slice().sort(function (a, b) { return a.container_no < b.container_no ? -1 : 1; }).map(function (c) {
           var ev = docs.filter(function (d) { return d.id === c.evidence_document_id; })[0];
@@ -2451,7 +2542,7 @@
         });
         html += card('الحاويات وإرجاع الفارغ', table(['رقم الحاوية', 'النوع', 'آخر موعد للإرجاع', 'مكان الإرجاع', 'حالة الإرجاع', 'دليل الإرجاع', ''], cRows) +
           '<p class="form-hint">الإثبات الوحيد المقبول لإرجاع الحاوية هو «' + esc(lbl('document_kind', 'empty_return_receipt')) + '» بعد تأكيد تصنيفه من الموظف. إيصال التسليم (EIR) وتعليمات الإرجاع ليست إثباتًا.</p>',
-          canTr ? '<button class="btn btn-sm btn-primary" type="button" data-act="ctr-add" data-tx="' + esc(t.id) + '">' + icon('plus') + 'إضافة حاوية</button>' : '');
+          canTr ? '<button class="btn btn-sm btn-primary" type="button" data-act="ctr-add" data-tx="' + esc(t.id) + '">' + icon('plus') + 'إضافة حاوية</button>' : '', 'adm-txc-containers');
         }
 
         // documents
@@ -2467,7 +2558,7 @@
             '<p class="form-hint">الحد الأقصى 25 ميغابايت. الأصل يُحفظ كما هو مع بصمته (SHA-256)، والتصحيح يكون برفع نسخة جديدة أو إلغاء المستند مع ذكر السبب.</p>';
         }
         var voidToggle = '<label class="check adm-voided-toggle"><input type="checkbox" data-act="toggle-voided"' + (S.showVoided ? ' checked' : '') + '> إظهار المستندات الملغاة</label>';
-        html += card('المستندات', (res[1].error ? alertBox('danger', errText(res[1].error)) : docsTable(docs, { tx: t })) + upload, voidToggle);
+        html += card('المستندات', (res[1].error ? alertBox('danger', errText(res[1].error)) : docsTable(docs, { tx: t })) + upload, voidToggle, 'adm-txc-docs');
 
         // events (append-only)
         var evHtml = res[2].error ? alertBox('danger', errText(res[2].error)) : timeline(events, docs);
@@ -2476,7 +2567,7 @@
             field({ name: 'note', label: 'إضافة ملاحظة', type: 'textarea', rows: 2, req: true, attrs: ' maxlength="2000"', full: true }) +
             '<button class="btn btn-sm btn-primary" type="submit">إضافة إلى السجل</button></form>';
         }
-        html += card('سجل الأحداث', '<p class="form-hint">السجل للإضافة فقط: لا يُعدّل ولا يُحذف. للتصحيح أضف ملاحظة جديدة توضّح السبب.</p>' + evHtml);
+        html += card('سجل الأحداث', '<p class="form-hint">السجل للإضافة فقط: لا يُعدّل ولا يُحذف. للتصحيح أضف ملاحظة جديدة توضّح السبب.</p>' + evHtml, '', 'adm-txc-log');
         // G3 sections (MarsaOps.txSections) are DOM nodes: the escaped markup above becomes a fragment first
         var tpl = document.createElement('template');
         tpl.innerHTML = html;
@@ -2495,6 +2586,7 @@
         var sections = el('div', { class: 'ops-tx-sections' });
         out.appendChild(sections);
         renderTxSections(sections, t);
+        txTabs(out, t, sections);
         return out;
       });
     });
