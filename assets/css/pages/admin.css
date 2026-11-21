@@ -317,6 +317,11 @@ a.adm-mini-row:focus-visible { outline: none; box-shadow: var(--ring); }
 .adm-txpanel > * + * { margin-block-start: 14px; }
 @media (max-width: 640px) { .adm-txtab { padding: 8px 10px; font-size: .9rem; } }
 /* owner reorg: «إضافة مستند آخر» folded under one button in the documents card */
+/* AI reading: the providers order (20261208000100), three choices on one row */
+.adm-ai-order h4 { margin: 4px 0 2px; }
+.adm-ai-order-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 18px; margin-top: 8px; }
+.adm-ai-order-grid .form-group { margin: 0; min-width: 0; }
+@media (max-width: 640px) { .adm-ai-order-grid { grid-template-columns: minmax(0, 1fr); } }
 .adm-upload-more { margin-block-start: 12px; }
 .adm-upload-more > summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .adm-upload-more > summary::-webkit-details-marker { display: none; }

@@ -67,7 +67,7 @@ check('tab strings in ar + en', () => TABS.concat(['aria', 'flag_danger', 'flag_
 check('flags: storage red / yellow, unclassified driver yellow', () =>
   (/data-tab-flag', v\.blocked \? 'danger' : 'warning'/.test(rd('assets/js/ops/tx-storage.js')) && /'data-tab-flag': 'warning'/.test(rd('assets/js/ops/drivers.js'))) || 'flags');
 check('css for tabs and flags', () => (/\.adm-txtab\.is-active/.test(rd('assets/css/pages/admin.css')) && /\.adm-txtab-flag\.is-danger/.test(rd('assets/css/pages/admin.css'))) || 'css');
-check('sw.js VERSION bumped for the tabs and the documents tab', () => /var VERSION = '[^']+';\s+\/\/ owner reorg: «إضافة مستند آخر»[^;]*; owner reorg: the transaction page in tabs/.test(rd('sw.js')) || 'sw');
+check('sw.js VERSION bumped for the tabs and the documents tab', () => /var VERSION = '[^']+';\s+\/\/ [^\n]*owner reorg: «إضافة مستند آخر»[^;]*; owner reorg: the transaction page in tabs/.test(rd('sw.js')) || 'sw');
 
 // the «المستندات» tab: the upload folded as «إضافة مستند آخر» (a later document), the payment attachments listed there
 check('documents card: the upload form is folded under «إضافة مستند آخر» with the hint', () =>

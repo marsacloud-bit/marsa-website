@@ -3711,7 +3711,10 @@
 
   /* ------------------------------------------------------------------
      القراءة بالذكاء الاصطناعي — org admin (aal2): ai_get_settings / ai_save_settings (20261114000100).
-     Off by default; switching on needs the explicit consent checkbox (document contents go to Anthropic).
+     Off by default; switching on needs the explicit consent checkbox (document contents go to the providers).
+     20261208000100 (owner, 21 Nov 2026): the providers order (Claude / OpenAI / Gemini), tried in turn; adding a
+     provider the last consent did not name asks for the consent again. Without the providers list (older database)
+     the card is as before (Claude only).
      ------------------------------------------------------------------ */
   function aiNum(v, digits) {
     var n = Number(v);
@@ -3724,9 +3727,14 @@
     return call('aiGetSettings', S.orgId).then(function (r) {
       if (r.error) return dCard(t('ai_title'), [dAlert('danger', apiErr(r.error))]);
       var a = r.data || {}, u = a.usage || {}, m = u.month || {};
+      // the providers order (20261208000100): codes of app.ai_providers, labels from i18n (ai_prov_<code>)
+      var provs = Array.isArray(a.providers) ? a.providers.map(function (x) { return x && x.provider; }).filter(Boolean) : null;
+      var order = Array.isArray(a.provider_order) ? a.provider_order.slice() : ['anthropic'];
+      var consented = Array.isArray(a.consent_providers) ? a.consent_providers : [];
+      var provName = function (c) { var k = 'ai_prov_' + c, v = t(k); return v && v !== k ? v : c; };
       var status = dKv([
         [t('ai_status'), a.enabled ? dBadge('success', t('ai_on')) : dBadge('warning', t('ai_off'))],
-        [t('ai_model'), dLtr(a.model || 'claude-opus-5-5')],
+        provs ? [t('ai_order_now'), order.map(provName).join(isEn() ? ' → ' : ' ← ')] : [t('ai_model'), dLtr(a.model || 'claude-opus-5-5')],
         [t('ai_consent_at'), a.consent_ack_at ? fmtWhen(a.consent_ack_at, true) : T.common.none]
       ]);
       var usage = dKv([
@@ -3735,33 +3743,65 @@
         [t('ai_ok') + ' / ' + t('ai_refused') + ' / ' + t('ai_errors'), aiNum(m.ok) + ' / ' + aiNum(m.refused) + ' / ' + aiNum(m.error)],
         [t('ai_tokens'), aiNum(m.input_tokens) + ' / ' + aiNum(m.output_tokens)],
         [t('ai_cost'), t('ai_of', { a: '$' + aiNum(Number(m.cost_usd || 0) + Number(m.held_usd || 0), 2), b: '$' + aiNum(a.monthly_budget_usd, 2) })]
-      ]);
+      ].concat(provs ? [
+        [t('ai_by_provider'), Object.keys(m.by_provider || {}).length
+          ? Object.keys(m.by_provider).map(function (c) { return provName(c) + ': ' + aiNum(m.by_provider[c]); }).join(' · ') : T.common.none],
+        [t('ai_fell_back'), aiNum(m.fell_back || 0)]
+      ] : []));
+      // three choices: provider 1 (required), 2 and 3 (optional)
+      var orderFields = provs ? [0, 1, 2].map(function (i) {
+        return dField({ name: 'ai_order_' + i, label: t('ai_order_n', { n: i + 1 }), type: 'select', value: order[i] || '',
+          options: (i ? [['', t('ai_order_none')]] : []).concat(provs.map(function (c) { return [c, provName(c)]; })) });
+      }) : [];
+      var form = null;
+      var readOrder = function () {
+        return orderFields.map(function (f, i) { return form.elements['ai_order_' + i].value; }).filter(Boolean);
+      };
       var msg = el('p', { class: 'form-error', role: 'alert', hidden: true });
       var saveBtn = el('button', { class: 'btn btn-primary', type: 'submit', text: T.common.save });
-      var consent = dField({ name: 'ai_consent', label: t('ai_consent'), type: 'checkbox', value: false, full: true });
-      var form = el('form', { class: 'adm-org-form adm-ai-form', novalidate: true }, [
+      var consent = dField({ name: 'ai_consent', label: t('ai_consent', { list: order.map(provName).join('، ') }), type: 'checkbox', value: false, full: true });
+      form = el('form', { class: 'adm-org-form adm-ai-form', novalidate: true }, [
         dGrid([
-          dField({ name: 'ai_enabled', label: t('ai_enabled'), type: 'checkbox', value: !!a.enabled, full: true }),
+          dField({ name: 'ai_enabled', label: t('ai_enabled'), type: 'checkbox', value: !!a.enabled, full: true })
+        ].concat(provs ? [el('div', { class: 'adm-full adm-ai-order' }, [el('h4', { text: t('ai_order') }), el('p', { class: 'form-hint', text: t('ai_order_hint') }),
+          el('div', { class: 'adm-ai-order-grid' }, orderFields)])] : []).concat([
+          // the consent sits under the order it names
           consent,
           dField({ name: 'daily_request_cap', label: t('ai_daily_cap'), type: 'number', value: a.daily_request_cap, ltr: true, hint: t('ai_daily_cap_hint') }),
           dField({ name: 'monthly_budget_usd', label: t('ai_budget'), type: 'number', value: a.monthly_budget_usd, ltr: true, hint: t('ai_budget_hint') })
-        ]),
+        ])),
         msg, el('div', { class: 'btn-group' }, saveBtn)
       ]);
-      // the consent box is asked only when switching on (off → on)
-      var syncConsent = function () { consent.hidden = !!a.enabled || !form.elements.ai_enabled.checked; };
-      form.elements.ai_enabled.addEventListener('change', syncConsent); syncConsent();
+      // the consent box is asked when switching on (off → on), and when the order adds a provider the last consent did
+      // not name; its text names the providers of the order being saved
+      var needsConsent = function () {
+        if (!form.elements.ai_enabled.checked) return false;
+        if (!a.enabled) return true;
+        return !!provs && readOrder().some(function (c) { return consented.indexOf(c) === -1; });
+      };
+      var syncConsent = function () {
+        consent.hidden = !needsConsent();
+        var lbl = consent.querySelector('label.check');
+        var list = (provs ? readOrder() : order).map(provName).join('، ');
+        if (lbl && lbl.lastChild && lbl.lastChild.nodeType === 3) lbl.lastChild.nodeValue = t('ai_consent', { list: list });
+      };
+      form.elements.ai_enabled.addEventListener('change', syncConsent);
+      orderFields.forEach(function (f, i) { form.elements['ai_order_' + i].addEventListener('change', syncConsent); });
+      syncConsent();
       form.addEventListener('submit', function (e) {
         e.preventDefault();
         msg.hidden = true;
         var on = !!form.elements.ai_enabled.checked, ack = !!form.elements.ai_consent.checked;
         var cap = Number(form.elements.daily_request_cap.value), budget = Number(form.elements.monthly_budget_usd.value);
+        var newOrder = provs ? readOrder() : null;
+        var dup = !!newOrder && (newOrder.length < 1 || newOrder.some(function (c, i) { return newOrder.indexOf(c) !== i; }));
         var bad = !Number.isInteger(cap) || cap < 1 || cap > 1000 ? t('ai_err_cap')
           : (!isFinite(budget) || budget < 0 || budget > 10000 || Math.round(budget * 100) !== budget * 100 ? t('ai_err_budget')
-            : (on && !a.enabled && !ack ? t('ai_consent_required') : null));
+            : (dup ? t('ai_err_order') : (needsConsent() && !ack ? t('ai_consent_required') : null)));
         if (bad) { msg.textContent = bad; msg.hidden = false; return; }
         var payload = { enabled: on, daily_request_cap: cap, monthly_budget_usd: budget };
-        if (on && !a.enabled) payload.consent_ack = true;
+        if (newOrder) payload.provider_order = newOrder;
+        if (needsConsent()) payload.consent_ack = true;
         saveBtn.disabled = true;
         call('aiSaveSettings', S.orgId, payload).then(function (res) {
           saveBtn.disabled = false;

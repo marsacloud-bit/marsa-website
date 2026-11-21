@@ -32,6 +32,8 @@
 //   never sent to the database or to handler.js. Errors are fixed codes; upstream / SDK messages are never echoed.
 // - Env: SUPABASE_URL, SUPABASE_ANON_KEY (or SUPABASE_PUBLISHABLE_KEY), SUPABASE_SERVICE_ROLE_KEY (all injected by
 //   Supabase), ANTHROPIC_API_KEY (owner-entered Edge Function secret).
+//   OPENAI_API_KEY / GEMINI_API_KEY (optional, owner-entered secrets, 21 Nov 2026): the other reading providers, tried
+//   in the order the organisation chose; a provider without its key is skipped.
 
 import Anthropic from 'npm:@anthropic-ai/sdk@1.5.0';
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
@@ -42,6 +44,37 @@ import './handler.js';
 const X: any = (globalThis as any).MarsaAiExtract;
 
 const CLAUDE_TIMEOUT_MS = 135000;                // one attempt, no retry: inside the 150 s request idle timeout
+
+// Other providers (owner, 21 Nov 2026): OpenAI and Gemini, tried in the organisation's order (ai_access → providers).
+// Their keys are owner-entered Edge Function secrets, read here only and added to the request headers here only; the
+// two endpoints below are the only addresses called. A provider without its key is skipped.
+const OPENAI_URL = 'https://api.openai.com/v1/responses';
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/';
+const MODEL_ID = /^[a-z0-9][a-z0-9.-]{0,63}$/;
+const openaiKey = Deno.env.get('OPENAI_API_KEY') ?? '';
+const geminiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
+
+// one HTTPS JSON call → {status, json} (json only on a 2xx answer). Rejects with {notSent: true} when nothing was sent,
+// or with the abort / network error (the call may have run). No retry; the response is never logged.
+async function send(provider: string, model: string, body: unknown, o: { deadlineMs: number }): Promise<{ status: number; json: unknown }> {
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  let url = '';
+  if (!MODEL_ID.test(model) || !(Number.isFinite(o.deadlineMs) && o.deadlineMs > 0)) throw { notSent: true };
+  if (provider === 'openai' && openaiKey !== '') { url = OPENAI_URL; headers['authorization'] = 'Bearer ' + openaiKey; }
+  else if (provider === 'gemini' && geminiKey !== '') { url = GEMINI_URL + model + ':generateContent'; headers['x-goog-api-key'] = geminiKey; }
+  else throw { notSent: true };
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), o.deadlineMs);
+  try {
+    const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: ctl.signal });
+    const text = await r.text();
+    let json: unknown = null;
+    if (r.ok) { try { json = JSON.parse(text); } catch (_e) { json = null; } }
+    return { status: r.status, json };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (!X || typeof X.handleRequest !== 'function') {
@@ -62,6 +95,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     claudeClient: () => new Anthropic({ apiKey, maxRetries: 0, timeout: CLAUDE_TIMEOUT_MS }),
     claudeTimeoutMs: CLAUDE_TIMEOUT_MS,           // the whole streamed call (headers + body), see handler.js
     sdk: Anthropic,
+    ready: { openai: openaiKey !== '', gemini: geminiKey !== '' },
+    send,
     log: (text: string) => console.error(text),
   });
   return new Response(r.body, { status: r.status, headers: r.headers });

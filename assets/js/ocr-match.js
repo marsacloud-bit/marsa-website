@@ -1723,7 +1723,7 @@
       var row = {
         doc_type: DOC_TYPE[k], source_name: String(s.file ? s.file.name : docName(k)).slice(0, 255), source_sha256: s.sha256 || '',
         source_mime: s.mime || null, source_size: s.file ? s.file.size : null, source_pages: maxPage ? Math.min(Math.max(maxPage, 1), 200) : null,
-        engine: ENGINE_AI, languages: 'auto', mean_confidence: res.mean_confidence == null ? null : Math.min(100, Math.max(0, Number(res.mean_confidence))),
+        engine: res.engine || ENGINE_AI, languages: 'auto', mean_confidence: res.mean_confidence == null ? null : Math.min(100, Math.max(0, Number(res.mean_confidence))),
         raw_text: String(res.raw_text || '').slice(0, 200000), extracted_fields: res.extracted_fields && typeof res.extracted_fields === 'object' ? res.extracted_fields : (s.orig || {}),
         qr_payload: null, line_items: (res.line_items || []).map(function (x) { return Object.assign({}, x); }), ai_usage_id: res.usage_id
       };

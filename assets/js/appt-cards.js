@@ -193,7 +193,7 @@
     var row = {
       doc_type: 'appointment', source_name: String(file.name || 'appointment').slice(0, 255),
       source_sha256: o.sha256 || res.source_sha256 || '', source_mime: o.mime || null, source_size: file.size != null ? file.size : null,
-      source_pages: maxPage ? Math.min(Math.max(maxPage, 1), 200) : null, engine: res.model || 'claude-opus-5-5', languages: 'auto',
+      source_pages: maxPage ? Math.min(Math.max(maxPage, 1), 200) : null, engine: res.engine || 'claude-opus-5-5', languages: 'auto',
       mean_confidence: res.mean_confidence == null ? null : Math.min(100, Math.max(0, Number(res.mean_confidence))),
       raw_text: String(res.raw_text || '').slice(0, 200000),
       extracted_fields: res.extracted_fields && typeof res.extracted_fields === 'object' ? res.extracted_fields : {},

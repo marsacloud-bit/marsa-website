@@ -104,7 +104,7 @@ check('ocr.css: the steps box styles (.ocr-nt, numbered circles, done / locked)'
   const css = rd('assets/css/pages/ocr.css');
   return /\.ocr-nt \{/.test(css) && /\.ocr-nt-step\.is-done \.ocr-nt-num/.test(css) && /\.ocr-nt-step\.is-locked/.test(css) || 'css';
 });
-check('sw.js: VERSION comment names the owner stage 3 work', () => /VERSION = '[^']+';\s+\/\/ owner reorg/.test(rd('sw.js')) && /stage 3أ/.test(rd('sw.js')) || 'version');
+check('sw.js: VERSION comment names the owner stage 3 work', () => /VERSION = '[^']+';\s+\/\/ (owner: [^\n]*)?owner reorg/.test(rd('sw.js')) && /stage 3أ/.test(rd('sw.js')) || 'version');
 
 // stage 3ب: the same steps continue on the draft card of the transaction page
 const TDsrc = rd('assets/js/ops/tx-draft.js'), DE = rd('assets/i18n/decl.js');

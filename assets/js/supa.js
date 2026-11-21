@@ -2777,7 +2777,7 @@
   var EXT_LIST_COLS = 'id,org_id,transaction_id,document_id,doc_type,source_name,source_sha256,source_mime,source_size,source_pages,' +
     'engine,languages,mean_confidence,extracted_fields,qr_payload,reviewed_fields,review_status,review_note,reviewed_by,reviewed_at,' +
     'created_by,created_at,voided_at,void_reason';
-  var EXT_COLS = EXT_LIST_COLS + ',raw_text,line_items';
+  var EXT_COLS = EXT_LIST_COLS + ',raw_text,line_items,ai_usage_id';   // ai_usage_id: an AI reading of any provider (20261208000100)
   var EXT_INSERT = ['org_id', 'transaction_id', 'document_id', 'doc_type', 'source_name', 'source_sha256', 'source_mime', 'source_size',
     'source_pages', 'engine', 'languages', 'mean_confidence', 'raw_text', 'extracted_fields', 'qr_payload', 'line_items',
     'ai_usage_id',    // AI reading (20261114000100): sent only when set (pickKeys skips undefined)
