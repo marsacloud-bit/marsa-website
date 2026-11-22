@@ -326,3 +326,12 @@ a.adm-mini-row:focus-visible { outline: none; box-shadow: var(--ring); }
 .adm-upload-more > summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .adm-upload-more > summary::-webkit-details-marker { display: none; }
 .adm-upload-more[open] > summary { margin-block-end: 10px; }
+
+/* «الموانئ التي نخدمها» (20261210000100): checkboxes grouped by kind */
+.adm-ports { display: grid; gap: 14px; margin: 10px 0; }
+.adm-ports-kind { border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px 12px; margin: 0; min-width: 0; }
+.adm-ports-kind legend { font-weight: 700; font-size: var(--fs-sm); padding: 0 6px; }
+.adm-ports-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px 18px; }
+.adm-port { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: var(--fs-sm); min-width: 0; }
+.adm-port input { width: 18px; height: 18px; flex-shrink: 0; }
+.adm-port input:disabled + span { color: var(--muted); }

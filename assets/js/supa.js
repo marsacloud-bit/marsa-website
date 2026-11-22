@@ -2485,6 +2485,19 @@
       return c.from('org_service_items').update({ default_price: price }).eq('id', id).select('id,code,default_price').single();
     });
   }
+  // served ports (20261210000100): every active platform port + served flag (staff of the org) / save the office's
+  // choice in order (org admins) / the public website's read of the chosen ports (anon; demo: data null → static list)
+  function getServedPorts(orgId) {
+    return inActiveOrg(orgId, function (oid) { return rpc('get_served_ports', { p_org: oid }); });
+  }
+  function saveServedPorts(orgId, codes) {
+    return inActiveOrg(orgId, function (oid) {
+      return rpc('save_served_ports', { p_org: oid, p_codes: (codes || []).map(function (c) { return String(c || ''); }) });
+    });
+  }
+  function siteServedPorts() {
+    return rpc('site_served_ports', { p_org_slug: ORG_SLUG }, function () { return { data: null, error: null }; });
+  }
   // o = { orgId?, name (consignee block or name), vatNumber?, crNumber?, limit? } → { source_name, latin_key, candidates
   //   [{client_id, name_ar, name_en, confidence 0..100, method, review, reasons}], best {client_id, confidence, method} | null,
   //   suggested, conflict, confirmed:false, thresholds {suggest:90, review:70} }   (never links: confirm with confirmClientMatch)
@@ -4962,7 +4975,7 @@
     listPayments: listPayments, txDisbursements: txDisbursements, checkPaymentDuplicates: checkPaymentDuplicates,
     matchPaymentTransaction: matchPaymentTransaction, saveCustodyEntry: saveCustodyEntry, voidCustodyEntry: voidCustodyEntry,
     listCustodyEntries: listCustodyEntries, custodyBalances: custodyBalances, clientCustodyBalance: clientCustodyBalance,
-    listServiceItems: listServiceItems, getServiceItemPrice: getServiceItemPrice, setServiceItemPrice: setServiceItemPrice, txStorageGate: txStorageGate, approveStorageOverride: approveStorageOverride, updateContainerStorage: updateContainerStorage, listDriversDirectory: listDriversDirectory, saveDriverEntry: saveDriverEntry,
+    listServiceItems: listServiceItems, getServiceItemPrice: getServiceItemPrice, setServiceItemPrice: setServiceItemPrice, getServedPorts: getServedPorts, saveServedPorts: saveServedPorts, siteServedPorts: siteServedPorts, txStorageGate: txStorageGate, approveStorageOverride: approveStorageOverride, updateContainerStorage: updateContainerStorage, listDriversDirectory: listDriversDirectory, saveDriverEntry: saveDriverEntry,
     // 20261201000100: legacy gaps (client category / Daftra code, follow-up employee)
     setClientLegacyFields: setClientLegacyFields, setTransactionResponsible: setTransactionResponsible, listAssignableStaff: listAssignableStaff,
     listContainers: listContainers, addContainer: addContainer, updateContainer: updateContainer,

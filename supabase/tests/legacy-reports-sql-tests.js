@@ -320,7 +320,7 @@ async function secFile() {
     return bad.length === 0 || bad.map(b => b.slice(0, 80)).join(' | ');
   });
   // later phases may follow this file (20261125000100 legacy_import: re-creates att_reasons / alert_causes / rpt_tx_match / audit_label_of)
-  const LATER_PHASES = ['20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql'];
+  const LATER_PHASES = ['20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261210000100_org_served_ports.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -832,7 +832,7 @@ async function secFasah() {
     const r = await call('admin', ['2001', '١٠٠١', '999999'], []);
     const x = r.records.find(i => i.transaction_id === TX.t3.id);
     return (r.counts.by_no === 2 && x && x.declaration_no_norm === '2001' && x.port_code === 'SADMM' && x.declaration_date === '2026-11-04'
-      && x.month === '2026-11' && x.declaration_status === 'awaiting_duty_payment' && x.by_no && !x.in_scope && r.ports.length === 7) || J(r);
+      && x.month === '2026-11' && x.declaration_status === 'awaiting_duty_payment' && x.by_no && !x.in_scope && r.ports.length === 10) || J(r);   // 7 legacy ports + 3 (20261210000100)
   });
   await check('scopes: every system declaration of the port and month (in_scope), plus the numbers; org B never', async () => {
     const r = await call('admin', ['1002'], [{ port_code: 'SAJED', month: '2026-11' }, { port_code: 'sadmm', month: '2026-10' }]);

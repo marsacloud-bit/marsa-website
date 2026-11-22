@@ -249,7 +249,7 @@ async function secFile() {
   await check('no personal data / legacy organization name copied from the legacy code (no e-mail, phone number, real org name)', () =>
     (!/@[a-z0-9-]+\.[a-z]/i.test(src.replace(/--.*$/gm, '')) && !/\b05[0-9]{8}\b/.test(src) && !/رأس الحكمة/.test(src)) || 'personal data');
   // later phases may follow this file (20261118000100 legacy_tx: re-creates public_track)
-  const LATER_PHASES = ['20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql'];
+  const LATER_PHASES = ['20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261210000100_org_served_ports.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -482,18 +482,19 @@ async function secHelpers() {
 async function secPorts() {
   section('5. customs_ports + party_ports');
   await check('the 7 approved legacy ports: code, UN/LOCODE, kind, Arabic name, Daftra value, order; English names set', async () => {
-    const r = await q(`SELECT code, unlocode, kind, name_ar, daftra_value, name_en, is_active FROM public.customs_ports ORDER BY sort`);
+    // 20261210000100 adds 3 later ports (sort 8–10: Madinah airport, Salwa, Al Haditha); the 7 legacy ports stay first
+    const r = await q(`SELECT code, unlocode, kind, name_ar, daftra_value, name_en, is_active FROM public.customs_ports WHERE sort <= 7 ORDER BY sort`);
     return (r.length === 7 && r.every((x, i) => x.code === PORTS[i][0] && x.unlocode === PORTS[i][1] && x.kind === PORTS[i][2]
       && x.name_ar === PORTS[i][3] && x.daftra_value === PORTS[i][4] && x.name_en && x.is_active)) || J(r);
   });
   await check('kinds: 3 sea, 3 air, 1 dry; a city LOCODE covers both its sea / dry port and its airport', async () => {
-    const r = await q(`SELECT kind, count(*)::int n FROM public.customs_ports GROUP BY 1 ORDER BY 1`);
+    const r = await q(`SELECT kind, count(*)::int n FROM public.customs_ports WHERE sort <= 7 GROUP BY 1 ORDER BY 1`);
     return J(r) === J([{ kind: 'air', n: 3 }, { kind: 'dry', n: 1 }, { kind: 'sea', n: 3 }]) || J(r);
   });
   for (const [label, sql, want] of [
     ['code format', `INSERT INTO public.customs_ports (code, unlocode, kind, name_ar, name_en, daftra_value) VALUES ('SAJ', 'SAJ', 'sea', 'س', 'x1', 'xx')`, 'chk:customs_ports_code_check'],
     ['code ↔ unlocode / kind', `INSERT INTO public.customs_ports (code, unlocode, kind, name_ar, name_en, daftra_value) VALUES ('SAYNB-AIR', 'SAYNB', 'sea', 'ينبع', 'Yanbu', 'جمرك ينبع')`, 'chk:customs_ports_kind_code_chk'],
-    ['kind domain', `INSERT INTO public.customs_ports (code, unlocode, kind, name_ar, name_en, daftra_value) VALUES ('SAYNB', 'SAYNB', 'land', 'ينبع', 'Yanbu', 'جمرك ينبع')`, 'chk:customs_ports_kind_check'],
+    ['kind domain', `INSERT INTO public.customs_ports (code, unlocode, kind, name_ar, name_en, daftra_value) VALUES ('SAYNB', 'SAYNB', 'rail', 'ينبع', 'Yanbu', 'جمرك ينبع')`, 'chk:customs_ports_kind_check'],   // 'land' is allowed since 20261210000100
     ['unique Arabic name', `INSERT INTO public.customs_ports (code, unlocode, kind, name_ar, name_en, daftra_value) VALUES ('SAYNB', 'SAYNB', 'sea', 'ميناء جدة الإسلامي', 'Yanbu', 'جمرك ينبع')`, 'uniq:customs_ports_name_uniq']]) {
     await check('customs_ports CHECK: ' + label + ' → ' + want, async () => { const g = await code(() => q(sql)); return g === want || g; });
   }
@@ -501,7 +502,7 @@ async function secPorts() {
     const s = await as('jed', `SELECT count(*)::int n FROM public.customs_ports`), c = await as('portal', `SELECT count(*)::int n FROM public.customs_ports`);
     const b = await as('staffB', `SELECT count(*)::int n FROM public.customs_ports`);
     const a = await code(() => as('anon', `SELECT 1 FROM public.customs_ports`));
-    return (s[0].n === 7 && c[0].n === 7 && b[0].n === 7 && a === 'perm') || J({ s, c, b, a });
+    return (s[0].n === 10 && c[0].n === 10 && b[0].n === 10 && a === 'perm') || J({ s, c, b, a });   // 7 legacy + 3 (20261210000100)
   });
   await check('no write for anyone through the API (even the org admin): INSERT / UPDATE / DELETE → permission denied', async () => {
     const i = await code(() => as('admin', `INSERT INTO public.customs_ports (code, unlocode, kind, name_ar, name_en, daftra_value) VALUES ('SAYNB','SAYNB','sea','ينبع','Yanbu','ينبع')`));
@@ -1196,7 +1197,7 @@ async function secConvert() {
   section('12. convert_org_to_production: party_ports deleted with the parties, the service catalog kept');
   await check('conversion lists: party_ports right after parties (deleted); org_service_items kept; customs_ports has no org (not listed)', async () => {
     const t = (await one(`SELECT app.convert_delete_tables() t`)).t, k = (await one(`SELECT app.convert_keep_tables() k`)).k;
-    return (t.indexOf('public.party_ports') === t.indexOf('public.parties') + 1 && t.length === 83 + 2 + 1 + 1 /* + legacy_import_rows, legacy_import_runs (20261125000100), return_extension_requests (20261128000100), tx_storage_overrides (20261206000100) */ /* + 5 legacy docs tables (20261119000100) + 3 legacy decl tables (20261120000100) + 3 legacy appt tables (20261121000100) + 4 legacy pay tables (20261122000100) + 5 legacy daftra tables (20261123000100) */ && k.includes('public.org_service_items') && k.length === 21 + 2 + 1 + 1 /* + storage_gate_ports (20261206000100), ai_provider_keys (20261209000100) */ /* + tx_stage_sets, tx_stage_steps (20261204000100, kept like document_requirements) */
+    return (t.indexOf('public.party_ports') === t.indexOf('public.parties') + 1 && t.length === 83 + 2 + 1 + 1 /* + legacy_import_rows, legacy_import_runs (20261125000100), return_extension_requests (20261128000100), tx_storage_overrides (20261206000100) */ /* + 5 legacy docs tables (20261119000100) + 3 legacy decl tables (20261120000100) + 3 legacy appt tables (20261121000100) + 4 legacy pay tables (20261122000100) + 5 legacy daftra tables (20261123000100) */ && k.includes('public.org_service_items') && k.length === 21 + 2 + 1 + 1 + 1 /* + storage_gate_ports (20261206000100), ai_provider_keys (20261209000100), org_served_ports (20261210000100) */ /* + tx_stage_sets, tx_stage_steps (20261204000100, kept like document_requirements) */
       && !t.includes('public.customs_ports') && !k.includes('public.customs_ports')) || J({ t: t.length, k: k.length });
   });
   await check('convert_check: every org-scoped table classified, no unexpected delete guard', async () => {
@@ -1221,7 +1222,7 @@ async function secConvert() {
     const svc = await num(`SELECT count(*) n FROM public.org_service_items WHERE org_id = $1`, [A]);
     const ports = await num(`SELECT count(*) n FROM public.customs_ports`);
     const b = await num(`SELECT count(*) n FROM public.org_service_items WHERE org_id = $1`, [B]);
-    return (pp === 0 && tx === 0 && svc === nSvc && svc >= 27 && ports === 7 && b === 26) || J({ pp, tx, svc, ports, b });
+    return (pp === 0 && tx === 0 && svc === nSvc && svc >= 27 && ports === 10 && b === 26) || J({ pp, tx, svc, ports, b });
   });
 }
 

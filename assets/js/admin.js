@@ -3642,6 +3642,56 @@
     });
   }
   var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  // owner 2026-11-22 (20261210000100): «الموانئ التي نخدمها» — the ports this office serves, chosen from the platform list
+  // (sea / dry / air / land); only these show on the office website. Staff see the choice, the org admin saves it.
+  // Before the migration the RPC does not exist: the card says so instead of failing the page.
+  var PORT_KINDS = ['sea', 'dry', 'air', 'land'];
+  function servedPortsCard() {
+    if (!api || typeof api.getServedPorts !== 'function') return Promise.resolve(null);
+    var orgId = S.orgId;
+    return call('getServedPorts', orgId).then(function (r) {
+      if (S.orgId !== orgId) return null;
+      if (r.error) {
+        var raw = r.error.raw || {};
+        var missing = /get_served_ports|does not exist|PGRST202/.test([r.error.message, r.error.code, raw.code, raw.message].join(' '));
+        return dCard(t('ports_title'), [dAlert(missing ? 'info' : 'warning', missing ? t('ports_not_ready') : apiErr(r.error))]);
+      }
+      var rows = Array.isArray(r.data) ? r.data : [];
+      var canEdit = S.memberships.some(function (m) { return m.role === 'admin' && !m.branch_id; });
+      var en = isEn();
+      var box = el('div', { class: 'adm-ports', 'data-served-ports': '' });
+      PORT_KINDS.forEach(function (kind) {
+        var list = rows.filter(function (p) { return p.kind === kind; });
+        if (!list.length) return;
+        var grid = el('div', { class: 'adm-ports-grid' });
+        list.forEach(function (p) {
+          var cb = el('input', { type: 'checkbox', value: p.code });
+          cb.checked = !!p.served;
+          cb.disabled = !canEdit;
+          grid.appendChild(el('label', { class: 'adm-port' }, [cb, el('span', { text: en ? (p.name_en || p.name_ar) : p.name_ar })]));
+        });
+        box.appendChild(el('fieldset', { class: 'adm-ports-kind' }, [el('legend', { text: t('ports_kind_' + kind) }), grid]));
+      });
+      var msg = el('p', { class: 'form-hint', role: 'status' });
+      var btn = canEdit ? el('button', { class: 'btn btn-primary', type: 'button', text: t('ports_save') }) : null;
+      if (btn) btn.addEventListener('click', function () {
+        var codes = Array.prototype.map.call(box.querySelectorAll('input[type="checkbox"]:checked'), function (c) { return c.value; });
+        btn.disabled = true; msg.textContent = '';
+        call('saveServedPorts', orgId, codes).then(function (res) {
+          btn.disabled = false;
+          if (res.error) { msg.textContent = apiErr(res.error); return; }
+          toast(T.common.saved, 'success');
+          msg.textContent = codes.length ? t('ports_saved') : t('ports_saved_none');
+        });
+      });
+      return dCard(t('ports_title'), [
+        el('p', { class: 'text-sm text-muted', text: t('ports_sub') }),
+        box,
+        canEdit ? null : el('p', { class: 'text-sm text-muted', text: t('ports_read_only') }),
+        msg, btn ? el('div', { class: 'btn-group' }, [btn]) : null
+      ]);
+    });
+  }
   function renderOrg() {
     return L.getOrgRow(S.orgId).then(function (r) {
       var out = frag(dHead(t('org_title'), t('org_sub')));
@@ -3703,7 +3753,8 @@
       });
       out.appendChild(dCard(t('org_settings'), [dAlert('info', t('org_settings_info')), form]));
       out.appendChild(orgLogoCard(st));
-      return clearancePriceCard().then(function (pc) { if (pc) out.appendChild(pc); }).then(function () {
+      return clearancePriceCard().then(function (pc) { if (pc) out.appendChild(pc); })
+        .then(function () { return servedPortsCard().then(function (sp) { if (sp) out.appendChild(sp); }); }).then(function () {
         return aiSettingsCard().then(function (card) { if (card) out.appendChild(card); return out; });
       });
     });

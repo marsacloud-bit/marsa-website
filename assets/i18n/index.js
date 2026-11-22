@@ -184,7 +184,7 @@
     v2_h4: "تستلمها", v2_h4d: "ننسّق النقل ونرسل لك إشعار التسليم.",
     v2_ports_title: "المنافذ التي نعمل فيها", v2_ports_sub: "فريقنا حاضر في أهم منافذ المملكة.",
     v2_p1: "ميناء جدة الإسلامي", v2_p2: "ميناء الملك عبدالعزيز بالدمام",
-    v2_p3: "مطار الملك عبدالعزيز الدولي", v2_p4: "مطار الملك خالد الدولي", v2_p5: "منفذ البطحاء",
+    v2_p3: "مطار الملك عبدالعزيز الدولي", v2_p4: "مطار الملك خالد الدولي", v2_p5: "جمرك سلوى",
     v2_blog_title: "من المدونة", v2_blog_sub: "مقالات قصيرة عن التخليص والأنظمة الجمركية.",
     v2_c_title: "تحتاج رأيًا قبل أن تشحن؟", v2_c_sub: "اطلب استشارة جمركية، ويرد عليك مختص في أقرب وقت.", v2_c_btn: "اطلب استشارة",
     v2_f_clients: "للعملاء"
@@ -364,7 +364,7 @@
     v2_h4: "You receive", v2_h4d: "We arrange transport and send you a delivery notice.",
     v2_ports_title: "Where we work", v2_ports_sub: "Our team is present at the Kingdom's main entry points.",
     v2_p1: "Jeddah Islamic Port", v2_p2: "King Abdulaziz Port, Dammam",
-    v2_p3: "King Abdulaziz Intl. Airport", v2_p4: "King Khalid Intl. Airport", v2_p5: "Al Batha border crossing",
+    v2_p3: "King Abdulaziz Intl. Airport", v2_p4: "King Khalid Intl. Airport", v2_p5: "Salwa Customs",
     v2_blog_title: "From the blog", v2_blog_sub: "Short articles on clearance and customs rules.",
     v2_c_title: "Need advice before you ship?", v2_c_sub: "Request a customs consultation and a specialist will reply soon.", v2_c_btn: "Request advice",
     v2_f_clients: "For clients"

@@ -165,16 +165,17 @@
       </div>
     </section>
 
-    <!-- PORTS -->
-    <section class="hm-block hm-alt" id="ports" aria-labelledby="ports-title">
+    <!-- PORTS: the ports the office chose in its settings (assets/js/site-ports.js, 20261210000100); the items below are the
+         demo example only. Hidden until loaded; none chosen → stays hidden. -->
+    <section class="hm-block hm-alt" id="ports" aria-labelledby="ports-title" hidden>
       <div class="container">
         <div class="hm-head"><h2 id="ports-title" data-i18n="index.v2_ports_title">المنافذ التي نعمل فيها</h2><p data-i18n="index.v2_ports_sub">فريقنا حاضر في أهم منافذ المملكة.</p></div>
-        <ul class="hm-ports">
+        <ul class="hm-ports" data-site-ports>
           <li><span class="hm-ico"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2.5"/><path d="M12 7.5V21M5 12H3a9 9 0 0 0 18 0h-2M8 11h8"/></svg></span><span data-i18n="index.v2_p1">ميناء جدة الإسلامي</span></li>
           <li><span class="hm-ico"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2.5"/><path d="M12 7.5V21M5 12H3a9 9 0 0 0 18 0h-2M8 11h8"/></svg></span><span data-i18n="index.v2_p2">ميناء الملك عبدالعزيز بالدمام</span></li>
           <li><span class="hm-ico"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 13.5L3 11l1.5-1.5 8 1 4-4.5a2 2 0 0 1 3 3L15 13l1 8-1.5 1.5-2.5-7.5L9 18v3l-1.5 1L6 18l-4-1.5L3 15h3z"/></svg></span><span data-i18n="index.v2_p3">مطار الملك عبدالعزيز الدولي</span></li>
           <li><span class="hm-ico"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 13.5L3 11l1.5-1.5 8 1 4-4.5a2 2 0 0 1 3 3L15 13l1 8-1.5 1.5-2.5-7.5L9 18v3l-1.5 1L6 18l-4-1.5L3 15h3z"/></svg></span><span data-i18n="index.v2_p4">مطار الملك خالد الدولي</span></li>
-          <li><span class="hm-ico"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 6h11v10H2zM13 9h4l4 4v3h-8z"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg></span><span data-i18n="index.v2_p5">منفذ البطحاء</span></li>
+          <li><span class="hm-ico"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 6h11v10H2zM13 9h4l4 4v3h-8z"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg></span><span data-i18n="index.v2_p5">جمرك سلوى</span></li>
         </ul>
       </div>
     </section>
@@ -265,7 +266,9 @@
   <script src="assets/i18n/index.js" defer></script>
   <script src="assets/i18n/blog.js" defer></script>
   <script src="assets/js/main.js" defer></script>
+  <script src="assets/js/supa.js" defer></script>
   <script src="assets/js/blog-posts.js" defer></script>
   <script src="assets/js/blog.js" defer></script>
+  <script src="assets/js/site-ports.js" defer></script>
 </body>
 </html>

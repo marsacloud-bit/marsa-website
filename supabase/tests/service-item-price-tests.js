@@ -143,7 +143,7 @@ async function secFile() {
     return (i > 0 && (body === s || body + '\n' === s) && all.indexOf(h, i + 1) < 0 && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles()))
       || 'not appended verbatim / no note / order';
   });
-  const LATER_PHASES = ['20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql'];
+  const LATER_PHASES = ['20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261210000100_org_served_ports.sql'];
   await check('this file is the latest migration (later phases excepted)', () => J(migFiles().filter(f => f > MIG)) === J(LATER_PHASES) || 'later ' + J(migFiles().filter(f => f > MIG)));
 }
 
@@ -249,7 +249,8 @@ async function secUi() {
     && /update\(\{ default_price: price \}\)/.test(su) && /getServiceItemPrice: getServiceItemPrice, setServiceItemPrice: setServiceItemPrice/.test(su)
     && !/select\('id,code,name_ar,name_en,fin_service,sort,is_active,default_price'/.test(su) || 'api (listServiceItems must not ask for the new column)');
   await check('admin.js: the card after the logo, before the AI card; text field with 0-9 (lang en), Arabic-Indic digits accepted; admin / accounts manager edit', () =>
-    /return clearancePriceCard\(\)\.then\(function \(pc\) \{ if \(pc\) out\.appendChild\(pc\); \}\)\.then\(function \(\) \{\s+return aiSettingsCard\(\)\.then/.test(ad)
+    // 20261210000100: «الموانئ التي نخدمها» sits between this card and the AI card
+    /return clearancePriceCard\(\)\.then\(function \(pc\) \{ if \(pc\) out\.appendChild\(pc\); \}\)[\s\S]{0,200}?servedPortsCard\(\)[\s\S]{0,200}?return aiSettingsCard\(\)\.then/.test(ad)
     && /id: 'adg-clearance-price', type: 'text'[^\n]*lang: 'en'/.test(ad) && /replace\(\/\[٠-٩\]\/g/.test(ad)
     && /m\.role === 'admin' \|\| m\.role === 'accounts_manager'\) && !m\.branch_id/.test(ad) || 'card');
   await check('admin.js: before the migration (no column) the card shows «price_not_ready» instead of failing the page', () =>
