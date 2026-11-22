@@ -425,6 +425,31 @@
             </div>
           </section>
 
+          <!-- AI provider keys (20261209000100) -->
+          <section class="card pf-card" aria-labelledby="pf-ai-title" data-pf-ai-card>
+            <div class="pf-card-head">
+              <h2 id="pf-ai-title" data-i18n="platform.aiTitle">مفاتيح الذكاء الاصطناعي</h2>
+              <button class="btn btn-sm btn-ghost" type="button" data-pf-ai-reload data-i18n="platform.refresh">تحديث</button>
+            </div>
+            <p class="text-muted text-sm" data-i18n="platform.aiLead">مفاتيح المنصة لقراءة المستندات، وتعمل لكل المكاتب. يُحفظ المفتاح مشفّرًا في الخادم ولا يظهر بعد الحفظ (يظهر آخر 4 حروف فقط). «اختبار» يتأكد أن المفتاح يعمل ويجلب أسماء النماذج المتاحة في حسابك. ترتيب المزوّدين يختاره كل مكتب من إعداداته.</p>
+            <div class="table-wrap">
+              <table class="table pf-table">
+                <caption class="sr-only" data-i18n="platform.aiTitle">مفاتيح الذكاء الاصطناعي</caption>
+                <thead>
+                  <tr>
+                    <th scope="col" data-i18n="platform.aiColProvider">المزوّد</th>
+                    <th scope="col" data-i18n="platform.aiColKey">المفتاح</th>
+                    <th scope="col" data-i18n="platform.aiColModel">النموذج</th>
+                    <th scope="col" data-i18n="platform.aiColPrice">السعر لكل مليون رمز (إدخال / إخراج)</th>
+                    <th scope="col" data-i18n="platform.aiColTest">آخر اختبار</th>
+                    <th scope="col" data-i18n="platform.colActions">الإجراء</th>
+                  </tr>
+                </thead>
+                <tbody data-pf-ai></tbody>
+              </table>
+            </div>
+          </section>
+
           <!-- recent client errors -->
           <section class="card pf-card" aria-labelledby="pf-errors-title">
             <div class="pf-card-head">

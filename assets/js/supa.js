@@ -1741,6 +1741,29 @@
   function platformListPlans() { return rpc('platform_list_plans'); }
   // payload = {name_ar, name_en?, sort?, is_active?, limits:{…six keys, null = unlimited}, price_monthly_sar?, notes?}; code immutable once created
   function platformSavePlan(code, payload) { return rpc('platform_save_plan', { p_code: code, p_payload: payload || {} }); }
+  // AI provider keys (20261209000100, owner 22 Nov 2026) — platform admins. The key is sent once to the database
+  // (kept in Vault) and never read back: the list carries the last 4 characters only.
+  var AI_PROVIDER_CODES = ['anthropic', 'openai', 'gemini'];
+  function platformAiProviders() { return rpc('platform_ai_providers'); }
+  function platformAiSetKey(provider, key) {
+    if (AI_PROVIDER_CODES.indexOf(provider) === -1) return Promise.resolve(fail('MRS_INVALID', 'provider'));
+    var k = String(key == null ? '' : key).trim();
+    if (k.length < 20 || k.length > 400 || /\s/.test(k)) return Promise.resolve(fail('MRS_INVALID', 'key'));
+    return rpc('platform_ai_set_key', { p_provider: provider, p_key: k });
+  }
+  function platformAiClearKey(provider) { return rpc('platform_ai_clear_key', { p_provider: provider }); }
+  function platformAiSaveProvider(provider, payload) { return rpc('platform_ai_save_provider', { p_provider: provider, p_payload: payload || {} }); }
+  // the connection test: the Edge Function lists the provider's models with the saved key → {provider, ok, note, models}
+  function platformAiTestKey(provider) {
+    if (!configured) return demoOnly();
+    if (AI_PROVIDER_CODES.indexOf(provider) === -1) return Promise.resolve(fail('MRS_INVALID', 'provider'));
+    return ready().then(function (c) {
+      return c.functions.invoke('ai-extract', { body: { action: 'provider_test', provider: provider } }).then(function (res) {
+        if (res && !res.error && res.data && typeof res.data === 'object' && typeof res.data.ok === 'boolean') return ok(res.data);
+        return aiEdgeError(res && res.error);
+      }, function (e) { return { data: null, error: normalizeError(e) }; });
+    }, function (e) { return { data: null, error: normalizeError(e) }; });
+  }
   // → [{org_id, slug, name_ar, name_en, is_active, plan_code, plan_name_ar, plan_name_en, status, period_start, period_end,
   //     limit_overrides, limits, usage, over_limit[], status_reason, suspended_at, updated_at}]
   function platformListSubscriptions() { return rpc('platform_list_subscriptions'); }
@@ -4893,7 +4916,9 @@
     platformReissueAdminInvitation: platformReissueAdminInvitation,
     platformRecentErrors: platformRecentErrors,
     // G7 plans / subscriptions / usage (platform admin) + the org admin's own subscription
-    platformListPlans: platformListPlans, platformSavePlan: platformSavePlan, platformListSubscriptions: platformListSubscriptions,
+    platformListPlans: platformListPlans, platformSavePlan: platformSavePlan,
+    platformAiProviders: platformAiProviders, platformAiSetKey: platformAiSetKey, platformAiClearKey: platformAiClearKey,
+    platformAiSaveProvider: platformAiSaveProvider, platformAiTestKey: platformAiTestKey, platformListSubscriptions: platformListSubscriptions,
     platformSetOrgPlan: platformSetOrgPlan, platformSuspendOrg: platformSuspendOrg, platformActivateOrg: platformActivateOrg,
     platformOrgUsage: platformOrgUsage, platformRecountUsage: platformRecountUsage, orgSubscription: orgSubscription,
     // requests

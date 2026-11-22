@@ -198,7 +198,7 @@ async function secFile() {
   // later phases may follow this file (20261115000100 convert_in_place, 20261116000100 doc_match); none may sort before it unnoticed
   const LATER_PHASES = ['20261115000100_convert_in_place.sql', '20261116000100_doc_match.sql', '20261117000100_legacy_core.sql',
     '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql',
-    '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql'];
+    '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql'];
   await check('this file is present; only the listed later phases follow it', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -307,7 +307,7 @@ async function secGrants() {
                          FROM pg_proc p WHERE p.pronamespace = 'app'::regnamespace AND (p.proname LIKE 'ai\\_%' OR p.proname = 'tg_ai_usage_guard')`);
     // 20261208000100: + ai_provider_chain (no API role) and ai_is_engine (authenticated: the extraction trigger)
     const bad = r.filter(x => x.a || x.s || (x.u && !['ai_model', 'ai_usage_claimable', 'ai_usage_source_ok', 'ai_is_engine'].includes(x.proname)));
-    return (r.length === 12 && bad.length === 0) || J(r);
+    return (r.length === 13 && bad.length === 0) || J(r);   // 20261209000100: + ai_key_json (no API role)
   });
   await check('ai_access / ai_get_settings / ai_save_settings: authenticated only (not anon, not service_role), SECURITY DEFINER', async () => {
     const r = await q(`SELECT p.proname, p.prosecdef d, has_function_privilege('anon', p.oid, 'EXECUTE') a,
@@ -2080,13 +2080,17 @@ async function secStatic() {
     }
     return bad.length === 0 || 'found in ' + bad.join(', ');
   });
-  await check('index.ts: the key is read once from Deno.env ANTHROPIC_API_KEY and only handed to the SDK constructor; never logged / returned', () => {
+  // 20261209000100: the key saved on the platform page (Vault, service RPC ai_provider_keys) replaces the secret in this
+  // request's `keys`; ANTHROPIC_API_KEY stays the fallback. Read once, handed to the SDK constructors only.
+  await check('index.ts: the Anthropic key (page key, else the ANTHROPIC_API_KEY secret) lives in the request scope and only goes to the SDK constructors; never logged / returned', () => {
     const reads = idx.match(/Deno\.env\.get\('ANTHROPIC_API_KEY'\)/g) || [];
-    const uses = idx.match(/\bapiKey\b/g) || [];
+    const uses = idx.match(/keys\.anthropic\b/g) || [];
     const logs = idx.match(/console\.\w+\([^)]*\)/g) || [];
-    return (reads.length === 1 && /const apiKey = Deno\.env\.get\('ANTHROPIC_API_KEY'\) \?\? '';/.test(idx)
-      && /claudeClient: \(\) => new Anthropic\(\{ apiKey, maxRetries: 0, timeout: CLAUDE_TIMEOUT_MS \}\)/.test(idx) && /modelConfigured: apiKey !== ''/.test(idx)
-      && uses.length === 3 && J(logs) === J(['console.error(text)']) && !/json\([^)]*apiKey/.test(idx)) || J({ reads: reads.length, uses: uses.length, logs });
+    return (reads.length === 1 && /anthropic: Deno\.env\.get\('ANTHROPIC_API_KEY'\) \?\? '',/.test(idx)
+      && /claudeClient: \(\) => new Anthropic\(\{ apiKey: keys\.anthropic, maxRetries: 0, timeout: CLAUDE_TIMEOUT_MS \}\)/.test(idx)
+      && /modelConfigured: keys\.anthropic !== '',/.test(idx) && /new Anthropic\(\{ apiKey: keys\.anthropic, maxRetries: 0, timeout: TEST_TIMEOUT_MS \}\)\.models\.list/.test(idx)
+      && uses.length === 5 && J(logs) === J(['console.error(text)']) && !/json\([^)]*keys/.test(idx) && !/\bapiKey\b(?!:)/.test(idx))
+      || J({ reads: reads.length, uses: uses.length, logs });
   });
   await check('review A-4: index.ts — one attempt (maxRetries 0), streamed, 135 s SDK timeout + the same whole-call deadline (claudeTimeoutMs): the call + settle answer inside the 150 s idle timeout', () =>
     (/const CLAUDE_TIMEOUT_MS = 135000;/.test(idx) && /claudeTimeoutMs: CLAUDE_TIMEOUT_MS,/.test(idx) && !/maxRetries: [1-9]/.test(idx)
@@ -2096,15 +2100,16 @@ async function secStatic() {
   await check('index.ts: official SDK pinned (npm:@anthropic-ai/sdk@1.5.0), supabase-js 2.45.4, extract.js + handler.js loaded, no raw fetch to Anthropic', () =>
     (/import Anthropic from 'npm:@anthropic-ai\/sdk@1\.5\.0';/.test(idx) && /from 'npm:@supabase\/supabase-js@2\.45\.4'/.test(idx)
       && /import '\.\/extract\.js';/.test(idx) && /import '\.\/handler\.js';/.test(idx) && !/api\.anthropic\.com/.test(idx)
-      // owner 21 Nov 2026: one fetch, and its address is OPENAI_URL or GEMINI_URL + the checked model id (the other providers)
-      && (idx.match(/\bfetch\s*\(/g) || []).length === 1 && /await fetch\(url, /.test(idx)
-      && /const OPENAI_URL = 'https:\/\/api\.openai\.com\/v1\/responses';/.test(idx)
+      // owner 21–22 Nov 2026: one fetch (httpJson); its addresses are the OpenAI / Gemini reading and model-list URLs only
+      && (idx.match(/\bfetch\s*\(/g) || []).length === 1 && /const r = await fetch\(url, \{ \.\.\.init, signal: ctl\.signal \}\);/.test(idx)
+      && /const OPENAI_URL = 'https:\/\/api\.openai\.com\/v1\/responses';/.test(idx) && /const OPENAI_MODELS_URL = 'https:\/\/api\.openai\.com\/v1\/models';/.test(idx)
       && /const GEMINI_URL = 'https:\/\/generativelanguage\.googleapis\.com\/v1beta\/models\/';/.test(idx)
-      && J(idx.match(/\burl = [^;]+;/g)) === J(["url = '';", 'url = OPENAI_URL;', "url = GEMINI_URL + model + ':generateContent';", "url = Deno.env.get('SUPABASE_URL') ?? '';"])
+      && /const GEMINI_MODELS_URL = 'https:\/\/generativelanguage\.googleapis\.com\/v1beta\/models\?pageSize=200';/.test(idx)
+      && J(idx.match(/\btarget = [^;]+;/g)) === J(["target = '';", 'target = OPENAI_URL;', "target = GEMINI_URL + model + ':generateContent';", "target = '';", 'target = OPENAI_MODELS_URL;', 'target = GEMINI_MODELS_URL;'])
       && /if \(!MODEL_ID\.test\(model\)/.test(idx)) || 'imports');
   await check('index.ts: user client = anon key + the caller\'s bearer; service client = service key; the handler gets clients, never a key', () =>
     (/userClient: \(token: string\) => createClient\(url, anonKey, \{ \.\.\.opts, global: \{ headers: \{ Authorization: `Bearer \$\{token\}` \} \} \}\)/.test(idx)
-      && /serviceClient: \(\) => createClient\(url, serviceKey, opts\)/.test(idx) && /isAnonKey: \(t: string\) => t === anonKey/.test(idx)
+      && /const service = \(\) => createClient\(url, serviceKey, opts\);/.test(idx) && /serviceClient: service,/.test(idx) && /isAnonKey: \(t: string\) => t === anonKey/.test(idx)
       && !/^\s*(apiKey|serviceKey|anonKey|key)\s*[,:]/m.test(idx.slice(idx.indexOf('X.handleRequest(req, {')))) || 'wiring');
   const hsrc = fs.readFileSync(path.join(FN_DIR, 'handler.js'), 'utf8');
   await check('handler.js: CORS https://marsacloud.com + http://127.0.0.1 dev only, no wildcard; errors are fixed codes, SDK errors never echoed', () => {

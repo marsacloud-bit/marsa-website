@@ -18,6 +18,9 @@
     deps.send(provider, model, body, {deadlineMs})
                            optional: one HTTPS JSON call to OpenAI / Gemini made by index.ts (the key is added there)
                            → {status, json}; rejects on the deadline / a lost connection. Without it only Claude is used.
+    deps.loadKeys(org)     optional (22 Nov 2026): index.ts reads the keys saved on the platform page for this org (Vault,
+                           service RPC ai_provider_keys) into its own request scope → {anthropic, openai, gemini} booleans
+    deps.listModels(p)     optional: the provider's model list with the saved key → {status, models} (the key test)
     deps.now()             optional: the clock in ms (default Date.now; tests)
     deps.sdk               the Anthropic class (typed error classes for classifyCallError)
     deps.log(text)         fixed-text log line (never a token, a key, an error message or document content)
@@ -170,6 +173,34 @@
     return body;
   }
 
+  // owner 22 Nov 2026 — the connection test of the platform page («مفاتيح الذكاء الاصطناعي»): platform admins only (the
+  // caller's own platform_ai_providers RPC answers), the provider's model list read with the saved key (index.ts
+  // listModels), the result recorded (ai_record_key_test, service role). → {ok, note, models}; never the key.
+  const TEST_NOTES = { 0: 'no_key', 401: 'key_rejected', 403: 'key_rejected', 429: 'busy' };
+  async function providerTest(body, userDb, d, X, origin, log) {
+    const provider = body && typeof body.provider === 'string' ? body.provider : '';
+    if ((X.PROVIDERS || []).indexOf(provider) === -1) return fail('bad_request', 400, origin);
+    const who = await userDb.rpc('platform_ai_providers', {});
+    if (!who || who.error) {
+      const c = mrs(who && who.error);
+      return fail(c === 'MRS_MFA_REQUIRED' ? 'mfa_required' : 'forbidden', 403, origin);
+    }
+    if (typeof d.loadKeys !== 'function' || typeof d.listModels !== 'function') return fail('not_configured', 503, origin);
+    try { await d.loadKeys(null); } catch (e) { log('ai-extract: key lookup failed'); }
+    let r;
+    try { r = await d.listModels(provider); } catch (e) { r = { status: 599, models: [] }; }
+    const st = r && Number.isInteger(r.status) ? r.status : 599;
+    const ok = st === 200;
+    const note = ok ? 'ok' : (TEST_NOTES[st] || 'unreachable');
+    const models = (r && Array.isArray(r.models) ? r.models : []).filter(m => typeof m === 'string' && /^[a-z0-9][a-z0-9.-]{0,63}$/.test(m)).slice(0, 200);
+    log('ai-extract: key test ' + provider + ' (' + note + ')');
+    try {
+      const rec = await d.serviceClient().rpc('ai_record_key_test', { p_provider: provider, p_ok: ok, p_note: note, p_models: models });
+      if (rec && rec.error) log('ai-extract: key test record failed');
+    } catch (e) { log('ai-extract: key test record failed'); }
+    return json({ provider, ok, note, models }, 200, origin);
+  }
+
   async function handleRequest(req, deps) {
     const d = deps || {};
     const now = typeof d.now === 'function' ? d.now : Date.now;
@@ -211,6 +242,8 @@
     let v;
     try {
       const body = JSON.parse(raw);
+      // owner 22 Nov 2026: the platform page's key test ({action: 'provider_test', provider}) — no file, no reading
+      if (body && body.action === 'provider_test') { raw = ''; return await providerTest(body, userDb, d, X, origin, log); }
       // a non-PDF body above the image envelope is refused before the base64 is decoded
       if (raw.length > MAX_BODY && !(body && body.file && body.file.media_type === 'application/pdf')) throw new X.AiError('too_large', 413);
       v = X.validateRequest(body);
@@ -247,7 +280,13 @@
       }
     }
     // the providers to try, in the organisation's order, that this server holds a key for (owner, 21 Nov 2026)
-    const ready = Object.assign({}, d.ready || {}, { anthropic: !!d.modelConfigured });
+    // the keys saved on the platform page (index.ts loadKeys: Vault through the service RPC; booleans only here), else the
+    // Edge Function secrets
+    let ready = Object.assign({}, d.ready || {}, { anthropic: !!d.modelConfigured });
+    if (typeof d.loadKeys === 'function') {
+      try { const rk = await d.loadKeys(v.org_id); if (rk && typeof rk === 'object') ready = { anthropic: !!rk.anthropic, openai: !!rk.openai, gemini: !!rk.gemini }; }
+      catch (e) { log('ai-extract: key lookup failed'); }
+    }
     if (typeof d.send !== 'function') { ready.openai = false; ready.gemini = false; }
     const chain = X.providerChain ? X.providerChain(acc.data, ready) : (d.modelConfigured ? [{ provider: 'anthropic', model: X.MODEL }] : []);
     const withMeta = !!(acc.data && Array.isArray(acc.data.providers));

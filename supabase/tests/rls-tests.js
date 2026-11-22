@@ -863,6 +863,8 @@ async function main() {
       'tx_storage_gate', 'approve_storage_override',
       // driver classes (20261207000100): the «السائقون» directory
       'list_drivers', 'save_driver',
+      // AI keys (20261209000100): the platform page «مفاتيح الذكاء الاصطناعي» (platform admins only, checked inside)
+      'platform_ai_providers', 'platform_ai_set_key', 'platform_ai_clear_key', 'platform_ai_save_provider',
       // legacy pay (20261122000100): the payment register (four-eyes review, correct / void, attachments, the transaction panel,
       // the duplicate / transaction checks) and the client custody
       'record_payment_bundle', 'correct_payment', 'void_payment', 'review_payment', 'add_payment_documents', 'remove_payment_document',
@@ -887,7 +889,7 @@ async function main() {
       'legacy_import_commit', 'legacy_import_void', 'legacy_import_get_run', 'legacy_import_list_runs', 'legacy_import_list_rows',
       'legacy_import_skip_rows', 'legacy_import_queue_daftra', 'legacy_import_daftra_candidates'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 315) return 'expected list has ' + exp.length + ' names';   // + tx_storage_gate, approve_storage_override (20261206000100)
+    if (exp.length !== 319) return 'expected list has ' + exp.length + ' names';   // + 4 platform_ai_* (20261209000100)   // + tx_storage_gate, approve_storage_override (20261206000100)
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');
@@ -1005,7 +1007,12 @@ async function main() {
     ['platform_suspend_org', `SELECT public.platform_suspend_org('${A}', 'x')`],
     ['platform_activate_org', `SELECT public.platform_activate_org('${A}', 'x')`],
     ['platform_org_usage', `SELECT public.platform_org_usage('${A}')`],
-    ['platform_recount_usage', `SELECT public.platform_recount_usage('${A}')`]]) {
+    ['platform_recount_usage', `SELECT public.platform_recount_usage('${A}')`],
+    // AI keys (20261209000100): platform admins only
+    ['platform_ai_providers', `SELECT public.platform_ai_providers()`],
+    ['platform_ai_set_key', `SELECT public.platform_ai_set_key('openai', 'sk-test-ONLYFORTESTS-rls-0000000000')`],
+    ['platform_ai_clear_key', `SELECT public.platform_ai_clear_key('openai')`],
+    ['platform_ai_save_provider', `SELECT public.platform_ai_save_provider('openai', '{"model":"gpt-x"}'::jsonb)`]]) {
     for (const who of ['adminA', 'staffA', 'clientA', 'staffB']) {
       await expectErr(`${who} cannot call ${fn} (G7 platform-only)`, () => as(who, sql), /MRS_FORBIDDEN/, 'G7 app.is_platform_admin() check');
     }

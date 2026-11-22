@@ -112,7 +112,8 @@ async function secFile() {
     const body = nx < 0 ? all.slice(i + h.length) : all.slice(i + h.length, nx);
     return (i > 0 && (body === s || body + '\n' === s) && all.indexOf(h, i + 1) < 0 && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles())) || 'bundle';
   });
-  await check('this file is the latest migration', () => migFiles().pop() === MIG || 'latest ' + migFiles().pop());
+  const LATER_PHASES = ['20261209000100_ai_keys.sql'];
+  await check('this file is the latest migration (later phases excepted)', () => JSON.stringify(migFiles().filter(f => f > MIG)) === JSON.stringify(LATER_PHASES) || 'later ' + JSON.stringify(migFiles().filter(f => f > MIG)));
   await check('the extraction trigger is the 20261119000100 body with the engine check only changed', () => {
     const old = fs.readFileSync(path.join(MIG_DIR, '20261119000100_legacy_docs.sql'), 'utf8');
     const cut = t => { const a = t.indexOf('CREATE OR REPLACE FUNCTION app.tg_document_extractions_before()'); return t.slice(a, t.indexOf('END $$;', a)); };
@@ -454,15 +455,18 @@ async function secStatic() {
   section('6. static: the keys and the network stay in index.ts');
   const idx = fs.readFileSync(path.join(FN_DIR, 'index.ts'), 'utf8');
   await check('index.ts: each key read once from Deno.env and used only in that provider\'s request header; never logged or returned', () => {
+    // 20261209000100: the request's `keys` (the page key from Vault, else the secret); used in that provider's headers only
     const r = ['OPENAI_API_KEY', 'GEMINI_API_KEY'].map(k => (idx.match(new RegExp("Deno\\.env\\.get\\('" + k + "'\\)", 'g')) || []).length);
-    const o = idx.match(/\bopenaiKey\b/g) || [], g = idx.match(/\bgeminiKey\b/g) || [];
-    return (J(r) === J([1, 1]) && o.length === 4 && g.length === 4 && /headers\['authorization'\] = 'Bearer ' \+ openaiKey;/.test(idx)
-      && /headers\['x-goog-api-key'\] = geminiKey;/.test(idx) && /ready: \{ openai: openaiKey !== '', gemini: geminiKey !== '' \},/.test(idx)
+    const o = idx.match(/keys\.openai\b/g) || [], g = idx.match(/keys\.gemini\b/g) || [];
+    return (J(r) === J([1, 1]) && o.length === 6 && g.length === 6 && (idx.match(/headers\['authorization'\] = 'Bearer ' \+ keys\.openai;/g) || []).length === 2
+      && (idx.match(/headers\['x-goog-api-key'\] = keys\.gemini;/g) || []).length === 2 && /ready: \{ openai: keys\.openai !== '', gemini: keys\.gemini !== '' \},/.test(idx)
+      && /const r = await service\(\)\.rpc\('ai_provider_keys', \{ p_org: org \}\);/.test(idx) && /return ready\(\);/.test(idx)
       && J(idx.match(/console\.\w+\([^)]*\)/g)) === J(['console.error(text)'])) || J({ r, o: o.length, g: g.length });
   });
   await check('index.ts send(): the model id is checked before it goes into the Gemini address; a deadline aborts the call; the answer is never logged', () =>
     (/if \(!MODEL_ID\.test\(model\) \|\| !\(Number\.isFinite\(o\.deadlineMs\) && o\.deadlineMs > 0\)\) throw \{ notSent: true \};/.test(idx)
-      && /setTimeout\(\(\) => ctl\.abort\(\), o\.deadlineMs\)/.test(idx) && /clearTimeout\(timer\)/.test(idx) && !/log\(.*text/.test(idx)) || 'send');
+      && /setTimeout\(\(\) => ctl\.abort\(\), ms\)/.test(idx) && /clearTimeout\(timer\)/.test(idx) && /await httpJson\(target, \{ method: 'POST', headers, body: JSON\.stringify\(body\) \}, o\.deadlineMs\)/.test(idx)
+      && !/log\(.*text/.test(idx)) || 'send');
   await check('front end: ocr.js isAiJob (Claude engine name or a usage row) runs and answers right', () => {
     const vm = require('vm');
     const src = fs.readFileSync(path.join(ROOT, 'assets/js/ocr.js'), 'utf8');
