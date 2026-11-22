@@ -550,6 +550,26 @@
     qsa('[data-year], #year').forEach(function (el) { el.textContent = new Date().getFullYear(); });
   }
 
+  /* ---- Office site top strip: today in Gregorian + Hijri (Umm al-Qura), latin digits ---- */
+  function renderSiteDates() {
+    var box = qs('[data-site-dates]');
+    if (!box || typeof Intl === 'undefined') return;
+    var en = I18N && I18N.lang() === 'en';
+    var base = en ? 'en-GB-u-nu-latn' : 'ar-SA-u-nu-latn';
+    var now = new Date();
+    function fmt(cal, opts) {
+      try { return new Intl.DateTimeFormat(base + '-ca-' + cal, opts).format(now); } catch (e) { return ''; }
+    }
+    var g = qs('[data-date-greg]', box), h = qs('[data-date-hijri]', box);
+    if (g) g.textContent = fmt('gregory', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    if (h) h.textContent = fmt('islamic-umalqura', { day: 'numeric', month: 'long', year: 'numeric' });
+  }
+  function initSiteDates() {
+    if (!qs('[data-site-dates]')) return;
+    renderSiteDates();
+    window.addEventListener('marsa:langchange', renderSiteDates);
+  }
+
   function init() {
     tagChrome();
     if (I18N) I18N.apply(document);
@@ -565,6 +585,7 @@
     initDemoBanner();
     initClearData();
     initYear();
+    initSiteDates();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();

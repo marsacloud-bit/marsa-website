@@ -228,7 +228,8 @@
       mainMenu: 'القائمة الرئيسية', openMenu: 'فتح القائمة', closeMenu: 'إغلاق القائمة', drawer: 'القائمة الجانبية',
       home: 'الرئيسية', services: 'خدماتنا', calculator: 'حاسبة الرسوم', calculatorFull: 'حاسبة الرسوم الجمركية',
       tracking: 'تتبع الشحنة', bulk: 'الرفع الجماعي', bulkFull: 'الرفع الجماعي للبيانات',
-      ocr: 'قراءة المستندات', ocrFull: 'قراءة المستندات (OCR)', about: 'من نحن', contact: 'تواصل معنا',
+      ocr: 'قراءة المستندات', ocrFull: 'قراءة المستندات (OCR)', about: 'من نحن', contact: 'اتصل بنا',
+      blog: 'المدونة', consult: 'استشارات جمركية',
       request: 'اطلب تخليص', requestNow: 'اطلب تخليص الآن',
       clientLogin: 'دخول العملاء', staffLogin: 'دخول الموظفين', portal: 'بوابتي', platform: 'لوحة المنصة'
     },
@@ -239,6 +240,7 @@
       home: 'Home', services: 'Services', calculator: 'Duty calculator', calculatorFull: 'Customs duty calculator',
       tracking: 'Track shipment', bulk: 'Bulk upload', bulkFull: 'Bulk data upload',
       ocr: 'Read documents', ocrFull: 'Document reading (OCR)', about: 'About us', contact: 'Contact us',
+      blog: 'Blog', consult: 'Customs advice',
       request: 'Request clearance', requestNow: 'Request clearance now',
       clientLogin: 'Client sign-in', staffLogin: 'Staff sign-in', portal: 'My portal', platform: 'Platform console'
     }
