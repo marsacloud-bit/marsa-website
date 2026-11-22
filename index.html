@@ -42,9 +42,8 @@
           <li><a class="nav-link" href="index.html" data-i18n="nav.home">الرئيسية</a></li>
           <li><a class="nav-link" href="#services" data-i18n="nav.services">خدماتنا</a></li>
           <li><a class="nav-link" href="#track" data-i18n="nav.tracking">تتبع الشحنة</a></li>
-          <!-- owner 2026-11-22: blog + consultations pages come in a later stage; shown once the pages exist -->
-          <li hidden><a class="nav-link" href="blog.html" data-i18n="nav.blog">المدونة</a></li>
-          <li hidden><a class="nav-link" href="consult.html" data-i18n="nav.consult">استشارات جمركية</a></li>
+          <li><a class="nav-link" href="blog.html" data-i18n="nav.blog">المدونة</a></li>
+          <li><a class="nav-link" href="consult.html" data-i18n="nav.consult">استشارات جمركية</a></li>
           <li><a class="nav-link" href="about.html" data-i18n="nav.about">من نحن</a></li>
           <li><a class="nav-link" href="contact.html" data-i18n="nav.contact">اتصل بنا</a></li>
           <li data-platform-only hidden><a class="nav-link" href="platform.html" data-platform-only hidden data-i18n="nav.platform">لوحة المنصة</a></li>
@@ -81,8 +80,8 @@
       <li><a href="index.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/></svg>الرئيسية</a></li>
       <li><a href="#services" data-i18n="nav.services"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>خدماتنا</a></li>
       <li><a href="#track" data-i18n="nav.tracking"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>تتبع الشحنة</a></li>
-      <li hidden><a href="blog.html" data-i18n="nav.blog"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>المدونة</a></li>
-      <li hidden><a href="consult.html" data-i18n="nav.consult"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/></svg>استشارات جمركية</a></li>
+      <li><a href="blog.html" data-i18n="nav.blog"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>المدونة</a></li>
+      <li><a href="consult.html" data-i18n="nav.consult"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/></svg>استشارات جمركية</a></li>
       <li><a href="about.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2"/><path d="M12 7v14M5 13H3a9 9 0 0 0 18 0h-2M8 11h8"/></svg>من نحن</a></li>
       <li><a href="contact.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/></svg>اتصل بنا</a></li>
       <li><a href="login.html#client"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>دخول العملاء</a></li>
@@ -180,19 +179,23 @@
       </div>
     </section>
 
-    <!-- BLOG: hidden until blog.html exists (owner 2026-11-22: blog is a later stage) -->
-    <section class="hm-block" id="blog" aria-labelledby="blog-title" hidden>
+    <!-- BLOG: latest 3 articles (assets/js/blog.js fills [data-blog-latest]; the section hides when there are none) -->
+    <section class="hm-block" id="blog" aria-labelledby="blog-title">
       <div class="container">
-        <div class="hm-head"><h2 id="blog-title" data-i18n="index.v2_blog_title">من المدونة</h2><p data-i18n="index.v2_blog_sub">مقالات قصيرة عن التخليص والأنظمة الجمركية.</p></div>
+        <div class="hm-head-row">
+          <div class="hm-head"><h2 id="blog-title" data-i18n="blog.home_title">من المدونة</h2><p data-i18n="blog.home_sub">مقالات قصيرة عن التخليص والأنظمة الجمركية.</p></div>
+          <a class="btn hm-btn-line" href="blog.html"><span data-i18n="blog.all">كل المقالات</span></a>
+        </div>
+        <div class="hm-grid3" data-blog-latest></div>
       </div>
     </section>
 
-    <!-- CONSULTATION: points to the contact page until consult.html exists -->
+    <!-- CONSULTATION -->
     <section class="hm-block hm-consult-wrap" id="consult" aria-labelledby="consult-title">
       <div class="container">
         <div class="hm-consult">
           <div><h2 id="consult-title" data-i18n="index.v2_c_title">تحتاج رأيًا قبل أن تشحن؟</h2><p data-i18n="index.v2_c_sub">اطلب استشارة جمركية، ويرد عليك مختص في أقرب وقت.</p></div>
-          <a class="btn btn-primary btn-lg" href="contact.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/><path d="M9 11h6M9 14h4"/></svg><span data-i18n="index.v2_c_btn">اطلب استشارة</span></a>
+          <a class="btn btn-primary btn-lg" href="consult.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/><path d="M9 11h6M9 14h4"/></svg><span data-i18n="index.v2_c_btn">اطلب استشارة</span></a>
         </div>
       </div>
     </section>
@@ -214,6 +217,8 @@
           <ul class="footer-links">
             <li><a href="#services" data-i18n="nav.services">خدماتنا</a></li>
             <li><a href="about.html" data-i18n="nav.about">من نحن</a></li>
+            <li><a href="blog.html" data-i18n="nav.blog">المدونة</a></li>
+            <li><a href="consult.html" data-i18n="nav.consult">استشارات جمركية</a></li>
             <li><a href="about.html#faq" data-i18n="footer.faq">الأسئلة الشائعة</a></li>
             <li><a href="contact.html" data-i18n="nav.contact">اتصل بنا</a></li>
           </ul>
@@ -258,6 +263,9 @@
   <script src="assets/js/config.js" defer></script>
   <script src="assets/js/i18n.js" defer></script>
   <script src="assets/i18n/index.js" defer></script>
+  <script src="assets/i18n/blog.js" defer></script>
   <script src="assets/js/main.js" defer></script>
+  <script src="assets/js/blog-posts.js" defer></script>
+  <script src="assets/js/blog.js" defer></script>
 </body>
 </html>
