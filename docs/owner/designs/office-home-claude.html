@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>الصفحة الرئيسية — تصميم مقترح</title>
+<!-- DESIGN PROPOSAL ONLY (docs/owner/designs, not deployed). Same brief as office-home-brief-chatgpt.md. Invented sample data. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  /* All colors in one place: change --accent to re-theme the page. */
+  :root {
+    --accent: #5B4BA8;
+    --accent-ink: #FFFFFF;
+    --accent-soft: #EFECF8;
+    --accent-line: #D9D3EF;
+    --bg: #F8F7F4;
+    --surface: #FFFFFF;
+    --ink: #1F1C24;
+    --muted: #67626E;
+    --line: #E7E3DD;
+    --deep: #26212F;
+    --deep-ink: #EDEAF3;
+    --deep-muted: #A9A2B6;
+    /* meaning colors: fixed, never decorative */
+    --ok: #1E6B34; --ok-bg: #E3F2E6;
+    --review: #7A5410; --review-bg: #FBF1D9;
+    --late: #9B1C24; --late-bg: #FBE4E6;
+    --r: 14px; --r-lg: 22px;
+    --shadow: 0 1px 2px rgba(31,28,36,.05), 0 8px 24px rgba(31,28,36,.06);
+    --font: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif;
+    --mono: "IBM Plex Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 17px; line-height: 1.75; }
+  a { color: inherit; text-decoration: none; }
+  img, svg { display: block; }
+  .wrap { width: min(1200px, 100% - 32px); margin-inline: auto; }
+  .num { direction: ltr; unicode-bidi: isolate; font-family: var(--mono); letter-spacing: .02em; }
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+  /* buttons */
+  .btn { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 10px 20px; font-weight: 600; font-size: 15px; border: 1px solid transparent; cursor: pointer; font-family: inherit; white-space: nowrap; }
+  .btn-main { background: var(--accent); color: var(--accent-ink); }
+  .btn-main:hover { filter: brightness(1.08); }
+  .btn-line { border-color: var(--line); background: var(--surface); }
+  .btn-line:hover { border-color: var(--accent-line); background: var(--accent-soft); }
+  .btn-big { padding: 14px 30px; font-size: 17px; }
+
+  /* top strip */
+  .strip { background: var(--surface); border-bottom: 1px solid var(--line); font-size: 13.5px; color: var(--muted); }
+  .strip .wrap { display: flex; justify-content: space-between; align-items: center; gap: 16px; min-height: 38px; }
+  .strip .dates { display: flex; gap: 14px; flex-wrap: wrap; }
+  .strip .dates span + span::before { content: "•"; margin-inline-end: 14px; color: var(--line); }
+  .lang { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 2px 12px; font: inherit; color: var(--ink); cursor: pointer; }
+
+  /* header */
+  header.top { position: sticky; top: 0; z-index: 20; background: rgba(248,247,244,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  header.top .wrap { display: flex; align-items: center; gap: 28px; min-height: 72px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 19px; }
+  .logo { width: 40px; height: 40px; border-radius: 12px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; }
+  nav.main { display: flex; gap: 4px; flex: 1; }
+  nav.main a { padding: 8px 12px; border-radius: 999px; font-weight: 500; font-size: 15.5px; color: var(--muted); }
+  nav.main a:hover { color: var(--ink); background: var(--surface); }
+  nav.main a.on { color: var(--accent); background: var(--accent-soft); }
+  .auth { display: flex; gap: 8px; }
+  .menu-btn { display: none; margin-inline-start: auto; background: none; border: 1px solid var(--line); border-radius: 10px; padding: 8px; cursor: pointer; color: var(--ink); }
+
+  /* hero */
+  .hero { padding: 72px 0 56px; }
+  .hero .wrap { display: grid; grid-template-columns: 1.1fr .9fr; gap: 56px; align-items: center; }
+  .eyebrow { display: inline-flex; align-items: center; gap: 8px; background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 4px 14px; font-size: 14px; font-weight: 600; }
+  h1 { font-size: clamp(32px, 2.2vw + 18px, 50px); line-height: 1.3; margin: 18px 0 14px; font-weight: 700; letter-spacing: -.01em; }
+  .lead { font-size: 19px; color: var(--muted); margin: 0 0 28px; max-width: 34em; }
+  .track { margin-top: 34px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px; box-shadow: var(--shadow); max-width: 560px; }
+  .track label { font-weight: 600; font-size: 15px; display: block; margin-bottom: 8px; }
+  .track .row { display: flex; gap: 8px; }
+  .track input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 999px; padding: 11px 18px; font: 500 16px var(--mono); direction: ltr; text-align: start; background: var(--bg); color: var(--ink); }
+  .track input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  [dir="rtl"] .track input { text-align: right; }
+  .track small { display: block; color: var(--muted); font-size: 13.5px; margin-top: 8px; }
+
+  /* hero card: sample transaction */
+  .tx { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow); padding: 24px; }
+  .tx-head { display: flex; justify-content: space-between; align-items: start; gap: 12px; margin-bottom: 18px; }
+  .tx-head b { display: block; font-size: 17px; }
+  .tx-head .num { color: var(--muted); font-size: 14px; }
+  .tag { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
+  .tag-ok { background: var(--ok-bg); color: var(--ok); }
+  .tag-review { background: var(--review-bg); color: var(--review); }
+  .steps { list-style: none; margin: 0; padding: 0; }
+  .steps li { position: relative; padding-inline-start: 34px; padding-bottom: 16px; font-size: 15.5px; }
+  .steps li::before { content: ""; position: absolute; inset-inline-start: 10px; top: 26px; bottom: 0; width: 2px; background: var(--line); }
+  .steps li:last-child::before { display: none; }
+  .steps .dot { position: absolute; inset-inline-start: 0; top: 4px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--bg); border: 2px solid var(--line); }
+  .steps .done .dot { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .steps .now .dot { border-color: var(--accent); background: var(--accent-soft); }
+  .steps .now .dot::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .steps small { display: block; color: var(--muted); font-size: 13.5px; }
+  .steps .wait { color: var(--muted); }
+  .tx-foot { display: flex; gap: 10px; flex-wrap: wrap; border-top: 1px dashed var(--line); padding-top: 14px; font-size: 14px; color: var(--muted); }
+  .tx-foot .num { color: var(--ink); }
+  .sample { font-size: 12.5px; color: var(--muted); text-align: center; margin-top: 10px; }
+
+  /* sections */
+  section.block { padding: 72px 0; }
+  section.alt { background: var(--surface); border-block: 1px solid var(--line); }
+  .head { max-width: 640px; margin-bottom: 36px; }
+  .head h2 { font-size: clamp(26px, 1.2vw + 18px, 34px); line-height: 1.35; margin: 0 0 8px; }
+  .head p { color: var(--muted); margin: 0; }
+  .head-row { display: flex; justify-content: space-between; align-items: end; gap: 16px; flex-wrap: wrap; }
+
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 24px; transition: border-color .15s, transform .15s; }
+  section.alt .card { background: var(--bg); }
+  .card:hover { border-color: var(--accent-line); transform: translateY(-2px); }
+  .ico { width: 46px; height: 46px; border-radius: 13px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; margin-bottom: 14px; }
+  .card h3 { margin: 0 0 6px; font-size: 18.5px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15.5px; }
+
+  .how { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; counter-reset: s; }
+  .how li { list-style: none; position: relative; padding: 24px; border-radius: var(--r-lg); background: var(--bg); border: 1px solid var(--line); }
+  .how li::before { counter-increment: s; content: counter(s); position: absolute; inset-inline-end: 20px; top: 16px; font: 700 34px var(--font); color: var(--accent-line); }
+  .how h3 { margin: 0 0 6px; font-size: 18px; }
+  .how p { margin: 0; color: var(--muted); font-size: 15px; }
+  .how ol { margin: 0; padding: 0; display: contents; }
+
+  .ports { display: flex; flex-wrap: wrap; gap: 10px; }
+  .port { display: inline-flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 10px 18px; font-weight: 500; }
+  .port .ico { width: 30px; height: 30px; border-radius: 50%; margin: 0; }
+
+  .post .meta { font-size: 13.5px; color: var(--muted); margin-bottom: 8px; display: flex; gap: 10px; }
+  .post .more { display: inline-block; margin-top: 14px; color: var(--accent); font-weight: 600; font-size: 15px; }
+
+  .consult { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: var(--r-lg); padding: 36px 40px; }
+  .consult h2 { margin: 0 0 6px; font-size: 28px; }
+  .consult p { margin: 0; color: var(--muted); }
+
+  /* footer */
+  footer { background: var(--deep); color: var(--deep-ink); padding: 56px 0 24px; margin-top: 72px; }
+  footer .cols { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1.2fr; gap: 32px; }
+  footer h4 { margin: 0 0 12px; font-size: 15px; color: #fff; }
+  footer p, footer li { color: var(--deep-muted); font-size: 15px; }
+  footer ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  footer a:hover { color: #fff; }
+  footer .brand .logo { background: #fff; color: var(--deep); }
+  footer .copy { border-top: 1px solid rgba(255,255,255,.1); margin-top: 36px; padding-top: 18px; font-size: 13.5px; color: var(--deep-muted); }
+
+  /* responsive */
+  @media (max-width: 1180px) {
+    nav.main a { padding: 8px 9px; font-size: 15px; }
+    header.top .wrap { gap: 16px; }
+  }
+  @media (max-width: 1080px) {
+    .menu-btn { display: block; }
+    nav.main, .auth { display: none; }
+    header.top.open .wrap { flex-wrap: wrap; padding-bottom: 14px; }
+    header.top.open nav.main { display: flex; flex-direction: column; flex: 0 0 100%; order: 3; }
+    header.top.open .auth { display: flex; width: 100%; order: 4; }
+    header.top.open .auth .btn { flex: 1; justify-content: center; }
+  }
+  @media (max-width: 900px) {
+    .hero .wrap, .consult { grid-template-columns: 1fr; }
+    .hero { padding-top: 40px; }
+    .grid3, .how { grid-template-columns: 1fr 1fr; }
+    footer .cols { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 600px) {
+    body { font-size: 16px; }
+    .grid3, .how, footer .cols { grid-template-columns: 1fr; }
+    .track .row { flex-direction: column; }
+    .track .btn { justify-content: center; }
+    .strip { font-size: 12px; }
+    .strip .dates { gap: 2px 8px; }
+    .strip .dates span + span::before { margin-inline-end: 8px; }
+    section.block { padding: 52px 0; }
+    .consult { padding: 26px; }
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-anchor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.5"/><path d="M12 7.5V21M5 12H3a9 9 0 0 0 18 0h-2M8 11h8"/></symbol>
+    <symbol id="i-in" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M12 21V11M3 7l9 4 9-4"/></symbol>
+    <symbol id="i-out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+    <symbol id="i-plane" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 13.5L3 11l1.5-1.5 8 1 4-4.5a2 2 0 0 1 3 3L15 13l1 8-1.5 1.5-2.5-7.5L9 18v3l-1.5 1L6 18l-4-1.5L3 15h3z"/></symbol>
+    <symbol id="i-truck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6h11v10H2zM13 9h4l4 4v3h-8z"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
+    <symbol id="i-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/><path d="M9 11h6M9 14h4"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6.2 7-12a7 7 0 0 0-14 0c0 5.8 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></symbol>
+  </defs>
+</svg>
+
+<div class="strip">
+  <div class="wrap">
+    <div class="dates"><span id="d-greg"></span><span id="d-hijri"></span></div>
+    <button class="lang" id="lang" type="button" data-t="lang"></button>
+  </div>
+</div>
+
+<header class="top" id="top">
+  <div class="wrap">
+    <a class="brand" href="index.html"><span class="logo"><svg width="22" height="22"><use href="#i-anchor"/></svg></span><span data-office="name"></span></a>
+    <nav class="main" id="nav" aria-label="main">
+      <a href="#" class="on" data-t="nav_home"></a>
+      <a href="#services" data-t="nav_services"></a>
+      <a href="#track" data-t="nav_track"></a>
+      <a href="blog.html" data-t="nav_blog"></a>
+      <a href="consult.html" data-t="nav_consult"></a>
+      <a href="about.html" data-t="nav_about"></a>
+      <a href="contact.html" data-t="nav_contact"></a>
+    </nav>
+    <div class="auth">
+      <a class="btn btn-line" href="login.html#client"><svg width="17" height="17"><use href="#i-user"/></svg><span data-t="client_login"></span></a>
+      <a class="btn btn-line" href="login.html#staff"><span data-t="staff_login"></span></a>
+    </div>
+    <button class="menu-btn" id="menu" type="button" aria-expanded="false"><svg width="22" height="22"><use href="#i-menu"/></svg><span class="sr" data-t="menu"></span></button>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap">
+      <div>
+        <span class="eyebrow"><svg width="16" height="16"><use href="#i-shield"/></svg><span data-t="hero_eyebrow"></span></span>
+        <h1 data-t="hero_title"></h1>
+        <p class="lead" data-t="hero_lead"></p>
+        <a class="btn btn-main btn-big" href="request.html"><span data-t="cta_request"></span><svg width="18" height="18" class="flip"><use href="#i-arrow"/></svg></a>
+
+        <form class="track" id="track" action="tracking.html">
+          <label for="q" data-t="track_label"></label>
+          <div class="row">
+            <input id="q" name="id" autocomplete="off" placeholder="SEGU 9702408" required>
+            <button class="btn btn-main" type="submit"><svg width="17" height="17"><use href="#i-search"/></svg><span data-t="track_btn"></span></button>
+          </div>
+          <small data-t="track_hint"></small>
+        </form>
+      </div>
+
+      <div aria-hidden="true">
+        <div class="tx">
+          <div class="tx-head">
+            <div><b data-t="tx_client"></b><span class="num">TX-2026-0418</span></div>
+            <span class="tag tag-ok"><svg width="13" height="13"><use href="#i-check"/></svg><span data-t="tx_status"></span></span>
+          </div>
+          <ul class="steps">
+            <li class="done"><span class="dot"><svg width="12" height="12"><use href="#i-check"/></svg></span><span data-t="st1"></span><small data-t="st1d"></small></li>
+            <li class="done"><span class="dot"><svg width="12" height="12"><use href="#i-check"/></svg></span><span data-t="st2"></span><small data-t="st2d"></small></li>
+            <li class="now"><span class="dot"></span><b data-t="st3"></b><small data-t="st3d"></small></li>
+            <li class="wait"><span class="dot"></span><span data-t="st4"></span></li>
+          </ul>
+          <div class="tx-foot"><span data-t="tx_bl"></span><span class="num">ABT0125147</span><span data-t="tx_cont"></span><span class="num">SEGU 9702408</span></div>
+        </div>
+        <p class="sample" data-t="sample"></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="block alt" id="services">
+    <div class="wrap">
+      <div class="head"><h2 data-t="svc_title"></h2><p data-t="svc_sub"></p></div>
+      <div class="grid3">
+        <article class="card"><div class="ico"><svg width="24" height="24"><use href="#i-in"/></svg></div><h3 data-t="s1"></h3><p data-t="s1d"></p></article>
+        <article class="card"><div class="ico"><svg width="24" height="24"><use href="#i-out"/></svg></div><h3 data-t="s2"></h3><p data-t="s2d"></p></article>
+        <article class="card"><div class="ico"><svg width="24" height="24"><use href="#i-plane"/></svg></div><h3 data-t="s3"></h3><p data-t="s3d"></p></article>
+        <article class="card"><div class="ico"><svg width="24" height="24"><use href="#i-truck"/></svg></div><h3 data-t="s4"></h3><p data-t="s4d"></p></article>
+        <article class="card"><div class="ico"><svg width="24" height="24"><use href="#i-doc"/></svg></div><h3 data-t="s5"></h3><p data-t="s5d"></p></article>
+        <article class="card"><div class="ico"><svg width="24" height="24"><use href="#i-chat"/></svg></div><h3 data-t="s6"></h3><p data-t="s6d"></p></article>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="how">
+    <div class="wrap">
+      <div class="head"><h2 data-t="how_title"></h2><p data-t="how_sub"></p></div>
+      <ol class="how">
+        <li><div class="ico"><svg width="24" height="24"><use href="#i-upload"/></svg></div><h3 data-t="h1"></h3><p data-t="h1d"></p></li>
+        <li><div class="ico"><svg width="24" height="24"><use href="#i-doc"/></svg></div><h3 data-t="h2"></h3><p data-t="h2d"></p></li>
+        <li><div class="ico"><svg width="24" height="24"><use href="#i-shield"/></svg></div><h3 data-t="h3"></h3><p data-t="h3d"></p></li>
+        <li><div class="ico"><svg width="24" height="24"><use href="#i-truck"/></svg></div><h3 data-t="h4"></h3><p data-t="h4d"></p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="block alt" id="ports">
+    <div class="wrap">
+      <div class="head"><h2 data-t="ports_title"></h2><p data-t="ports_sub"></p></div>
+      <div class="ports" id="port-list"></div>
+    </div>
+  </section>
+
+  <section class="block" id="blog">
+    <div class="wrap">
+      <div class="head-row">
+        <div class="head"><h2 data-t="blog_title"></h2><p data-t="blog_sub"></p></div>
+        <a class="btn btn-line" href="blog.html" style="margin-bottom:36px"><span data-t="blog_all"></span></a>
+      </div>
+      <div class="grid3">
+        <article class="card post"><div class="meta"><span data-t="b_tag1"></span><span data-date="2026-11-12"></span></div><h3 data-t="b1"></h3><p data-t="b1d"></p><a class="more" href="blog.html" data-t="read"></a></article>
+        <article class="card post"><div class="meta"><span data-t="b_tag2"></span><span data-date="2026-11-03"></span></div><h3 data-t="b2"></h3><p data-t="b2d"></p><a class="more" href="blog.html" data-t="read"></a></article>
+        <article class="card post"><div class="meta"><span data-t="b_tag3"></span><span data-date="2026-10-21"></span></div><h3 data-t="b3"></h3><p data-t="b3d"></p><a class="more" href="blog.html" data-t="read"></a></article>
+      </div>
+    </div>
+  </section>
+
+  <section id="consult">
+    <div class="wrap">
+      <div class="consult">
+        <div><h2 data-t="c_title"></h2><p data-t="c_sub"></p></div>
+        <a class="btn btn-main btn-big" href="consult.html"><svg width="18" height="18"><use href="#i-chat"/></svg><span data-t="c_btn"></span></a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <a class="brand" href="index.html"><span class="logo"><svg width="22" height="22"><use href="#i-anchor"/></svg></span><span data-office="name"></span></a>
+        <p data-t="f_about"></p>
+      </div>
+      <div><h4 data-t="f_links"></h4><ul>
+        <li><a href="#services" data-t="nav_services"></a></li>
+        <li><a href="#track" data-t="nav_track"></a></li>
+        <li><a href="blog.html" data-t="nav_blog"></a></li>
+        <li><a href="consult.html" data-t="nav_consult"></a></li>
+      </ul></div>
+      <div><h4 data-t="f_office"></h4><ul>
+        <li><a href="about.html" data-t="nav_about"></a></li>
+        <li><a href="contact.html" data-t="nav_contact"></a></li>
+        <li><a href="login.html#client" data-t="client_login"></a></li>
+        <li><a href="login.html#staff" data-t="staff_login"></a></li>
+      </ul></div>
+      <div><h4 data-t="f_contact"></h4><ul>
+        <li><span class="num" data-office="phone"></span></li>
+        <li><span class="num" data-office="email"></span></li>
+        <li data-office="address"></li>
+      </ul></div>
+    </div>
+    <div class="copy"><span>© <span id="year"></span> </span><span data-office="name"></span>. <span data-t="rights"></span></div>
+  </div>
+</footer>
+
+<script>
+/* Office data: one place (later read from the organization settings). Invented sample values. */
+var OFFICE = {
+  name: { ar: '[اسم المكتب]', en: '[Office name]' },
+  phone: '+966 12 000 0000',
+  email: 'info@example.com',
+  address: { ar: 'جدة، المملكة العربية السعودية', en: 'Jeddah, Saudi Arabia' },
+  ports: [
+    { ar: 'ميناء جدة الإسلامي', en: 'Jeddah Islamic Port', icon: 'i-anchor' },
+    { ar: 'ميناء الملك عبدالعزيز بالدمام', en: 'King Abdulaziz Port, Dammam', icon: 'i-anchor' },
+    { ar: 'مطار الملك عبدالعزيز الدولي', en: 'King Abdulaziz Intl. Airport', icon: 'i-plane' },
+    { ar: 'مطار الملك خالد الدولي', en: 'King Khalid Intl. Airport', icon: 'i-plane' },
+    { ar: 'منفذ البطحاء', en: 'Al Batha Border Crossing', icon: 'i-truck' }
+  ]
+};
+
+var T = {
+  ar: {
+    lang: 'English', menu: 'القائمة',
+    nav_home: 'الرئيسية', nav_services: 'خدماتنا', nav_track: 'تتبع الشحنة', nav_blog: 'المدونة', nav_consult: 'استشارات جمركية', nav_about: 'من نحن', nav_contact: 'اتصل بنا',
+    client_login: 'دخول العملاء', staff_login: 'دخول الموظفين',
+    hero_eyebrow: 'مكتب تخليص جمركي مرخّص',
+    hero_title: 'نخلّص شحنتك، وأنت تتابعها خطوة بخطوة',
+    hero_lead: 'ارفع مستنداتك مرة واحدة، ونتولى الباقي في الموانئ والمطارات والمنافذ البرية، مع إشعار عند كل مرحلة.',
+    cta_request: 'اطلب تخليص',
+    track_label: 'تتبع شحنتك', track_btn: 'تتبع',
+    track_hint: 'اكتب رقم المعاملة أو رقم البوليصة أو رقم الحاوية.',
+    tx_client: 'شحنة ملابس — استيراد بحري', tx_status: 'تسير في موعدها',
+    st1: 'استلام المستندات', st1d: '10 نوفمبر', st2: 'تقديم البيان الجمركي', st2d: '11 نوفمبر',
+    st3: 'الفحص والإفراج', st3d: 'اليوم — بانتظار نتيجة الفحص', st4: 'التسليم للعميل',
+    tx_bl: 'البوليصة', tx_cont: 'الحاوية', sample: 'مثال توضيحي لما يراه العميل في بوابته',
+    svc_title: 'خدماتنا', svc_sub: 'كل ما تحتاجه لتخليص شحنتك في مكان واحد.',
+    s1: 'تخليص الاستيراد', s1d: 'من وصول الشحنة إلى الميناء حتى خروجها من الجمارك.',
+    s2: 'تخليص التصدير', s2d: 'تجهيز مستندات التصدير وإنهاء إجراءاتها.',
+    s3: 'الشحن الجوي', s3d: 'تخليص الشحنات في المطارات بسرعة ودقة.',
+    s4: 'الشحن البري', s4d: 'تخليص الشاحنات في المنافذ البرية.',
+    s5: 'المستندات وفسح', s5d: 'نراجع مستنداتك ونتابع طلبك في فسح حتى الإفراج.',
+    s6: 'الاستشارات الجمركية', s6d: 'رأي واضح في الرسوم والبنود والمتطلبات قبل أن تشحن.',
+    how_title: 'كيف نعمل', how_sub: 'أربع خطوات بسيطة، وأنت تعرف أين وصلت شحنتك في كل وقت.',
+    h1: 'ارفع مستنداتك', h1d: 'البوليصة والفاتورة وبيان التعبئة من بوابة العميل.',
+    h2: 'نراجعها', h2d: 'نتأكد من اكتمالها وتطابقها قبل تقديم البيان.',
+    h3: 'نخلّص الشحنة', h3d: 'نتابع الفحص والسداد حتى الإفراج.',
+    h4: 'تستلمها', h4d: 'ننسّق النقل ونرسل لك إشعار التسليم.',
+    ports_title: 'المنافذ التي نعمل فيها', ports_sub: 'فريقنا حاضر في أهم منافذ المملكة.',
+    blog_title: 'من المدونة', blog_sub: 'مقالات قصيرة عن التخليص والأنظمة الجمركية.', blog_all: 'كل المقالات', read: 'اقرأ المقال',
+    b_tag1: 'أنظمة', b_tag2: 'مستندات', b_tag3: 'نصائح',
+    b1: 'متى تُضاف نسبة 1% إلى قيمة الفاتورة؟', b1d: 'الفرق بين C&F وCIF وأثره على قيمة البيان.',
+    b2: 'المستندات المطلوبة لتخليص حاوية', b2d: 'قائمة مختصرة تجهّزها قبل وصول الشحنة.',
+    b3: 'كيف تتجنب غرامات تأخير الحاوية', b3d: 'مواعيد الإرجاع وما يجب متابعته بعد الخروج.',
+    c_title: 'تحتاج رأيًا قبل أن تشحن؟', c_sub: 'اطلب استشارة جمركية، ويرد عليك مختص في أقرب وقت.', c_btn: 'اطلب استشارة',
+    f_about: 'مكتب تخليص جمركي يخدم المستوردين والمصدّرين في موانئ المملكة ومطاراتها ومنافذها البرية.',
+    f_links: 'روابط', f_office: 'المكتب', f_contact: 'تواصل معنا', rights: 'جميع الحقوق محفوظة.'
+  },
+  en: {
+    lang: 'العربية', menu: 'Menu',
+    nav_home: 'Home', nav_services: 'Services', nav_track: 'Track', nav_blog: 'Blog', nav_consult: 'Customs advice', nav_about: 'About', nav_contact: 'Contact',
+    client_login: 'Client login', staff_login: 'Staff login',
+    hero_eyebrow: 'Licensed customs broker',
+    hero_title: 'We clear your shipment, you follow every step',
+    hero_lead: 'Upload your documents once. We handle the rest at ports, airports and land crossings, and notify you at every stage.',
+    cta_request: 'Request clearance',
+    track_label: 'Track your shipment', track_btn: 'Track',
+    track_hint: 'Enter a transaction, bill of lading or container number.',
+    tx_client: 'Garments — sea import', tx_status: 'On schedule',
+    st1: 'Documents received', st1d: '10 Nov', st2: 'Declaration submitted', st2d: '11 Nov',
+    st3: 'Inspection and release', st3d: 'Today — awaiting inspection', st4: 'Delivery to client',
+    tx_bl: 'B/L', tx_cont: 'Container', sample: 'Sample of what a client sees in the portal',
+    svc_title: 'Our services', svc_sub: 'Everything you need to clear your shipment, in one place.',
+    s1: 'Import clearance', s1d: 'From arrival at the port until it leaves customs.',
+    s2: 'Export clearance', s2d: 'Export documents prepared and procedures completed.',
+    s3: 'Air freight', s3d: 'Fast, accurate clearance at airports.',
+    s4: 'Land freight', s4d: 'Truck clearance at land border crossings.',
+    s5: 'Documents & Fasah', s5d: 'We check your documents and follow your request until release.',
+    s6: 'Customs advice', s6d: 'Clear answers on duties, tariff codes and requirements before you ship.',
+    how_title: 'How it works', how_sub: 'Four simple steps, and you always know where your shipment is.',
+    h1: 'Upload documents', h1d: 'B/L, invoice and packing list from the client portal.',
+    h2: 'We review', h2d: 'We check they are complete and consistent before filing.',
+    h3: 'We clear', h3d: 'We follow inspection and payments until release.',
+    h4: 'You receive', h4d: 'We arrange transport and send you a delivery notice.',
+    ports_title: 'Where we work', ports_sub: 'Our team is present at the Kingdom’s main entry points.',
+    blog_title: 'From the blog', blog_sub: 'Short articles on clearance and customs rules.', blog_all: 'All articles', read: 'Read article',
+    b_tag1: 'Rules', b_tag2: 'Documents', b_tag3: 'Tips',
+    b1: 'When is 1% added to the invoice value?', b1d: 'C&F versus CIF and how it changes the declared value.',
+    b2: 'Documents needed to clear a container', b2d: 'A short list to prepare before your shipment arrives.',
+    b3: 'Avoiding container detention charges', b3d: 'Return deadlines and what to follow after gate-out.',
+    c_title: 'Need advice before you ship?', c_sub: 'Request a customs consultation and a specialist will reply soon.', c_btn: 'Request advice',
+    f_about: 'A customs brokerage serving importers and exporters at the Kingdom’s ports, airports and land crossings.',
+    f_links: 'Links', f_office: 'Office', f_contact: 'Contact us', rights: 'All rights reserved.'
+  }
+};
+
+(function () {
+  var KEY = 'office_home_lang';
+  var lang = 'ar';
+  try { lang = localStorage.getItem(KEY) || 'ar'; } catch (e) {}
+
+  function pick(v) { return (v && typeof v === 'object') ? (v[lang] || v.ar) : v; }
+  function fmt(d, opts, cal) {
+    // Western digits always (nu-latn), Hijri via Umm al-Qura.
+    var loc = (lang === 'ar' ? 'ar-SA' : 'en-GB') + '-u-nu-latn' + (cal ? '-ca-' + cal : '');
+    try { return new Intl.DateTimeFormat(loc, opts).format(d); } catch (e) { return d.toDateString(); }
+  }
+
+  function render() {
+    var t = T[lang], html = document.documentElement;
+    html.lang = lang; html.dir = lang === 'ar' ? 'rtl' : 'ltr';
+    document.querySelectorAll('[data-t]').forEach(function (el) { el.textContent = t[el.getAttribute('data-t')] || ''; });
+    document.querySelectorAll('[data-office]').forEach(function (el) { el.textContent = pick(OFFICE[el.getAttribute('data-office')]); });
+    document.querySelectorAll('[data-date]').forEach(function (el) {
+      el.textContent = fmt(new Date(el.getAttribute('data-date') + 'T12:00:00'), { day: 'numeric', month: 'long', year: 'numeric' });
+    });
+    var now = new Date();
+    document.getElementById('d-greg').textContent = fmt(now, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    document.getElementById('d-hijri').textContent = fmt(now, { day: 'numeric', month: 'long', year: 'numeric' }, 'islamic-umalqura');
+    document.getElementById('year').textContent = String(now.getFullYear());
+    document.querySelectorAll('.flip').forEach(function (el) { el.style.transform = lang === 'ar' ? '' : 'scaleX(-1)'; });
+    var list = document.getElementById('port-list');
+    list.innerHTML = '';
+    OFFICE.ports.forEach(function (p) {
+      var s = document.createElement('span'); s.className = 'port';
+      s.innerHTML = '<span class="ico"><svg width="16" height="16"><use href="#' + p.icon + '"/></svg></span>';
+      s.appendChild(document.createTextNode(pick(p)));
+      list.appendChild(s);
+    });
+    document.title = (lang === 'ar' ? 'الرئيسية — ' : 'Home — ') + pick(OFFICE.name);
+  }
+
+  document.getElementById('lang').addEventListener('click', function () {
+    lang = lang === 'ar' ? 'en' : 'ar';
+    try { localStorage.setItem(KEY, lang); } catch (e) {}
+    render();
+  });
+  var top = document.getElementById('top'), menu = document.getElementById('menu');
+  menu.addEventListener('click', function () {
+    var open = top.classList.toggle('open');
+    menu.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  document.getElementById('nav').addEventListener('click', function (e) {
+    if (e.target.tagName === 'A') { top.classList.remove('open'); menu.setAttribute('aria-expanded', 'false'); }
+  });
+  render();
+})();
+</script>
+</body>
+</html>
