@@ -178,7 +178,7 @@ async function secFile() {
   });
   // later phases may follow this file (20261116000100 doc_match: re-creates convert_delete_tables / convert_delete_guards
   // with public.document_matches); none may sort before it unnoticed
-  const LATER_PHASES = ['20261116000100_doc_match.sql', '20261117000100_legacy_core.sql', '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql'];
+  const LATER_PHASES = ['20261116000100_doc_match.sql', '20261117000100_legacy_core.sql', '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261211000100_reconvert.sql'];
   await check('this file is present; only the listed later phases follow it', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -641,6 +641,14 @@ async function secAfter() {
       && c.converted_orgs.length === 1 && c.converted_orgs[0].org_id === A && c.converted_orgs[0].to_slug === NEW_SLUG
       && J(c.blockers) === J(CRON_BLOCKERS) && J(c.orgs_by_environment) === J({ production: 2 })
       && c.auth_users_without_access === PRE.noacc && J(c.warnings) === J(['auth_users_without_access:' + PRE.noacc])) || J(c);
+  });
+  await check('post_install_checks.sql: the owner without a verified TOTP factor is no blocker (MFA off, 20261129000100); totp_verified reported', async () => {
+    await q(`UPDATE auth.mfa_factors SET status = 'unverified' WHERE user_id = $1`, [U.A_admin]);
+    try {
+      const c = await runChecks();
+      const me = c.platform_admins.find(a => a.totp_verified === false);
+      return (J(c.blockers) === J(CRON_BLOCKERS) && !/totp/i.test(J(c.blockers)) && !!me) || J({ b: c.blockers, a: c.platform_admins });
+    } finally { await q(`UPDATE auth.mfa_factors SET status = 'verified' WHERE user_id = $1`, [U.A_admin]); }
   });
   await check('[D2] after the owner deletes the listed test accounts (Authentication → Users): auth_users_without_access 0, warnings [], owner kept', async () => {
     await q(`DELETE FROM auth.users u WHERE NOT EXISTS (SELECT 1 FROM public.platform_admins pa WHERE pa.user_id = u.id)

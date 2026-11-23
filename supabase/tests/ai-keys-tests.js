@@ -12,6 +12,10 @@
   ai_access follows); ai_provider_keys service-only (platform key for an org); ai_record_key_test (codes, model ids
   only); the Edge Function key test (handler providerTest) and the reading path using the saved keys (loadKeys);
   the platform page / supa.js / i18n (static).
+  23 Nov 2026 fixes: the key source (vault / env / none) — a provider saved or deleted on the page never falls back to
+  the Edge Function secret, a failed lookup uses no key; the key test uses the Vault key only (no_key / lookup_failed,
+  never the secret); a model id used by another provider refused, Claude's model locked to app.ai_model(), price 0
+  refused; an orphan Vault secret of the same name removed before create_secret (extract.js keySources unit-tested).
 
   usage:
     node supabase/tests/ai-keys-tests.js [/path/to/marsa-website] [--quiet]
@@ -105,7 +109,7 @@ async function secFile() {
   await check('preflight on ai_providers + Vault, its schema_versions row, no BEGIN / COMMIT, no key-like text, no endpoint', () =>
     (/version = '20261208000100'/.test(s) && /to_regclass\('vault\.secrets'\)/.test(s) && /VALUES \('20261209000100', 'ai_keys'\)/.test(s)
       && !/^\s*(BEGIN|COMMIT)\s*;/im.test(s) && !/sk-ant|sk-[A-Za-z0-9]{20}|AIza|api\.openai\.com|googleapis\.com|api\.anthropic\.com/.test(s)) || 'conventions');
-  await check('all_migrations.sql: this file verbatim, last, in order', () => {
+  await check('all_migrations.sql: this file verbatim, in order', () => {
     const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
     const h = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(h);
@@ -114,7 +118,9 @@ async function secFile() {
     const body = nx < 0 ? all.slice(i + h.length) : all.slice(i + h.length, nx);
     return (i > 0 && (body === s || body + '\n' === s) && all.indexOf(h, i + 1) < 0 && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles())) || 'bundle';
   });
-  await check('this file is the latest migration', () => migFiles().pop() === MIG || 'latest ' + migFiles().pop());
+  const LATER_PHASES = ['20261211000100_reconvert.sql'];
+  await check('this file is the latest migration (later phases excepted)', () =>
+    J(migFiles().filter(f => f > MIG).filter(f => LATER_PHASES.indexOf(f) < 0)) === '[]' || 'later ' + J(migFiles().filter(f => f > MIG)));
   await check('the key is never written to a log, a notice or the audit trail by the SQL (only last 4 characters)', () =>
     (!/RAISE\s+(NOTICE|LOG|INFO|WARNING)/i.test(s) && /'last4', v_last4/.test(s) && !/'key', v_key|jsonb_build_object\([^)]*p_key/.test(s) && /v_key := NULL;/.test(s)) || 'logging');
 }
@@ -201,9 +207,11 @@ async function secSql() {
     const k0 = await keysFor(null);
     await q(`UPDATE app.ai_providers SET is_active = false WHERE provider = 'openai'`);
     const off = await keysFor(A);
+    const off0 = await keysFor(null);
     await q(`UPDATE app.ai_providers SET is_active = true WHERE provider = 'openai'`);
-    return (J(no) === J(['perm', 'perm']) && k.openai === KEY2 && k.anthropic === null && k.gemini === null && k0.openai === KEY2 && !('openai' in off))
-      || J({ no, k, off });
+    return (J(no) === J(['perm', 'perm']) && J(k.openai) === J({ key: KEY2, source: 'vault' }) && J(k.anthropic) === J({ source: 'env' })
+      && J(k.gemini) === J({ source: 'env' }) && k0.openai.key === KEY2 && !('openai' in off) && off0.openai.source === 'vault')
+      || J({ no, k, off, off0 });
   });
   await check('ai_record_key_test: service role only; codes and model ids only (bad ids dropped, sorted, distinct)', async () => {
     const no = await code(() => as('owner', `SELECT public.ai_record_key_test('openai', true, 'ok', NULL)`));
@@ -221,17 +229,77 @@ async function secSql() {
     const acc = await as('staff', `SELECT public.ai_access($1) r`, [A]).then(x => x[0].r);
     return (r.model === 'gpt-a' && Number(r.price_in) === 1.25 && pr.i === 1.25 && pr.o === 10 && J(acc.providers) === J([{ model: 'gpt-a', provider: 'openai' }])) || J({ r, pr, acc });
   });
-  await check('model / price validation: bad id, one price only, negative, unknown key refused', async () => {
+  await check('model / price validation: bad id, one price only, negative, a 0 price, unknown key refused', async () => {
     const sp = p => code(() => as('owner', `SELECT public.platform_ai_save_provider('openai', $1)`, [J(p)]));
-    const r = [await sp({ model: 'GPT A' }), await sp({ price_in: 1 }), await sp({ price_in: -1, price_out: 2 }), await sp({ secret: 'x' })];
-    return J(r) === J(['MRS_INVALID model', 'MRS_INVALID price', 'MRS_INVALID price', 'MRS_INVALID unknown_key']) || J(r);
+    const r = [await sp({ model: 'GPT A' }), await sp({ price_in: 1 }), await sp({ price_in: -1, price_out: 2 }), await sp({ secret: 'x' }),
+      await sp({ price_in: 0, price_out: 2 }), await sp({ price_in: 1, price_out: 0 })];
+    const pr = await one(`SELECT input_usd_per_mtok::float i FROM app.ai_prices WHERE model = 'gpt-a'`);
+    return (J(r) === J(['MRS_INVALID model', 'MRS_INVALID price', 'MRS_INVALID price', 'MRS_INVALID unknown_key', 'MRS_INVALID price', 'MRS_INVALID price'])
+      && pr.i === 1.25) || J({ r, pr });
   });
-  await check('delete: the Vault secret is removed, the row gone, an audit row without the key; a second delete is harmless', async () => {
+  await check('a model id another provider already asks for is refused (MRS_CONFLICT model_taken), Claude\'s included; the table has a unique index too', async () => {
+    const sp = (p, b) => code(() => as('owner', `SELECT public.platform_ai_save_provider($1, $2)`, [p, J(b)]));
+    const r = [await sp('gemini', { model: 'gpt-a' }), await sp('gemini', { model: 'claude-opus-5-5' }), await sp('gemini', { model: 'gemini-3.8-flash', is_active: true })];
+    const g = await one(`SELECT model FROM app.ai_providers WHERE provider = 'gemini'`);
+    const ix = await code(() => q(`UPDATE app.ai_providers SET model = 'gpt-a' WHERE provider = 'gemini'`));
+    return (J(r) === J(['MRS_CONFLICT model_taken', 'MRS_CONFLICT model_taken', 'ok']) && g.model === 'gemini-3.8-flash' && /duplicate key|ai_providers_model_uidx/.test(ix)) || J({ r, g, ix });
+  });
+  await check('Claude\'s model is locked to app.ai_model() (another id: MRS_INVALID model_locked); its price is saved under that id; the page says model_locked', async () => {
+    const sp = b => code(() => as('owner', `SELECT public.platform_ai_save_provider('anthropic', $1)`, [J(b)]));
+    const r = [await sp({ model: 'claude-other-1' }), await sp({ model: 'claude-opus-5-5', price_in: 5, price_out: 25 }), await sp({ price_in: 6, price_out: 30 })];
+    await q(`UPDATE app.ai_providers SET model = 'claude-drifted-1' WHERE provider = 'anthropic'`);       // a row tuned by hand
+    const p = (await providers('owner')).find(x => x.provider === 'anthropic');
+    const r2 = await sp({ is_active: true });
+    const m = await one(`SELECT model, (SELECT input_usd_per_mtok::float FROM app.ai_prices WHERE model = app.ai_model()) i FROM app.ai_providers WHERE provider = 'anthropic'`);
+    const o = (await providers('owner')).find(x => x.provider === 'openai');
+    return (J(r) === J(['MRS_INVALID model_locked', 'ok', 'ok']) && p.model === 'claude-opus-5-5' && p.model_locked === true && Number(p.price_in) === 6
+      && r2 === 'ok' && m.model === 'claude-opus-5-5' && m.i === 6 && o.model_locked === false) || J({ r, p, r2, m });
+  });
+  await check('key source on the page: vault (saved here) / env (never saved here) before any delete', async () => {
+    const p = await providers('owner');
+    return J(p.map(x => x.key_source)) === J(['env', 'vault', 'env']) || J(p.map(x => x.key_source));
+  });
+  await check('delete: the Vault secret is removed, the row stays without a secret (source none: no secret fallback), an audit row without the key; a second delete is harmless', async () => {
     const r = await as('owner', `SELECT public.platform_ai_clear_key('openai') r`).then(x => x[0].r);
-    const n = await one(`SELECT (SELECT count(*)::int FROM vault.secrets) v, (SELECT count(*)::int FROM app.ai_provider_keys) k`);
+    const n = await one(`SELECT (SELECT count(*)::int FROM vault.secrets) v, (SELECT count(*)::int FROM app.ai_provider_keys WHERE secret_id IS NULL AND key_last4 IS NULL) k`);
     const a = await one(`SELECT action, old_data o FROM public.audit_log WHERE table_name = 'ai_provider_keys' ORDER BY id DESC LIMIT 1`);
+    const nA = await one(`SELECT count(*)::int n FROM public.audit_log WHERE table_name = 'ai_provider_keys'`);
     const again = await as('owner', `SELECT public.platform_ai_clear_key('openai') r`).then(x => x[0].r);
-    return (r.removed === true && n.v === 0 && n.k === 0 && a.action === 'DELETE' && a.o.last4 === '9876' && !J(a).includes(KEY2) && again.removed === false) || J({ r, n, a, again });
+    const nB = await one(`SELECT count(*)::int n FROM public.audit_log WHERE table_name = 'ai_provider_keys'`);
+    const p = (await providers('owner')).find(x => x.provider === 'openai');
+    const k = await keysFor(A);
+    return (r.removed === true && n.v === 0 && n.k === 1 && a.action === 'DELETE' && a.o.last4 === '9876' && !J(a).includes(KEY2) && again.removed === false
+      && nB.n === nA.n && p.key === null && p.key_source === 'none' && J(k.openai) === J({ source: 'none' })) || J({ r, n, a, again, p, k });
+  });
+  await check('delete on a provider never saved here: a row without a secret (the secret fallback stops), audit INSERT; unknown provider refused', async () => {
+    const r = await as('owner', `SELECT public.platform_ai_clear_key('gemini') r`).then(x => x[0].r);
+    const a = await one(`SELECT action, new_data n FROM public.audit_log WHERE table_name = 'ai_provider_keys' ORDER BY id DESC LIMIT 1`);
+    const p = (await providers('owner')).find(x => x.provider === 'gemini');
+    const bad = await code(() => as('owner', `SELECT public.platform_ai_clear_key('mistral')`));
+    await q(`DELETE FROM app.ai_provider_keys WHERE provider = 'gemini'`);                                // back to «never saved here»
+    const p2 = (await providers('owner')).find(x => x.provider === 'gemini');
+    return (r.removed === false && a.action === 'INSERT' && a.n.key_source === 'none' && p.key_source === 'none' && bad === 'MRS_INVALID provider' && p2.key_source === 'env')
+      || J({ r, a, p, bad, p2 });
+  });
+  await check('save after a delete: a new Vault secret; an orphan secret of the same name is removed first (unique name in Vault)', async () => {
+    const orphan = (await q(`SELECT vault.create_secret('orphan-left-behind-000000000000', 'ai_key:platform:openai') id`))[0].id;
+    const r = await setKey('owner', 'openai', KEY2);
+    const v = await q(`SELECT id, decrypted_secret s FROM vault.decrypted_secrets WHERE name = 'ai_key:platform:openai'`);
+    const row = await one(`SELECT secret_id FROM app.ai_provider_keys WHERE provider = 'openai' AND org_id IS NULL`);
+    // a row whose secret vanished: the next save creates a new one (no silent update of a missing secret)
+    const orphan2 = (await q(`SELECT vault.create_secret('orphan-gemini-00000000000000000000', 'ai_key:platform:gemini') id`))[0].id;
+    const g = await setKey('owner', 'gemini', KEY1);
+    const gv = await q(`SELECT id FROM vault.secrets WHERE name = 'ai_key:platform:gemini'`);
+    await q(`DELETE FROM vault.secrets WHERE name = 'ai_key:platform:gemini'`);
+    const gp = (await providers('owner')).find(x => x.provider === 'gemini');
+    const gk = await keysFor(null);
+    const g2 = await setKey('owner', 'gemini', KEY1);
+    const gv2 = await q(`SELECT s.id FROM vault.secrets s JOIN app.ai_provider_keys k ON k.secret_id = s.id WHERE k.provider = 'gemini'`);
+    await as('owner', `SELECT public.platform_ai_clear_key('gemini')`);
+    await q(`DELETE FROM app.ai_provider_keys WHERE provider = 'gemini'`);
+    return (r.last4 === '9876' && v.length === 1 && v[0].s === KEY2 && v[0].id !== orphan && row.secret_id === v[0].id
+      && g.last4 === '1234' && gv.length === 1 && gv[0].id !== orphan2 && gp.key_source === 'none' && J(gk.gemini) === J({ source: 'none' })
+      && g2.last4 === '1234' && gv2.length === 1) || J({ r, v, row, g, gv, gp, gk, gv2 });
   });
 }
 
@@ -257,8 +325,13 @@ function hDeps(o) {
       from: () => { const q2 = { select: () => q2, eq: () => q2, maybeSingle: async () => ({ data: null, error: null }) }; return q2; }
     }),
     serviceClient: () => ({ rpc: (name, a) => { calls.push(name); return sqlRpc('service', name, a); } }),
-    loadKeys: async org => { calls.push('loadKeys:' + org); const k = (await sqlRpc('service', 'ai_provider_keys', { p_org: org })).data || {};
-      d.loaded = k; return { anthropic: !!k.anthropic, openai: !!k.openai, gemini: !!k.gemini }; },
+    // as index.ts loadKeys: extract.js keySources on the RPC answer; x.env = the Edge Function secrets that are set
+    loadKeys: async org => { calls.push('loadKeys:' + org);
+      const res = x.rpc ? x.rpc : await sqlRpc('service', 'ai_provider_keys', { p_org: org });
+      const s = X.keySources(res), env = x.env || {};
+      const out = { sources: s.sources, failed: s.failed === true };
+      X.PROVIDERS.forEach(p => { out[p] = s.sources[p] === 'vault' || (s.sources[p] === 'env' && !!env[p]); });
+      d.loaded = out; return out; },
     listModels: async p => { calls.push('listModels:' + p); return x.models || { status: 200, models: ['gpt-a', 'gpt-b', 'Bad Id'] }; },
     send: async (p, m, body) => { calls.push('send:' + p); return { status: 200, json: { status: 'completed', model: m, usage: { input_tokens: 10, output_tokens: 5 },
       output: [{ type: 'message', content: [{ type: 'output_text', text: J({ doc_type: 'bill_of_lading', fields: [], line_items: [], warnings: [] }) }] }] } }; },
@@ -299,6 +372,55 @@ async function secHandler() {
     const r = await H.handleRequest(hReq({ org_id: A, doc_type: 'bill_of_lading', file: { media_type: 'image/png', data_b64: PNG } }), d);
     return (r.status === 200 && d.calls.includes('loadKeys:' + A) && d.calls.includes('send:openai') && JSON.parse(r.body).engine === 'gpt-a') || J({ s: r.status, b: r.body, calls: d.calls });
   });
+  const PNG2 = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 73, 72, 68, 82, 1]).toString('base64');
+  const read = d => H.handleRequest(hReq({ org_id: A, doc_type: 'bill_of_lading', file: { media_type: 'image/png', data_b64: PNG2 } }), d);
+  await check('key test: the Edge Function secret is never tested — a provider without a Vault key (env only) → no_key, nothing listed', async () => {
+    const d = hDeps({ env: { anthropic: true, openai: true, gemini: true } });
+    const r = JSON.parse((await H.handleRequest(hReq({ action: 'provider_test', provider: 'gemini' }), d)).body);
+    return (r.ok === false && r.note === 'no_key' && !d.calls.some(c => /^listModels/.test(c))) || J({ r, calls: d.calls });
+  });
+  await check('key test: the key lookup failed (RPC error) → lookup_failed recorded, nothing listed, never the secret', async () => {
+    const d = hDeps({ env: { openai: true }, rpc: { data: null, error: { code: 'XX000', message: 'down' } } });
+    const r = JSON.parse((await H.handleRequest(hReq({ action: 'provider_test', provider: 'openai' }), d)).body);
+    const k = (await providers('owner')).find(x => x.provider === 'openai').key;
+    return (r.ok === false && r.note === 'lookup_failed' && !d.calls.some(c => /^listModels/.test(c)) && d.calls.includes('ai_record_key_test')
+      && k.test_note === 'lookup_failed' && d.calls.includes('log:ai-extract: key lookup failed')) || J({ r, calls: d.calls, k });
+  });
+  await check('reading: a key lookup that failed uses no key at all (no silent fallback to the secrets) → not_configured, nothing sent', async () => {
+    const d = hDeps({ who: 'staff', env: { anthropic: true, openai: true, gemini: true }, rpc: { data: null, error: { code: 'XX000', message: 'down' } } });
+    const r = await read(d);
+    return (r.status === 503 && JSON.parse(r.body).error === 'not_configured' && !d.calls.some(c => /^send:/.test(c))) || J({ s: r.status, b: r.body, calls: d.calls });
+  });
+  await check('reading: a database without the key RPC yet (PGRST202, before 20261209000100) keeps the secrets, as before', async () => {
+    const d = hDeps({ who: 'staff', env: { openai: true }, rpc: { data: null, error: { code: 'PGRST202', message: 'not found' } } });
+    const r = await read(d);
+    return (r.status === 200 && d.calls.includes('send:openai')) || J({ s: r.status, calls: d.calls });
+  });
+  await check('reading: a key deleted on the page is NOT replaced by the OPENAI_API_KEY secret (source none) → not_configured, nothing sent', async () => {
+    await as('owner', `SELECT public.platform_ai_clear_key('openai')`);
+    const d = hDeps({ who: 'staff', env: { openai: true } });
+    const r = await read(d);
+    return (r.status === 503 && !d.calls.some(c => /^send:/.test(c)) && d.loaded.sources.openai === 'none' && d.loaded.openai === false) || J({ s: r.status, calls: d.calls, l: d.loaded });
+  });
+  await check('reading: a provider never saved on the page still uses its Edge Function secret (source env)', async () => {
+    await q(`UPDATE app.ai_settings SET provider_order = ARRAY['gemini'], consent_providers = ARRAY['gemini'] WHERE org_id = $1`, [A]);
+    const d = hDeps({ who: 'staff', env: { gemini: true } });
+    await read(d);
+    const d2 = hDeps({ who: 'staff' });
+    const r2 = await read(d2);
+    await q(`UPDATE app.ai_settings SET provider_order = ARRAY['openai'], consent_providers = ARRAY['openai'] WHERE org_id = $1`, [A]);
+    return (d.loaded.sources.gemini === 'env' && d.calls.includes('send:gemini') && r2.status === 503 && !d2.calls.some(c => /^send:/.test(c))) || J({ calls: d.calls, r2: r2.status });
+  });
+  await check('extract.js keySources: vault / env / none per provider; an RPC error → all none + failed; PGRST202 / 42883 → env; never returns a key', () => {
+    const a = X.keySources({ data: { anthropic: { source: 'vault', key: KEY1 }, openai: { source: 'none' }, gemini: { source: 'env' } }, error: null });
+    const b = X.keySources({ data: null, error: { code: '57014' } });
+    const c = X.keySources({ data: null, error: { code: 'PGRST202' } }), c2 = X.keySources({ data: null, error: { code: '42883' } });
+    const e = [X.keySources(null), X.keySources({ data: { anthropic: KEY1 }, error: null }), X.keySources({ data: { anthropic: { source: 'vault', key: '' } }, error: null })];
+    return (J(a) === J({ failed: false, sources: { anthropic: 'vault', openai: 'none', gemini: 'env' } }) && !J(a).includes(KEY1)
+      && J(b) === J({ failed: true, sources: { anthropic: 'none', openai: 'none', gemini: 'none' } })
+      && J(c.sources) === J({ anthropic: 'env', openai: 'env', gemini: 'env' }) && c.failed === false && J(c2) === J(c)
+      && e[0].failed === true && e[1].sources.anthropic === 'none' && e[1].sources.openai === 'none' && e[2].sources.anthropic === 'none') || J({ a, b, c, e });
+  });
 }
 
 /* ------------------------------------------------------------------ 5. static: page, supa.js, i18n, index.ts */
@@ -313,6 +435,12 @@ async function secStatic() {
     return (/type: 'password'/.test(seg) && /f\.input\.value = '';/.test(seg) && /'autocomplete', 'new-password'/.test(seg) && !/innerHTML/.test(seg)
       && /'•••• ' \+ k\.last4/.test(seg) && !/\.key\.(value|secret)|secret_id/.test(seg) && /loadAi\(\)\]\); \}/.test(pf)) || 'platform.js';
   });
+  await check('platform.js: the key source shown on every row; lookup_failed has its text; Claude\'s model read-only and not sent; a 0 price refused; model_taken / model_locked explained', () => {
+    const seg = pf.slice(pf.indexOf('AI PROVIDER KEYS'), pf.indexOf('TOP BAR + BOOT'));
+    return (/var AI_SRC_KEYS = \{ vault: 'aiSrcVault', env: 'aiSrcEnv', none: 'aiSrcNone' \};/.test(seg) && /keyCell\.push\(h\('span', \{ class: 'pf-sub', 'data-pf-ai-src': src/.test(seg)
+      && /lookup_failed: 'aiTestLookupFailed'/.test(seg) && /if \(locked\) fm\.input\.readOnly = true;/.test(seg) && /if \(!locked\) payload\.model = model;/.test(seg)
+      && /a <= 0 \|\| b <= 0/.test(seg) && /model_taken: 'aiModelTaken', model_locked: 'aiModelLocked'/.test(seg) && /AI_SAVE_ERR\[r\.error\.field\]/.test(seg)) || 'platform.js';
+  });
   await check('supa.js: the five platformAi* calls (the key trimmed and checked before it is sent; the test through the Edge Function)', () =>
     (['platformAiProviders', 'platformAiSetKey', 'platformAiClearKey', 'platformAiSaveProvider', 'platformAiTestKey'].every(n => new RegExp(n + ': ' + n).test(supa))
       && /rpc\('platform_ai_set_key', \{ p_provider: provider, p_key: k \}\)/.test(supa) && /k\.length > 400 \|\| \/\\s\/\.test\(k\)/.test(supa)
@@ -323,12 +451,18 @@ async function secStatic() {
     const box = { window: { MarsaI18n: { register: (ns, d) => { dict = d; } } } }; vm.createContext(box); vm.runInContext(rd('assets/i18n/platform.js'), box);
     const ar = Object.keys(dict.ar).filter(k => /^ai/.test(k)), en = Object.keys(dict.en).filter(k => /^ai/.test(k));
     const miss = ar.filter(k => !dict.en[k]).concat(en.filter(k => !dict.ar[k]));
-    return (ar.length >= 40 && miss.length === 0) || J({ n: ar.length, miss });
+    const need = ['aiSrcVault', 'aiSrcEnv', 'aiSrcNone', 'aiTestLookupFailed', 'aiModelTaken', 'aiModelLocked', 'aiModelLockedHint'].filter(k => !dict.ar[k] || !dict.en[k]);
+    // the delete dialog says the server secret is not used either (true since 23 Nov 2026)
+    const del = /Edge Function/.test(dict.ar.aiKeyDeleteText) && /Edge Function/.test(dict.en.aiKeyDeleteText);
+    return (ar.length >= 47 && miss.length === 0 && need.length === 0 && del) || J({ n: ar.length, miss, need, del });
   });
   await check('index.ts: the keys come from the service RPC into the request scope; handler.js gets booleans (loadKeys) and never a key', () => {
     const h = rd('supabase/functions/ai-extract/handler.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
     return (/const keys: Record<string, string> = \{/.test(idx) && /loadKeys,/.test(idx) && /listModels,/.test(idx)
-      && /return ready\(\);/.test(idx) && !/keys\.(anthropic|openai|gemini)|apiKey|_API_KEY|decrypted_secret/.test(h)) || 'index.ts';
+      && /return \{ \.\.\.ready\(\), sources: \{ \.\.\.source \}, failed: s\.failed === true \};/.test(idx) && /const s = X\.keySources\(r\);/.test(idx)
+      && /if \(source\[p\] === 'vault'\) keys\[p\] = r\.data\[p\]\.key;/.test(idx) && /else if \(source\[p\] !== 'env'\) keys\[p\] = '';/.test(idx)
+      && /if \(source\[provider\] !== 'vault'\) return \{ status: 0, models: \[\] \};/.test(idx)
+      && !/keys\.(anthropic|openai|gemini)|apiKey|_API_KEY|decrypted_secret/.test(h)) || 'index.ts';
   });
 }
 

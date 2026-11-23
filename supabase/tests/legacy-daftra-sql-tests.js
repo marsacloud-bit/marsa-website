@@ -605,7 +605,7 @@ async function secFile() {
       && /'updateDraftInvoice' = ANY \(v_ops\) AND NOT app\.daftra_allow_update/.test(body) && /app\.rpt_today\(\)/.test(body)
       && !/review_status = 'approved'/.test(body)) || 'decisions');
   // later phases may follow this file (20261124000100 legacy_reports: re-creates readers of G6a / G3, never a step-7 function)
-  const LATER_PHASES = ['20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql'];
+  const LATER_PHASES = ['20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261211000100_reconvert.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');
@@ -903,11 +903,67 @@ async function secOpening() {
       && x.items.some(i => i.item_key === 'item:customs_clearance' && i.remote_product_code === '10x1') && x.client.external_id === 'dc-a';
     const h = H('open-1');
     await complete(ctx, { outcome: 'ok', effects: { intent_id: x.id, external_invoice_id: 'inv-open-1', found_by: 'created', daftra_status: 'draft', remote_state: 'draft',
-      remote_hash: h, pushed_hash: h, remote_snapshot: {}, remote_totals: { net: 0, vat: 0, total: 0 }, line_results: [],
-      daftra_url: 'https://acct.example.test/owner/invoices/view/77', read_back: { date: today, client_id: 'dc-a', total: 0, line_count: 1 } } });
+      remote_hash: h, pushed_hash: h, remote_snapshot: {}, remote_totals: { net: 500, vat: 75, total: 575 }, line_results: [],
+      daftra_url: 'https://acct.example.test/owner/invoices/view/77', read_back: { date: today, client_id: 'dc-a', total: 575, line_count: 1 } } });
     const i = await one(`SELECT status, daftra_url, external_invoice_id FROM public.billing_intents WHERE id = $1`, [x.id]);
     const rv = await num(`SELECT count(*) n FROM public.billing_review_items WHERE intent_id = $1`, [x.id]);
     return (okc && i.status === 'draft' && i.daftra_url === 'https://acct.example.test/owner/invoices/view/77' && rv === 0) || J({ x, i, rv });
+  });
+  // 20261205000100: the opening line (500 SAR + 15 % VAT) is not a billing line — the totals checks add it
+  const OPEN_LINE = (price, extra) => Object.assign({ id: 'rl-open', line_ref: null, product_id: 'p-clr', description: '', quantity: '1.000', unit_price: price, tax_rate: '15.00' }, extra || {});
+  await check('app.bill_opening_total: no snapshot → the catalogue line (500 + 15 % = 575); the snapshot line as Daftra shows it (600 → 690); no unmarked clearance line → 0; a non-opening intent → 0', async () => {
+    const r = await one(`SELECT app.bill_opening_total(i, NULL) a, app.bill_opening_total(i, $2::jsonb) b, app.bill_opening_total(i, '{"lines":[]}'::jsonb) c,
+                                app.bill_opening_total(i, $3::jsonb) d, app.bill_opening_total(jsonb_populate_record(i, '{"origin":"marsa"}'), NULL) e
+                           FROM public.billing_intents i WHERE i.id = $1`,
+      [opened.i.id, { lines: [{ line_ref: 'MRSL-x', product_id: 'p-clr', quantity: '1.000', unit_price: '90.00', tax_rate: '15.00' }, OPEN_LINE('600.00')] },
+       { lines: [OPEN_LINE('500.00', { product_id: 'p-other' })] }]);
+    const m = await one(`SELECT app.bill_opening_total(i, NULL) m FROM public.billing_intents i WHERE i.origin <> 'opening' LIMIT 1`);
+    const got = [r.a, r.b, r.c, r.d, r.e, m ? m.m : 0].map(Number);
+    return J(got) === J([575, 690, 0, 0, 0, 0]) || J(got);
+  });
+  await check('opening read-back: a created draft whose total lacks the opening line → readback_mismatch total (expected 575)', async () => {
+    const t = await mkTx();
+    await addDecl(t);
+    const i = await one(`SELECT * FROM public.billing_intents WHERE transaction_id = $1 AND origin = 'opening'`, [t.id]);
+    const j = await one(`SELECT id FROM public.billing_sync_jobs WHERE intent_id = $1`, [i.id]);
+    const ctx = await claimJob(j.id);
+    const today = (await one(`SELECT to_char((now() AT TIME ZONE 'Asia/Riyadh')::date, 'YYYY-MM-DD') d`)).d;
+    const h = H('open-rb');
+    await complete(ctx, { outcome: 'ok', effects: { intent_id: i.id, external_invoice_id: 'inv-open-rb', found_by: 'created', daftra_status: 'draft', remote_state: 'draft',
+      remote_hash: h, pushed_hash: h, remote_snapshot: {}, remote_totals: { net: 0, vat: 0, total: 0 }, line_results: [],
+      read_back: { date: today, client_id: 'dc-a', total: 0, line_count: 1 } } });
+    const rv = await one(`SELECT details FROM public.billing_review_items WHERE intent_id = $1 AND kind = 'readback_mismatch'`, [i.id]);
+    return (rv && J(rv.details.fields) === J(['total']) && Number(rv.details.expected_total) === 575) || J(rv);
+  });
+  await check('HF5 issue of the opening draft (500 SAR line, total 575): NO issued_mismatch — the intent is issued', async () => {
+    const job = await rpc('acc', `SELECT public.request_billing_pull($1) r`, [opened.i.id]);
+    const ctx = await claimJob(job.id);
+    await complete(ctx, { outcome: 'ok', effects: { intent_id: opened.i.id, external_invoice_id: 'inv-open-1', daftra_number: 'INV-OPEN-1', daftra_status: 'issued',
+      remote_state: 'issued', remote_hash: H('open-1 issued'), remote_snapshot: { lines: [OPEN_LINE('500.00')] }, remote_totals: { net: 500, vat: 75, total: 575 }, remote_client_id: 'dc-a' } });
+    const i = await one(`SELECT status FROM public.billing_intents WHERE id = $1`, [opened.i.id]);
+    const mm = await num(`SELECT count(*) n FROM public.billing_review_items WHERE intent_id = $1 AND kind = 'issued_mismatch'`, [opened.i.id]);
+    return (i.status === 'issued' && mm === 0) || J({ i, mm });
+  });
+  await check('HF5 issue of an opening draft: the employee changed the clearance amount (600) → no mismatch; a line added by hand that nobody listed (+100) → issued_mismatch totals with opening_total', async () => {
+    const out = [];
+    for (const [price, total] of [['600.00', 690], ['500.00', 675]]) {
+      const t = await mkTx();
+      await addDecl(t);
+      const it = await one(`SELECT * FROM public.billing_intents WHERE transaction_id = $1 AND origin = 'opening'`, [t.id]);
+      const j = await one(`SELECT id FROM public.billing_sync_jobs WHERE intent_id = $1`, [it.id]);
+      const c1 = await claimJob(j.id);
+      const ext = 'inv-open-' + price + '-' + total, h = H(ext);
+      await complete(c1, { outcome: 'ok', effects: { intent_id: it.id, external_invoice_id: ext, found_by: 'created', daftra_status: 'draft', remote_state: 'draft',
+        remote_hash: h, pushed_hash: h, remote_snapshot: {}, remote_totals: { net: 500, vat: 75, total: 575 }, line_results: [] } });
+      const job = await rpc('acc', `SELECT public.request_billing_pull($1) r`, [it.id]);
+      const c2 = await claimJob(job.id);
+      const lines = [OPEN_LINE(price)].concat(total === 675 ? [{ id: 'rl-hand', line_ref: null, product_id: 'p-x', quantity: '1.000', unit_price: '100.00', tax_rate: '0.00' }] : []);
+      await complete(c2, { outcome: 'ok', effects: { intent_id: it.id, external_invoice_id: ext, daftra_number: 'INV-' + total, daftra_status: 'issued',
+        remote_state: 'issued', remote_hash: H(ext + ' issued'), remote_snapshot: { lines }, remote_totals: { net: total, vat: 0, total }, remote_client_id: 'dc-a' } });
+      out.push(await one(`SELECT details FROM public.billing_review_items WHERE intent_id = $1 AND kind = 'issued_mismatch'`, [it.id]));
+    }
+    return (!out[0] && out[1] && out[1].details.reason === 'totals' && Number(out[1].details.remote_total) === 675 && Number(out[1].details.lines_total) === 0
+      && Number(out[1].details.opening_total) === 575) || J(out);
   });
   await check('no linked client → one open opening_blocked item (client_not_linked); the declaration is saved; after linking, retry → queued and the item resolved', async () => {
     const t = await mkTx({ client: CLIENT_A2 });
@@ -1456,7 +1512,7 @@ async function secRls() {
     const all = (await q(`SELECT 'public.' || relname n FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r'`)).map(x => x.n);
     const un = all.filter(x => !t.includes(x) && !keep.includes(x) && !['public.status_labels', 'public.schema_versions', 'public.organizations',
       'public.profiles', 'public.platform_admins', 'public.plans', 'public.customs_ports', 'public.daftra_mock_accounts'].includes(x));
-    return (NEW_TABLE_NAMES.every(x => t.includes('public.' + x) && g.includes('public.' + x + ':trg_no_delete')) && g.length === 44 && t.length === 83 + 2 + 1 + 1 /* + tx_storage_overrides (20261206000100) */ /* + legacy_import_rows, legacy_import_runs (20261125000100), return_extension_requests (20261128000100) */ && un.length === 0) || J({ g: g.length, t: t.length, un });
+    return (NEW_TABLE_NAMES.every(x => t.includes('public.' + x) && g.includes('public.' + x + ':trg_no_delete')) && g.length === 44 && t.length === 83 + 2 + 1 + 2 /* + tx_storage_overrides, container_storage (20261206000100) */ /* + legacy_import_rows, legacy_import_runs (20261125000100), return_extension_requests (20261128000100) */ && un.length === 0) || J({ g: g.length, t: t.length, un });
   });
   await check('no DELETE even for the owner (trg_no_delete); the trail: runs / candidates / supplier links / purchases audited, import rows not', async () => {
     const r = await code(() => q(`DELETE FROM public.daftra_runs WHERE org_id = $1`, [A]));

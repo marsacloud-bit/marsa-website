@@ -2196,6 +2196,29 @@
     return out;
   }
 
+  // where each provider's key comes from (owner, 23 Nov 2026), from the answer {data, error} of the service RPC
+  // ai_provider_keys (20261209000100): 'vault' (the key saved on the platform page), 'none' (deleted on the page, or its
+  // Vault secret is missing: NO key — the Edge Function secret is not used for it), 'env' (never saved on the page: the
+  // Edge Function secret may be used). An answer the RPC could not give → every provider 'none' and failed: true (no
+  // silent fallback to the secrets), except a database without the RPC yet (PGRST202 / 42883: before 20261209000100)
+  // → 'env', the setup of that time. A provider missing from the answer (inactive) → 'none'. Reads the shape only;
+  // returns codes, never a key.
+  const KEY_SOURCES = Object.freeze(['vault', 'env', 'none']);
+  function keySources(r) {
+    const err = r ? r.error : { code: 'no_answer' };
+    const data = r && !err && r.data && typeof r.data === 'object' && !Array.isArray(r.data) ? r.data : null;
+    const noRpc = !!err && (err.code === 'PGRST202' || err.code === '42883');
+    const out = { failed: !data && !noRpc, sources: {} };
+    PROVIDERS.forEach(p => {
+      const e = data && data[p] && typeof data[p] === 'object' ? data[p] : null;
+      if (!data) out.sources[p] = noRpc ? 'env' : 'none';
+      else if (e && e.source === 'vault' && typeof e.key === 'string' && e.key !== '') out.sources[p] = 'vault';
+      else if (e && e.source === 'env') out.sources[p] = 'env';
+      else out.sources[p] = 'none';
+    });
+    return out;
+  }
+
   const API = {
     MODEL, ENGINE, EFFORT, MAX_TOKENS, MAX_TOKENS_DOC, maxTokensFor, BETAS, FALLBACKS, MAX_BYTES, MAX_IMAGE_BYTES, PROMPT_VERSION, MEDIA_TYPES, DOC_TYPES,
     DETECTED_TYPES, KIND_OF, ALL_KEYS, KEYS_FOR, MATCH_KEYS, INCOTERMS, MAX_WEIGHT_KG, MAX_PACKAGES, SYSTEM,
@@ -2217,7 +2240,9 @@
     isPay, isPaymentChannel, roughPartyMatch, payMethod, tasStrict,
     // other providers (owner, 21 Nov 2026)
     PROVIDERS, PROVIDER_DEADLINE_MS, PROVIDER_MIN_MS, specOf, buildOpenAi, buildGemini, normOpenAi, normGemini, parseAnswer, answerOf,
-    classifyHttpError, providerChain
+    classifyHttpError, providerChain,
+    // key sources (owner, 23 Nov 2026)
+    KEY_SOURCES, keySources
   };
   (typeof module === 'object' && module.exports) ? (module.exports = API) : (globalThis.MarsaAiExtract = Object.assign(globalThis.MarsaAiExtract || {}, API));
 })();

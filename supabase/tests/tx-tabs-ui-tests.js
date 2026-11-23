@@ -99,5 +99,150 @@ check('payment attachments: a finance-reader section in the documents tab, no am
   check('payDocRows: a payment whose details did not load is skipped', () => box.f(items, { p2: det.p2 }).map(r => r.id).join(',') === 'd4' || 'skip');
 }
 
-console.log((fail ? 'FAILED' : 'OK') + ' — ' + pass + ' passed, ' + fail + ' failed');
-process.exit(fail ? 1 : 0);
+// review fixes (batch 2): static checks for the shortcuts / toggle / notes
+check('checklist «رفع»: opens the tab of the upload form, then the <details> fold, before the focus', () => {
+  const sec = rd('assets/js/ops/tx-sections.js');
+  const b = sec.slice(sec.indexOf('function uploadShortcut'), sec.indexOf('function classifyShortcut'));
+  const iR = b.indexOf('api.revealInTab(form)'), iD = b.indexOf('fold.open = true'), iF = b.indexOf('f.focus()');
+  return (iR > 0 && iD > iR && iF > iD) || [iR, iD, iF].join(',');
+});
+check('readiness «إثباتات إعادة الفارغ»: opens the «إرجاع الفارغ» tab before scrolling', () => {
+  const ap = rd('assets/js/ops/tx-appt.js');
+  const i = ap.indexOf("api.revealInTab(d)"), j = ap.indexOf("d.scrollIntoView({ behavior: 'smooth', block: 'start' })");
+  return (i > 0 && j > i && MAP.empty_return === 'return') || [i, j].join(',');
+});
+check('admin.js: txOpsApi gives revealInTab; route() runs the view teardown before a new render', () =>
+  (/a\.revealInTab = revealInTxTab;/.test(admin) && /runViewTeardown\(\);[^\n]*\n\s+view\.setAttribute\('aria-busy', 'true'\);/.test(admin)
+    && /onViewTeardown\(stop\);/.test(admin)) || 'wiring');
+check('drivers toggle: never guesses or forces a class — sends no driver_class / carrier_id (save_driver keeps them), no edit dialog', () => {
+  const dr = rd('assets/js/ops/drivers.js');
+  const b = dr.slice(dr.indexOf('function toggle(d)'), dr.indexOf('return load();', dr.indexOf('function toggle(d)')));
+  const tr = dr.slice(dr.indexOf('function toggleRow('), dr.indexOf('// pure: does a directory row match'));
+  return (/var row = toggleRow\(d, !off\);/.test(b) && !/drv2_toggle_need_class|edit\(d\)|'individual'|'company'/.test(b)
+    && /delete row\.driver_class; delete row\.carrier_id; delete row\.truck_plate;/.test(tr)) || 'toggle';
+});
+check('#new-tx: the importer check failing shows «failed» (ar + en), the client list gets the focus back', () => {
+  const om = rd('assets/js/ocr-match.js'), io = rd('assets/i18n/ocr.js');
+  return (/if \(!m\) return D\.matchFailed \? 'failed' : 'pending';/.test(om) && /if \(!r \|\| r\.error \|\| !r\.data\) \{ D\.matchFailed = true; return; \}/.test(om)
+    && /var again = \$\('ocr-nt-client'\);/.test(om) && (io.match(/nt_match_failed:/g) || []).length === 2) || 'new-tx';
+});
+check('nav icons: every app-shell NAV icon exists in ICONS («السائقون» no longer falls back to info)', () => {
+  const sh = rd('assets/js/app-shell.js');
+  const ic = sh.slice(sh.indexOf('var ICONS = {'), sh.indexOf('function icon(name'));
+  const keys = new Set((ic.match(/^    ([a-z_]+):/gm) || []).map(x => x.trim().slice(0, -1)));
+  const used = (sh.match(/href: '[^']+', icon: '([a-z_]+)'/g) || []).map(x => x.match(/icon: '([a-z_]+)'/)[1]);
+  const missing = used.filter(u => !keys.has(u));
+  return (used.length > 10 && !missing.length) || 'missing: ' + missing.join(',');
+});
+check('register «+N»: the list opens upwards in the last rows of a longer table', () =>
+  /tbody tr:nth-last-child\(-n\+3\):not\(:nth-child\(-n\+3\)\) \.lrpt-ctr-pop \{ inset-block-start: auto; inset-block-end: calc\(100% \+ 4px\);/.test(rd('assets/css/pages/lrpt.css')) || 'css');
+
+// txTabs in a real DOM (jsdom): the observer settles (no self-triggered loop), stops when the view leaves the page,
+// arrow keys skip hidden tabs, revealInTxTab opens the tab of a node
+let JSDOM = null;
+try { JSDOM = require('jsdom').JSDOM; } catch (e) { /* NODE_PATH without jsdom */ }
+const pick = (name) => {
+  const a = admin.indexOf('  function ' + name + '(');
+  if (a === -1) throw new Error('no ' + name);
+  const b = admin.indexOf('\n  }\n', a);
+  return admin.slice(a, b + 4);
+};
+const pickVar = (re) => (admin.match(re) || [''])[0];
+async function domTests() {
+  if (!JSDOM) { check('jsdom available for the txTabs DOM checks', () => 'jsdom missing (NODE_PATH)'); return; }
+  const dom = new JSDOM('<!doctype html><html dir="rtl"><body><main id="view"></main></body></html>', { pretendToBeVisual: true });
+  const w = dom.window;
+  const src = [
+    pickVar(/var TX_TABS = \[[^\]]+\];/), pickVar(/var TX_TAB_OF = \{[\s\S]*?\};/), pickVar(/var TX_TAB_OF_STAGE = \{[^}]+\};/),
+    pick('txTabStore'), pick('txTabs'), pick('revealInTxTab'),
+    'var VIEW_TEARDOWN = [];', pick('onViewTeardown'), pick('runViewTeardown'),
+    'this.txTabs = txTabs; this.reveal = revealInTxTab; this.teardown = runViewTeardown; this.count = function () { return VIEW_TEARDOWN.length; };'
+  ].join('\n');
+  const ctx = {
+    BOOL: { hidden: true },
+    el(tag, attrs, kids) {
+      const n = w.document.createElement(tag);
+      Object.keys(attrs || {}).forEach(k => {
+        const v = attrs[k];
+        if (v == null || v === false) return;
+        if (k === 'class') n.className = v; else if (k === 'text') n.textContent = String(v);
+        else if (k === 'hidden') n.hidden = true; else n.setAttribute(k, v === true ? '' : String(v));
+      });
+      (kids || []).forEach(c => c && n.appendChild(c));
+      return n;
+    },
+    tl: (k) => k, OPS: { txSections: [{ id: 'storage', render() {} }, { id: 'empty_return', render() {} }, { id: 'checklist', render() {} }] }
+  };
+  const fn = new Function('window', 'document', 'MutationObserver', 'setTimeout', 'clearTimeout', 'el', 'tl', 'OPS',
+    src + '\nreturn this;').call({}, w, w.document, w.MutationObserver, w.setTimeout.bind(w), w.clearTimeout.bind(w), ctx.el, ctx.tl, ctx.OPS);
+  const sleep = (ms) => new Promise(r => w.setTimeout(r, ms));
+  // one transaction page: summary + docs cards, a storage section (flagged), an empty-return section, an empty checklist box
+  const out = w.document.createDocumentFragment();
+  const mk = (cls, text) => { const d = w.document.createElement('div'); d.className = cls; d.textContent = text; return d; };
+  out.appendChild(mk('adm-txc-summary', 'summary'));
+  out.appendChild(mk('adm-txc-docs', 'docs'));
+  out.appendChild(mk('adm-txc-log', 'log'));
+  const sections = w.document.createElement('div'); sections.className = 'ops-tx-sections'; out.appendChild(sections);
+  const box = (id) => { const b = w.document.createElement('div'); b.setAttribute('data-section', id); sections.appendChild(b); return b; };
+  const st = box('storage'); st.innerHTML = '<p data-tab-flag="danger">unpaid</p>';
+  const er = box('empty_return'); er.innerHTML = '<section id="tx-empty-return">proofs</section>';
+  box('checklist');
+  fn.txTabs(out, { id: 't1', operational_status: 'new' }, sections);
+  const view = w.document.getElementById('view');
+  view.appendChild(out);
+  const wrap = view.querySelector('.adm-txtabs-wrap');
+  let records = 0;
+  new w.MutationObserver((l) => { records += l.length; }).observe(wrap, { subtree: true, childList: true, attributes: true, characterData: true });
+  st.querySelector('p').setAttribute('data-tab-flag', 'warning');   // one real change
+  await sleep(250);
+  const settled = records;
+  await sleep(400);
+  check('txTabs observer settles: no mutations while nothing changes (no self-triggered loop)', () => (records === settled) || ('still mutating: ' + settled + ' → ' + records));
+  const cflag = wrap.querySelector('#txtab-containers .adm-txtab-flag');
+  check('txTabs flag follows a real change (danger → warning)', () => (cflag.textContent === '!' && !cflag.hidden && /is-warning/.test(cflag.className)) || cflag.outerHTML);
+  check('empty tabs hide (transport / finance), the opening tab follows the stage (docs)', () =>
+    (wrap.querySelector('#txtab-transport').hidden && wrap.querySelector('#txtab-finance').hidden
+      && wrap.querySelector('#txtab-docs').getAttribute('aria-selected') === 'true') || 'tabs');
+  // arrow keys skip the hidden tabs: from «المستندات» (docs) the next shown in RTL ArrowLeft is «الحاويات» then «إرجاع الفارغ»
+  const press = (k) => { const e = new w.KeyboardEvent('keydown', { key: k, bubbles: true }); w.document.activeElement.dispatchEvent(e); return w.document.activeElement.getAttribute('data-txtab'); };
+  wrap.querySelector('#txtab-docs').focus();
+  const a1 = press('ArrowLeft'), a2 = press('ArrowLeft'), a3 = press('ArrowLeft'), a4 = press('End'), a5 = press('ArrowLeft');
+  check('arrow keys skip hidden tabs (docs → containers → return → log; End = log; wraps to summary)', () =>
+    [a1, a2, a3, a4, a5].join(',') === 'containers,return,log,log,summary' || [a1, a2, a3, a4, a5].join(','));
+  // revealInTxTab: the empty-return section is in a hidden panel → its tab opens
+  wrap.querySelector('#txtab-summary').click();
+  const target = w.document.getElementById('tx-empty-return');
+  const shownBefore = !target.closest('[data-txtab-panel]').hidden;
+  const ok = fn.reveal(target);
+  check('revealInTxTab opens the «إرجاع الفارغ» tab of a node in a hidden panel', () =>
+    (!shownBefore && ok === true && wrap.querySelector('#txtab-return').getAttribute('aria-selected') === 'true') || 'reveal');
+  await sleep(150);
+  // teardown: the view registered its stop; route() → runViewTeardown disconnects; later mutations change nothing
+  check('txTabs registers a view teardown', () => fn.count() === 1 || String(fn.count()));
+  fn.teardown();
+  view.textContent = '';
+  st.querySelector('p').setAttribute('data-tab-flag', 'danger');
+  await sleep(150);
+  check('after the teardown the observer is disconnected (a later change is not re-checked)', () => cflag.textContent === '!' || cflag.textContent);
+  // without route(): a tree that left the page stops by itself on its next mutation
+  const out2 = w.document.createDocumentFragment();
+  out2.appendChild(mk('adm-txc-summary', 'summary'));
+  const sec2 = w.document.createElement('div'); out2.appendChild(sec2);
+  const s2 = w.document.createElement('div'); s2.setAttribute('data-section', 'storage'); s2.innerHTML = '<p data-tab-flag="danger">x</p>'; sec2.appendChild(s2);
+  fn.txTabs(out2, { id: 't2', operational_status: 'new' }, sec2);
+  view.appendChild(out2);
+  const wrap2 = view.querySelector('.adm-txtabs-wrap');
+  await sleep(120);
+  view.removeChild(wrap2);
+  s2.querySelector('p').setAttribute('data-tab-flag', 'warning');
+  await sleep(150);
+  check('a detached tab tree stops watching itself (no flags() on a removed view)', () =>
+    wrap2.querySelector('#txtab-containers .adm-txtab-flag').textContent === '✗' || 'still running');
+  fn.teardown();
+  w.close();
+}
+
+domTests().catch(e => check('txTabs DOM checks ran', () => String(e && e.stack || e))).then(() => {
+  console.log((fail ? 'FAILED' : 'OK') + ' — ' + pass + ' passed, ' + fail + ' failed');
+  process.exit(fail ? 1 : 0);
+});

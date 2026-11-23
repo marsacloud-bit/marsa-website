@@ -95,7 +95,7 @@ async function runFile(dbx, file) {
 const migFiles = () => fs.readdirSync(MIG_DIR).filter(f => /^\d+_.*\.sql$/.test(f)).sort();
 // phases added after this file (each has its own suite); schema_version then reports the latest of them
 const LATER_PHASES = ['20261113000100_public_antispam.sql', '20261114000100_ai_documents.sql', '20261115000100_convert_in_place.sql',
-  '20261116000100_doc_match.sql', '20261117000100_legacy_core.sql', '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql'];
+  '20261116000100_doc_match.sql', '20261117000100_legacy_core.sql', '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261211000100_reconvert.sql'];
 const LATEST = migFiles().pop().slice(0, 14);
 async function freshDb(upTo) {
   const d = new PGlite();
@@ -453,11 +453,11 @@ async function secProduction() {
       });
 
       section('6b. post_install_checks.sql on production');
-      await check('blockers: the platform admin without TOTP + pg_cron (absent in PGlite); after a verified TOTP factor → pg_cron only', async () => {
+      await check('blockers: pg_cron only (absent in PGlite) — a platform admin without TOTP is no blocker (MFA off, 20261129000100); totp_verified still reported', async () => {
         const c1 = await runChecks();
         await db.exec(`INSERT INTO auth.mfa_factors (user_id, friendly_name, factor_type, status) VALUES ('${U.platP}', 'phone', 'totp', 'verified')`);
         const c2 = await runChecks();
-        return (J(c1.blockers) === J(['platform_admin_without_totp'].concat(CRON_BLOCKERS)) && c1.platform_admins[0].totp_verified === false
+        return (J(c1.blockers) === J(CRON_BLOCKERS) && c1.platform_admins[0].totp_verified === false
           && J(c2.blockers) === J(CRON_BLOCKERS) && c2.platform_admins[0].totp_verified === true && c2.platform_admins[0].email === 'o***@env.example.com'
           && c2.deploy_environment === 'production' && c2.demo_org_present === false && c2.seed_rows === 0
           && J(c2.orgs_by_environment) === J({ production: 2 })) || J({ c1: c1.blockers, c2 });
@@ -527,8 +527,8 @@ async function secChecks() {
   await check('extensions absent in PGlite → nulls, cron_jobs null; mock counts are numbers', () =>
     (J(c.extensions) === J({ pg_net: null, pg_cron: null, pg_trgm: null, supabase_vault: null }) && c.cron_jobs === null
       && Number.isInteger(c.msg_channels_mock) && Number.isInteger(c.daftra_connections_mock)) || J(c));
-  await check('blockers on staging name the demo / seed / environment / staging orgs / TOTP problems', () =>
-    J(c.blockers) === J(['deploy_environment_not_production', 'demo_org_present', 'seed_rows_present', 'platform_admin_without_totp', 'staging_orgs_present']
+  await check('blockers on staging name the demo / seed / environment / staging orgs problems (no TOTP blocker: MFA off, 20261129000100)', () =>
+    J(c.blockers) === J(['deploy_environment_not_production', 'demo_org_present', 'seed_rows_present', 'staging_orgs_present']
       .concat(CRON_BLOCKERS)) || J(c.blockers));
   await check('a public table without RLS is reported (temporary table, rolled back)', async () => {
     await db.exec(`BEGIN; CREATE TABLE public.zz_no_rls (id int)`);

@@ -63,7 +63,7 @@ check('renderNewTx: four steps — the client (search + list from listClients), 
   && /b3\.disabled = true/.test(rn) && /API\.listClients\(/.test(rn)
   && /ntStep\(4, T\('nt_step_appt'\), 'locked'/.test(rn) && /b4\.disabled = true/.test(rn) && /T\('nt_step_appt_storage'\)/.test(rn) || 'steps');
 check('renderNewTx: changing the client after a reading resets the draft panel (match, confirmation, client)', () =>
-  /S\.draft\.match = null; S\.draft\.open = false; S\.draft\.autoOpened = false; S\.draft\.confirmClient = false;/.test(rn) || 'reset');
+  /S\.draft\.match = null; S\.draft\.matchFailed = false; S\.draft\.open = false; S\.draft\.autoOpened = false; S\.draft\.confirmClient = false;/.test(rn) || 'reset');
 
 check('openDraft: the chosen client is the draft client', () =>
   /if \(NT && NT\.clientId\) \{ D\.clientSel = NT\.clientId; D\.clientId = NT\.clientId; \}/.test(fnBody('openDraft')) || 'client');
@@ -84,6 +84,7 @@ const st = (nt, d) => { box.NT = nt; return box.f(d); };
 check('ntMatchState: outside the mode → ok', () => st(null, {}) === 'ok');
 check('ntMatchState: no importer name read → noname', () => st({ clientId: C1 }, { matchName: '' }) === 'noname');
 check('ntMatchState: match not back yet → pending', () => st({ clientId: C1 }, { matchName: 'ACME' }) === 'pending');
+check('ntMatchState: the importer check failed → failed (not an endless «pending»)', () => st({ clientId: C1 }, { matchName: 'ACME', matchFailed: true }) === 'failed');
 check('ntMatchState: the name is this client\'s (preselect) → ok', () => st({ clientId: C1 }, { matchName: 'ACME', match: { preselect: C1, candidates: [{ client_id: C1 }] } }) === 'ok');
 check('ntMatchState: the name is another client\'s → other', () => st({ clientId: C1 }, { matchName: 'ACME', match: { preselect: C2, candidates: [{ client_id: C2 }] } }) === 'other');
 check('ntMatchState: close names include this client → near', () => st({ clientId: C1 }, { matchName: 'ACME', match: { preselect: null, candidates: [{ client_id: C1 }] } }) === 'near');
@@ -93,7 +94,7 @@ check('ntMatchState: not found at all → none', () => st({ clientId: C1 }, { ma
 const I = rd('assets/i18n/ocr.js'), L = rd('assets/i18n/lrpt.js');
 const keys = ['nt_title', 'nt_lead', 'nt_ai_off', 'nt_step_client', 'nt_client_search', 'nt_client_label', 'nt_client_pick', 'nt_client_first', 'nt_step_docs',
   'nt_step_docs_hint', 'nt_step_docs_done', 'nt_step_decl', 'nt_step_decl_btn', 'nt_step_decl_hint', 'nt_step_appt', 'nt_step_appt_btn', 'nt_step_appt_hint', 'nt_step_appt_storage', 'nt_client_chosen', 'nt_match_ok', 'nt_match_near',
-  'nt_match_none', 'nt_match_other', 'nt_match_noname', 'nt_match_pending', 'nt_need_confirm'];
+  'nt_match_none', 'nt_match_other', 'nt_match_noname', 'nt_match_pending', 'nt_match_failed', 'nt_need_confirm'];
 check('i18n/ocr.js: every nt_* label in Arabic and English', () => {
   const miss = keys.filter(k => (I.match(new RegExp('\\b' + k + ': \'', 'g')) || []).length !== 2);
   return !miss.length || 'missing ' + J(miss);

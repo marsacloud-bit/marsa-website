@@ -492,6 +492,10 @@
   function uploadShortcut(api, kind) {
     var form = document.querySelector('[data-form="doc-upload"]');
     if (!form) { api.toast(api.t('opstx.chk_no_upload'), 'warning'); return; }
+    // the form sits in the «المستندات» tab, folded under «إضافة مستند آخر»: that tab opens, then the fold, then the focus
+    if (typeof api.revealInTab === 'function') api.revealInTab(form);
+    var fold = form.closest ? form.closest('details') : null;
+    if (fold && !fold.open) fold.open = true;
     var sel = form.querySelector('[name=kind]');
     if (sel && kind) { sel.value = kind; if (sel.value !== kind) sel.value = 'other'; }
     try { form.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { /* old browsers */ }
@@ -501,7 +505,8 @@
     var b = docId && UUID_RE.test(docId) ? document.querySelector('[data-act="doc-classify"][data-id="' + docId + '"]') : null;
     if (b) { b.click(); return; }
     var form = document.querySelector('[data-form="doc-upload"]');
-    var anchor = form ? form.closest('.app-card') : null;
+    if (form && typeof api.revealInTab === 'function') api.revealInTab(form);
+    var anchor = form ? (form.closest('.app-card') || form.closest('.adm-card')) : null;
     if (anchor) { try { anchor.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { /* ignore */ } }
   }
   function renderChecklist(root, tx, api) {

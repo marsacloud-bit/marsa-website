@@ -20,7 +20,9 @@
                            → {status, json}; rejects on the deadline / a lost connection. Without it only Claude is used.
     deps.loadKeys(org)     optional (22 Nov 2026): index.ts reads the keys saved on the platform page for this org (Vault,
                            service RPC ai_provider_keys) into its own request scope → {anthropic, openai, gemini} booleans
-    deps.listModels(p)     optional: the provider's model list with the saved key → {status, models} (the key test)
+                           + sources {provider: 'vault' | 'env' | 'none'} + failed (the lookup failed: no key is usable;
+                           23 Nov 2026, extract.js keySources)
+    deps.listModels(p)     optional: the provider's model list with the Vault key only → {status, models} (the key test)
     deps.now()             optional: the clock in ms (default Date.now; tests)
     deps.sdk               the Anthropic class (typed error classes for classifyCallError)
     deps.log(text)         fixed-text log line (never a token, a key, an error message or document content)
@@ -176,6 +178,8 @@
   // owner 22 Nov 2026 — the connection test of the platform page («مفاتيح الذكاء الاصطناعي»): platform admins only (the
   // caller's own platform_ai_providers RPC answers), the provider's model list read with the saved key (index.ts
   // listModels), the result recorded (ai_record_key_test, service role). → {ok, note, models}; never the key.
+  // Only the key saved on the page (Vault) is tested (23 Nov 2026): the lookup failed → 'lookup_failed', no Vault key
+  // (never saved, deleted, or the Edge Function secret only) → 'no_key'; the Edge Function secret is never tested.
   const TEST_NOTES = { 0: 'no_key', 401: 'key_rejected', 403: 'key_rejected', 429: 'busy' };
   async function providerTest(body, userDb, d, X, origin, log) {
     const provider = body && typeof body.provider === 'string' ? body.provider : '';
@@ -186,12 +190,17 @@
       return fail(c === 'MRS_MFA_REQUIRED' ? 'mfa_required' : 'forbidden', 403, origin);
     }
     if (typeof d.loadKeys !== 'function' || typeof d.listModels !== 'function') return fail('not_configured', 503, origin);
-    try { await d.loadKeys(null); } catch (e) { log('ai-extract: key lookup failed'); }
-    let r;
-    try { r = await d.listModels(provider); } catch (e) { r = { status: 599, models: [] }; }
+    let rk = null;
+    try { rk = await d.loadKeys(null); } catch (e) { rk = null; }
+    let r = null, note = null;
+    if (!rk || typeof rk !== 'object' || rk.failed || !rk.sources) { note = 'lookup_failed'; log('ai-extract: key lookup failed'); }
+    else if (rk.sources[provider] !== 'vault') note = 'no_key';
+    if (!note) {
+      try { r = await d.listModels(provider); } catch (e) { r = { status: 599, models: [] }; }
+    }
     const st = r && Number.isInteger(r.status) ? r.status : 599;
-    const ok = st === 200;
-    const note = ok ? 'ok' : (TEST_NOTES[st] || 'unreachable');
+    const ok = !note && st === 200;
+    if (!note) note = ok ? 'ok' : (TEST_NOTES[st] || 'unreachable');
     const models = (r && Array.isArray(r.models) ? r.models : []).filter(m => typeof m === 'string' && /^[a-z0-9][a-z0-9.-]{0,63}$/.test(m)).slice(0, 200);
     log('ai-extract: key test ' + provider + ' (' + note + ')');
     try {
@@ -280,12 +289,14 @@
       }
     }
     // the providers to try, in the organisation's order, that this server holds a key for (owner, 21 Nov 2026)
-    // the keys saved on the platform page (index.ts loadKeys: Vault through the service RPC; booleans only here), else the
-    // Edge Function secrets
+    // the keys saved on the platform page (index.ts loadKeys: Vault through the service RPC; booleans only here); the
+    // Edge Function secret only for a provider the page never managed. A failed lookup → no provider (no silent fallback).
     let ready = Object.assign({}, d.ready || {}, { anthropic: !!d.modelConfigured });
     if (typeof d.loadKeys === 'function') {
-      try { const rk = await d.loadKeys(v.org_id); if (rk && typeof rk === 'object') ready = { anthropic: !!rk.anthropic, openai: !!rk.openai, gemini: !!rk.gemini }; }
-      catch (e) { log('ai-extract: key lookup failed'); }
+      let rk = null;
+      try { rk = await d.loadKeys(v.org_id); } catch (e) { rk = null; }
+      if (rk && typeof rk === 'object' && !rk.failed) ready = { anthropic: !!rk.anthropic, openai: !!rk.openai, gemini: !!rk.gemini };
+      else { ready = { anthropic: false, openai: false, gemini: false }; log('ai-extract: key lookup failed'); }
     }
     if (typeof d.send !== 'function') { ready.openai = false; ready.gemini = false; }
     const chain = X.providerChain ? X.providerChain(acc.data, ready) : (d.modelConfigured ? [{ provider: 'anthropic', model: X.MODEL }] : []);

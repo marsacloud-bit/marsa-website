@@ -651,6 +651,8 @@ const TENANT_TABLES = [
   // storage gate (20261206000100): the ports where an unpaid storage invoice blocks the appointment; the manager overrides
   ['storage_gate_ports', `SELECT id::text id FROM public.storage_gate_ports WHERE org_id = $1 LIMIT 1`, 'id::text', 'is_active = is_active'],
   ['tx_storage_overrides', `SELECT id::text id FROM public.tx_storage_overrides WHERE org_id = $1 LIMIT 1`, 'id::text', 'reason = reason'],
+  // the storage answer of a container: staff of the transaction read (never a portal client), written only by set_container_storage
+  ['container_storage', `SELECT id::text id FROM public.container_storage WHERE org_id = $1 LIMIT 1`, 'id::text', 'storage_note = storage_note'],
   ['port_appointments',  `SELECT id::text id FROM public.port_appointments WHERE org_id = $1 LIMIT 1`,  'id::text',  'status = status'],
   ['transport_trips',    `SELECT id::text id FROM public.transport_trips WHERE org_id = $1 LIMIT 1`,    'id::text',  'status = status'],
   ['operational_exceptions', `SELECT id::text id FROM public.operational_exceptions WHERE org_id = $1 LIMIT 1`, 'id::text', 'status = status'],
@@ -746,7 +748,11 @@ async function main() {
                    SELECT t.org_id, t.id, 'اختبار', (SELECT m.user_id FROM public.memberships m WHERE m.org_id = t.org_id ORDER BY m.created_at LIMIT 1)
                      FROM (SELECT DISTINCT ON (org_id) org_id, id FROM public.transactions ORDER BY org_id, created_at) t
                    ON CONFLICT DO NOTHING`);
-    pass('storage gate fixtures: one override per org');
+    await db.exec(`INSERT INTO public.container_storage (org_id, transaction_id, container_id, storage_state)
+                   SELECT c.org_id, c.transaction_id, c.id, 'sent'
+                     FROM (SELECT DISTINCT ON (org_id) org_id, transaction_id, id FROM public.containers ORDER BY org_id, created_at, id) c
+                   ON CONFLICT DO NOTHING`);
+    pass('storage gate fixtures: one override + one container storage row per org');
   } catch (e) { fail('storage gate fixtures', errText(e)); return finish(); }
 
   /* ---------------------------------------------------------------- catalog */
@@ -860,7 +866,7 @@ async function main() {
       'approve_appointment_draft', 'create_empty_return_proof', 'verify_empty_return_proof', 'void_empty_return_proof',
       'save_empty_return_deadline', 'list_empty_return_proofs', 'save_transport_carrier_order', 'tx_readiness',
       // storage gate (20261206000100): the gate state of a transaction + the manager approval to book before payment
-      'tx_storage_gate', 'approve_storage_override',
+      'tx_storage_gate', 'approve_storage_override', 'set_container_storage',
       // driver classes (20261207000100): the «السائقون» directory
       'list_drivers', 'save_driver',
       // AI keys (20261209000100): the platform page «مفاتيح الذكاء الاصطناعي» (platform admins only, checked inside)
@@ -889,7 +895,7 @@ async function main() {
       'legacy_import_commit', 'legacy_import_void', 'legacy_import_get_run', 'legacy_import_list_runs', 'legacy_import_list_rows',
       'legacy_import_skip_rows', 'legacy_import_queue_daftra', 'legacy_import_daftra_candidates'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 319) return 'expected list has ' + exp.length + ' names';   // + 4 platform_ai_* (20261209000100)   // + tx_storage_gate, approve_storage_override (20261206000100)
+    if (exp.length !== 320) return 'expected list has ' + exp.length + ' names';   // + set_container_storage (20261206000100: container_storage written only through it)   // + 4 platform_ai_* (20261209000100)   // + tx_storage_gate, approve_storage_override (20261206000100)
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');
@@ -1181,6 +1187,16 @@ async function main() {
     const r = await as('clientA', `SELECT DISTINCT transaction_id FROM public.containers`);
     return (r.length === 1 && r[0].transaction_id === TX1) || JSON.stringify(r);
   }, 'containers_select / app.can_read_transaction');
+  // storage gate (20261206000100): the storage answer is staff-only — a portal client reads none (even of its own
+  // containers), staff of org A read org A rows only, and nobody writes the table directly (set_container_storage only)
+  await check('container_storage: staff-only (clientA reads 0 rows, staffB none of org A); no direct write', async () => {
+    const c = (await as('clientA', `SELECT count(*)::int n FROM public.container_storage`))[0].n;
+    const own = (await q(`SELECT count(*)::int n FROM public.container_storage WHERE org_id = $1`, [A]))[0].n;
+    const s = (await as('staffA', `SELECT count(*)::int n FROM public.container_storage`))[0].n;
+    const b = (await as('staffB', `SELECT count(*)::int n FROM public.container_storage WHERE org_id = $1`, [A]))[0].n;
+    const w = await as('adminA', `UPDATE public.container_storage SET storage_note = 'x' RETURNING 1`).then(() => 'ok', e => errText(e));
+    return (c === 0 && own > 0 && s <= own && b === 0 && /permission denied/.test(w)) || JSON.stringify({ c, own, s, b, w });
+  }, 'container_storage_select / REVOKE INSERT, UPDATE, DELETE');
   await check('clientA events only own + visible_to_client', async () => {
     const r = await as('clientA', `SELECT transaction_id, visible_to_client FROM public.transaction_events`);
     return (r.length > 0 && r.every(x => x.transaction_id === TX1 && x.visible_to_client)) || JSON.stringify(r);

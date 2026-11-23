@@ -29,6 +29,13 @@
     if (id) row.id = id;
     return row;
   }
+  // pure: the row the active toggle sends — no driver_class / carrier_id / truck_plate keys, so save_driver keeps the
+  // class, the party and the truck as they are
+  function toggleRow(d, active) {
+    var row = driverRow({ full_name: d.full_name, phone: d.phone, license_no: d.license_no, is_active: active }, d.id);
+    delete row.driver_class; delete row.carrier_id; delete row.truck_plate;
+    return row;
+  }
   // pure: does a directory row match the filters
   function matches(U, d, f) {
     if (!f.inactive && d.is_active === false) return false;
@@ -129,12 +136,12 @@
     function edit(d) { driverDialog(U, api, carriers, d).then(function (res) { if (!res || !sc.alive()) return; U.toast(api, t('drv2_saved'), 'success'); load(); }); }
     function toggle(d) {
       var off = d.is_active !== false;
+      // the toggle never classifies a driver: it sends no driver_class / carrier_id, so save_driver keeps the class and
+      // the party as they are (NULL for an unclassified driver) instead of the toggle guessing «فردي» / «شركة»
       var ask = off ? U.confirm(api, { title: t('drv2_deact_title'), text: t('drv2_deact_text', { name: d.full_name || '' }), okText: t('deactivate'), danger: true }) : Promise.resolve(true);
       ask.then(function (yes) {
         if (!yes) return;
-        var row = driverRow({ full_name: d.full_name, phone: d.phone, driver_class: d.driver_class || (d.party ? 'company' : 'individual'), carrier_id: d.party ? d.party.id : null,
-          license_no: d.license_no, is_active: !off }, d.id);
-        delete row.truck_plate;   // keep the truck as it is
+        var row = toggleRow(d, !off);
         U.call(api, 'saveDriverEntry', row).then(function (r) {
           if (r.error) { U.toast(api, U.errMsg(r.error, api), 'error'); return; }
           U.toast(api, t(off ? 'deactivated' : 'activated'), 'success');
@@ -236,7 +243,7 @@
   for (var i = Ops.txSections.length - 1; i >= 0; i--) { if (Ops.txSections[i] && Ops.txSections[i].id === 'driver_classify') Ops.txSections.splice(i, 1); }
   TXS.forEach(function (s) { Ops.txSections.push(s); });
 
-  Ops.drivers = { VERSION: 'drv2-2', pure: { driverRow: driverRow, matches: matches, unclassifiedOf: unclassifiedOf, classifyRow: classifyRow } };
+  Ops.drivers = { VERSION: 'drv2-3', pure: { driverRow: driverRow, toggleRow: toggleRow, matches: matches, unclassifiedOf: unclassifiedOf, classifyRow: classifyRow } };
   Ops.views.drivers = { allow: 'staff', titleKey: 'ops.nav_drivers', icon: 'user',
     render: function (root, api) { if (!Ops.ui) return noKit(root); return renderList(root, api); } };
 })();

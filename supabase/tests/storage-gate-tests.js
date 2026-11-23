@@ -6,11 +6,15 @@
   One database: shim → every migration → seed.sql → fixtures (org A = seed "blue-sea" with branch JED, org B).
 
   Covers: file conventions + all_migrations.sql; preflight refusal; re-run on itself (identical catalog, data kept);
-  the states in status_labels; container storage columns (invalid state refused, sent / paid stamped, back to none clears;
-  a transport writer updates them, audited); the gate ports (SAJED for every org, a new org gets it; staff read, admin
-  writes, anon nothing); the gate on every booking path (create_appointment as the user; NULL / issued / sent block,
-  none / paid pass; per container; a reschedule, a closed status and a run without a user request pass; another port or an
-  inactive gate row passes; Ro-Ro passes); tx_storage_gate (applies / blocked / containers / can_override; another org →
+  the states in status_labels; public.container_storage (set_container_storage: invalid state refused, sent / paid
+  stamped, back to none clears, keys present only, amount / invoice checks; a transport writer writes, clearance staff of
+  another branch / a client cannot; no direct write; audited; deleted with its container); internal: no storage column on
+  public.containers, a portal client reads its container but not its storage row; the gate ports (SAJED for every org, a
+  new org gets it; staff read, admin writes, anon nothing); the gate on EVERY booking path, no bypass (create_appointment;
+  NULL / issued / sent block, none / paid pass; per container; reschedule_appointment; save_movement new / new time /
+  moved to another container; an UPDATE of container_id / a re-opened booking; the transaction moved to Jeddah with an
+  open unpaid booking; a closed status and a run without a user request pass; another port, an inactive gate row, Ro-Ro,
+  a cancelled / closed transaction pass); tx_storage_gate (applies / blocked / containers / can_override; another org →
   not found); approve_storage_override (clearance staff forbidden, short reason invalid, a manager approves, a second one
   conflicts, the booking then passes; no direct insert).
 
@@ -46,7 +50,8 @@ const U = {
   admin: 'deca0000-0000-4000-8000-000000000021',
   opsm: 'deca0000-0000-4000-8000-000000000022',     // operations_manager of A (senior ops)
   jed: 'deca0000-0000-4000-8000-000000000023',      // clearance_staff of A, JED
-  staffB: 'deca0000-0000-4000-8000-000000000024'    // admin of B
+  staffB: 'deca0000-0000-4000-8000-000000000024',   // admin of B
+  client: 'deca0000-0000-4000-8000-000000000025'    // portal user of CLIENT_A
 };
 
 let db;
@@ -96,22 +101,23 @@ async function catalog() {
   const trg = (await q(`SELECT c.relname || '.' || t.tgname x FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
                          JOIN pg_namespace n ON n.oid = c.relnamespace WHERE NOT t.tgisinternal AND n.nspname = 'public' ORDER BY 1`)).map(x => x.x);
   const pol = (await q(`SELECT tablename || '.' || policyname x FROM pg_policies WHERE schemaname = 'public' ORDER BY 1`)).map(x => x.x);
-  const rows = await one(`SELECT (SELECT count(*) FROM public.storage_gate_ports)::int g,
+  const rows = await one(`SELECT (SELECT count(*) FROM public.storage_gate_ports)::int g, (SELECT count(*) FROM public.container_storage)::int c,
                                  (SELECT count(*) FROM public.status_labels WHERE domain = 'container_storage_state')::int s`);
   return { fns, trg, pol, rows };
 }
 const FIXTURES = `
   INSERT INTO auth.users (id, email, email_confirmed_at) VALUES
     ('${U.admin}', 'admin@gate.example.com', now()), ('${U.opsm}', 'opsm@gate.example.com', now()),
-    ('${U.jed}', 'jed@gate.example.com', now()), ('${U.staffB}', 'staffb@gate.example.com', now());
-  INSERT INTO public.profiles (id, full_name) VALUES ('${U.admin}', 'admin'), ('${U.opsm}', 'مدير العمليات'), ('${U.jed}', 'jed'), ('${U.staffB}', 'staffB')
-    ON CONFLICT (id) DO NOTHING;
+    ('${U.jed}', 'jed@gate.example.com', now()), ('${U.staffB}', 'staffb@gate.example.com', now()), ('${U.client}', 'client@gate.example.com', now());
+  INSERT INTO public.profiles (id, full_name) VALUES ('${U.admin}', 'admin'), ('${U.opsm}', 'مدير العمليات'), ('${U.jed}', 'jed'), ('${U.staffB}', 'staffB'),
+    ('${U.client}', 'client') ON CONFLICT (id) DO NOTHING;
   UPDATE public.profiles SET full_name = 'مدير العمليات' WHERE id = '${U.opsm}';
   INSERT INTO public.organizations (id, slug, name_ar, name_en, ref_prefix, environment)
     VALUES ('${B}', 'gate-org-b', 'مؤسسة ب', 'Gate org B', 'GTB', 'staging') ON CONFLICT (id) DO NOTHING;
   INSERT INTO public.memberships (user_id, org_id, branch_id, role) VALUES
     ('${U.admin}', '${A}', NULL, 'admin'), ('${U.opsm}', '${A}', NULL, 'operations_manager'),
     ('${U.jed}', '${A}', '${JED}', 'clearance_staff'), ('${U.staffB}', '${B}', NULL, 'admin');
+  INSERT INTO public.client_users (org_id, client_id, user_id, role) VALUES ('${A}', '${CLIENT_A}', '${U.client}', 'owner');
 `;
 let seqN = 0;
 async function mkTx(port, unit) {
@@ -123,8 +129,12 @@ async function mkTx(port, unit) {
   const c2 = unit === 'roro' ? null : (await as('jed', `INSERT INTO public.containers (org_id, transaction_id, container_no) VALUES ($1, $2, $3) RETURNING id`, [A, t, 'SGTU' + String(n).padStart(6, '0') + '2']))[0].id;
   return { t, c1, c2 };
 }
-const setState = (c, s) => as('jed', `UPDATE public.containers SET storage_state = $2 WHERE id = $1 RETURNING storage_state, storage_sent_at, storage_paid_at`, [c, s]).then(r => r[0]);
-const book = (tx, ctr) => code(() => as('jed', `SELECT public.create_appointment($1) r`, [{ transaction_id: tx, container_id: ctr || undefined, appointment_at: new Date(Date.now() + 86400000).toISOString() }]));
+const setStorage = (c, p, who) => as(who || 'jed', `SELECT public.set_container_storage($1, $2) r`, [c, p]).then(r => r[0].r);
+const setState = (c, s) => setStorage(c, { storage_state: s });
+const inDays = d => new Date(Date.now() + d * 86400000).toISOString();
+const book = (tx, ctr) => code(() => as('jed', `SELECT public.create_appointment($1) r`, [{ transaction_id: tx, container_id: ctr || undefined, appointment_at: inDays(1) }]));
+// an open booking recorded without a user request (like the legacy import) — the gate does not run, the start of a path
+const rawBooking = (tx, ctr) => q(`INSERT INTO public.port_appointments (org_id, transaction_id, container_id, appointment_at, status) VALUES ($1, $2, $3, now() + interval '3 day', 'confirmed') RETURNING id`, [A, tx, ctr]).then(r => r[0].id);
 
 async function secFile() {
   section('1. file + all_migrations.sql');
@@ -141,7 +151,7 @@ async function secFile() {
     const body = nx < 0 ? all.slice(i + h.length) : all.slice(i + h.length, nx);
     return (i > 0 && (body === s || body + '\n' === s) && all.indexOf(h, i + 1) < 0 && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles())) || 'bundle';
   });
-  const LATER_PHASES = ['20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql'];
+  const LATER_PHASES = ['20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261211000100_reconvert.sql'];
   await check('this file is the latest migration (later phases excepted)', () => J(migFiles().filter(f => f > MIG)) === J(LATER_PHASES) || 'later ' + J(migFiles().filter(f => f > MIG)));
 }
 
@@ -159,23 +169,24 @@ async function secRerun() {
   await db.exec(s);
   await check('an org that existed before the migration gets its SAJED gate row', async () =>
     (await one(`SELECT count(*)::int n FROM public.storage_gate_ports WHERE org_id = $1 AND port_code = 'SAJED' AND is_active`, [A])).n === 1);
-  await q(`UPDATE public.containers SET storage_state = 'paid' WHERE container_no = 'TSTU0000001'`);
+  await q(`INSERT INTO public.container_storage (org_id, transaction_id, container_id, storage_state)
+           SELECT c.org_id, c.transaction_id, c.id, 'paid' FROM public.containers c WHERE c.container_no = 'TSTU0000001'`);
   const c1 = await catalog();
   await db.exec(s);
   const c2 = await catalog();
   await check('re-run on itself: identical catalog; a container state kept', async () =>
-    J(c1) === J(c2) && (await one(`SELECT storage_state s FROM public.containers WHERE container_no = 'TSTU0000001'`)).s === 'paid' || 'changed');
+    J(c1) === J(c2) && (await one(`SELECT s.storage_state s FROM public.container_storage s JOIN public.containers c ON c.id = s.container_id WHERE c.container_no = 'TSTU0000001'`)).s === 'paid' || 'changed');
   await db.close();
 }
 
 async function secMain() {
-  section('3. states, columns, gate ports');
+  section('3. states, the storage table, gate ports');
   await check('status_labels: none / issued / sent / paid (staff only)', async () => {
     const r = await q(`SELECT code, client_visible v FROM public.status_labels WHERE domain = 'container_storage_state' ORDER BY sort`);
     return J(r.map(x => x.code)) === J(['none', 'issued', 'sent', 'paid']) && r.every(x => x.v === false) || J(r);
   });
   const T = await mkTx('SAJED');
-  await check('container: an unknown state is refused; sent stamps sent_at, paid stamps paid_at; back to none clears both', async () => {
+  await check('set_container_storage: an unknown state is refused; sent stamps sent_at, paid stamps paid_at; back to none clears both', async () => {
     const bad = await code(() => setState(T.c1, 'maybe'));
     const s1 = await setState(T.c1, 'sent');
     const s2 = await setState(T.c1, 'paid');
@@ -183,13 +194,35 @@ async function secMain() {
     return (bad === 'MRS_INVALID storage_state' && s1.storage_sent_at && !s1.storage_paid_at && s2.storage_paid_at && s2.storage_sent_at
       && !s3.storage_sent_at && !s3.storage_paid_at) || J({ bad, s1, s2, s3 });
   });
-  await check('container: amount / invoice number checks', async () => {
-    const r = await code(() => as('jed', `UPDATE public.containers SET storage_amount = -5 WHERE id = $1`, [T.c1]));
-    return r === 'chk:containers_storage_fields_check' || r;
+  await check('set_container_storage: keys present only (the state kept when only the amount changes); Arabic-Indic amount; negative / too long / unknown key refused; null clears', async () => {
+    const a = await setStorage(T.c1, { storage_invoice_no: ' INV-7 ', storage_amount: '٧٠٠', storage_note: 'TEST' });
+    const neg = await code(() => setStorage(T.c1, { storage_amount: -5 }));
+    const big = await code(() => setStorage(T.c1, { storage_invoice_no: 'X'.repeat(61) }));
+    const key = await code(() => setStorage(T.c1, { storage_paid_at: '2026-01-01' }));
+    const b = await setStorage(T.c1, { storage_amount: null, storage_note: '' });
+    return (a.storage_state === 'none' && a.storage_invoice_no === 'INV-7' && Number(a.storage_amount) === 700 && a.storage_note === 'TEST'
+      && neg === 'MRS_INVALID storage_amount' && big === 'MRS_TOO_LONG storage_invoice_no' && /^MRS_INVALID/.test(key)
+      && b.storage_amount === null && b.storage_note === null && b.storage_invoice_no === 'INV-7' && b.id === T.c1) || J({ a, neg, big, key, b });
   });
-  await check('a storage change is audited', async () =>
-    (await one(`SELECT count(*)::int n FROM public.audit_log WHERE table_name = 'containers' AND row_id = $1::text`, [T.c1]).catch(() => ({ n: -1 }))).n > 0
+  await check('set_container_storage: staff of another org → not found; a client → not found; anon → no access; no direct write on the table', async () => {
+    const o = await code(() => setStorage(T.c1, { storage_state: 'paid' }, 'staffB'));
+    const c = await code(() => setStorage(T.c1, { storage_state: 'paid' }, 'client'));
+    const an = await code(() => as('anon', `SELECT public.set_container_storage($1, '{}'::jsonb)`, [T.c1]));
+    const ins = await code(() => as('jed', `INSERT INTO public.container_storage (org_id, transaction_id, container_id, storage_state) VALUES ($1, $2, $3, 'paid')`, [A, T.t, T.c2]));
+    const upd = await code(() => as('admin', `UPDATE public.container_storage SET storage_state = 'paid' WHERE container_id = $1`, [T.c1]));
+    return (o === 'MRS_NOT_FOUND container' && c === 'MRS_NOT_FOUND container' && an === 'perm' && ins === 'perm' && upd === 'perm') || J({ o, c, an, ins, upd });
+  });
+  await check('a storage change is audited (container_storage)', async () =>
+    (await one(`SELECT count(*)::int n FROM public.audit_log WHERE table_name = 'container_storage' AND new_data ->> 'container_id' = $1::text`, [T.c1])).n >= 3
     || 'no audit');
+  await check('internal: public.containers has no storage column; a portal client reads its container, never its storage row', async () => {
+    const cols = await q(`SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'containers' AND column_name LIKE 'storage%'`);
+    const seen = await as('client', `SELECT id FROM public.containers WHERE id = $1`, [T.c1]);
+    const st = await as('client', `SELECT * FROM public.container_storage`);
+    const staff = await as('jed', `SELECT storage_state FROM public.container_storage WHERE container_id = $1`, [T.c1]);
+    const gate = await code(() => as('client', `SELECT public.tx_storage_gate($1)`, [T.t]));
+    return (cols.length === 0 && seen.length === 1 && st.length === 0 && staff.length === 1 && gate === 'MRS_NOT_FOUND transaction') || J({ cols, seen, st, staff, gate });
+  });
   await check('gate ports: SAJED for the seed orgs and a new org; staff read; clearance staff cannot add; anon nothing', async () => {
     const n = (await one(`SELECT count(*)::int n FROM public.storage_gate_ports WHERE port_code = 'SAJED' AND org_id IN ($1, $2)`, [A, B])).n;
     const read = await as('jed', `SELECT port_code FROM public.storage_gate_ports WHERE org_id = $1`, [A]);
@@ -218,15 +251,86 @@ async function secMain() {
     const b = await book(T2.t, null);
     return (/^MRS_STORAGE_UNPAID SGTU\d{6}2$/.test(a) && b === 'ok') || J([a, b]);
   });
-  await check('a reschedule, a closed status and a run without a user request are not gated', async () => {
+  await check('a closed status and a run without a user request are not gated; a direct open booking as the user is', async () => {
     const T3 = await mkTx('SAJED');
-    const orig = (await q(`INSERT INTO public.port_appointments (org_id, transaction_id, container_id, appointment_at, status) VALUES ($1, $2, $3, now(), 'requested') RETURNING id`, [A, T3.t, T3.c1]))[0].id;
+    const orig = await rawBooking(T3.t, T3.c1);
     await db.query(`SELECT set_config('request.jwt.claims', $1, false)`, [JSON.stringify({ sub: U.jed, role: 'authenticated' })]);
-    const resch = await code(() => q(`INSERT INTO public.port_appointments (org_id, transaction_id, container_id, appointment_at, status, rescheduled_from_id) VALUES ($1, $2, $3, now() + interval '1 day', 'requested', $4)`, [A, T3.t, T3.c1, orig]));
     const done = await code(() => q(`INSERT INTO public.port_appointments (org_id, transaction_id, container_id, appointment_at, status) VALUES ($1, $2, $3, now() - interval '1 day', 'completed')`, [A, T3.t, T3.c2]));
     const live = await code(() => q(`INSERT INTO public.port_appointments (org_id, transaction_id, container_id, appointment_at, status) VALUES ($1, $2, $3, now() + interval '2 day', 'requested')`, [A, T3.t, T3.c2]));
+    const resch = await code(() => q(`INSERT INTO public.port_appointments (org_id, transaction_id, container_id, appointment_at, status, rescheduled_from_id) VALUES ($1, $2, $3, now() + interval '1 day', 'requested', $4)`, [A, T3.t, T3.c1, orig]));
     await db.exec(`SELECT set_config('request.jwt.claims', '', false)`);
-    return (resch === 'ok' && done === 'ok' && /^MRS_STORAGE_UNPAID/.test(live)) || J({ resch, done, live });
+    return (done === 'ok' && /^MRS_STORAGE_UNPAID/.test(live) && /^MRS_STORAGE_UNPAID/.test(resch)) || J({ done, live, resch });
+  });
+
+  section('4b. no bypass: reschedule, save_movement, container / port changes');
+  await check('reschedule_appointment of an unpaid container → refused (nothing changed); paid → the new slot is recorded', async () => {
+    const R = await mkTx('SAJED');
+    const id = await rawBooking(R.t, R.c1);
+    const a = await code(() => as('jed', `SELECT public.reschedule_appointment($1, $2, 'تغيير الموعد') r`, [id, { appointment_at: inDays(4) }]));
+    const kept = (await one(`SELECT status FROM public.port_appointments WHERE id = $1`, [id])).status;
+    await setState(R.c1, 'paid');
+    const b = await code(() => as('jed', `SELECT public.reschedule_appointment($1, $2, 'تغيير الموعد') r`, [id, { appointment_at: inDays(4) }]));
+    return (/^MRS_STORAGE_UNPAID SGTU\d{6}1$/.test(a) && kept === 'confirmed' && b === 'ok') || J({ a, kept, b });
+  });
+  await check('reschedule_appointment onto another (unpaid) container → refused', async () => {
+    const R = await mkTx('SAJED');
+    await setState(R.c1, 'paid');
+    const id = await rawBooking(R.t, R.c1);
+    const a = await code(() => as('jed', `SELECT public.reschedule_appointment($1, $2, 'حاوية أخرى') r`, [id, { appointment_at: inDays(5), container_id: R.c2 }]));
+    return /^MRS_STORAGE_UNPAID SGTU\d{6}2$/.test(a) || a;
+  });
+  const mv = (tx, ctr, extra) => code(() => as('admin', `SELECT public.save_movement($1) r`, [Object.assign({ transaction_id: tx, container_id: ctr,
+    appointment_at: inDays(2), appointment_status: 'confirmed', driver_name: 'سائق بوابة', driver_phone: '0555000111', truck_plate: 'GTE1234' }, extra || {})]));
+  await check('save_movement: a new movement on an unpaid container → refused; paid → recorded', async () => {
+    const M = await mkTx('SAJED');
+    const a = await mv(M.t, M.c1);
+    await setState(M.c1, 'paid');
+    const b = await mv(M.t, M.c1);
+    return (/^MRS_STORAGE_UNPAID SGTU\d{6}1$/.test(a) && b === 'ok') || J({ a, b });
+  });
+  await check('save_movement on an existing booking: a new time (reschedule) and a move to another unpaid container → refused; same container, other driver → passes', async () => {
+    const M = await mkTx('SAJED');
+    const id = await rawBooking(M.t, M.c1);                     // booked before the gate (legacy row), storage not answered
+    const same = await mv(M.t, M.c1, { appointment_id: id, appointment_at: undefined, driver_name: 'سائق آخر', driver_phone: '0555000112' });
+    const resch = await mv(M.t, M.c1, { appointment_id: id, appointment_at: inDays(6), reason: 'موعد جديد' });
+    await setState(M.c1, 'paid');
+    const moved = await mv(M.t, M.c2, { appointment_id: id, appointment_at: undefined });
+    const ctr = (await one(`SELECT container_id FROM public.port_appointments WHERE id = $1`, [id])).container_id;
+    return (same === 'ok' && /^MRS_STORAGE_UNPAID SGTU\d{6}1$/.test(resch) && /^MRS_STORAGE_UNPAID SGTU\d{6}2$/.test(moved) && ctr === M.c1) || J({ same, resch, moved, ctr });
+  });
+  await check('an UPDATE that moves a booking to another container / re-opens a closed one → gated (as the user)', async () => {
+    const U2 = await mkTx('SAJED');
+    await setState(U2.c1, 'paid');
+    const id = await rawBooking(U2.t, U2.c1);
+    await q(`UPDATE public.port_appointments SET status = 'cancelled', status_reason = 'x' WHERE id = $1`, [id]);
+    const id2 = await rawBooking(U2.t, U2.c1);
+    await db.query(`SELECT set_config('request.jwt.claims', $1, false)`, [JSON.stringify({ sub: U.jed, role: 'authenticated' })]);
+    const move = await code(() => q(`UPDATE public.port_appointments SET container_id = $2 WHERE id = $1`, [id2, U2.c2]));
+    await q(`UPDATE public.containers SET notes = 'x' WHERE id = $1`, [U2.c2]);
+    const reopen = await code(() => q(`UPDATE public.port_appointments SET status = 'requested', container_id = $2 WHERE id = $1`, [id, U2.c2]));
+    const inplace = await code(() => q(`UPDATE public.port_appointments SET window_minutes = 30 WHERE id = $1`, [id2]));
+    await db.exec(`SELECT set_config('request.jwt.claims', '', false)`);
+    return (/^MRS_STORAGE_UNPAID/.test(move) && /^MRS_STORAGE_UNPAID/.test(reopen) && inplace === 'ok') || J({ move, reopen, inplace });
+  });
+  await check('the transaction moved to Jeddah with an open unpaid booking → refused; settled → allowed; another port change passes', async () => {
+    const P = await mkTx('SADMM');
+    await setState(P.c2, 'paid');
+    const ok1 = await book(P.t, P.c1);                          // Dammam: not gated
+    const a = await code(() => as('jed', `UPDATE public.transactions SET port_code = 'SAJED' WHERE id = $1`, [P.t]));
+    const b = await code(() => as('jed', `UPDATE public.transactions SET port_code = 'SAKAC' WHERE id = $1`, [P.t]));
+    await setState(P.c1, 'none');
+    const c = await code(() => as('jed', `UPDATE public.transactions SET port_code = 'SAJED' WHERE id = $1`, [P.t]));
+    return (ok1 === 'ok' && /^MRS_STORAGE_UNPAID SGTU\d{6}1$/.test(a) && b === 'ok' && c === 'ok') || J({ ok1, a, b, c });
+  });
+  await check('a cancelled or closed transaction is ignored by the gate (tx_storage_gate applies false)', async () => {
+    const C = await mkTx('SAJED');
+    await q(`UPDATE public.transactions SET operational_status = 'closed' WHERE id = $1`, [C.t]).catch(() => null);
+    const closed = (await one(`SELECT app.storage_gate_applies($1) a, t.operational_status s FROM public.transactions t WHERE t.id = $1`, [C.t]));
+    const C2 = await mkTx('SAJED');
+    await as('admin', `SELECT public.cancel_transaction($1, 'إلغاء تجريبي')`, [C2.t]);
+    const canc = (await one(`SELECT app.storage_gate_applies($1) a`, [C2.t])).a;
+    const live = (await one(`SELECT app.storage_gate_applies($1) a`, [(await mkTx('SAJED')).t])).a;
+    return ((closed.s !== 'closed' || closed.a === false) && canc === false && live === true) || J({ closed, canc, live });
   });
   await check('another port, an inactive gate row and Ro-Ro are not gated', async () => {
     const D = await mkTx('SADMM');
@@ -303,6 +407,12 @@ async function secUi() {
     const i1 = h.indexOf('assets/js/ops/tx-draft.js'), i2 = h.indexOf('assets/js/ops/tx-storage.js'), i3 = h.indexOf('assets/js/admin.js');
     return (i1 > 0 && i2 > i1 && i3 > i2 && sw.includes("'assets/js/ops/tx-storage.js'") && /txStorageGate: txStorageGate, approveStorageOverride: approveStorageOverride, updateContainerStorage: updateContainerStorage/.test(su)
       && !/innerHTML|=>|\blet\b|\bconst\b/.test(src)) || 'wiring';
+  });
+  await check('supa.js updateContainerStorage writes through rpc set_container_storage (p_container, p) — no direct containers / container_storage write', () => {
+    const su = fs.readFileSync(path.join(ROOT, 'assets/js/supa.js'), 'utf8');
+    const b = su.slice(su.indexOf('function updateContainerStorage('), su.indexOf('\n  }\n', su.indexOf('function updateContainerStorage(')));
+    return (/return rpc\('set_container_storage', \{ p_container: id, p: row \}\);/.test(b) && !/from\('containers'\)|from\('container_storage'\)/.test(b)
+      && !/from\('containers'\)[^;]*storage_/.test(su) && !/from\('container_storage'\)\.(update|insert|upsert)/.test(su)) || 'supa';
   });
   await check('strings: every stg_* key used exists in ar and en; MRS_STORAGE_UNPAID in supa.js and i18n.js (ar + en)', () => {
     const ops = fs.readFileSync(path.join(ROOT, 'assets/i18n/ops.js'), 'utf8'), i18 = fs.readFileSync(path.join(ROOT, 'assets/js/i18n.js'), 'utf8'), su = fs.readFileSync(path.join(ROOT, 'assets/js/supa.js'), 'utf8');

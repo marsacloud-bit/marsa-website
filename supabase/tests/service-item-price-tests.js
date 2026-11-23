@@ -12,7 +12,9 @@
   app.opening_unit_price (catalogue price of item:<code>, 0 for an unknown / inactive / non-item key, per org; not callable
   by authenticated / anon); RLS of the price (admin / accounts manager update, clearance staff / anon cannot, other org
   cannot); app.bill_job_context and public.test_daftra_custom_fields read the price (no zero opening line left in the
-  live functions), and the job context of an opening intent carries opening_line.unit_price = 500 (VAT 15).
+  live functions), and the job context of an opening intent carries opening_line.unit_price = 500 (VAT 15);
+  bill_apply_push_ok / bill_mark_issued re-created with only the opening-line total added (the totals checks themselves:
+  legacy-daftra-sql-tests §6, legacy-daftra-worker-tests end to end).
 
   usage:
     node supabase/tests/service-item-price-tests.js [/path/to/marsa-website] [--quiet]
@@ -133,6 +135,20 @@ async function secFile() {
     const back2 = norm(n2.replace(/'quantity', 1,\s+'unit_price', app\.opening_unit_price\(v_t\.org_id, coalesce\(v_conn\.opening_item, 'item:customs_clearance'\)\)\),\s+-- 20261205000100/, "'quantity', 1, 'unit_price', 0),"));
     return (back1 === norm(o1) && back2 === norm(o2)) || 'bodies differ beyond the opening line';
   });
+  await check('bill_apply_push_ok / bill_mark_issued re-created from 20261123000100: only the opening-line total added (every changed line marked 20261205000100)', () => {
+    const src = fs.readFileSync(path.join(MIG_DIR, '20261123000100_legacy_daftra.sql'), 'utf8');
+    const body = (txt, start) => { const i = txt.indexOf(start); return txt.slice(i, txt.indexOf('END $$;', i)); };
+    const norm = t => t.replace(/\s+/g, ' ');
+    // undo the marked changes: drop the added lines, put the two changed comparisons back
+    const undo = t => t.split('\n')
+      .filter(l => !/^\s*(v_open numeric := 0;|v_exp := v_exp \+ app\.bill_opening_total|IF v_hf5 AND p_i\.origin = 'opening' THEN v_open|IF v_hf5 AND v_open <> 0 THEN|-- 20261205000100: the opening line \(customs|-- the issued invoice too: the HF5 totals check)/.test(l))
+      .join('\n').replace('v_tot[3] = v_exp + v_open;                                    -- 20261205000100', 'v_tot[3] = v_exp;')
+      .replace('v_tot[3] <> v_lines + v_open)                     -- L7; 20261205000100', 'v_tot[3] <> v_lines)                              -- L7');
+    const bad = ['app.bill_apply_push_ok(', 'app.bill_mark_issued('].filter(f =>
+      norm(undo(body(s, 'CREATE OR REPLACE FUNCTION ' + f))) !== norm(body(src, 'CREATE OR REPLACE FUNCTION ' + f)));
+    const marked = (s.match(/v_open|bill_opening_total\(v_i/g) || []).length;
+    return (bad.length === 0 && marked >= 7) || 'bodies differ: ' + bad.join(', ') + ' / marked ' + marked;
+  });
   const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
   await check('all_migrations.sql: appended verbatim under its header (followed only by the later phases); the paste note names it', () => {
     const h = '-- ===== migrations/' + MIG + ' =====\n';
@@ -143,7 +159,7 @@ async function secFile() {
     return (i > 0 && (body === s || body + '\n' === s) && all.indexOf(h, i + 1) < 0 && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles()))
       || 'not appended verbatim / no note / order';
   });
-  const LATER_PHASES = ['20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql'];
+  const LATER_PHASES = ['20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261211000100_reconvert.sql'];
   await check('this file is the latest migration (later phases excepted)', () => J(migFiles().filter(f => f > MIG)) === J(LATER_PHASES) || 'later ' + J(migFiles().filter(f => f > MIG)));
 }
 
@@ -236,6 +252,34 @@ async function secMain() {
     const ctx = (await one(`SELECT app.bill_job_context(j, gen_random_uuid(), NULL) c FROM public.billing_sync_jobs j WHERE j.id = $1`, [job.id])).c;
     const ol = ctx && ctx.intent && ctx.intent.opening_line;
     return (ol && Number(ol.unit_price) === 510 && Number(ol.vat_rate) === 15 && ol.quantity === 1 && ol.item_key === 'item:customs_clearance') || J(ol);
+  });
+  await check('app.bill_opening_total: the opening line of a snapshot is the earliest unmarked line of the opening product (live link, else a retired one, else no product); a hand-added line is never taken for it', async () => {
+    const tx = (await as('jed', `INSERT INTO public.transactions (org_id, branch_id, client_id, operation, mode) VALUES ($1, $2, $3, 'import', 'sea') RETURNING id`,
+      [A, JED, CLIENT_A]))[0].id;
+    const ref = (await one(`SELECT ref FROM public.transactions WHERE id = $1`, [tx])).ref;
+    const it = (await q(`INSERT INTO public.billing_intents (org_id, transaction_id, client_id, purpose, purpose_key, currency, revision, operational_ref, origin)
+                         VALUES ($1, $2, $3, 'final', 'F', 'SAR', 1, $4, 'opening') RETURNING id`, [A, tx, CLIENT_A, ref]))[0].id;
+    const L = (id, pid, price, mark) => ({ id, line_ref: mark || null, product_id: pid, description: '', quantity: '1.000', unit_price: price, tax_rate: '15.00' });
+    const tot = async (lines) => Number((await one(`SELECT app.bill_opening_total(i, $2::jsonb) t FROM public.billing_intents i WHERE i.id = $1`,
+      [it, lines === null ? null : J({ lines })])).t);
+    const link = (pid, st) => q(`INSERT INTO public.daftra_item_links (org_id, item_key, product_code, name_ar, default_vat_rate, tax_code, external_product_id, status)
+                                 VALUES ($1, 'item:customs_clearance', 'MRS-item-customs_clearance', 'تخليص جمركي', 15, 'standard', $2, $3)`, [A, pid, st]);
+    await db.exec('BEGIN');
+    try {
+      await q(`DELETE FROM public.daftra_item_links WHERE org_id = $1 AND item_key = 'item:customs_clearance'`, [A]);
+      const r = {};
+      r.catalogue = await tot(null);                                                                  // 510 × 1.15
+      // no link: the product-less line pushed by Marsa, not the hand-added line of another product listed first
+      r.noLink = await tot([L('100', '77', '999.00'), L('99', null, '400.00')]);
+      r.noLinkNone = await tot([L('100', '77', '999.00')]);                                         // only a foreign product: none → 0
+      await link('44', 'retired');
+      r.retired = await tot([L('5', '88', '900.00'), L('7', '44', '300.00')]);                       // the retired link's product
+      await link('55', 'linked');
+      // same product added again by hand (higher id, listed first by the JSON sort '100' < '99'); a marked line never counts
+      r.live = await tot([L('100', '55', '700.00'), L('99', '55', '510.00'), L('98', '55', '1.00', 'MRSL-0001-01')]);
+      r.livePref = await tot([L('3', null, '200.00'), L('9', '55', '600.00')]);                     // the live product before a product-less line
+      return J(r) === J({ catalogue: 586.5, noLink: 460, noLinkNone: 0, retired: 345, live: 586.5, livePref: 690 }) || J(r);
+    } finally { await db.exec('ROLLBACK'); }
   });
 }
 

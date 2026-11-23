@@ -17,6 +17,9 @@
 --   · its OWN fleet: 8 drivers «تجريبي — سائق …» (0500000101 … 0500000108) and 6 trucks TST1001 … TST1006, inserted as
 --     new rows and handed to the movements by id (never find-or-create by phone / plate, so no existing driver or truck
 --     is ever taken over, renamed or re-pointed)
+--   · the storage (groundage) answer of every container where the storage gate applies (Jeddah, 20261206000100), written
+--     with set_container_storage like the transaction page: paid (invoice TSTSTG……) or «no storage invoice» for every
+--     container that reaches the appointment; issued / sent / not answered for some earlier ones (the red banner)
 --   · appointments (TAS…), movements (trips with those drivers / trucks, transport value / org revenue, party type
 --     supplier / company / direct / unset), empty-return deadlines (some overdue), passed appointments that raise the
 --     follow-up / critical badges, waived returns (documented exception)
@@ -264,6 +267,26 @@ BEGIN
         RETURNING id INTO v_ctr;
         v_ctrs := v_ctrs || v_ctr;
       END LOOP;
+      -- the storage (groundage) answer where the storage gate applies (Jeddah today, 20261206000100), as the transaction
+      -- page records it (set_container_storage): every container that reaches the appointment is settled (paid with a
+      -- TSTSTG… invoice, or «no storage invoice»); before the appointment some are still issued / sent / not answered, so
+      -- the red «لا يُحجز الموعد قبل سداد الأرضيات» banner can be tried
+      IF v_ncont > 0 AND coalesce((public.tx_storage_gate(v_tx) ->> 'applies')::boolean, false) THEN
+        FOR i IN 1 .. v_ncont LOOP
+          IF array_position(c_order, s) < array_position(c_order, 'appointment') AND (v_n + i) % 3 <> 0 THEN
+            CONTINUE WHEN (v_n + i) % 3 = 1;                                          -- not answered yet
+            PERFORM public.set_container_storage(v_ctrs[i], jsonb_build_object('storage_state', CASE WHEN v_n % 2 = 0 THEN 'sent' ELSE 'issued' END,
+              'storage_invoice_no', 'TSTSTG' || lpad((v_n * 10 + i)::text, 6, '0'), 'storage_amount', 150 + (v_n * 23 + i * 7) % 600,
+              'storage_note', c_mark));
+          ELSIF (v_n + i) % 4 = 0 THEN
+            PERFORM public.set_container_storage(v_ctrs[i], jsonb_build_object('storage_state', 'none', 'storage_note', c_mark));
+          ELSE
+            PERFORM public.set_container_storage(v_ctrs[i], jsonb_build_object('storage_state', 'paid',
+              'storage_invoice_no', 'TSTSTG' || lpad((v_n * 10 + i)::text, 6, '0'), 'storage_amount', 150 + (v_n * 23 + i * 7) % 600,
+              'storage_note', c_mark));
+          END IF;
+        END LOOP;
+      END IF;
 
       v_txs := v_txs || v_tx; v_tx_status := v_tx_status || s; v_tx_client := v_tx_client || v_clients[k]; v_tx_cont := v_tx_cont || v_ncont;
       v_tx_ddate := v_tx_ddate || v_ddate;

@@ -91,7 +91,9 @@
     bl_prefix: /(?<![A-Z0-9])((?:MEDU|MSCU|MAEU|COSU|HLCU|ONEY|EGLV|CMDU|OOLU|ZIMU|YMLU)[A-Z0-9]{6,12})(?![A-Z0-9])/g,
     declaration: new RegExp('(?:البيان الجمركي|رقم البيان|بيان|CUSTOMS DECL\\.?|DECLARATION)' + KW_NO + '(\\d{6,12})(?!\\d)', 'g'),
     invoice: /(?:فاتورة رقم|رقم الفاتورة|INVOICE[ \t]*(?:NO\.?|NUMBER|#))[ \t]*[:#]?[ \t]*([A-Z0-9][A-Z0-9/-]{2,29})(?![A-Z0-9/-])/g,
-    tx_ref: /(?<![A-Z0-9])(MRS-\d{4}-\d{6})(?!\d)/g,
+    // the office transaction reference <ref_prefix>-YYYY-NNNNNN: the prefix is an org setting (2-5 capital letters, MRS by default,
+    // a new one after a re-conversion, 20261211000100); REQ- / MSG- / IMP- share the shape but are request / message / import refs
+    tx_ref: /(?<![A-Z0-9])((?!(?:REQ|MSG|IMP)-)[A-Z]{2,5}-\d{4}-\d{6})(?!\d)/g,
     appointment: /(?:رقم الموعد|APPOINTMENT[ \t]*(?:NO\.?|#|REF\.?))[ \t]*[:#]?[ \t]*([A-Z0-9][A-Z0-9-]{3,39})(?![A-Z0-9-])/g,
     date_ymd: /(?<![\d/.-])(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?![\d/-])/g,
     date_dmy: /(?<![\d/.-])(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?![\d/.-]?\d)/g

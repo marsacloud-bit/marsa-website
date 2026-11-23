@@ -14,7 +14,9 @@
 --      party {id, name_ar, name_en, phone, cr_number, contact_name}}] — staff of the org; search by name / phone / plate /
 --      party name; 500 rows (active first).
 --   4. public.save_driver(p_org, p) → the driver row as list_drivers returns it — transport writers of the org.
---      keys: id?, full_name, phone (Saudi mobile, normalised), driver_class, carrier_id (company / contractor), truck_plate
+--      keys: id?, full_name, phone (Saudi mobile, normalised), driver_class (absent / null = keep the driver's class, NULL for
+--      a new or unclassified driver: the active toggle never forces a classification), carrier_id (company / contractor;
+--      absent = keep the driver's party), truck_plate
 --      (found by its normalised plate in the org or created with the driver's party), license_no, is_active.
 --      Another active driver with the same mobile → MRS_CONFLICT phone. An inactive truck plate → MRS_INVALID truck_plate.
 --   Re-runnable (IF NOT EXISTS / CREATE OR REPLACE / DROP … IF EXISTS + CREATE / ON CONFLICT).
@@ -131,16 +133,19 @@ BEGIN
   IF v_phone_raw IS NULL THEN PERFORM app.fail('MRS_REQUIRED', 'phone'); END IF;
   v_phone := app.norm_sa_phone(v_phone_raw, false);
   IF v_phone IS NULL THEN PERFORM app.fail('MRS_INVALID', 'phone'); END IF;
-  v_class := app.ptext(p, 'driver_class', 30);
-  IF v_class IS NULL THEN PERFORM app.fail('MRS_REQUIRED', 'driver_class'); END IF;
-  IF NOT app.is_code('driver_class', v_class) THEN PERFORM app.fail('MRS_INVALID', 'driver_class'); END IF;
-  v_carrier := app.puuid(p, 'carrier_id');
+  -- no driver_class in the payload (absent / null / '') keeps the driver's class — NULL for a new or unclassified driver:
+  -- activating / deactivating (the directory toggle) or an edit without the class never forces a classification
+  v_class := CASE WHEN nullif(btrim(coalesce(p ->> 'driver_class', '')), '') IS NOT NULL THEN app.ptext(p, 'driver_class', 30)
+                  ELSE v_d.driver_class END;
+  IF v_class IS NOT NULL AND NOT app.is_code('driver_class', v_class) THEN PERFORM app.fail('MRS_INVALID', 'driver_class'); END IF;
+  -- no carrier_id key keeps the driver's party
+  v_carrier := CASE WHEN p ? 'carrier_id' THEN app.puuid(p, 'carrier_id') ELSE v_d.carrier_id END;
   IF v_class = 'individual' THEN v_carrier := NULL;
-  ELSE
-    IF v_carrier IS NULL THEN PERFORM app.fail('MRS_REQUIRED', 'carrier_id'); END IF;
-    IF NOT EXISTS (SELECT 1 FROM public.parties x WHERE x.id = v_carrier AND x.org_id = p_org AND 'carrier' = ANY (x.kinds)) THEN
-      PERFORM app.fail('MRS_INVALID', 'carrier_id');
-    END IF;
+  ELSIF v_class IS NOT NULL AND v_carrier IS NULL THEN PERFORM app.fail('MRS_REQUIRED', 'carrier_id');
+  END IF;
+  IF v_carrier IS NOT NULL AND (p ? 'carrier_id' OR p ? 'driver_class')
+     AND NOT EXISTS (SELECT 1 FROM public.parties x WHERE x.id = v_carrier AND x.org_id = p_org AND 'carrier' = ANY (x.kinds)) THEN
+    PERFORM app.fail('MRS_INVALID', 'carrier_id');
   END IF;
   v_lic := app.ptext(p, 'license_no', 30);
   v_active := CASE WHEN p ? 'is_active' THEN coalesce((p ->> 'is_active')::boolean, true) ELSE coalesce(v_d.is_active, true) END;

@@ -168,7 +168,7 @@
       { id: 'schedule', key: 'ops.nav_schedule', href: 'admin.html#schedule', icon: 'calendar', allow: R.staff },
       { id: 'exceptions', key: 'ops.nav_exceptions', href: 'admin.html#exceptions', icon: 'flag', allow: R.staff },
       { id: 'parties', key: 'ops.nav_parties', href: 'admin.html#parties', icon: 'truck', allow: R.staff },
-      { id: 'drivers', key: 'ops.nav_drivers', href: 'admin.html#drivers', icon: 'user', allow: R.staff }
+      { id: 'drivers', key: 'ops.nav_drivers', href: 'admin.html#drivers', icon: 'users', allow: R.staff }
     ] },
     // G6a reports & advanced search (assets/js/rpt/*.js views, allow 'staff')
     { id: 'insight', key: 'rpt.nav_group', items: [

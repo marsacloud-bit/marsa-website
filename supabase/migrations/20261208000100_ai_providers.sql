@@ -7,6 +7,7 @@
 --   whether a fallback ran are recorded with every reading.
 --   1. app.ai_providers — the providers the platform can call (anthropic · openai · gemini) and the model id each is
 --      asked for. Platform-wide (the SQL Editor tunes the model ids, like app.ai_prices). Seeded; re-run keeps tuned rows.
+--      One model id per row (unique index: the prices are keyed by the model id); anthropic is seeded with app.ai_model().
 --      The keys are Edge Function secrets (one per provider, set by the owner), never in the database.
 --   2. app.ai_settings + provider_order text[] (the organisation's order, default {anthropic}: unchanged behaviour) and
 --      consent_providers text[] (the providers the admin's last consent named). Existing consents named Anthropic only.
@@ -25,7 +26,7 @@
 --   Re-runnable (IF NOT EXISTS / CREATE OR REPLACE / ON CONFLICT DO NOTHING keeps tuned rows and settings).
 --   Data: none changed except consent_providers = {anthropic} on rows whose consent was given (it named Anthropic).
 --   Down-path: re-paste the 20261114000100 / 20261119000100 bodies of the re-created functions; DROP FUNCTION
---   app.ai_provider_chain(uuid), app.ai_is_engine(text); ALTER TABLE app.ai_usage DROP COLUMN call_meta, DROP COLUMN
+--   app.ai_provider_chain(uuid), app.ai_is_engine(text); DROP INDEX app.ai_providers_model_uidx; ALTER TABLE app.ai_usage DROP COLUMN call_meta, DROP COLUMN
 --   provider; ALTER TABLE app.ai_settings DROP COLUMN consent_providers, DROP COLUMN provider_order; DROP TABLE
 --   app.ai_providers; DELETE FROM public.schema_versions WHERE version = '20261208000100'.
 --   No BEGIN/COMMIT (the SQL editor wraps the run).
@@ -59,10 +60,13 @@ CREATE TABLE IF NOT EXISTS app.ai_providers (
 COMMENT ON TABLE app.ai_providers IS 'AI reading providers the ai-extract Edge Function can call (20261208000100) and the model id each is asked for. Platform-wide; tuned from the SQL Editor (UPDATE app.ai_providers SET model = … WHERE provider = …). The Edge Function calls a provider only when its key secret is set. anthropic always uses the model the function is built for (app.ai_model()).';
 -- the model ids are a starting point: confirm them against each provider's model list before switching the order
 INSERT INTO app.ai_providers (provider, model, sort) VALUES
-  ('anthropic', 'claude-opus-5-5', 1),
+  ('anthropic', app.ai_model(),    1),                -- always the model the function is built for
   ('openai',    'gpt-6.2-astra',   2),
   ('gemini',    'gemini-3.8-flash', 3)
 ON CONFLICT (provider) DO NOTHING;
+-- one model id per provider row: app.ai_prices is keyed by the model id, so two providers asking for the same id would
+-- share (and overwrite) one price row; platform_ai_save_provider (20261209000100) refuses it with a clear error first
+CREATE UNIQUE INDEX IF NOT EXISTS ai_providers_model_uidx ON app.ai_providers (model);
 ALTER TABLE app.ai_providers ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON app.ai_providers FROM PUBLIC, anon, authenticated, service_role;
 

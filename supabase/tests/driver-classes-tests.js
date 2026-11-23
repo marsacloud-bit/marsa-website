@@ -127,7 +127,7 @@ async function secFile() {
     const body = nx < 0 ? all.slice(i + h.length) : all.slice(i + h.length, nx);
     return (i > 0 && (body === s || body + '\n' === s) && all.indexOf(h, i + 1) < 0 && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles())) || 'bundle';
   });
-  const LATER_PHASES = ['20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql'];
+  const LATER_PHASES = ['20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261211000100_reconvert.sql'];
   await check('this file is the latest migration (later phases excepted)', () => J(migFiles().filter(f => f > MIG)) === J(LATER_PHASES) || 'later ' + J(migFiles().filter(f => f > MIG)));
 }
 
@@ -180,13 +180,27 @@ async function secMain() {
     const r = await code(() => save('trans', { full_name: 'آخر', phone: '966551234567', driver_class: 'individual' }));
     return r === 'MRS_CONFLICT phone' || r;
   });
-  await check('required / invalid fields: name, mobile, class', async () => {
+  await check('required / invalid fields: name, mobile; an unknown class; no class → an unclassified driver (NULL), not an error', async () => {
     const a = await code(() => save('trans', { phone: '0550000009', driver_class: 'individual' }));
     const b = await code(() => save('trans', { full_name: 'سائق', phone: '12', driver_class: 'individual' }));
-    const c = await code(() => save('trans', { full_name: 'سائق', phone: '0550000009' }));
     const d = await code(() => save('trans', { full_name: 'سائق', phone: '0550000009', driver_class: 'x' }));
     const e = await code(() => save('trans', { full_name: 'سائق', phone: '0550000009', driver_class: 'individual', nope: 1 }));
-    return (a === 'MRS_REQUIRED full_name' && b === 'MRS_INVALID phone' && c === 'MRS_REQUIRED driver_class' && d === 'MRS_INVALID driver_class' && /^MRS_/.test(e)) || J([a, b, c, d, e]);
+    const c = await save('trans', { full_name: 'سائق بلا تصنيف', phone: '0550000009', driver_class: null });
+    return (a === 'MRS_REQUIRED full_name' && b === 'MRS_INVALID phone' && c.driver_class === null && c.party === null
+      && d === 'MRS_INVALID driver_class' && /^MRS_/.test(e)) || J([a, b, c, d, e]);
+  });
+  // review fix (batch 2): the directory toggle sends no driver_class / carrier_id — the class and the party are kept
+  await check('no driver_class in the payload keeps the class: an unclassified driver stays NULL, a company driver keeps class + party', async () => {
+    const u0 = await save('trans', { full_name: 'سائق من بطاقة موعد', phone: '0557770001' });
+    const u1 = await save('trans', { id: u0.id, full_name: u0.full_name, phone: u0.phone, is_active: false });
+    const k0 = await save('trans', { full_name: 'سائق شركة', phone: '0557770002', driver_class: 'company', carrier_id: CAR });
+    const k1 = await save('trans', { id: k0.id, full_name: k0.full_name, phone: k0.phone, is_active: false });
+    const k2 = await save('trans', { id: k0.id, full_name: k0.full_name, phone: k0.phone, license_no: 'L-1', is_active: true });
+    const need = await code(() => save('trans', { id: u0.id, full_name: u0.full_name, phone: u0.phone, driver_class: 'contractor' }));
+    return (u0.driver_class === null && u1.driver_class === null && u1.is_active === false && u1.party === null
+      && k1.driver_class === 'company' && k1.party && k1.party.id === CAR && k1.is_active === false
+      && k2.driver_class === 'company' && k2.party && k2.party.id === CAR && k2.is_active === true && k2.license_no === 'L-1'
+      && need === 'MRS_REQUIRED carrier_id') || J({ u0, u1, k1, k2, need });
   });
   await check('an existing inactive truck plate is refused', async () => {
     await q(`INSERT INTO public.trucks (org_id, plate_no, is_active) VALUES ($1, 'OLD999', false)`, [A]);
@@ -233,13 +247,18 @@ async function secUi() {
   ctx.window.window = ctx.window; vm.createContext(ctx);
   vm.runInContext(src, ctx, { filename: 'drivers.js' });
   const D = ctx.window.MarsaOps && ctx.window.MarsaOps.drivers, V = ctx.window.MarsaOps && ctx.window.MarsaOps.views && ctx.window.MarsaOps.views.drivers;
-  await check('drivers.js registers #drivers (staff, ops.nav_drivers)', () => (D && D.VERSION === 'drv2-2' && V && V.allow === 'staff' && V.titleKey === 'ops.nav_drivers' && typeof V.render === 'function') || 'view');
+  await check('drivers.js registers #drivers (staff, ops.nav_drivers)', () => (D && D.VERSION === 'drv2-3' && V && V.allow === 'staff' && V.titleKey === 'ops.nav_drivers' && typeof V.render === 'function') || 'view');
   await check('driverRow: an individual drops the party; a company keeps it; empty plate / licence → null; the id on an edit', () => {
     const a = D.pure.driverRow({ full_name: ' سالم ', phone: '055', driver_class: 'individual', carrier_id: 'x', truck_plate: ' ', license_no: '' });
     const b = D.pure.driverRow({ full_name: 'خالد', phone: '055', driver_class: 'company', carrier_id: 'c1', truck_plate: 'AB1' }, 'id1');
     const c = D.pure.driverRow({ full_name: 'x', phone: '1', driver_class: 'boss' });
     return (a.full_name === 'سالم' && a.carrier_id === null && a.truck_plate === null && a.license_no === null && !('id' in a)
       && b.carrier_id === 'c1' && b.id === 'id1' && b.truck_plate === 'AB1' && c.driver_class === null) || JSON.stringify([a, b, c]);
+  });
+  await check('toggleRow: only name / mobile / licence / is_active / id — no driver_class, carrier_id or truck_plate (save_driver keeps them)', () => {
+    const r = D.pure.toggleRow({ id: 'd1', full_name: ' خالد ', phone: '0551', license_no: 'L', driver_class: null, party: { id: 'p' }, truck_plate: 'T1' }, false);
+    return (r.id === 'd1' && r.full_name === 'خالد' && r.is_active === false && r.license_no === 'L'
+      && !('driver_class' in r) && !('carrier_id' in r) && !('truck_plate' in r)) || JSON.stringify(r);
   });
   await check('matches: inactive hidden unless asked; the class filter (incl. «غير مصنّف»); search over the party too', () => {
     const U = { matches: (q, arr) => !q || arr.some(x => x && String(x).indexOf(q) !== -1) };
@@ -266,7 +285,7 @@ async function secUi() {
     const ad = fs.readFileSync(path.join(ROOT, 'assets/js/admin.js'), 'utf8'), sh = fs.readFileSync(path.join(ROOT, 'assets/js/app-shell.js'), 'utf8');
     const h = fs.readFileSync(path.join(ROOT, 'admin.html'), 'utf8'), sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8'), su = fs.readFileSync(path.join(ROOT, 'assets/js/supa.js'), 'utf8');
     return (/\{ id: 'ops', items: \['alerts', 'schedule', 'exceptions', 'parties', 'drivers'\] \}/.test(ad) && /'parties', 'drivers',\n    'search'/.test(ad)
-      && /\{ id: 'drivers', key: 'ops\.nav_drivers', href: 'admin\.html#drivers', icon: 'user', allow: R\.staff \}/.test(sh)
+      && /\{ id: 'drivers', key: 'ops\.nav_drivers', href: 'admin\.html#drivers', icon: 'users', allow: R\.staff \}/.test(sh)
       && h.indexOf('assets/js/ops/drivers.js') > h.indexOf('assets/js/ops/parties.js') && h.indexOf('assets/js/ops/drivers.js') < h.indexOf('assets/js/admin.js')
       && sw.includes("'assets/js/ops/drivers.js'") && /listDriversDirectory: listDriversDirectory, saveDriverEntry: saveDriverEntry/.test(su)
       && !/innerHTML|=>|\blet\b|\bconst\b/.test(src)) || 'wiring';

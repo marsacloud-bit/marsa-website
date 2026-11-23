@@ -28,13 +28,16 @@
 //   145 s after the request started), so getUser + ai_access + reserve + the Claude call + settle end inside the 150 s
 //   (a retry could outlive it, be billed twice and leave the reservation to the 15-minute sweep). Shipping documents
 //   use max_tokens 32000 (measured: an ~85-line scanned invoice, 13.4k output tokens in 92 s).
-// - Secrets: the provider keys (saved on the platform page in Vault, read with the service RPC ai_provider_keys; else the
-//   Edge Function secrets) live in index.ts only, go to the SDK client / the request header only, never logged, never
+// - Secrets: the provider keys (saved on the platform page in Vault, read with the service RPC ai_provider_keys; the
+//   Edge Function secret only for a provider never saved / deleted on the page) live in index.ts only, go to the SDK client / the request header only, never logged, never
 //   returned, never sent to handler.js. Errors are fixed codes; upstream / SDK messages are never echoed.
 // - Env: SUPABASE_URL, SUPABASE_ANON_KEY (or SUPABASE_PUBLISHABLE_KEY), SUPABASE_SERVICE_ROLE_KEY (all injected by
 //   Supabase), ANTHROPIC_API_KEY (owner-entered Edge Function secret).
 //   OPENAI_API_KEY / GEMINI_API_KEY (optional, owner-entered secrets, 21 Nov 2026): the other reading providers, tried
 //   in the order the organisation chose; a provider without its key is skipped.
+//   Since 20261209000100 these secrets are a fallback ONLY for a provider that has no key row on the platform page
+//   (source 'env'): once a key was saved there (source 'vault') or deleted there (source 'none') the secret is never
+//   used for that provider. A failed key lookup uses no key at all (no silent fallback).
 
 import Anthropic from 'npm:@anthropic-ai/sdk@1.5.0';
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
@@ -49,8 +52,10 @@ const CLAUDE_TIMEOUT_MS = 135000;                // one attempt, no retry: insid
 // Other providers (owner, 21 Nov 2026): OpenAI and Gemini, tried in the organisation's order (ai_access → providers).
 // Keys (owner, 22 Nov 2026): entered on the platform page and kept in Supabase Vault (migration 20261209000100); read
 // per request through the service RPC ai_provider_keys into this request's `keys` only — never logged, never returned,
-// never handed to handler.js (it gets booleans). The Edge Function secrets ANTHROPIC_API_KEY / OPENAI_API_KEY /
-// GEMINI_API_KEY stay as a fallback when no key is saved on the page. The addresses below are the only ones called.
+// never handed to handler.js (it gets booleans and source codes). The Edge Function secrets ANTHROPIC_API_KEY /
+// OPENAI_API_KEY / GEMINI_API_KEY stay as a fallback only for a provider the page never managed (extract.js keySources:
+// 'env'); a key saved or deleted on the page wins, and the connection test uses the Vault key only. The addresses
+// below are the only ones called.
 const OPENAI_URL = 'https://api.openai.com/v1/responses';
 const OPENAI_MODELS_URL = 'https://api.openai.com/v1/models';
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/';
@@ -82,23 +87,31 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? Deno.env.get('SUPABASE_PUBLISHABLE_KEY') ?? '';
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
   const opts = { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } };
-  // this request's keys: the Edge Function secrets first, replaced by the keys saved on the platform page (loadKeys)
+  // this request's keys: the Edge Function secrets first; loadKeys then sets each provider from the platform page
+  // (its Vault key, or none at all when the page deleted it; the secret stays only for source 'env')
   const keys: Record<string, string> = {
     anthropic: Deno.env.get('ANTHROPIC_API_KEY') ?? '',
     openai: Deno.env.get('OPENAI_API_KEY') ?? '',
     gemini: Deno.env.get('GEMINI_API_KEY') ?? '',
   };
+  const source: Record<string, string> = { anthropic: 'env', openai: 'env', gemini: 'env' };
   const ready = () => ({ anthropic: keys.anthropic !== '', openai: keys.openai !== '', gemini: keys.gemini !== '' });
   const service = () => createClient(url, serviceKey, opts);
 
-  // the keys saved for this organisation (its own, else the platform's; org null = the platform's) → booleans only
-  async function loadKeys(org: string | null): Promise<Record<string, boolean>> {
-    try {
-      const r = await service().rpc('ai_provider_keys', { p_org: org });
-      const d = r && !r.error && r.data && typeof r.data === 'object' ? r.data as Record<string, unknown> : {};
-      for (const p of PROVIDERS) { const v = d[p]; if (typeof v === 'string' && v !== '') keys[p] = v; }
-    } catch (_e) { /* the secrets stay */ }
-    return ready();
+  // the keys saved for this organisation (its own, else the platform's; org null = the platform's) → booleans and
+  // source codes only ({anthropic, openai, gemini, sources, failed})
+  async function loadKeys(org: string | null): Promise<Record<string, unknown>> {
+    // deno-lint-ignore no-explicit-any
+    let r: any;
+    try { r = await service().rpc('ai_provider_keys', { p_org: org }); } catch (_e) { r = { data: null, error: { code: 'thrown' } }; }
+    const s = X.keySources(r);
+    for (const p of PROVIDERS) {
+      source[p] = s.sources[p];
+      if (source[p] === 'vault') keys[p] = r.data[p].key;
+      else if (source[p] !== 'env') keys[p] = '';                 // deleted on the page / lookup failed: no key, no secret
+    }
+    r = null;
+    return { ...ready(), sources: { ...source }, failed: s.failed === true };
   }
 
   // one reading call to OpenAI / Gemini → {status, json}. Rejects with {notSent: true} when nothing was sent, or with
@@ -113,8 +126,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return await httpJson(target, { method: 'POST', headers, body: JSON.stringify(body) }, o.deadlineMs);
   }
 
-  // the connection test of the platform page: list the provider's models with the saved key → {status, models}
+  // the connection test of the platform page: list the provider's models with the key saved on the page (Vault) only —
+  // never the Edge Function secret → {status, models}; status 0 = no Vault key
   async function listModels(provider: string): Promise<{ status: number; models: string[] }> {
+    if (source[provider] !== 'vault') return { status: 0, models: [] };
     if (provider === 'anthropic') {
       if (keys.anthropic === '') return { status: 0, models: [] };
       try {

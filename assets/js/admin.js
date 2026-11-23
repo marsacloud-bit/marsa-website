@@ -845,8 +845,17 @@
   // a cancelled transaction (legacy step 2) is read-only: the sections get can() = false for the named write sets
   // (read sets and explicit role lists unchanged); the server refuses every write anyway (MRS_BAD_TRANSITION cancelled)
   var READ_SETS = ['staff', 'finRead', 'msgRead', 'mgmt', 'tripFin'];
+  // the transaction tab that holds a node is opened (txTabs: wrap.mrsShowTab); true when the node is now in the shown tab
+  function revealInTxTab(node) {
+    var panel = node && node.closest ? node.closest('[data-txtab-panel]') : null;
+    var wrap = panel && panel.closest ? panel.closest('.adm-txtabs-wrap') : null;
+    if (!panel || !wrap || typeof wrap.mrsShowTab !== 'function') return !!node;
+    if (panel.hidden) wrap.mrsShowTab(panel.getAttribute('data-txtab-panel'));
+    return !panel.hidden;
+  }
   function txOpsApi(tx) {
     var a = opsApi();
+    a.revealInTab = revealInTxTab;
     if (tx && tx.cancelled_at) {
       var can0 = a.can;
       a.can = function (set, branchId) { return typeof set === 'string' && READ_SETS.indexOf(set) === -1 ? false : can0(set, branchId); };
@@ -900,18 +909,23 @@
       panels[k] = el('div', { class: 'adm-txpanel', role: 'tabpanel', id: 'txpanel-' + k, 'aria-labelledby': 'txtab-' + k, 'data-txtab-panel': k, hidden: true });
       wrap.appendChild(panels[k]);
     });
+    // arrow keys / Home / End move between the SHOWN tabs only (a hidden, empty tab is skipped)
     bar.addEventListener('keydown', function (e) {
-      var i = TX_TABS.indexOf(e.target && e.target.getAttribute && e.target.getAttribute('data-txtab'));
-      if (i === -1) return;
+      var k0 = e.target && e.target.getAttribute && e.target.getAttribute('data-txtab');
+      if (TX_TABS.indexOf(k0) === -1) return;
+      var vis = TX_TABS.filter(function (x) { return !btns[x].hidden || x === k0; });
+      var i = vis.indexOf(k0);
       var rtl = (document.documentElement.getAttribute('dir') || 'rtl') === 'rtl', n = null;
       if (e.key === 'ArrowLeft') n = rtl ? i + 1 : i - 1;
       else if (e.key === 'ArrowRight') n = rtl ? i - 1 : i + 1;
-      else if (e.key === 'Home') n = 0; else if (e.key === 'End') n = TX_TABS.length - 1;
+      else if (e.key === 'Home') n = 0; else if (e.key === 'End') n = vis.length - 1;
       if (n === null) return;
       e.preventDefault();
-      n = (n + TX_TABS.length) % TX_TABS.length;
-      show(TX_TABS[n], true); btns[TX_TABS[n]].focus();
+      n = (n + vis.length) % vis.length;
+      show(vis[n], true); btns[vis[n]].focus();
     });
+    // a section's shortcut (checklist «رفع», readiness «إثباتات إعادة الفارغ») opens the tab that holds its target first
+    wrap.mrsShowTab = function (k) { if (TX_TABS.indexOf(k) !== -1) show(k, true); };
     function put(k, node) { if (node) panels[TX_TABS.indexOf(k) === -1 ? 'summary' : k].appendChild(node); }
     put('summary', out.querySelector('.adm-txc-summary'));
     Array.prototype.slice.call(out.querySelectorAll('.adm-txc-containers')).forEach(function (n) { put('containers', n); });
@@ -931,7 +945,8 @@
         btns[x].setAttribute('aria-selected', on ? 'true' : 'false');
         btns[x].tabIndex = on ? 0 : -1;
         btns[x].classList.toggle('is-active', on);
-        panels[x].hidden = !on;
+        if (panels[x].hidden !== !on) panels[x].hidden = !on;
+        if (on && btns[x].hidden) btns[x].hidden = false;   // the chosen tab is always listed
       });
       if (remember) txTabStore(t.id, k);
     }
@@ -944,19 +959,34 @@
           var f = n.getAttribute('data-tab-flag');
           if (f === 'danger' || (f === 'warning' && !tone)) tone = f;
         });
+        // writes only when a value really changes: flags() runs from the MutationObserver below, and an unconditional
+        // write of 'hidden' would be a mutation of its own (an endless re-run every 60 ms)
         var fl = btns[k].querySelector('.adm-txtab-flag');
-        fl.hidden = !tone;
-        fl.className = 'adm-txtab-flag' + (tone ? ' is-' + tone : '');
-        fl.textContent = tone === 'danger' ? '✗' : tone === 'warning' ? '!' : '';
-        btns[k].setAttribute('aria-label', tl('txtab_' + k) + (tone ? ' — ' + tl('txtab_flag_' + tone) : ''));
+        var cls = 'adm-txtab-flag' + (tone ? ' is-' + tone : ''), mark = tone === 'danger' ? '✗' : tone === 'warning' ? '!' : '';
+        var aria = tl('txtab_' + k) + (tone ? ' — ' + tl('txtab_flag_' + tone) : '');
+        if (fl.hidden !== !tone) fl.hidden = !tone;
+        if (fl.className !== cls) fl.className = cls;
+        if (fl.textContent !== mark) fl.textContent = mark;
+        if (btns[k].getAttribute('aria-label') !== aria) btns[k].setAttribute('aria-label', aria);
         // a tab with nothing to show for this transaction / role (finance for a clerk, empty return for Ro-Ro) hides
-        btns[k].hidden = !panels[k].textContent.trim() && !panels[k].querySelector('input, select, textarea, button, img, table') && btns[k].getAttribute('aria-selected') !== 'true';
+        var hide = !panels[k].textContent.trim() && !panels[k].querySelector('input, select, textarea, button, img, table') && btns[k].getAttribute('aria-selected') !== 'true';
+        if (btns[k].hidden !== hide) btns[k].hidden = hide;
       });
     }
     if (typeof MutationObserver === 'function') {
-      var pend = false;
-      new MutationObserver(function () { if (pend) return; pend = true; setTimeout(function () { pend = false; flags(); }, 60); })
-        .observe(wrap, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden', 'data-tab-flag'] });
+      var pend = false, tmr = null, shown = false;
+      // the page moved on (another route / re-render): a tree that was on the page and left it is not watched any more
+      var gone = function () { if (wrap.isConnected === true) shown = true; return shown && wrap.isConnected === false; };
+      var mo = new MutationObserver(function () {
+        if (gone()) { stop(); return; }
+        if (pend) return;
+        pend = true;
+        tmr = setTimeout(function () { pend = false; tmr = null; if (gone()) { stop(); return; } flags(); }, 60);
+      });
+      var stop = function () { mo.disconnect(); if (tmr) clearTimeout(tmr); tmr = null; pend = false; };
+      mo.observe(wrap, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden', 'data-tab-flag'] });
+      wrap.mrsStopTabs = stop;
+      onViewTeardown(stop);
     }
     var saved = txTabStore(t.id);
     show(TX_TABS.indexOf(saved) !== -1 ? saved : (TX_TAB_OF_STAGE[t.operational_status] || 'summary'), false);
@@ -1280,6 +1310,7 @@
     if (parent === 'requests') refreshRequestsBadge();   // a request was just reviewed / converted / rejected
     setPageTitle(viewLabel(parent), null);
     var seq = ++S.renderSeq;
+    runViewTeardown();   // the previous view's observers / timers (txTabs) stop before its nodes go
     view.setAttribute('aria-busy', 'true');
     view.innerHTML = loadingBox();
     if (!keepDialog) scrollToView();
@@ -1307,6 +1338,13 @@
       view.removeAttribute('aria-busy');
       view.innerHTML = alertBox('danger', errText(e));
     });
+  }
+  // a view registers what must stop when it is replaced (MutationObservers, timers); route() runs them first
+  var VIEW_TEARDOWN = [];
+  function onViewTeardown(fn) { if (typeof fn === 'function') VIEW_TEARDOWN.push(fn); }
+  function runViewTeardown() {
+    var list = VIEW_TEARDOWN; VIEW_TEARDOWN = [];
+    list.forEach(function (fn) { try { fn(); } catch (e) { /* one teardown failing does not keep the others */ } });
   }
   function rerender() { route(true); }   // keeps an open result dialog (e.g. a one-time token)
   function go(hash) { if (location.hash === hash) route(); else location.hash = hash; }

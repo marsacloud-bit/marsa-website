@@ -2460,14 +2460,14 @@
   function txStorageGate(txId) { return rpc('tx_storage_gate', { p_tx: txId }); }
   // the manager approval to book before the storage is paid (senior ops; reason 3 … 500)
   function approveStorageOverride(txId, reason) { return rpc('approve_storage_override', { p_tx: txId, p_reason: String(reason || '') }); }
-  // a container's storage answer (transport writers, RLS): patch = { storage_state, storage_invoice_no?, storage_amount?, storage_note? }
+  // a container's storage answer: the staff-only public.container_storage row, written only through the definer RPC
+  //   set_container_storage (transport writers of the transaction). patch = { storage_state?, storage_invoice_no?,
+  //   storage_amount?, storage_note? } (keys present only; null clears) → { id, container_no, storage_state,
+  //   storage_invoice_no, storage_amount, storage_sent_at, storage_paid_at, storage_note } (id = the container id)
   function updateContainerStorage(id, patch) {
     var allowed = ['storage_state', 'storage_invoice_no', 'storage_amount', 'storage_note'], row = {};
-    Object.keys(patch || {}).forEach(function (k) { if (allowed.indexOf(k) !== -1) row[k] = patch[k]; });
-    return online(function (c) {
-      return c.from('containers').update(row).eq('id', id)
-        .select('id,container_no,storage_state,storage_invoice_no,storage_amount,storage_sent_at,storage_paid_at,storage_note').single();
-    });
+    Object.keys(patch || {}).forEach(function (k) { if (allowed.indexOf(k) !== -1) row[k] = patch[k] === undefined ? null : patch[k]; });
+    return rpc('set_container_storage', { p_container: id, p: row });
   }
   // owner stage 3ب (20261205000100): the default price of a service item (customs_clearance = the opening draft invoice line)
   // f = { orgId?, code } → { id, code, name_ar, name_en, default_price } | null (an error before the migration: no column yet)

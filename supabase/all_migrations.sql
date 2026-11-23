@@ -126,7 +126,7 @@
 -- per org; the opening draft invoice line takes that price instead of 0; re-runnable, sets the price only where it is empty).
 -- After re-pasting 20261123000100, re-paste the service_item_price file straight after.
 -- A live DB that already has service_item_price (health_check() = 20261205000100) pastes
--- supabase/migrations/20261206000100_storage_gate.sql alone (containers.storage_*; storage_gate_ports with SAJED per org;
+-- supabase/migrations/20261206000100_storage_gate.sql alone (container_storage, staff only; storage_gate_ports with SAJED per org;
 -- tx_storage_overrides; an appointment is refused while a container's storage invoice is unpaid unless a manager approved;
 -- re-runnable, adds one gate port row per org, changes no container or appointment).
 -- A live DB that already has storage_gate (health_check() = 20261206000100) pastes
@@ -138,6 +138,10 @@
 -- A live DB that already has ai_providers (health_check() = 20261208000100) pastes
 -- supabase/migrations/20261209000100_ai_keys.sql alone (AI provider keys kept in Supabase Vault, model ids and prices set from
 -- the platform page; needs the supabase_vault extension; re-runnable, stores no key).
+-- A live DB that already has ai_keys (health_check() = 20261209000100 or later) pastes
+-- supabase/migrations/20261211000100_reconvert.sql alone (re-conversion of a converted org: reconvert_org_preview /
+-- reconvert_org, SQL Editor only; PAY- / CUS- numbering per org; mail tx_ref of any 2-5 letter prefix; re-runnable,
+-- deletes no data — the wipe itself is ONE call after a backup: docs/online/CONVERT_IN_PLACE_AR.md section 15).
 DO $guard$
 BEGIN
   -- stops immediately if the Arabic text was pasted with the wrong encoding
@@ -47496,12 +47500,21 @@ REVOKE EXECUTE ON FUNCTION app.default_stage_steps() FROM PUBLIC, anon;
 --      default service rate, 15). The employee edits the amount in the draft in the accounting program; Marsa never
 --      updates an existing draft (allow_draft_update stays as set).
 --   5. public.test_daftra_custom_fields (20261123000100 body, re-created): the dry run shows the same price.
+--   6. app.bill_opening_total(intent, snapshot): the opening line's total (net + VAT). The opening line is sent from the job
+--      context and is NOT a billing_intent_line, so the totals checks that compare the accounting program's total with the
+--      synced lines must add it, or a 500 SAR opening draft would raise a false mismatch:
+--   7. app.bill_apply_push_ok (20261123000100 body, re-created): the read-back of a created draft expects lines + the opening
+--      line Marsa sent (catalogue price × (1 + service VAT)) — no false readback_mismatch 'total'.
+--   8. app.bill_mark_issued (20261123000100 body, re-created): the HF5 issued check (official total = synced lines) adds the
+--      opening line as the issued invoice shows it (snapshot: the first unmarked line of the opening product, the amount the
+--      employee may have changed; no snapshot lines → the catalogue line) — no false issued_mismatch at issue time.
 --   CREATE OR REPLACE keeps each re-created function's privileges.
 --   Re-runnable (ADD COLUMN IF NOT EXISTS / DROP CONSTRAINT IF EXISTS + ADD / CREATE OR REPLACE / UPDATE … WHERE NULL).
 --   Data: sets default_price = 500 on the customs_clearance item of every existing org (only where it is NULL).
 --   Re-pasting 20261123000100 after this file brings back the zero opening line: re-paste this file straight after.
---   Down-path: re-create app.bill_job_context, public.test_daftra_custom_fields (20261123000100) and
---   app.tg_org_service_items_before (20261117000100) verbatim; DROP FUNCTION app.opening_unit_price(uuid, text);
+--   Down-path: re-create app.bill_job_context, public.test_daftra_custom_fields, app.bill_apply_push_ok, app.bill_mark_issued
+--   (20261123000100) and app.tg_org_service_items_before (20261117000100) verbatim;
+--   DROP FUNCTION app.bill_opening_total(public.billing_intents, jsonb); DROP FUNCTION app.opening_unit_price(uuid, text);
 --   ALTER TABLE public.org_service_items DROP COLUMN default_price; DELETE FROM public.schema_versions WHERE version = '20261205000100'.
 --   No BEGIN/COMMIT (the SQL editor wraps the run).
 -- =====================================================================
@@ -47513,7 +47526,9 @@ BEGIN
     RAISE EXCEPTION 'SERVICE ITEM PRICE preflight: apply tx_stage_sets first (schema_versions lacks 20261204000100)';
   END IF;
   IF to_regclass('public.org_service_items') IS NULL OR to_regprocedure('app.bill_job_context(public.billing_sync_jobs,uuid,text)') IS NULL
-     OR to_regprocedure('public.test_daftra_custom_fields(uuid)') IS NULL OR to_regprocedure('app.tg_org_service_items_before()') IS NULL THEN
+     OR to_regprocedure('public.test_daftra_custom_fields(uuid)') IS NULL OR to_regprocedure('app.tg_org_service_items_before()') IS NULL
+     OR to_regprocedure('app.bill_mark_issued(public.billing_intents,jsonb)') IS NULL
+     OR to_regprocedure('app.bill_apply_push_ok(public.billing_intents,jsonb,uuid)') IS NULL THEN
     RAISE EXCEPTION 'SERVICE ITEM PRICE preflight: org_service_items (20261117000100) or bill_job_context / test_daftra_custom_fields (20261123000100) missing';
   END IF;
 END $pre$;
@@ -47705,6 +47720,219 @@ BEGIN
     'ok', jsonb_array_length(v_cf -> 'missing') = 0 AND cardinality(v_un) = 0);
 END $$;
 
+-- ---------------------------------------------------------------------
+-- 6. the opening line's total (net + VAT) for the totals checks: the opening line is sent from the job context, it is not
+--    a billing_intent_line, so the read-back (bill_apply_push_ok) and the HF5 issued check (bill_mark_issued) add it
+--    p_snap NULL / without lines → what Marsa sends (the catalogue price, the connection's service VAT rate);
+--    p_snap.lines → the line as the accounting program shows it; none → 0. The opening line is an unmarked (no [MRSL-])
+--    line whose product is the opening item's live product, else a product that item was ever linked to, else no product
+--    (pushed without a link); among those the earliest created one (lowest numeric Daftra line id; the snapshot sorts
+--    foreign lines by their JSON, not by invoice order), so a line the accountant adds later by hand — another product, or
+--    the same product again — is not taken for it
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.bill_opening_total(p_i public.billing_intents, p_snap jsonb) RETURNS numeric
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_conn jsonb; v_key text; v_rate numeric; v_pid text; v_pids text[]; x jsonb; v_q numeric; v_p numeric; v_net numeric;
+        c_num constant text := '^-?[0-9]{1,12}(\.[0-9]{1,6})?$';
+BEGIN
+  IF p_i.id IS NULL OR p_i.origin IS DISTINCT FROM 'opening' THEN RETURN 0; END IF;
+  v_conn := app.bill_conn_json(p_i.org_id);
+  v_key := coalesce(v_conn ->> 'opening_item', 'item:customs_clearance');
+  v_rate := coalesce(CASE WHEN (v_conn ->> 'default_service_vat_rate') ~ c_num THEN (v_conn ->> 'default_service_vat_rate')::numeric END, 15);
+  IF jsonb_typeof(p_snap -> 'lines') = 'array' THEN
+    SELECT i.external_product_id INTO v_pid FROM public.daftra_item_links i
+     WHERE i.org_id = p_i.org_id AND i.item_key = v_key AND i.status <> 'retired';
+    SELECT coalesce(array_agg(i.external_product_id) FILTER (WHERE i.external_product_id IS NOT NULL), ARRAY[]::text[]) INTO v_pids
+      FROM public.daftra_item_links i WHERE i.org_id = p_i.org_id AND i.item_key = v_key;
+    SELECT e.v INTO x FROM jsonb_array_elements(p_snap -> 'lines') WITH ORDINALITY e(v, n)
+     WHERE jsonb_typeof(e.v) = 'object' AND nullif(e.v ->> 'line_ref', '') IS NULL
+       AND (nullif(e.v ->> 'product_id', '') IS NULL OR e.v ->> 'product_id' = ANY (v_pids))
+     ORDER BY CASE WHEN v_pid IS NOT NULL AND e.v ->> 'product_id' = v_pid THEN 0
+                   WHEN nullif(e.v ->> 'product_id', '') IS NOT NULL THEN 1 ELSE 2 END,
+              CASE WHEN (e.v ->> 'id') ~ '^[0-9]{1,18}$' THEN (e.v ->> 'id')::numeric END NULLS LAST, e.n
+     LIMIT 1;
+    IF x IS NULL THEN RETURN 0; END IF;
+    v_q := CASE WHEN (x ->> 'quantity') ~ c_num THEN (x ->> 'quantity')::numeric ELSE 1 END;
+    v_p := CASE WHEN (x ->> 'unit_price') ~ c_num THEN (x ->> 'unit_price')::numeric ELSE 0 END;
+    IF (x ->> 'tax_rate') ~ c_num THEN v_rate := (x ->> 'tax_rate')::numeric; END IF;
+  ELSE
+    v_q := 1;
+    v_p := app.opening_unit_price(p_i.org_id, v_key);
+  END IF;
+  v_net := round(v_q * v_p, 2);
+  RETURN v_net + round(v_net * v_rate / 100, 2);
+END $$;
+REVOKE ALL ON FUNCTION app.bill_opening_total(public.billing_intents, jsonb) FROM PUBLIC, anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- 7. the read-back of a created draft expects the opening line too (20261123000100 body; only the expected total changed)
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.bill_apply_push_ok(p_i public.billing_intents, p_eff jsonb, p_job uuid) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_i public.billing_intents; v_ext text; v_state text; v_by text; v_ph text; v_rh text; v_tot numeric[]; v_url text;
+        v_rb jsonb; v_rbd date; v_rbc text; v_rbt numeric; v_link text; v_diff text[] := '{}'; v_exp numeric;
+BEGIN
+  v_ext := app.bill_ext_id(app.bill_rtext(p_eff, 'external_invoice_id', 64), 'external_invoice_id');
+  IF v_ext IS NULL THEN PERFORM app.fail('MRS_INVALID', 'external_invoice_id'); END IF;
+  IF p_i.external_invoice_id IS NOT NULL AND p_i.external_invoice_id <> v_ext THEN PERFORM app.fail('MRS_INVALID', 'external_invoice_id'); END IF;
+  PERFORM app.bill_check_invoice_free(p_i.org_id, p_i.id, v_ext);
+  v_state := coalesce(app.bill_rtext(p_eff, 'remote_state', 20), 'draft');
+  IF v_state NOT IN ('draft','issued','cancelled') THEN PERFORM app.fail('MRS_INVALID', 'remote_state'); END IF;
+  IF v_state <> 'draft' THEN
+    -- the read-back is no longer a draft: frozen (handled as a pull)
+    PERFORM app.bill_apply_pull(p_i, p_eff || jsonb_build_object('external_invoice_id', v_ext));
+    RETURN;
+  END IF;
+  v_by := app.bill_rtext(p_eff, 'found_by', 20);
+  IF v_by IS NULL OR v_by NOT IN ('ref','created','existing') THEN PERFORM app.fail('MRS_INVALID', 'found_by'); END IF;
+  v_ph := app.bill_hash(app.bill_rtext(p_eff, 'pushed_hash', 64), 'pushed_hash');
+  IF v_ph IS NULL THEN PERFORM app.fail('MRS_INVALID', 'pushed_hash'); END IF;
+  v_rh := app.bill_hash(app.bill_rtext(p_eff, 'remote_hash', 64), 'remote_hash');
+  v_tot := app.bill_totals(p_eff -> 'remote_totals');
+  v_url := app.bill_rtext(p_eff, 'daftra_url', 500);                                                                 -- L7
+  IF v_url IS NOT NULL AND v_url !~ '^https://[A-Za-z0-9.-]+(/[A-Za-z0-9_./?=&%-]*)?$' THEN PERFORM app.fail('MRS_INVALID', 'daftra_url'); END IF;
+  v_rb := p_eff -> 'read_back';
+  IF v_rb IS NOT NULL AND jsonb_typeof(v_rb) NOT IN ('object','null') THEN PERFORM app.fail('MRS_INVALID', 'read_back'); END IF;
+  UPDATE public.billing_intents i SET external_invoice_id = v_ext, status = CASE WHEN i.status = 'open' THEN 'draft' ELSE i.status END,
+         daftra_number = coalesce(app.bill_rtext(p_eff, 'daftra_number', 60), i.daftra_number),
+         daftra_status = coalesce(app.bill_rtext(p_eff, 'daftra_status', 40), i.daftra_status),
+         remote_version = coalesce(app.bill_rtext(p_eff, 'remote_version', 64), i.remote_version),
+         pushed_hash = v_ph, remote_hash = coalesce(v_rh, v_ph), pushed_at = now(), last_synced_at = now(),
+         remote_net = coalesce(v_tot[1], i.remote_net), remote_vat = coalesce(v_tot[2], i.remote_vat), remote_total = coalesce(v_tot[3], i.remote_total),
+         daftra_url = coalesce(v_url, i.daftra_url),                                                                   -- L7
+         conflict = NULL, last_error_code = NULL, last_error_message = NULL
+   WHERE i.id = p_i.id RETURNING * INTO v_i;
+  PERFORM app.bill_line_results(v_i, p_eff -> 'line_results');
+  UPDATE public.billing_intents i SET sync_state = CASE WHEN app.bill_has_pending(i.id) THEN 'pending' ELSE 'synced' END
+   WHERE i.id = p_i.id;
+  -- L7: the read-back of the draft just created (legacy assertDaftraInvoiceDateSafe_): date / client / total
+  IF jsonb_typeof(v_rb) = 'object' THEN
+    BEGIN v_rbd := app.bill_rtext(v_rb, 'date', 10)::date;
+    EXCEPTION WHEN invalid_datetime_format OR datetime_field_overflow THEN PERFORM app.fail('MRS_INVALID', 'read_back'); END;
+    v_rbc := app.bill_ext_id(app.bill_rtext(v_rb, 'client_id', 64), 'read_back');
+    v_rbt := app.fin_money(v_rb, 'total');
+    -- review (legacy assertDaftraInvoiceDateSafe_): a created draft whose stored date cannot be read is a date_mismatch too
+    IF v_i.invoice_date IS NOT NULL AND (v_rbd IS DISTINCT FROM v_i.invoice_date) AND (v_rbd IS NOT NULL OR v_by = 'created') THEN
+      PERFORM app.daftra_review_open(v_i.org_id, v_i.transaction_id, v_i.id, 'date_mismatch',
+        jsonb_build_object('expected', v_i.invoice_date, 'stored', v_rbd, 'time_zone', 'Asia/Riyadh', 'daftra_number', v_i.daftra_number));
+    END IF;
+    SELECT l.external_id INTO v_link FROM public.daftra_client_links l
+     WHERE l.org_id = v_i.org_id AND l.client_id = v_i.client_id AND l.status IN ('linked','drift');
+    IF v_rbc IS NOT NULL AND v_link IS NOT NULL AND v_rbc <> v_link THEN v_diff := v_diff || 'client'::text; END IF;
+    SELECT coalesce(sum(l.total_amount), 0) INTO v_exp FROM public.billing_intent_lines l WHERE l.intent_id = v_i.id AND l.state = 'synced';
+    v_exp := v_exp + app.bill_opening_total(v_i, NULL);                                -- 20261205000100: + the opening line sent
+    IF v_rbt IS NOT NULL AND v_by = 'created' AND v_rbt <> v_exp THEN v_diff := v_diff || 'total'::text; END IF;
+    IF (v_rb ->> 'line_count') ~ '^[0-9]{1,4}$' AND v_by = 'created'
+       AND (v_rb ->> 'line_count')::int <> (SELECT count(*)::int FROM public.billing_intent_lines l WHERE l.intent_id = v_i.id AND l.state = 'synced')
+                                            + (CASE WHEN v_i.origin = 'opening' THEN 1 ELSE 0 END) THEN
+      v_diff := v_diff || 'lines'::text;
+    END IF;
+    IF cardinality(v_diff) > 0 THEN
+      PERFORM app.daftra_review_open(v_i.org_id, v_i.transaction_id, v_i.id, 'readback_mismatch',
+        jsonb_build_object('fields', to_jsonb(v_diff), 'expected_total', v_exp, 'stored_total', v_rbt, 'expected_client_id', v_link,
+                           'stored_client_id', v_rbc, 'line_count', v_rb -> 'line_count'));
+    END IF;
+  END IF;
+  PERFORM app.bill_event(v_i.org_id, v_i.transaction_id, 'draft_synced', 'billing_intent', v_i.id,
+    jsonb_build_object('job_id', p_job, 'found_by', v_by, 'origin', v_i.origin));
+  PERFORM app.bill_tx_financial(v_i.transaction_id);
+  PERFORM app.daftra_manual_refresh(v_i.id);                                                                          -- L7
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 8. the HF5 issued check counts the opening line (20261123000100 body; only the opening total added)
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.bill_mark_issued(p_i public.billing_intents, p_eff jsonb) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_snap jsonb := p_eff -> 'remote_snapshot'; v_refs text[]; v_inv uuid[] := '{}'; v_late uuid[] := '{}'; v_l public.billing_intent_lines;
+        v_hash text := p_eff ->> 'remote_hash'; v_held jsonb; v_det jsonb; v_hf5 boolean := NOT app.daftra_allow_update(p_i.org_id);
+        v_tot numeric[] := app.bill_totals(p_eff -> 'remote_totals'); v_lines numeric;
+        v_man public.billing_review_items; v_hand uuid[] := '{}'; v_exp numeric; v_as_listed boolean := false;
+        v_open numeric := 0;                                                                   -- 20261205000100
+BEGIN
+  v_refs := ARRAY(SELECT x ->> 'line_ref' FROM jsonb_array_elements(CASE WHEN jsonb_typeof(v_snap -> 'lines') = 'array' THEN v_snap -> 'lines' ELSE '[]'::jsonb END) x
+                   WHERE jsonb_typeof(x) = 'object' AND x ->> 'line_ref' IS NOT NULL);
+  -- 20261205000100: the opening line (customs clearance at the catalogue price, no [MRSL-] marker, not a billing line) is on
+  -- the issued invoice too: the HF5 totals check counts it (as Daftra shows it: the employee may have changed the amount)
+  IF v_hf5 AND p_i.origin = 'opening' THEN v_open := app.bill_opening_total(p_i, v_snap); END IF;
+  -- review (HF5): the lines an OPEN manual_in_daftra item asked the accountant to add / remove by hand carry no [MRSL-] marker
+  -- on the issued invoice. When the official total equals the synced lines + the listed additions, the hand edit is taken as
+  -- done (the additions are invoiced, the removals removed; item resolved 'issued_as_listed'). Otherwise they are HELD: not
+  -- removed, no late_charge, the item stays open (details.issued) and a human decides (done_in_daftra → invoiced; dismiss →
+  -- not billed: removed + late_charge); the totals mismatch item is raised as before.
+  IF v_hf5 AND p_i.origin <> 'linked' THEN
+    SELECT * INTO v_man FROM public.billing_review_items r WHERE r.intent_id = p_i.id AND r.kind = 'manual_in_daftra' AND r.status = 'open' FOR UPDATE;
+    IF v_man.id IS NOT NULL THEN
+      v_hand := ARRAY(SELECT (x ->> 'line_id')::uuid FROM jsonb_array_elements(coalesce(v_man.details -> 'add', '[]'::jsonb) || coalesce(v_man.details -> 'remove', '[]'::jsonb)) x
+                       WHERE x ->> 'line_id' ~ '^[0-9a-f-]{36}$');
+      SELECT coalesce(sum(l.total_amount) FILTER (WHERE l.state = 'synced' OR (l.state = 'pending_add' AND l.id = ANY (v_hand))), 0) INTO v_exp
+        FROM public.billing_intent_lines l WHERE l.intent_id = p_i.id AND NOT (l.line_ref = ANY (v_refs) AND l.state = 'pending_remove');
+      v_as_listed := v_tot[3] IS NOT NULL AND v_tot[3] = v_exp + v_open;                                    -- 20261205000100
+    END IF;
+  END IF;
+  FOR v_l IN SELECT * FROM public.billing_intent_lines l WHERE l.intent_id = p_i.id AND l.state <> 'removed' ORDER BY l.id FOR UPDATE LOOP
+    IF v_l.line_ref = ANY (v_refs) OR (v_l.manual_in_daftra AND v_l.state = 'synced') THEN                         -- L7
+      UPDATE public.billing_intent_lines l SET state = 'synced', pushed = true WHERE l.id = v_l.id AND (l.state <> 'synced' OR NOT l.pushed);
+      v_inv := v_inv || v_l.charge_id;
+    ELSIF v_l.id = ANY (v_hand) AND v_l.state IN ('pending_add','pending_remove') THEN                               -- review
+      IF v_as_listed AND v_l.state = 'pending_add' THEN
+        UPDATE public.billing_intent_lines l SET state = 'synced', manual_in_daftra = true, pushed = true WHERE l.id = v_l.id;
+        v_inv := v_inv || v_l.charge_id;
+      ELSIF v_as_listed THEN
+        UPDATE public.billing_intent_lines l SET state = 'removed', removed_at = now(), removed_reason = coalesce(v_l.removed_reason, 'removed_in_daftra')
+         WHERE l.id = v_l.id;
+      END IF;                                                                     -- else held for the open manual_in_daftra item
+    ELSE
+      UPDATE public.billing_intent_lines l SET state = 'removed', removed_at = now(),
+             removed_reason = CASE WHEN v_l.state = 'pending_remove' THEN coalesce(v_l.removed_reason, 'not_on_issued') ELSE 'not_on_issued' END
+       WHERE l.id = v_l.id;
+      IF v_l.state <> 'pending_remove' THEN v_late := v_late || v_l.charge_id; END IF;
+    END IF;
+  END LOOP;
+  PERFORM app.bill_set_charges(v_inv, 'invoiced');
+  INSERT INTO public.billing_review_items (org_id, transaction_id, intent_id, charge_id, kind, details)
+  SELECT p_i.org_id, p_i.transaction_id, p_i.id, c, 'late_charge', jsonb_build_object('reason', 'not_on_issued') FROM unnest(v_late) c
+  ON CONFLICT (charge_id, kind) WHERE status = 'open' DO NOTHING;
+  -- backstop: a line Marsa already removed locally whose line_ref is on the issued invoice (its charge is held, never
+  -- billed twice, until a human resolves the mismatch)
+  SELECT coalesce(jsonb_agg(jsonb_build_object('line_ref', l.line_ref, 'line_id', l.id, 'charge_id', l.charge_id) ORDER BY l.line_ref), '[]'::jsonb)
+    INTO v_held
+    FROM public.billing_intent_lines l
+   WHERE l.intent_id = p_i.id AND l.state = 'removed' AND l.line_ref = ANY (v_refs)
+     AND NOT EXISTS (SELECT 1 FROM public.billing_intent_lines o WHERE o.charge_id = l.charge_id AND o.state <> 'removed');
+  SELECT coalesce(sum(l.total_amount), 0) INTO v_lines FROM public.billing_intent_lines l WHERE l.intent_id = p_i.id AND l.state = 'synced';
+  IF (NOT v_hf5 AND p_i.pushed_hash IS NOT NULL AND v_hash IS DISTINCT FROM p_i.pushed_hash)
+     OR (v_hf5 AND p_i.origin <> 'linked' AND v_tot[3] IS NOT NULL AND v_tot[3] <> v_lines + v_open)                     -- L7; 20261205000100
+     OR jsonb_array_length(v_held) > 0 THEN
+    -- the same redaction and bounds as the conflict path (bill_apply_conflict); an oversize snapshot / diff is dropped
+    v_det := jsonb_build_object('diff', app.bill_diff_cap(p_eff -> 'diff'), 'pushed_hash', p_i.pushed_hash, 'remote_hash', v_hash,
+                                'remote_snapshot', app.bill_redact(CASE WHEN jsonb_typeof(v_snap) = 'object' THEN v_snap END),
+                                'removed_on_remote', v_held);
+    IF jsonb_array_length(v_held) = 0 THEN v_det := v_det - 'removed_on_remote'; END IF;
+    IF v_hf5 THEN v_det := v_det || jsonb_build_object('reason', 'totals', 'remote_total', v_tot[3], 'lines_total', v_lines); END IF;   -- L7
+    IF v_hf5 AND v_open <> 0 THEN v_det := v_det || jsonb_build_object('opening_total', v_open); END IF;                 -- 20261205000100
+    v_det := app.bill_bound_details(v_det);
+    INSERT INTO public.billing_review_items (org_id, transaction_id, intent_id, kind, details)
+    VALUES (p_i.org_id, p_i.transaction_id, p_i.id, 'issued_mismatch', v_det)
+    ON CONFLICT (intent_id, kind) WHERE status = 'open' AND charge_id IS NULL DO NOTHING;
+  END IF;
+  UPDATE public.billing_intents i SET status = 'issued', issued_at = coalesce(i.issued_at, now()), sync_state = 'synced', conflict = NULL
+   WHERE i.id = p_i.id;
+  -- L7: nothing is left to change by hand on an issued invoice (Daftra is the truth; late charges are their own items).
+  -- review: an item whose listed lines are held stays open (issued: true) for the human decision
+  IF v_man.id IS NOT NULL AND NOT v_as_listed AND cardinality(v_hand) > 0
+     AND EXISTS (SELECT 1 FROM public.billing_intent_lines l WHERE l.id = ANY (v_hand) AND l.state IN ('pending_add','pending_remove')) THEN
+    UPDATE public.billing_review_items r SET details = r.details || jsonb_build_object('issued', true, 'issued_total', v_tot[3], 'expected_total', v_exp)
+     WHERE r.id = v_man.id;
+  ELSE
+    UPDATE public.billing_review_items r SET status = 'resolved', resolution = CASE WHEN v_as_listed THEN 'issued_as_listed' ELSE 'issued' END,
+           resolved_at = now()
+     WHERE r.intent_id = p_i.id AND r.kind = 'manual_in_daftra' AND r.status = 'open';
+  END IF;
+  PERFORM app.bill_event(p_i.org_id, p_i.transaction_id, 'issued', 'billing_intent', p_i.id,
+    jsonb_build_object('charge_ids', to_jsonb(v_inv), 'late_charge_ids', CASE WHEN cardinality(v_late) > 0 THEN to_jsonb(v_late) END));
+END $$;
+
 -- ===== migrations/20261206000100_storage_gate.sql =====
 -- =====================================================================
 -- 20261206000100_storage_gate — no appointment while a container's storage (groundage) invoice is unpaid, with a
@@ -47712,42 +47940,60 @@ END $$;
 --   Owner (Jeddah customs update): the storage invoice issued with the container now falls on the clearance office, so it
 --   goes to the client to pay BEFORE the appointment is booked. Recording an appointment for a container whose storage is
 --   not settled is refused; a manager may approve booking before payment (who / when / why kept); the follow-up goes on.
---   Jeddah only today — a per-org, per-port SETTING, so another port is a row, not a migration.
+--   Jeddah only today — a per-org, per-port SETTING, so another port is a row, not a migration. Final decision e6b31a4:
+--   unpaid storage BLOCKS (not a warning); a container not answered yet (no storage row / NULL state) counts as unpaid.
 --   1. public.status_labels domain 'container_storage_state' (a value list in settings, not a CHECK):
 --        none  = no storage invoice · issued = issued, not yet sent to the client · sent = sent, awaiting payment ·
---        paid  = paid. NULL on a container = not answered yet.
---   2. public.containers + storage_state / storage_invoice_no / storage_amount / storage_sent_at / storage_paid_at /
---      storage_note (staff edit them like the other container columns: RLS transport writers, audited by trg_audit).
---      app.tg_containers_storage_before: the state must be a status_labels code; sent_at / paid_at stamped when reached.
+--        paid  = paid. No row / NULL = not answered yet (= unpaid). Settled = none / paid; any other state blocks.
+--   2. public.container_storage (one row per container: storage_state / storage_invoice_no / storage_amount /
+--      storage_sent_at / storage_paid_at / storage_note). Internal: a SEPARATE staff-only table, NOT columns of
+--      public.containers (clients read their containers through RLS, so a column there would reach the portal).
+--      RLS: staff of the transaction read; written only through public.set_container_storage (transport writers, the
+--      same rule as the container); audited (trg_audit); deleted with its container (FK ON DELETE CASCADE).
+--      app.tg_container_storage_before: the state must be a status_labels code; sent_at / paid_at stamped when reached.
 --   3. public.storage_gate_ports (org_id, port_code → customs_ports, is_active): the ports where the gate applies. Staff read,
 --      the org admin inserts / updates (no DELETE: is_active), audited. Every existing org gets SAJED (Jeddah Islamic Port);
 --      a new org gets it through app.tg_organizations_seed_storage_gate.
 --   4. public.tx_storage_overrides: the manager approval to book before payment (one live per transaction; insert only
 --      through approve_storage_override; staff of the transaction read; audited).
---   5. app.storage_gate_block(tx, container) → NULL | 'unpaid': the gate applies (an active storage_gate_ports row for the
---      transaction's port, a container transaction, not cancelled), no live override, and the container (or, without one,
---      any container of the transaction) has storage_state NULL / issued / sent.
---   6. app.tg_port_appointments_storage_gate: BEFORE INSERT on port_appointments (every path: create_appointment,
---      save_movement, approve_appointment_draft → save_movement) → app.fail('MRS_STORAGE_UNPAID', container_no | 'transaction').
---      Not for a reschedule (rescheduled_from_id: the booking already exists), a closed status (completed / missed /
---      cancelled) or a run without a user request (app.auto_lifecycle_on() false: the legacy import, maintenance).
+--   5. app.storage_gate_applies(tx): an active storage_gate_ports row for the transaction's port, a container transaction,
+--      and the transaction is live (not cancelled, operational status not closed / cancelled: a closed or cancelled
+--      transaction books nothing, so its containers are ignored). app.storage_gate_block(tx, container) → NULL | 'unpaid':
+--      the gate applies, no live override, and the container (or, without one, any container of the transaction) is not
+--      settled (no row / NULL / issued / sent).
+--   6. the gate, with no bypass (app.auto_lifecycle_on() false — the legacy import, maintenance — is the only run not gated):
+--      a. app.tg_port_appointments_storage_gate, BEFORE INSERT OR UPDATE OF container_id, transaction_id, status on
+--         port_appointments → app.fail('MRS_STORAGE_UNPAID', container_no | 'transaction') for every OPEN booking
+--         (requested / confirmed): a new one (create_appointment, save_movement, approve_appointment_draft → save_movement),
+--         a RESCHEDULE (reschedule_appointment / save_movement with a new time: the new row is a new booking), an UPDATE
+--         that moves a booking to another container (save_movement edit) or transaction, and a booking re-opened from a
+--         closed status. Not gated: an open booking updated without a container / transaction change (driver, truck, time
+--         window, confirmation), a closed status (completed / missed / cancelled / rescheduled).
+--      b. app.tg_transactions_storage_gate, BEFORE UPDATE OF port_code, cargo_unit_type on transactions: moving a
+--         transaction with an open booking to a gated port (or to containers) is refused while that booking's container
+--         is not settled (the booking would otherwise reach Jeddah without passing the gate).
 --   7. public.tx_storage_gate(p_tx) → {applies, port_code, blocked, containers [{id, container_no, storage_state, …}],
 --      override {reason, approved_by_name, approved_at} | null, can_override} — staff of the transaction.
+--      public.set_container_storage(p_container, p) → the container's storage row (same keys as tx_storage_gate.containers);
+--      p = {storage_state?, storage_invoice_no?, storage_amount?, storage_note?} (keys present only; null clears) —
+--      transport writers of the transaction (not cancelled).
 --      public.approve_storage_override(p_tx, p_reason) → the override row — senior ops (operations_manager, branch_manager,
 --      supervisor, admin) of the transaction; reason 3 … 500 characters; one live override (a second → MRS_CONFLICT).
 --   8. conversion: app.convert_keep_tables (20261204000100 body) + storage_gate_ports (kept); app.convert_delete_tables
---      (20261128000100 body) + tx_storage_overrides (deleted, before the transactions).
+--      (20261128000100 body) + tx_storage_overrides, container_storage (deleted, before the transactions / containers).
 --   Re-runnable (IF NOT EXISTS / CREATE OR REPLACE / DROP … IF EXISTS + CREATE / ON CONFLICT).
---   Re-pasting 20261128000100 or 20261204000100 after this file drops the two tables from the conversion lists: re-paste
+--   Re-pasting 20261128000100 or 20261204000100 after this file drops the three tables from the conversion lists: re-paste
 --   this file straight after.
---   Data: one storage_gate_ports row (SAJED) per existing organisation; no existing container or appointment changes.
+--   Data: one storage_gate_ports row (SAJED) per existing organisation; no existing container or appointment changes (an
+--   existing open Jeddah booking stays; rescheduling or moving it afterwards passes the gate).
 --   Down-path: re-create app.convert_keep_tables (20261204000100) and app.convert_delete_tables (20261128000100) verbatim;
---   DROP TRIGGER trg_storage_gate ON public.port_appointments, trg_storage_before ON public.containers,
+--   DROP TRIGGER trg_storage_gate ON public.port_appointments, trg_storage_gate ON public.transactions,
 --   trg_seed_storage_gate ON public.organizations; DROP FUNCTION public.approve_storage_override(uuid, text),
---   public.tx_storage_gate(uuid), app.tg_port_appointments_storage_gate(), app.storage_gate_block(uuid, uuid), app.storage_gate_applies(uuid),
---   app.tg_containers_storage_before(), app.tg_organizations_seed_storage_gate(); DROP TABLE public.tx_storage_overrides,
---   public.storage_gate_ports; ALTER TABLE public.containers DROP COLUMN storage_state, storage_invoice_no, storage_amount,
---   storage_sent_at, storage_paid_at, storage_note; DELETE FROM public.status_labels WHERE domain = 'container_storage_state';
+--   public.set_container_storage(uuid, jsonb), public.tx_storage_gate(uuid), app.tg_port_appointments_storage_gate(),
+--   app.tg_transactions_storage_gate(), app.storage_gate_block(uuid, uuid), app.storage_gate_applies(uuid),
+--   app.storage_settled(text), app.container_storage_json(uuid), app.tg_container_storage_before(),
+--   app.tg_organizations_seed_storage_gate(); DROP TABLE public.container_storage, public.tx_storage_overrides,
+--   public.storage_gate_ports; DELETE FROM public.status_labels WHERE domain = 'container_storage_state';
 --   DELETE FROM public.schema_versions WHERE version = '20261206000100'.
 --   No BEGIN/COMMIT (the SQL editor wraps the run).
 -- =====================================================================
@@ -47779,23 +48025,38 @@ ON CONFLICT (domain, code) DO UPDATE SET sort = EXCLUDED.sort, label_ar = EXCLUD
   client_visible = EXCLUDED.client_visible;
 
 -- ---------------------------------------------------------------------
--- 2. the storage columns of a container
+-- 2. the storage answer of a container: a staff-only table (clients read public.containers through RLS)
 -- ---------------------------------------------------------------------
-ALTER TABLE public.containers ADD COLUMN IF NOT EXISTS storage_state text;
-ALTER TABLE public.containers ADD COLUMN IF NOT EXISTS storage_invoice_no text;
-ALTER TABLE public.containers ADD COLUMN IF NOT EXISTS storage_amount numeric(12,2);
-ALTER TABLE public.containers ADD COLUMN IF NOT EXISTS storage_sent_at timestamptz;
-ALTER TABLE public.containers ADD COLUMN IF NOT EXISTS storage_paid_at timestamptz;
-ALTER TABLE public.containers ADD COLUMN IF NOT EXISTS storage_note text;
-ALTER TABLE public.containers DROP CONSTRAINT IF EXISTS containers_storage_fields_check;
-ALTER TABLE public.containers ADD CONSTRAINT containers_storage_fields_check CHECK (
-  (storage_invoice_no IS NULL OR char_length(storage_invoice_no) BETWEEN 1 AND 60)
-  AND (storage_amount IS NULL OR (storage_amount >= 0 AND storage_amount <= 10000000))
-  AND (storage_note IS NULL OR char_length(storage_note) <= 500));
-COMMENT ON COLUMN public.containers.storage_state IS 'Storage (groundage) invoice state (20261206000100): status_labels container_storage_state; NULL = not answered yet.';
+CREATE TABLE IF NOT EXISTS public.container_storage (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id              uuid NOT NULL REFERENCES public.organizations(id) ON DELETE RESTRICT,
+  transaction_id      uuid NOT NULL,
+  container_id        uuid NOT NULL,
+  storage_state       text,
+  storage_invoice_no  text,
+  storage_amount      numeric(12,2),
+  storage_sent_at     timestamptz,
+  storage_paid_at     timestamptz,
+  storage_note        text,
+  created_by          uuid,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT container_storage_container_uniq UNIQUE (container_id),
+  CONSTRAINT container_storage_container_fk FOREIGN KEY (container_id, transaction_id)
+    REFERENCES public.containers(id, transaction_id) ON DELETE CASCADE,
+  CONSTRAINT container_storage_tx_fk FOREIGN KEY (transaction_id, org_id) REFERENCES public.transactions(id, org_id) ON DELETE CASCADE,
+  CONSTRAINT container_storage_fields_check CHECK (
+    (storage_invoice_no IS NULL OR char_length(storage_invoice_no) BETWEEN 1 AND 60)
+    AND (storage_amount IS NULL OR (storage_amount >= 0 AND storage_amount <= 10000000))
+    AND (storage_note IS NULL OR char_length(storage_note) <= 500)),
+  UNIQUE (id, org_id)
+);
+CREATE INDEX IF NOT EXISTS container_storage_tx_idx ON public.container_storage (transaction_id);
+COMMENT ON TABLE public.container_storage IS 'Storage gate (20261206000100): the storage (groundage) invoice answer of a container (staff only; written by set_container_storage). No row / NULL state = not answered yet = unpaid.';
+COMMENT ON COLUMN public.container_storage.storage_state IS 'status_labels container_storage_state (none / issued / sent / paid); NULL = not answered yet.';
 
 -- definer: the state list (status_labels via app.is_code) is checked whoever writes; not callable directly (REVOKE below)
-CREATE OR REPLACE FUNCTION app.tg_containers_storage_before() RETURNS trigger
+CREATE OR REPLACE FUNCTION app.tg_container_storage_before() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 BEGIN
   IF NEW.storage_state IS NOT NULL AND NOT app.is_code('container_storage_state', NEW.storage_state) THEN
@@ -47811,10 +48072,10 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
-REVOKE ALL ON FUNCTION app.tg_containers_storage_before() FROM PUBLIC, anon, authenticated;
-DROP TRIGGER IF EXISTS trg_storage_before ON public.containers;
-CREATE TRIGGER trg_storage_before BEFORE INSERT OR UPDATE ON public.containers
-  FOR EACH ROW EXECUTE FUNCTION app.tg_containers_storage_before();
+REVOKE ALL ON FUNCTION app.tg_container_storage_before() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS trg_storage_before ON public.container_storage;
+CREATE TRIGGER trg_storage_before BEFORE INSERT OR UPDATE ON public.container_storage
+  FOR EACH ROW EXECUTE FUNCTION app.tg_container_storage_before();
 
 -- ---------------------------------------------------------------------
 -- 3. the ports where the gate applies (per org; Jeddah today)
@@ -47853,7 +48114,7 @@ COMMENT ON TABLE public.tx_storage_overrides IS 'Storage gate (20261206000100): 
 DO $$
 DECLARE t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['storage_gate_ports','tx_storage_overrides'] LOOP
+  FOREACH t IN ARRAY ARRAY['storage_gate_ports','tx_storage_overrides','container_storage'] LOOP
     EXECUTE format('DROP TRIGGER IF EXISTS trg_touch ON public.%I', t);
     EXECUTE format('CREATE TRIGGER trg_touch BEFORE UPDATE ON public.%I FOR EACH ROW EXECUTE FUNCTION app.touch_updated_at()', t);
     EXECUTE format('DROP TRIGGER IF EXISTS trg_stamp ON public.%I', t);
@@ -47871,7 +48132,11 @@ DROP TRIGGER IF EXISTS trg_guard ON public.tx_storage_overrides;
 CREATE TRIGGER trg_guard BEFORE UPDATE ON public.tx_storage_overrides
   FOR EACH ROW EXECUTE FUNCTION app.tg_guard_generic('id', 'org_id', 'transaction_id', 'reason', 'approved_by', 'approved_at', 'created_by', 'created_at');
 
-SELECT app.drop_policies(t) FROM unnest(ARRAY['storage_gate_ports','tx_storage_overrides']) t;
+DROP TRIGGER IF EXISTS trg_guard ON public.container_storage;
+CREATE TRIGGER trg_guard BEFORE UPDATE ON public.container_storage
+  FOR EACH ROW EXECUTE FUNCTION app.tg_guard_generic('id', 'org_id', 'transaction_id', 'container_id', 'created_by', 'created_at');
+
+SELECT app.drop_policies(t) FROM unnest(ARRAY['storage_gate_ports','tx_storage_overrides','container_storage']) t;
 -- the gate ports: staff read; the org admin edits (no DELETE: is_active)
 CREATE POLICY storage_gate_ports_select ON public.storage_gate_ports FOR SELECT TO authenticated USING (app.is_staff(org_id));
 CREATE POLICY storage_gate_ports_insert ON public.storage_gate_ports FOR INSERT TO authenticated
@@ -47885,6 +48150,11 @@ CREATE POLICY tx_storage_overrides_select ON public.tx_storage_overrides FOR SEL
   USING (app.has_tx_role(transaction_id, app.staff_roles()));
 REVOKE INSERT, UPDATE, DELETE ON public.tx_storage_overrides FROM authenticated;
 GRANT SELECT ON public.tx_storage_overrides TO authenticated;
+-- the storage answers: staff of the transaction read (never a client); written only by set_container_storage (definer)
+CREATE POLICY container_storage_select ON public.container_storage FOR SELECT TO authenticated
+  USING (app.has_tx_role(transaction_id, app.staff_roles()));
+REVOKE INSERT, UPDATE, DELETE ON public.container_storage FROM authenticated;
+GRANT SELECT ON public.container_storage TO authenticated;
 
 -- Jeddah for every existing org; a new org gets it on creation
 INSERT INTO public.storage_gate_ports (org_id, port_code)
@@ -47908,11 +48178,20 @@ CREATE TRIGGER trg_seed_storage_gate AFTER INSERT ON public.organizations
 -- ---------------------------------------------------------------------
 -- 5. the gate
 -- ---------------------------------------------------------------------
+-- settled = no storage invoice / paid; anything else (not answered, issued, sent, a state added later) is unpaid
+CREATE OR REPLACE FUNCTION app.storage_settled(p_state text) RETURNS boolean
+LANGUAGE sql IMMUTABLE SET search_path = '' AS $$
+  SELECT coalesce(p_state IN ('none', 'paid'), false)
+$$;
+REVOKE ALL ON FUNCTION app.storage_settled(text) FROM PUBLIC, anon, authenticated;
+
+-- a live container transaction at an active gate port (a cancelled / closed transaction books nothing: ignored)
 CREATE OR REPLACE FUNCTION app.storage_gate_applies(p_tx uuid) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
   SELECT EXISTS (SELECT 1 FROM public.transactions t
                    JOIN public.storage_gate_ports g ON g.org_id = t.org_id AND g.port_code = t.port_code AND g.is_active
-                  WHERE t.id = p_tx AND t.cancelled_at IS NULL AND coalesce(t.cargo_unit_type, 'container') = 'container')
+                  WHERE t.id = p_tx AND t.cancelled_at IS NULL AND coalesce(t.operational_status, '') NOT IN ('closed', 'cancelled')
+                    AND coalesce(t.cargo_unit_type, 'container') = 'container')
 $$;
 REVOKE ALL ON FUNCTION app.storage_gate_applies(uuid) FROM PUBLIC, anon, authenticated;
 
@@ -47921,27 +48200,31 @@ CREATE OR REPLACE FUNCTION app.storage_gate_block(p_tx uuid, p_container uuid) R
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
   SELECT CASE WHEN app.storage_gate_applies(p_tx)
                AND NOT EXISTS (SELECT 1 FROM public.tx_storage_overrides o WHERE o.transaction_id = p_tx AND o.revoked_at IS NULL)
-               AND EXISTS (SELECT 1 FROM public.containers c
+               AND EXISTS (SELECT 1 FROM public.containers c LEFT JOIN public.container_storage s ON s.container_id = c.id
                             WHERE c.transaction_id = p_tx AND (p_container IS NULL OR c.id = p_container)
-                              AND (c.storage_state IS NULL OR c.storage_state IN ('issued', 'sent')))
+                              AND NOT app.storage_settled(s.storage_state))
               THEN 'unpaid' END
 $$;
 REVOKE ALL ON FUNCTION app.storage_gate_block(uuid, uuid) FROM PUBLIC, anon, authenticated;
 
 -- ---------------------------------------------------------------------
--- 6. every new booking passes the gate
+-- 6. every open booking passes the gate: new, rescheduled, moved to another container / transaction, re-opened
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.tg_port_appointments_storage_gate() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE v_no text;
 BEGIN
-  IF NEW.rescheduled_from_id IS NOT NULL OR NEW.status IN ('completed', 'missed', 'cancelled') OR NOT app.auto_lifecycle_on() THEN
+  -- a closed / replaced booking, or a run without a user request (legacy import, maintenance): not gated
+  IF NEW.status NOT IN ('requested', 'confirmed') OR NOT app.auto_lifecycle_on() THEN RETURN NEW; END IF;
+  -- an open booking updated in place (driver, truck, window, confirmation) on the same container / transaction
+  IF TG_OP = 'UPDATE' AND OLD.status IN ('requested', 'confirmed')
+     AND NEW.container_id IS NOT DISTINCT FROM OLD.container_id AND NEW.transaction_id IS NOT DISTINCT FROM OLD.transaction_id THEN
     RETURN NEW;
   END IF;
   IF app.storage_gate_block(NEW.transaction_id, NEW.container_id) IS NOT NULL THEN
-    SELECT c.container_no INTO v_no FROM public.containers c
+    SELECT c.container_no INTO v_no FROM public.containers c LEFT JOIN public.container_storage s ON s.container_id = c.id
      WHERE c.transaction_id = NEW.transaction_id AND (NEW.container_id IS NULL OR c.id = NEW.container_id)
-       AND (c.storage_state IS NULL OR c.storage_state IN ('issued', 'sent'))
+       AND NOT app.storage_settled(s.storage_state)
      ORDER BY c.container_no LIMIT 1;
     PERFORM app.fail('MRS_STORAGE_UNPAID', coalesce(v_no, 'transaction'));
   END IF;
@@ -47949,12 +48232,49 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION app.tg_port_appointments_storage_gate() FROM PUBLIC, anon, authenticated;
 DROP TRIGGER IF EXISTS trg_storage_gate ON public.port_appointments;
-CREATE TRIGGER trg_storage_gate BEFORE INSERT ON public.port_appointments
+CREATE TRIGGER trg_storage_gate BEFORE INSERT OR UPDATE OF container_id, transaction_id, status ON public.port_appointments
   FOR EACH ROW EXECUTE FUNCTION app.tg_port_appointments_storage_gate();
 
+-- a transaction moved to a gated port (or to containers) with an open booking: that booking passes the gate now
+-- (BEFORE: the NEW port is not stored yet, so the check reads NEW, not app.storage_gate_applies)
+CREATE OR REPLACE FUNCTION app.tg_transactions_storage_gate() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_no text;
+BEGIN
+  IF NOT app.auto_lifecycle_on() OR NEW.cancelled_at IS NOT NULL OR coalesce(NEW.operational_status, '') IN ('closed', 'cancelled')
+     OR coalesce(NEW.cargo_unit_type, 'container') <> 'container'
+     OR NOT EXISTS (SELECT 1 FROM public.storage_gate_ports g WHERE g.org_id = NEW.org_id AND g.port_code = NEW.port_code AND g.is_active)
+     OR EXISTS (SELECT 1 FROM public.tx_storage_overrides o WHERE o.transaction_id = NEW.id AND o.revoked_at IS NULL) THEN
+    RETURN NEW;
+  END IF;
+  SELECT c.container_no INTO v_no
+    FROM public.port_appointments a JOIN public.containers c ON c.transaction_id = NEW.id AND (a.container_id IS NULL OR c.id = a.container_id)
+    LEFT JOIN public.container_storage s ON s.container_id = c.id
+   WHERE a.transaction_id = NEW.id AND a.status IN ('requested', 'confirmed') AND NOT app.storage_settled(s.storage_state)
+   ORDER BY c.container_no LIMIT 1;
+  IF v_no IS NOT NULL THEN PERFORM app.fail('MRS_STORAGE_UNPAID', v_no); END IF;
+  RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION app.tg_transactions_storage_gate() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS trg_storage_gate ON public.transactions;
+CREATE TRIGGER trg_storage_gate BEFORE UPDATE OF port_code, cargo_unit_type ON public.transactions
+  FOR EACH ROW WHEN (OLD.port_code IS DISTINCT FROM NEW.port_code OR OLD.cargo_unit_type IS DISTINCT FROM NEW.cargo_unit_type)
+  EXECUTE FUNCTION app.tg_transactions_storage_gate();
+
 -- ---------------------------------------------------------------------
--- 7. read + override
+-- 7. read, write, override
 -- ---------------------------------------------------------------------
+-- one container's storage answer (no row → every storage key null)
+CREATE OR REPLACE FUNCTION app.container_storage_json(p_container uuid) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT jsonb_build_object('id', c.id, 'container_no', c.container_no, 'storage_state', s.storage_state,
+                            'storage_invoice_no', s.storage_invoice_no, 'storage_amount', s.storage_amount,
+                            'storage_sent_at', s.storage_sent_at, 'storage_paid_at', s.storage_paid_at, 'storage_note', s.storage_note)
+    FROM public.containers c LEFT JOIN public.container_storage s ON s.container_id = c.id
+   WHERE c.id = p_container
+$$;
+REVOKE ALL ON FUNCTION app.container_storage_json(uuid) FROM PUBLIC, anon, authenticated;
+
 CREATE OR REPLACE FUNCTION public.tx_storage_gate(p_tx uuid) RETURNS jsonb
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
 DECLARE v_t public.transactions; v_o public.tx_storage_overrides; v_applies boolean;
@@ -47967,10 +48287,7 @@ BEGIN
   RETURN jsonb_build_object(
     'applies', v_applies, 'port_code', v_t.port_code,
     'blocked', app.storage_gate_block(v_t.id, NULL) IS NOT NULL,
-    'containers', coalesce((SELECT jsonb_agg(jsonb_build_object('id', c.id, 'container_no', c.container_no, 'storage_state', c.storage_state,
-                                              'storage_invoice_no', c.storage_invoice_no, 'storage_amount', c.storage_amount,
-                                              'storage_sent_at', c.storage_sent_at, 'storage_paid_at', c.storage_paid_at,
-                                              'storage_note', c.storage_note) ORDER BY c.container_no)
+    'containers', coalesce((SELECT jsonb_agg(app.container_storage_json(c.id) ORDER BY c.container_no)
                               FROM public.containers c WHERE c.transaction_id = v_t.id), '[]'::jsonb),
     'override', CASE WHEN v_o.id IS NOT NULL THEN jsonb_build_object('id', v_o.id, 'reason', v_o.reason, 'approved_at', v_o.approved_at,
                        'approved_by_name', (SELECT p.full_name FROM public.profiles p WHERE p.id = v_o.approved_by)) END,
@@ -47978,6 +48295,41 @@ BEGIN
 END $$;
 REVOKE EXECUTE ON FUNCTION public.tx_storage_gate(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.tx_storage_gate(uuid) TO authenticated;
+
+-- set_container_storage(p_container, {storage_state?, storage_invoice_no?, storage_amount?, storage_note?}): the keys
+-- present are written (JSON null / '' clears); transport writers of the transaction (the rule of the container itself)
+CREATE OR REPLACE FUNCTION public.set_container_storage(p_container uuid, p jsonb) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_c public.containers; v_s public.container_storage; v_st text; v_no text; v_amt numeric; v_note text; v_raw text;
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  IF p IS NULL OR jsonb_typeof(p) <> 'object' THEN PERFORM app.fail('MRS_INVALID', 'payload'); END IF;
+  PERFORM app.only_keys(p, ARRAY['storage_state','storage_invoice_no','storage_amount','storage_note']);
+  SELECT * INTO v_c FROM public.containers c WHERE c.id = p_container;
+  IF v_c.id IS NULL OR NOT app.has_tx_role(v_c.transaction_id, app.staff_roles()) THEN PERFORM app.fail('MRS_NOT_FOUND', 'container'); END IF;
+  PERFORM app.g3_lock_tx(v_c.transaction_id, app.transport_writer_roles());
+  SELECT * INTO v_s FROM public.container_storage s WHERE s.container_id = v_c.id FOR UPDATE;
+  v_st := CASE WHEN p ? 'storage_state' THEN app.ptext(p, 'storage_state', 40) ELSE v_s.storage_state END;
+  v_no := CASE WHEN p ? 'storage_invoice_no' THEN app.ptext(p, 'storage_invoice_no', 60) ELSE v_s.storage_invoice_no END;
+  v_note := CASE WHEN p ? 'storage_note' THEN app.ptext(p, 'storage_note', 500) ELSE v_s.storage_note END;
+  IF p ? 'storage_amount' THEN
+    v_raw := CASE WHEN jsonb_typeof(p -> 'storage_amount') IN ('number','string') THEN p ->> 'storage_amount' END;
+    IF jsonb_typeof(p -> 'storage_amount') NOT IN ('number','string','null') THEN PERFORM app.fail('MRS_INVALID', 'storage_amount'); END IF;
+    v_amt := app.pnum(jsonb_build_object('storage_amount', v_raw), 'storage_amount', 10000000);
+  ELSE
+    v_amt := v_s.storage_amount;
+  END IF;
+  IF v_s.id IS NULL THEN
+    INSERT INTO public.container_storage (org_id, transaction_id, container_id, storage_state, storage_invoice_no, storage_amount, storage_note)
+    VALUES (v_c.org_id, v_c.transaction_id, v_c.id, v_st, v_no, v_amt, v_note);
+  ELSE
+    UPDATE public.container_storage s SET storage_state = v_st, storage_invoice_no = v_no, storage_amount = v_amt, storage_note = v_note
+     WHERE s.id = v_s.id;
+  END IF;
+  RETURN app.container_storage_json(v_c.id);
+END $$;
+REVOKE EXECUTE ON FUNCTION public.set_container_storage(uuid, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.set_container_storage(uuid, jsonb) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.approve_storage_override(p_tx uuid, p_reason text) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
@@ -48002,7 +48354,7 @@ GRANT EXECUTE ON FUNCTION public.approve_storage_override(uuid, text) TO authent
 -- ---------------------------------------------------------------------
 -- 8. conversion (20261115000100 convert_in_place): the gate ports are settings, KEPT; the overrides are transaction data,
 --    DELETED before the transactions — app.convert_keep_tables (20261204000100 body + public.storage_gate_ports) and
---    app.convert_delete_tables (20261128000100 body + public.tx_storage_overrides) re-created
+--    app.convert_delete_tables (20261128000100 body + public.tx_storage_overrides, public.container_storage) re-created
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION app.convert_keep_tables() RETURNS text[]
 LANGUAGE sql IMMUTABLE SET search_path = '' AS $$
@@ -48026,7 +48378,7 @@ LANGUAGE sql IMMUTABLE SET search_path = '' AS $$
     'public.service_requests', 'public.clients', 'public.client_aliases', 'public.client_users', 'public.invitations',
     'public.idempotency_keys', 'public.import_batches', 'public.import_rows', 'public.contact_messages',
     -- operations
-    'public.tx_storage_overrides',                                                                                -- SG (20261206000100)
+    'public.tx_storage_overrides', 'public.container_storage',                                                    -- SG (20261206000100)
     'public.transactions', 'public.transaction_events', 'public.transaction_bls', 'public.bills_of_lading',
     'public.customs_declarations', 'public.containers', 'public.documents', 'public.document_extractions',
     'public.document_matches',
@@ -48079,7 +48431,9 @@ REVOKE EXECUTE ON FUNCTION app.convert_delete_tables() FROM PUBLIC, anon, authen
 --      party {id, name_ar, name_en, phone, cr_number, contact_name}}] — staff of the org; search by name / phone / plate /
 --      party name; 500 rows (active first).
 --   4. public.save_driver(p_org, p) → the driver row as list_drivers returns it — transport writers of the org.
---      keys: id?, full_name, phone (Saudi mobile, normalised), driver_class, carrier_id (company / contractor), truck_plate
+--      keys: id?, full_name, phone (Saudi mobile, normalised), driver_class (absent / null = keep the driver's class, NULL for
+--      a new or unclassified driver: the active toggle never forces a classification), carrier_id (company / contractor;
+--      absent = keep the driver's party), truck_plate
 --      (found by its normalised plate in the org or created with the driver's party), license_no, is_active.
 --      Another active driver with the same mobile → MRS_CONFLICT phone. An inactive truck plate → MRS_INVALID truck_plate.
 --   Re-runnable (IF NOT EXISTS / CREATE OR REPLACE / DROP … IF EXISTS + CREATE / ON CONFLICT).
@@ -48196,16 +48550,19 @@ BEGIN
   IF v_phone_raw IS NULL THEN PERFORM app.fail('MRS_REQUIRED', 'phone'); END IF;
   v_phone := app.norm_sa_phone(v_phone_raw, false);
   IF v_phone IS NULL THEN PERFORM app.fail('MRS_INVALID', 'phone'); END IF;
-  v_class := app.ptext(p, 'driver_class', 30);
-  IF v_class IS NULL THEN PERFORM app.fail('MRS_REQUIRED', 'driver_class'); END IF;
-  IF NOT app.is_code('driver_class', v_class) THEN PERFORM app.fail('MRS_INVALID', 'driver_class'); END IF;
-  v_carrier := app.puuid(p, 'carrier_id');
+  -- no driver_class in the payload (absent / null / '') keeps the driver's class — NULL for a new or unclassified driver:
+  -- activating / deactivating (the directory toggle) or an edit without the class never forces a classification
+  v_class := CASE WHEN nullif(btrim(coalesce(p ->> 'driver_class', '')), '') IS NOT NULL THEN app.ptext(p, 'driver_class', 30)
+                  ELSE v_d.driver_class END;
+  IF v_class IS NOT NULL AND NOT app.is_code('driver_class', v_class) THEN PERFORM app.fail('MRS_INVALID', 'driver_class'); END IF;
+  -- no carrier_id key keeps the driver's party
+  v_carrier := CASE WHEN p ? 'carrier_id' THEN app.puuid(p, 'carrier_id') ELSE v_d.carrier_id END;
   IF v_class = 'individual' THEN v_carrier := NULL;
-  ELSE
-    IF v_carrier IS NULL THEN PERFORM app.fail('MRS_REQUIRED', 'carrier_id'); END IF;
-    IF NOT EXISTS (SELECT 1 FROM public.parties x WHERE x.id = v_carrier AND x.org_id = p_org AND 'carrier' = ANY (x.kinds)) THEN
-      PERFORM app.fail('MRS_INVALID', 'carrier_id');
-    END IF;
+  ELSIF v_class IS NOT NULL AND v_carrier IS NULL THEN PERFORM app.fail('MRS_REQUIRED', 'carrier_id');
+  END IF;
+  IF v_carrier IS NOT NULL AND (p ? 'carrier_id' OR p ? 'driver_class')
+     AND NOT EXISTS (SELECT 1 FROM public.parties x WHERE x.id = v_carrier AND x.org_id = p_org AND 'carrier' = ANY (x.kinds)) THEN
+    PERFORM app.fail('MRS_INVALID', 'carrier_id');
   END IF;
   v_lic := app.ptext(p, 'license_no', 30);
   v_active := CASE WHEN p ? 'is_active' THEN coalesce((p ->> 'is_active')::boolean, true) ELSE coalesce(v_d.is_active, true) END;
@@ -48248,6 +48605,7 @@ GRANT EXECUTE ON FUNCTION public.save_driver(uuid, jsonb) TO authenticated;
 --   whether a fallback ran are recorded with every reading.
 --   1. app.ai_providers — the providers the platform can call (anthropic · openai · gemini) and the model id each is
 --      asked for. Platform-wide (the SQL Editor tunes the model ids, like app.ai_prices). Seeded; re-run keeps tuned rows.
+--      One model id per row (unique index: the prices are keyed by the model id); anthropic is seeded with app.ai_model().
 --      The keys are Edge Function secrets (one per provider, set by the owner), never in the database.
 --   2. app.ai_settings + provider_order text[] (the organisation's order, default {anthropic}: unchanged behaviour) and
 --      consent_providers text[] (the providers the admin's last consent named). Existing consents named Anthropic only.
@@ -48266,7 +48624,7 @@ GRANT EXECUTE ON FUNCTION public.save_driver(uuid, jsonb) TO authenticated;
 --   Re-runnable (IF NOT EXISTS / CREATE OR REPLACE / ON CONFLICT DO NOTHING keeps tuned rows and settings).
 --   Data: none changed except consent_providers = {anthropic} on rows whose consent was given (it named Anthropic).
 --   Down-path: re-paste the 20261114000100 / 20261119000100 bodies of the re-created functions; DROP FUNCTION
---   app.ai_provider_chain(uuid), app.ai_is_engine(text); ALTER TABLE app.ai_usage DROP COLUMN call_meta, DROP COLUMN
+--   app.ai_provider_chain(uuid), app.ai_is_engine(text); DROP INDEX app.ai_providers_model_uidx; ALTER TABLE app.ai_usage DROP COLUMN call_meta, DROP COLUMN
 --   provider; ALTER TABLE app.ai_settings DROP COLUMN consent_providers, DROP COLUMN provider_order; DROP TABLE
 --   app.ai_providers; DELETE FROM public.schema_versions WHERE version = '20261208000100'.
 --   No BEGIN/COMMIT (the SQL editor wraps the run).
@@ -48300,10 +48658,13 @@ CREATE TABLE IF NOT EXISTS app.ai_providers (
 COMMENT ON TABLE app.ai_providers IS 'AI reading providers the ai-extract Edge Function can call (20261208000100) and the model id each is asked for. Platform-wide; tuned from the SQL Editor (UPDATE app.ai_providers SET model = … WHERE provider = …). The Edge Function calls a provider only when its key secret is set. anthropic always uses the model the function is built for (app.ai_model()).';
 -- the model ids are a starting point: confirm them against each provider's model list before switching the order
 INSERT INTO app.ai_providers (provider, model, sort) VALUES
-  ('anthropic', 'claude-opus-5-5', 1),
+  ('anthropic', app.ai_model(),    1),                -- always the model the function is built for
   ('openai',    'gpt-6.2-astra',   2),
   ('gemini',    'gemini-3.8-flash', 3)
 ON CONFLICT (provider) DO NOTHING;
+-- one model id per provider row: app.ai_prices is keyed by the model id, so two providers asking for the same id would
+-- share (and overwrite) one price row; platform_ai_save_provider (20261209000100) refuses it with a clear error first
+CREATE UNIQUE INDEX IF NOT EXISTS ai_providers_model_uidx ON app.ai_providers (model);
 ALTER TABLE app.ai_providers ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON app.ai_providers FROM PUBLIC, anon, authenticated, service_role;
 
@@ -48674,15 +49035,22 @@ GRANT EXECUTE ON FUNCTION public.ai_settle(uuid, int, int, text, text, jsonb) TO
 --   1. app.ai_provider_keys — one row per (provider, scope): the Supabase Vault secret that holds the key (encrypted at
 --      rest by Vault), its last 4 characters, who set it and when, and the last connection test. org_id NULL = the
 --      platform's key. The key itself is NEVER in this table, in a return value to a browser, in the audit log or in a
---      log line.
---   2. public.platform_ai_providers() — platform admins: each provider, its model id, active flag, prices, whether a key
---      is saved (last 4 only) and the last test.
+--      log line. A row without a secret (secret_id NULL) = the key was deleted on the platform page: that provider then
+--      has NO key — the provider's Edge Function secret is not used for it
+--      either. Only a provider with no row at all may still use its Edge Function secret (the setup before this page).
+--   2. public.platform_ai_providers() — platform admins: each provider, its model id (anthropic: app.ai_model(), locked),
+--      active flag, prices, whether a key is saved (last 4 only), the key source (vault / env / none) and the last test.
 --      public.platform_ai_set_key(provider, key) / platform_ai_clear_key(provider) — platform admins: store / replace /
---      remove the platform key in Vault (audit row without the key).
+--      remove the platform key in Vault (audit row without the key). Before a Vault secret is created, any orphan secret
+--      of the same name is deleted (the name is unique in Vault).
 --      public.platform_ai_save_provider(provider, {model, is_active, price_in, price_out}) — platform admins: the model id
---      asked for and its prices (app.ai_providers + app.ai_prices).
---   3. public.ai_provider_keys(org) — service_role only (the ai-extract Edge Function): the key to use per provider for an
---      organisation (its own key first — none yet — then the platform's). public.ai_record_key_test(provider, ok, note,
+--      asked for and its prices (app.ai_providers + app.ai_prices). A model id another provider already asks for is
+--      refused (MRS_CONFLICT model_taken: the prices are keyed by the model id); anthropic's model is app.ai_model()
+--      (MRS_INVALID model_locked otherwise); a price must be above 0 (MRS_INVALID price).
+--   3. public.ai_provider_keys(org) — service_role only (the ai-extract Edge Function): per provider {source: 'vault',
+--      key} | {source: 'none'} (deleted on the page / Vault secret missing: no key at all) | {source: 'env'} (no row: the
+--      Edge Function secret may be used) for an organisation (its own key first — none yet — then the platform's; org
+--      NULL = the platform's, every provider, for the connection test). public.ai_record_key_test(provider, ok, note,
 --      models) — service_role only: the result of the connection test the platform page asked the Edge Function for.
 --   Needs Supabase Vault (Database → Extensions → supabase_vault; on by default in Supabase projects).
 --   Re-runnable (IF NOT EXISTS / CREATE OR REPLACE). Data: none changed; no key is stored by this file.
@@ -48716,25 +49084,26 @@ CREATE TABLE IF NOT EXISTS app.ai_provider_keys (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   provider     text NOT NULL REFERENCES app.ai_providers(provider) ON DELETE RESTRICT,
   org_id       uuid REFERENCES public.organizations(id) ON DELETE RESTRICT,     -- NULL = the platform's key
-  secret_id    uuid NOT NULL,                                                   -- vault.secrets.id
-  key_last4    text NOT NULL CHECK (key_last4 ~ '^[A-Za-z0-9_-]{4}$'),
+  secret_id    uuid,                                                            -- vault.secrets.id; NULL = deleted on the page (no key, no secret fallback)
+  key_last4    text CHECK (key_last4 IS NULL OR key_last4 ~ '^[A-Za-z0-9_-]{4}$'),
   set_by       uuid,
   set_at       timestamptz NOT NULL DEFAULT now(),
   tested_at    timestamptz,
   test_ok      boolean,
   test_note    text CHECK (test_note IS NULL OR test_note ~ '^[a-z_]{1,40}$'),
   test_models  jsonb CHECK (test_models IS NULL OR (jsonb_typeof(test_models) = 'array' AND jsonb_array_length(test_models) <= 200
-                            AND octet_length(test_models::text) <= 12000))
+                            AND octet_length(test_models::text) <= 12000)),
+  CONSTRAINT ai_provider_keys_secret_last4_chk CHECK ((secret_id IS NULL) = (key_last4 IS NULL))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ai_provider_keys_scope_uidx ON app.ai_provider_keys (provider, coalesce(org_id, '00000000-0000-0000-0000-000000000000'::uuid));
-COMMENT ON TABLE app.ai_provider_keys IS 'AI provider keys (20261209000100): a reference to the Supabase Vault secret that holds the key, its last 4 characters and the last connection test. org_id NULL = the platform key (all offices); an office key (org_id) is a later stage. The key is never stored here and never returned to a browser.';
+COMMENT ON TABLE app.ai_provider_keys IS 'AI provider keys (20261209000100): a reference to the Supabase Vault secret that holds the key, its last 4 characters and the last connection test. org_id NULL = the platform key (all offices); an office key (org_id) is a later stage. secret_id NULL = the key was deleted on the platform page: the provider has no key and the Edge Function secret is not used for it (DELETE the row from the SQL Editor to allow the secret again). The key is never stored here and never returned to a browser.';
 ALTER TABLE app.ai_provider_keys ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON app.ai_provider_keys FROM PUBLIC, anon, authenticated, service_role;
 
 -- the row as the platform page sees it (no secret id, no key)
 CREATE OR REPLACE FUNCTION app.ai_key_json(k app.ai_provider_keys) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
-  SELECT CASE WHEN k.id IS NULL THEN NULL ELSE jsonb_build_object('last4', k.key_last4, 'set_at', k.set_at,
+  SELECT CASE WHEN k.id IS NULL OR k.secret_id IS NULL THEN NULL ELSE jsonb_build_object('last4', k.key_last4, 'set_at', k.set_at,
     'set_by_name', (SELECT p.full_name FROM public.profiles p WHERE p.id = k.set_by),
     'tested_at', k.tested_at, 'test_ok', k.test_ok, 'test_note', k.test_note, 'test_models', coalesce(k.test_models, '[]'::jsonb)) END
 $$;
@@ -48747,18 +49116,28 @@ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
 BEGIN
   IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
   IF NOT app.is_platform_admin() THEN PERFORM app.fail('MRS_FORBIDDEN'); END IF;
+  -- anthropic always asks for app.ai_model() (the model the function is built for): shown, priced and locked as such.
+  -- key_source: 'vault' (a key saved here), 'none' (deleted here, or its Vault secret is missing: no key, the Edge
+  -- Function secret is NOT used), 'env' (never saved here: the Edge Function secret is used if one is set)
   RETURN coalesce((SELECT jsonb_agg(jsonb_build_object(
-      'provider', p.provider, 'model', p.model, 'is_active', p.is_active, 'sort', p.sort,
-      'price_in', (SELECT x.input_usd_per_mtok FROM app.ai_prices x WHERE x.model = p.model),
-      'price_out', (SELECT x.output_usd_per_mtok FROM app.ai_prices x WHERE x.model = p.model),
-      'key', (SELECT app.ai_key_json(k) FROM app.ai_provider_keys k WHERE k.provider = p.provider AND k.org_id IS NULL))
-      ORDER BY p.sort, p.provider) FROM app.ai_providers p), '[]'::jsonb);
+      'provider', p.provider, 'model', m.model, 'model_locked', p.provider = 'anthropic', 'is_active', p.is_active, 'sort', p.sort,
+      'price_in', (SELECT x.input_usd_per_mtok FROM app.ai_prices x WHERE x.model = m.model),
+      'price_out', (SELECT x.output_usd_per_mtok FROM app.ai_prices x WHERE x.model = m.model),
+      'key', app.ai_key_json(k),
+      'key_source', CASE WHEN k.id IS NULL THEN 'env'
+                         WHEN k.secret_id IS NOT NULL AND EXISTS (SELECT 1 FROM vault.secrets s WHERE s.id = k.secret_id) THEN 'vault'
+                         ELSE 'none' END)
+      ORDER BY p.sort, p.provider)
+    FROM app.ai_providers p
+    CROSS JOIN LATERAL (SELECT CASE WHEN p.provider = 'anthropic' THEN app.ai_model() ELSE p.model END AS model) m
+    LEFT JOIN app.ai_provider_keys k ON k.provider = p.provider AND k.org_id IS NULL), '[]'::jsonb);
 END $$;
 
 -- store or replace the platform key of a provider in Vault. The key: 20–400 printable characters without spaces.
 CREATE OR REPLACE FUNCTION public.platform_ai_set_key(p_provider text, p_key text) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE k app.ai_provider_keys; v_key text := btrim(coalesce(p_key, '')); v_sid uuid; v_last4 text;
+        v_name text := 'ai_key:platform:' || coalesce(p_provider, '');
 BEGIN
   IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
   IF NOT app.is_platform_admin() THEN PERFORM app.fail('MRS_FORBIDDEN'); END IF;
@@ -48767,13 +49146,21 @@ BEGIN
   v_last4 := right(v_key, 4);
   IF v_last4 !~ '^[A-Za-z0-9_-]{4}$' THEN v_last4 := 'xxxx'; END IF;
   SELECT * INTO k FROM app.ai_provider_keys x WHERE x.provider = p_provider AND x.org_id IS NULL FOR UPDATE;
+  IF k.secret_id IS NOT NULL AND EXISTS (SELECT 1 FROM vault.secrets s WHERE s.id = k.secret_id) THEN
+    -- replace: the same Vault secret holds the new key
+    PERFORM vault.update_secret(k.secret_id, v_key);
+    v_sid := k.secret_id;
+  ELSE
+    -- a new secret (no row, a row deleted on the page, or a row whose secret is gone). An orphan secret of the same name
+    -- (a row removed outside this page, an interrupted earlier save) would make create_secret fail: the name is unique.
+    DELETE FROM vault.secrets s WHERE s.name = v_name;
+    v_sid := vault.create_secret(v_key, v_name, 'AI provider key (platform) — set from the platform page');
+  END IF;
   IF k.id IS NULL THEN
-    v_sid := vault.create_secret(v_key, 'ai_key:platform:' || p_provider, 'AI provider key (platform) — set from the platform page');
     INSERT INTO app.ai_provider_keys (provider, org_id, secret_id, key_last4, set_by) VALUES (p_provider, NULL, v_sid, v_last4, auth.uid())
     RETURNING * INTO k;
   ELSE
-    PERFORM vault.update_secret(k.secret_id, v_key);
-    UPDATE app.ai_provider_keys x SET key_last4 = v_last4, set_by = auth.uid(), set_at = now(),
+    UPDATE app.ai_provider_keys x SET secret_id = v_sid, key_last4 = v_last4, set_by = auth.uid(), set_at = now(),
            tested_at = NULL, test_ok = NULL, test_note = NULL, test_models = NULL
      WHERE x.id = k.id RETURNING * INTO k;
   END IF;
@@ -48785,20 +49172,38 @@ BEGIN
   RETURN app.ai_key_json(k);
 END $$;
 
+-- delete the platform key: the Vault secret (and any orphan of the same name) is removed and the row stays without a
+-- secret, so the provider has no key at all — the Edge Function secret is not used for it either (the dialog says so).
+-- A provider that had no row gets one (the secret fallback stops too).
 CREATE OR REPLACE FUNCTION public.platform_ai_clear_key(p_provider text) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
-DECLARE k app.ai_provider_keys;
+DECLARE k app.ai_provider_keys; v_name text := 'ai_key:platform:' || coalesce(p_provider, ''); v_had boolean; v_new boolean := false;
+        v_last4 text;
 BEGIN
   IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
   IF NOT app.is_platform_admin() THEN PERFORM app.fail('MRS_FORBIDDEN'); END IF;
+  IF NOT EXISTS (SELECT 1 FROM app.ai_providers p WHERE p.provider = p_provider) THEN PERFORM app.fail('MRS_INVALID', 'provider'); END IF;
   SELECT * INTO k FROM app.ai_provider_keys x WHERE x.provider = p_provider AND x.org_id IS NULL FOR UPDATE;
-  IF k.id IS NULL THEN RETURN jsonb_build_object('provider', p_provider, 'removed', false); END IF;
-  DELETE FROM vault.secrets s WHERE s.id = k.secret_id;
-  DELETE FROM app.ai_provider_keys x WHERE x.id = k.id;
+  v_had := k.secret_id IS NOT NULL AND EXISTS (SELECT 1 FROM vault.secrets s WHERE s.id = k.secret_id);
+  v_last4 := k.key_last4;
+  DELETE FROM vault.secrets s WHERE s.id = k.secret_id OR s.name = v_name;
+  IF k.id IS NULL THEN
+    INSERT INTO app.ai_provider_keys (provider, org_id, secret_id, key_last4, set_by) VALUES (p_provider, NULL, NULL, NULL, auth.uid())
+    RETURNING * INTO k;
+    v_new := true;
+  ELSIF k.secret_id IS NOT NULL THEN
+    UPDATE app.ai_provider_keys x SET secret_id = NULL, key_last4 = NULL, set_by = auth.uid(), set_at = now(),
+           tested_at = NULL, test_ok = NULL, test_note = NULL, test_models = NULL
+     WHERE x.id = k.id RETURNING * INTO k;
+  ELSE
+    RETURN jsonb_build_object('provider', p_provider, 'removed', false, 'key_source', 'none');
+  END IF;
   INSERT INTO public.audit_log (org_id, table_name, row_id, action, changed_fields, old_data, new_data, actor, actor_role)
-  VALUES (NULL, 'ai_provider_keys', k.id::text, 'DELETE', ARRAY['key'],
-          jsonb_build_object('provider', p_provider, 'scope', 'platform', 'last4', k.key_last4), NULL, auth.uid(), auth.jwt() ->> 'role');
-  RETURN jsonb_build_object('provider', p_provider, 'removed', true);
+  VALUES (NULL, 'ai_provider_keys', k.id::text, CASE WHEN v_new THEN 'INSERT' ELSE 'DELETE' END, ARRAY['key'],
+          CASE WHEN v_new THEN NULL ELSE jsonb_build_object('provider', p_provider, 'scope', 'platform', 'last4', v_last4) END,
+          CASE WHEN v_new THEN jsonb_build_object('provider', p_provider, 'scope', 'platform', 'key_source', 'none') END,
+          auth.uid(), auth.jwt() ->> 'role');
+  RETURN jsonb_build_object('provider', p_provider, 'removed', v_had, 'key_source', 'none');
 END $$;
 
 -- the model id asked for, on / off, and its prices (USD per million tokens; a price row per model id)
@@ -48815,7 +49220,15 @@ BEGIN
   IF p_payload ? 'model' THEN
     v_model := btrim(coalesce(p_payload ->> 'model', ''));
     IF jsonb_typeof(p_payload -> 'model') <> 'string' OR v_model !~ '^[a-z0-9][a-z0-9.-]{0,63}$' THEN PERFORM app.fail('MRS_INVALID', 'model'); END IF;
+    -- anthropic always asks for the model the function is built for
+    IF p.provider = 'anthropic' AND v_model <> app.ai_model() THEN PERFORM app.fail('MRS_INVALID', 'model_locked'); END IF;
     p.model := v_model;
+  END IF;
+  IF p.provider = 'anthropic' THEN p.model := app.ai_model(); END IF;
+  -- one model id per provider: the prices (app.ai_prices) are keyed by the model id
+  IF EXISTS (SELECT 1 FROM app.ai_providers x WHERE x.model = p.model AND x.provider <> p.provider)
+     OR (p.provider <> 'anthropic' AND p.model = app.ai_model()) THEN
+    PERFORM app.fail('MRS_CONFLICT', 'model_taken');
   END IF;
   IF p_payload ? 'is_active' THEN
     IF jsonb_typeof(p_payload -> 'is_active') <> 'boolean' THEN PERFORM app.fail('MRS_INVALID', 'is_active'); END IF;
@@ -48827,7 +49240,8 @@ BEGIN
       PERFORM app.fail('MRS_INVALID', 'price');
     END IF;
     v_in := (p_payload ->> 'price_in')::numeric; v_out := (p_payload ->> 'price_out')::numeric;
-    IF v_in < 0 OR v_in > 1000 OR v_out < 0 OR v_out > 1000 OR v_in <> round(v_in, 4) OR v_out <> round(v_out, 4) THEN
+    -- above 0 (a 0 price would make every reading free for the monthly budget), at most 1000, 4 decimals
+    IF v_in <= 0 OR v_in > 1000 OR v_out <= 0 OR v_out > 1000 OR v_in <> round(v_in, 4) OR v_out <> round(v_out, 4) THEN
       PERFORM app.fail('MRS_INVALID', 'price');
     END IF;
   END IF;
@@ -48845,17 +49259,24 @@ END $$;
 -- ---------------------------------------------------------------------
 -- 3. the Edge Function (service role)
 -- ---------------------------------------------------------------------
--- {anthropic: key | null, openai: …, gemini: …} for an organisation: its own key first (a later stage), then the
--- platform's. Active providers only. p_org NULL = the platform keys (the connection test from the platform page).
+-- {anthropic: {source, key?}, openai: …, gemini: …} for an organisation: its own key row first (a later stage), then
+-- the platform's. source 'vault' + key = the saved key; 'none' = deleted on the page or its Vault secret is missing (no
+-- key: the Edge Function must NOT use its secret); 'env' = no row (the Edge Function secret may be used). Active
+-- providers only; p_org NULL = the platform keys of every provider (the connection test from the platform page).
 CREATE OR REPLACE FUNCTION public.ai_provider_keys(p_org uuid) RETURNS jsonb
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
 BEGIN
   IF coalesce(auth.role(), '') <> 'service_role' THEN PERFORM app.fail('MRS_FORBIDDEN', 'service_only'); END IF;
-  RETURN coalesce((SELECT jsonb_object_agg(p.provider, (
-      SELECT d.decrypted_secret FROM app.ai_provider_keys k JOIN vault.decrypted_secrets d ON d.id = k.secret_id
-       WHERE k.provider = p.provider AND (k.org_id = p_org OR k.org_id IS NULL)
-       ORDER BY (k.org_id IS NULL) LIMIT 1))
-    FROM app.ai_providers p WHERE p.is_active), '{}'::jsonb);
+  RETURN coalesce((SELECT jsonb_object_agg(p.provider,
+      CASE WHEN k.id IS NULL THEN jsonb_build_object('source', 'env')
+           WHEN coalesce(d.decrypted_secret, '') = '' THEN jsonb_build_object('source', 'none')
+           ELSE jsonb_build_object('source', 'vault', 'key', d.decrypted_secret) END)
+    FROM app.ai_providers p
+    LEFT JOIN LATERAL (SELECT x.id, x.secret_id FROM app.ai_provider_keys x
+                        WHERE x.provider = p.provider AND (x.org_id = p_org OR x.org_id IS NULL)
+                        ORDER BY (x.org_id IS NULL) LIMIT 1) k ON true
+    LEFT JOIN vault.decrypted_secrets d ON d.id = k.secret_id
+   WHERE p.is_active OR p_org IS NULL), '{}'::jsonb);
 END $$;
 
 -- the connection test's result (ok, a fixed note code, the model ids the provider listed)
@@ -48907,3 +49328,573 @@ GRANT EXECUTE ON FUNCTION public.platform_ai_providers(), public.platform_ai_set
 REVOKE ALL ON FUNCTION public.ai_provider_keys(uuid), public.ai_record_key_test(text, boolean, text, jsonb)
 FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.ai_provider_keys(uuid), public.ai_record_key_test(text, boolean, text, jsonb) TO service_role;
+
+-- ===== migrations/20261211000100_reconvert.sql =====
+-- =====================================================================
+-- 20261211000100_reconvert — wipe an ALREADY converted (production) organisation's data again and restart its numbering
+-- with a new transaction prefix and slug (owner request, 23 Nov 2026). Owner runbook: docs/online/CONVERT_IN_PLACE_AR.md
+-- (part «إعادة التحويل») and the plain plan docs/owner/convert-plan-simple.md.
+-- Builds on convert_in_place (20261115000100) and every later phase up to ai_keys (20261209000100). Applying this file
+-- deletes NO business data: it adds the functions below, makes the PAY- / CUS- numbering per organisation and widens the
+-- mail transaction-reference check. The re-conversion itself runs only when the owner calls, from the SQL Editor
+-- (postgres, no JWT claims), after a backup:
+--   step 1 (read-only):  SELECT public.reconvert_org_preview('<org uuid>', '<new-slug>', '<NEW PREFIX>');
+--   step 2 (the wipe):   SELECT public.reconvert_org('<org uuid>', '<new-slug>', '<NEW PREFIX>',
+--                                                   'WIPE-ALL-DATA-<current-slug>-TO-<new-slug>-<NEW PREFIX>', '<الاسم العربي>|NULL', '<English name>|NULL');
+--   The confirm phrase names the org being wiped (its CURRENT slug) as well as the new slug / prefix, so a wrong org uuid
+--   pasted in step 2 is refused (confirm) unless its own slug was typed too.
+--   P. preflight (convert_in_place + ai_keys applied) + schema_versions row
+--   1. app.org_conversions: + run_no (1 = the first conversion) + kind ('convert' | 'reconvert'); primary key
+--      (org_id, run_no). Still append-only. public.convert_org_to_production is unchanged and still refuses an org that
+--      has a row here (already_production): a second run is possible ONLY through public.reconvert_org.
+--   2. per-org PAY- / CUS- numbering: org_counters scopes + 'payment' / 'custody' (year 0 = no yearly reset);
+--      app.next_org_seq(org, scope); BEFORE INSERT trigger trg_org_seq on client_disbursements / client_custody_entries
+--      sets seq + ref from the org's counter (the global sequences stay as column defaults only); the unique keys
+--      become (org_id, ref). The counters start at each org's current highest number, so no existing reference changes
+--      and no reference is reused inside an org. Deleting an org's org_counters rows (conversion / re-conversion) restarts
+--      PAY-000001 / CUS-000001 for that org only.
+--   3. mail: app.msg_tx_ref_ok(text) — the transaction reference shape of ANY org prefix (2–5 capital letters, then
+--      -YYYY-NNNNNN), not REQ- / MSG- / IMP-; public.review_msg_extraction (20261107000100 body) re-created with it in
+--      place of the hard-coded '^MRS-…' (the Edge Function extractors ai-mock.js / llm-provider.js changed alike).
+--   4. helpers   app.reconvert_reserved_prefixes(), app.reconvert_used_prefixes(org), app.reconvert_input_errors(…),
+--                app.reconvert_check(org)  (app.convert_check minus already_production / other_staging_orgs /
+--                daftra_not_cleared, plus not_production and never_converted: an org with no app.org_conversions row was
+--                never converted and cannot be wiped by this path), app.reconvert_wipe(org) (the original conversion's delete:
+--                app.convert_delete_tables / app.convert_delete_guards / memberships / org_counters / org_usage_counters,
+--                the same lists, so every table added by 20261116000100 … 20261209000100 is covered), app.reconvert_ready(org)
+--                (+ todo: storage_objects_left while the org's '<org>/' folders still hold files)
+--   5. public.reconvert_org_preview(org, slug, prefix)  read-only: rows per table that WOULD be deleted, what is kept
+--                (counts per kept table, branches, channels, accounting link, AI settings), memberships kept / removed,
+--                counters reset, storage objects, Daftra documents (a warning: a new prefix cannot collide with them),
+--                accounts left without access, input errors, blockers, the exact confirm phrase. SQL Editor only.
+--   6. public.reconvert_org(org, slug, prefix, confirm, name_ar, name_en)  the wipe + new slug / prefix / optional names,
+--                recorded in app.org_conversions (kind 'reconvert'). SQL Editor only.
+--   7. privileges: every function of 4–6: no API role (not even service_role).
+-- MFA (owner decision 15 Nov 2026, 20261129000100): no check here asks for a verified TOTP factor; app.reconvert_ready
+-- (the readiness list returned after the run) has no TOTP item.
+-- Kept by the re-conversion (exactly like the first conversion): the org row (new slug / prefix / names; settings and
+-- environment unchanged), branches, the platform admins' admin membership, mail channels (MOCK channels switched off),
+-- mail settings / templates / instructions / auto-reply policies, the accounting link (daftra_connections /
+-- daftra_item_links), document requirements, service items, stage sets, storage-gate ports, the subscription,
+-- AI settings / provider keys, and the append-only logs (audit_log, report_exports, ai_usage, alert runs, client errors).
+-- Re-runnable file (IF NOT EXISTS / CREATE OR REPLACE / guarded ALTERs). No BEGIN/COMMIT (the SQL editor wraps the run).
+-- Down-path (before any re-conversion only): DROP FUNCTION public.reconvert_org(uuid, text, text, text, text, text),
+-- public.reconvert_org_preview(uuid, text, text) and the app.reconvert_* helpers; re-paste 20261107000100 §review_msg_extraction;
+-- DROP TRIGGER trg_org_seq ON public.client_disbursements / public.client_custody_entries; DROP FUNCTION app.tg_org_seq(),
+-- app.next_org_seq(uuid, text), app.msg_tx_ref_ok(text); restore UNIQUE (ref) on both tables (only while no two orgs share a
+-- reference); DELETE FROM public.org_counters WHERE scope IN ('payment','custody') and restore the 4-scope CHECK; restore the
+-- org_conversions primary key (org_id) (only while one row per org); DELETE FROM public.schema_versions WHERE version = '20261211000100'.
+-- After a re-conversion the only way back is a restore of the backup taken before it.
+-- =====================================================================
+
+DO $guard$
+BEGIN
+  -- stops immediately if the Arabic text was pasted with the wrong encoding
+  IF 'جديد' <> U&'\062C\062F\064A\062F' THEN
+    RAISE EXCEPTION 'ENCODING ERROR: Arabic text was pasted incorrectly (not UTF-8). Nothing was changed.';
+  END IF;
+END $guard$;
+
+SELECT set_config('lock_timeout', '5s', true);
+
+-- ---------------------------------------------------------------------
+-- P. preflight (read-only)
+-- ---------------------------------------------------------------------
+DO $pre$
+BEGIN
+  IF to_regclass('public.schema_versions') IS NULL
+     OR NOT EXISTS (SELECT 1 FROM public.schema_versions WHERE version = '20261209000100') THEN
+    RAISE EXCEPTION 'RECONVERT preflight: apply ai_keys first (schema_versions lacks 20261209000100)';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.schema_versions WHERE version = '20261115000100')
+     OR to_regclass('app.org_conversions') IS NULL OR to_regprocedure('app.convert_check(uuid)') IS NULL
+     OR to_regprocedure('app.convert_delete_tables()') IS NULL OR to_regprocedure('app.convert_delete_guards()') IS NULL
+     OR to_regprocedure('app.convert_keep_tables()') IS NULL THEN
+    RAISE EXCEPTION 'RECONVERT preflight: convert_in_place missing (apply 20261115000100_convert_in_place.sql)';
+  END IF;
+  IF to_regclass('public.client_disbursements') IS NULL OR to_regclass('public.client_custody_entries') IS NULL
+     OR to_regprocedure('public.review_msg_extraction(uuid, text, text, text)') IS NULL THEN
+    RAISE EXCEPTION 'RECONVERT preflight: legacy_pay / inbox objects missing';
+  END IF;
+END $pre$;
+
+INSERT INTO public.schema_versions (version, name) VALUES ('20261211000100', 'reconvert')
+ON CONFLICT (version) DO NOTHING;
+
+-- ---------------------------------------------------------------------
+-- 1. app.org_conversions: one row per run (run_no 1 = the first conversion)
+-- ---------------------------------------------------------------------
+ALTER TABLE app.org_conversions ADD COLUMN IF NOT EXISTS run_no int NOT NULL DEFAULT 1;
+ALTER TABLE app.org_conversions ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'convert';
+DO $pk$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conrelid = 'app.org_conversions'::regclass AND c.conname = 'org_conversions_kind_chk') THEN
+    ALTER TABLE app.org_conversions ADD CONSTRAINT org_conversions_kind_chk CHECK (kind IN ('convert', 'reconvert'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conrelid = 'app.org_conversions'::regclass AND c.conname = 'org_conversions_run_chk') THEN
+    ALTER TABLE app.org_conversions ADD CONSTRAINT org_conversions_run_chk CHECK (run_no >= 1 AND (run_no = 1) = (kind = 'convert'));
+  END IF;
+  IF (SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c
+       WHERE c.conrelid = 'app.org_conversions'::regclass AND c.contype = 'p') IS DISTINCT FROM 'PRIMARY KEY (org_id, run_no)' THEN
+    ALTER TABLE app.org_conversions DROP CONSTRAINT IF EXISTS org_conversions_pkey;
+    ALTER TABLE app.org_conversions ADD CONSTRAINT org_conversions_pkey PRIMARY KEY (org_id, run_no);
+  END IF;
+END $pk$;
+COMMENT ON TABLE app.org_conversions IS 'In-place conversions of an org: run_no 1 = staging → production (public.convert_org_to_production, kind convert); run_no 2… = re-conversions (public.reconvert_org, kind reconvert: data wiped again, new slug / prefix). Append-only record: from / to slug, who, when, rows deleted per table. Read by supabase/production/post_install_checks.sql.';
+
+-- ---------------------------------------------------------------------
+-- 2. per-org PAY- / CUS- numbering
+-- ---------------------------------------------------------------------
+DO $scope$
+BEGIN
+  IF (SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c
+       WHERE c.conrelid = 'public.org_counters'::regclass AND c.conname = 'org_counters_scope_check') NOT LIKE '%custody%' THEN
+    ALTER TABLE public.org_counters DROP CONSTRAINT org_counters_scope_check;
+    ALTER TABLE public.org_counters ADD CONSTRAINT org_counters_scope_check
+      CHECK (scope IN ('transaction', 'request', 'message', 'import', 'payment', 'custody'));
+  END IF;
+END $scope$;
+
+-- the next number of an org's non-yearly counter (year 0); the row lock serialises concurrent inserts of one org
+CREATE OR REPLACE FUNCTION app.next_org_seq(p_org uuid, p_scope text) RETURNS bigint
+LANGUAGE plpgsql SET search_path = '' AS $$
+DECLARE v_n bigint;
+BEGIN
+  IF p_org IS NULL OR p_scope NOT IN ('payment', 'custody') THEN PERFORM app.fail('MRS_INVALID', 'counter_scope'); END IF;
+  INSERT INTO public.org_counters AS c (org_id, scope, year, last_value)
+  VALUES (p_org, p_scope, 0, 1)
+  ON CONFLICT (org_id, scope, year) DO UPDATE SET last_value = c.last_value + 1
+  RETURNING last_value INTO v_n;
+  RETURN v_n;
+END $$;
+
+-- TG_ARGV[0] = counter scope, TG_ARGV[1] = reference prefix. Always overrides seq / ref (the RPCs' nextval value is ignored)
+CREATE OR REPLACE FUNCTION app.tg_org_seq() RETURNS trigger
+LANGUAGE plpgsql SET search_path = '' AS $$
+BEGIN
+  NEW.seq := app.next_org_seq(NEW.org_id, TG_ARGV[0]);
+  NEW.ref := TG_ARGV[1] || '-' || lpad(NEW.seq::text, 6, '0');
+  RETURN NEW;
+END $$;
+
+-- start each org's counter at its current highest number (re-run: never lowers a counter)
+INSERT INTO public.org_counters AS c (org_id, scope, year, last_value)
+SELECT d.org_id, 'payment', 0, max(d.seq) FROM public.client_disbursements d GROUP BY d.org_id
+ON CONFLICT (org_id, scope, year) DO UPDATE SET last_value = greatest(c.last_value, EXCLUDED.last_value);
+INSERT INTO public.org_counters AS c (org_id, scope, year, last_value)
+SELECT e.org_id, 'custody', 0, max(e.seq) FROM public.client_custody_entries e GROUP BY e.org_id
+ON CONFLICT (org_id, scope, year) DO UPDATE SET last_value = greatest(c.last_value, EXCLUDED.last_value);
+
+DROP TRIGGER IF EXISTS trg_org_seq ON public.client_disbursements;
+CREATE TRIGGER trg_org_seq BEFORE INSERT ON public.client_disbursements
+  FOR EACH ROW EXECUTE FUNCTION app.tg_org_seq('payment', 'PAY');
+DROP TRIGGER IF EXISTS trg_org_seq ON public.client_custody_entries;
+CREATE TRIGGER trg_org_seq BEFORE INSERT ON public.client_custody_entries
+  FOR EACH ROW EXECUTE FUNCTION app.tg_org_seq('custody', 'CUS');
+
+DO $uniq$
+BEGIN
+  IF (SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c
+       WHERE c.conrelid = 'public.client_disbursements'::regclass AND c.conname = 'client_disbursements_ref_uniq') IS DISTINCT FROM 'UNIQUE (org_id, ref)' THEN
+    ALTER TABLE public.client_disbursements DROP CONSTRAINT IF EXISTS client_disbursements_ref_uniq;
+    ALTER TABLE public.client_disbursements ADD CONSTRAINT client_disbursements_ref_uniq UNIQUE (org_id, ref);
+  END IF;
+  IF (SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c
+       WHERE c.conrelid = 'public.client_custody_entries'::regclass AND c.conname = 'client_custody_entries_ref_uniq') IS DISTINCT FROM 'UNIQUE (org_id, ref)' THEN
+    ALTER TABLE public.client_custody_entries DROP CONSTRAINT IF EXISTS client_custody_entries_ref_uniq;
+    ALTER TABLE public.client_custody_entries ADD CONSTRAINT client_custody_entries_ref_uniq UNIQUE (org_id, ref);
+  END IF;
+END $uniq$;
+
+-- ---------------------------------------------------------------------
+-- 3. mail: the transaction reference of any org prefix
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.msg_tx_ref_ok(p text) RETURNS boolean
+LANGUAGE sql IMMUTABLE SET search_path = '' AS $$
+  SELECT coalesce(p ~ '^[A-Z]{2,5}-[0-9]{4}-[0-9]{6}$' AND p !~ '^(REQ|MSG|IMP)-', false)
+$$;
+
+-- review_msg_extraction (20261107000100 body; only the tx_ref check changed: app.msg_tx_ref_ok)
+CREATE OR REPLACE FUNCTION public.review_msg_extraction(p_id uuid, p_decision text, p_value text DEFAULT NULL, p_note text DEFAULT NULL) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE e public.msg_extractions; t public.msg_threads; v_val text; v_note text;
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  SELECT * INTO e FROM public.msg_extractions x WHERE x.id = p_id;
+  IF e.id IS NULL THEN PERFORM app.fail('MRS_NOT_FOUND', 'extraction'); END IF;
+  t := app.msg_thread_for(e.thread_id, app.msg_triage_roles());
+  IF p_decision IS NULL OR p_decision NOT IN ('confirm','correct','reject') THEN PERFORM app.fail('MRS_INVALID', 'decision'); END IF;
+  v_note := app.msg_note(p_note, p_decision = 'correct');
+  IF p_decision = 'correct' THEN
+    v_val := upper(regexp_replace(app.to_western(btrim(coalesce(p_value, ''))), '[[:space:]]+', '', 'g'));
+    IF e.kind = 'container_no' THEN v_val := replace(v_val, '-', ''); END IF;
+    IF v_val = '' OR char_length(v_val) > 200
+       OR (e.kind = 'container_no' AND NOT app.msg_iso6346_ok(v_val))
+       OR (e.kind = 'tx_ref' AND NOT app.msg_tx_ref_ok(v_val))                                          -- RECONVERT
+       OR (e.kind = 'date' AND (v_val !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' OR app.pdate(jsonb_build_object('d', v_val), 'd') IS NULL))
+       OR (e.kind IN ('bl_number','declaration_no','invoice_no','appointment_no') AND v_val !~ '^[A-Z0-9/-]{3,40}$') THEN
+      PERFORM app.fail('MRS_INVALID', 'extraction');
+    END IF;
+  END IF;
+  UPDATE public.msg_extractions x SET status = CASE p_decision WHEN 'confirm' THEN 'confirmed' WHEN 'correct' THEN 'corrected' ELSE 'rejected' END,
+         corrected_value = CASE WHEN p_decision = 'correct' THEN v_val END, reviewed_by = auth.uid(), reviewed_at = now(), review_note = v_note
+   WHERE x.id = e.id RETURNING * INTO e;
+  PERFORM app.msg_match(t.id);
+  RETURN to_jsonb(e) || jsonb_build_object('thread', (SELECT app.msg_thread_json(x) FROM public.msg_threads x WHERE x.id = t.id));
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 4. re-conversion helpers
+-- ---------------------------------------------------------------------
+-- prefixes that would read as another kind of reference (request / message / import / payment / custody / import run /
+-- Daftra markers / appointment / test data)
+CREATE OR REPLACE FUNCTION app.reconvert_reserved_prefixes() RETURNS text[]
+LANGUAGE sql IMMUTABLE SET search_path = '' AS $$
+  SELECT ARRAY['REQ', 'MSG', 'IMP', 'PAY', 'CUS', 'LIR', 'MRSC', 'MRSL', 'MRSO', 'MRSP', 'TAS', 'TEST', 'TST']::text[]
+$$;
+
+-- every transaction prefix this org has used: the current one + those recorded by earlier runs (a reused prefix would
+-- restart at …-000001 and meet old documents in Daftra / e-mail with the same reference)
+CREATE OR REPLACE FUNCTION app.reconvert_used_prefixes(p_org uuid) RETURNS text[]
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT coalesce(array_agg(DISTINCT x.p ORDER BY x.p) FILTER (WHERE x.p IS NOT NULL), ARRAY[]::text[]) FROM (
+    SELECT o.ref_prefix p FROM public.organizations o WHERE o.id = p_org
+    UNION ALL SELECT c.summary ->> 'from_ref_prefix' FROM app.org_conversions c WHERE c.org_id = p_org
+    UNION ALL SELECT c.summary ->> 'ref_prefix' FROM app.org_conversions c WHERE c.org_id = p_org) x
+$$;
+
+-- input errors (empty = valid). A NULL name keeps the current one.
+CREATE OR REPLACE FUNCTION app.reconvert_input_errors(p_org uuid, p_slug text, p_prefix text, p_name_ar text, p_name_en text) RETURNS text[]
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+DECLARE
+  o        public.organizations;
+  v_slug   text := lower(btrim(coalesce(p_slug, '')));
+  v_prefix text := upper(btrim(coalesce(p_prefix, '')));
+  v_out    text[] := ARRAY[]::text[];
+BEGIN
+  SELECT * INTO o FROM public.organizations x WHERE x.id = p_org;
+  IF o.id IS NULL THEN RETURN ARRAY['org_not_found']; END IF;
+  IF v_slug !~ '^[a-z0-9-]{3,40}$' OR v_slug !~ '^[a-z0-9]' THEN
+    v_out := v_out || 'slug'::text;
+  ELSE
+    o.slug := v_slug;
+    IF app.is_demo_org(o) THEN v_out := v_out || 'slug_demo'::text; END IF;
+    IF EXISTS (SELECT 1 FROM public.organizations x WHERE x.slug = v_slug AND x.id <> p_org) THEN v_out := v_out || 'slug_taken'::text; END IF;
+  END IF;
+  IF v_prefix !~ '^[A-Z]{2,5}$' THEN
+    v_out := v_out || 'ref_prefix'::text;
+  ELSIF v_prefix = ANY (app.reconvert_reserved_prefixes()) THEN
+    v_out := v_out || 'ref_prefix_reserved'::text;
+  ELSIF v_prefix = ANY (app.reconvert_used_prefixes(p_org)) THEN
+    v_out := v_out || 'ref_prefix_used'::text;
+  END IF;
+  IF p_name_ar IS NOT NULL AND (char_length(btrim(p_name_ar)) NOT BETWEEN 2 AND 160 OR p_name_ar ~ 'تجريبي|اختبار') THEN
+    v_out := v_out || 'name_ar'::text;
+  END IF;
+  IF p_name_en IS NOT NULL AND (char_length(btrim(p_name_en)) > 160 OR p_name_en ~* '\m(staging|demo|test)\M') THEN
+    v_out := v_out || 'name_en'::text;
+  END IF;
+  RETURN v_out;
+END $$;
+
+-- refusals shared by the preview and the run (empty = the run may start). The first conversion's checks are reused
+-- (owner admin membership, every org-scoped table classified, only the listed delete guards); dropped: already_production
+-- (this IS the path for a converted org), other_staging_orgs (the deploy switch is not called again) and
+-- daftra_not_cleared (a NEW prefix cannot meet the old Daftra references: reported as a warning by the preview).
+-- Added: not_production, and never_converted (no app.org_conversions row: an org created directly in production — another
+-- real office — was never converted, so this path never wipes it).
+CREATE OR REPLACE FUNCTION app.reconvert_check(p_org uuid) RETURNS text[]
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+DECLARE
+  o     public.organizations;
+  v_out text[] := ARRAY[]::text[];
+BEGIN
+  SELECT * INTO o FROM public.organizations x WHERE x.id = p_org;
+  IF o.id IS NULL THEN RETURN ARRAY['org_not_found']; END IF;
+  IF o.environment <> 'production' OR app.deploy_environment() <> 'production' THEN
+    v_out := v_out || 'not_production'::text;          -- a staging org uses public.convert_org_to_production
+  END IF;
+  SELECT v_out || coalesce(array_agg(x ORDER BY i), ARRAY[]::text[]) INTO v_out
+    FROM unnest(app.convert_check(p_org)) WITH ORDINALITY u(x, i)
+   WHERE x <> 'already_production' AND x NOT LIKE 'other\_staging\_orgs:%' AND x NOT LIKE 'daftra\_not\_cleared:%';
+  IF NOT EXISTS (SELECT 1 FROM app.org_conversions c WHERE c.org_id = p_org) THEN
+    v_out := v_out || 'never_converted'::text;
+  END IF;
+  RETURN v_out;
+END $$;
+
+-- the wipe: the first conversion's delete, unchanged (app.convert_delete_tables in ONE statement with the listed guards
+-- disabled for that statement only, then the memberships except the platform admins' admin one, org_counters,
+-- org_usage_counters recounted; MOCK channels switched off). Called only by public.reconvert_org.
+CREATE OR REPLACE FUNCTION app.reconvert_wipe(p_org uuid) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE
+  v_g        text;
+  v_t        text;
+  v_sql      text := '';
+  v_sel      text := '';
+  v_deleted  jsonb;
+  v_members  int;
+  v_counters int;
+  v_usage    int;
+  v_mock     int;
+  v_prev_bl  text := coalesce(current_setting('marsa.g3_bl_batch', true), '');
+BEGIN
+  IF nullif(current_setting('request.jwt.claims', true), '') IS NOT NULL THEN
+    PERFORM app.fail('MRS_FORBIDDEN', 'sql_editor_only');
+  END IF;
+  UPDATE public.msg_channels c SET ingest_enabled = false, send_enabled = false, status = 'disabled'
+   WHERE c.org_id = p_org AND c.mode = 'mock' AND (c.ingest_enabled OR c.send_enabled OR c.status <> 'disabled');
+  GET DIAGNOSTICS v_mock = ROW_COUNT;
+
+  FOREACH v_g IN ARRAY app.convert_delete_guards() LOOP
+    EXECUTE format('ALTER TABLE %s DISABLE TRIGGER %I', split_part(v_g, ':', 1), split_part(v_g, ':', 2));
+  END LOOP;
+  PERFORM set_config('marsa.g3_bl_batch', 'on', true);
+  FOREACH v_t IN ARRAY app.convert_delete_tables() LOOP
+    v_sql := v_sql || CASE WHEN v_sql = '' THEN 'WITH ' ELSE ', ' END
+             || format('%I AS (DELETE FROM %s WHERE org_id = $1 RETURNING 1)', 'd_' || split_part(v_t, '.', 2), v_t);
+    v_sel := v_sel || CASE WHEN v_sel = '' THEN '' ELSE ', ' END
+             || format('(%L, (SELECT count(*) FROM %I))', split_part(v_t, '.', 2), 'd_' || split_part(v_t, '.', 2));
+  END LOOP;
+  EXECUTE v_sql || ' SELECT jsonb_object_agg(v.t, v.n) FROM (VALUES ' || v_sel || ') v(t, n)' INTO v_deleted USING p_org;
+  PERFORM set_config('marsa.g3_bl_batch', v_prev_bl, true);
+  FOREACH v_g IN ARRAY app.convert_delete_guards() LOOP
+    EXECUTE format('ALTER TABLE %s ENABLE TRIGGER %I', split_part(v_g, ':', 1), split_part(v_g, ':', 2));
+  END LOOP;
+  IF EXISTS (SELECT 1 FROM unnest(app.convert_delete_guards()) g
+              JOIN pg_trigger t ON t.tgrelid = split_part(g, ':', 1)::regclass AND t.tgname = split_part(g, ':', 2)
+             WHERE t.tgenabled <> 'O') THEN
+    PERFORM app.fail('MRS_INVALID', 'guard_not_reenabled');
+  END IF;
+
+  DELETE FROM public.memberships m
+   WHERE m.org_id = p_org
+     AND NOT (m.role = 'admin' AND EXISTS (SELECT 1 FROM public.platform_admins pa WHERE pa.user_id = m.user_id));
+  GET DIAGNOSTICS v_members = ROW_COUNT;
+  -- every reference restarts at …-000001: <prefix>- / REQ- / MSG- / IMP- (yearly) and PAY- / CUS- (year 0), this org only
+  DELETE FROM public.org_counters c WHERE c.org_id = p_org;
+  GET DIAGNOSTICS v_counters = ROW_COUNT;
+  DELETE FROM public.org_usage_counters u WHERE u.org_id = p_org;
+  GET DIAGNOSTICS v_usage = ROW_COUNT;
+  PERFORM app.g7_recount(p_org);
+  RETURN jsonb_build_object('deleted', v_deleted, 'memberships', v_members, 'org_counters', v_counters,
+                            'org_usage_counters', v_usage, 'mock_channels_disabled', v_mock);
+END $$;
+
+-- readiness after the run (read-only; no TOTP item: MFA is off by the owner's decision, 20261129000100)
+CREATE OR REPLACE FUNCTION app.reconvert_ready(p_org uuid) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+DECLARE
+  o     public.organizations;
+  v_t   text;
+  v_n   bigint;
+  v_left text[] := ARRAY[]::text[];
+  v_bl  text[];
+  v_st  jsonb;
+BEGIN
+  SELECT * INTO o FROM public.organizations x WHERE x.id = p_org;
+  IF o.id IS NULL THEN RETURN jsonb_build_object('ok', false, 'blockers', jsonb_build_array('org_not_found')); END IF;
+  FOREACH v_t IN ARRAY app.convert_delete_tables() LOOP
+    EXECUTE format('SELECT count(*) FROM %s WHERE org_id = $1', v_t) INTO v_n USING p_org;
+    IF v_n > 0 THEN v_left := v_left || (split_part(v_t, '.', 2) || ':' || v_n); END IF;
+  END LOOP;
+  v_bl := array_remove(ARRAY[
+    CASE WHEN app.deploy_environment() <> 'production' THEN 'deploy_environment_not_production' END,
+    CASE WHEN o.environment <> 'production' THEN 'org_not_production' END,
+    CASE WHEN app.is_demo_org(o) THEN 'demo_org' END,
+    CASE WHEN NOT EXISTS (SELECT 1 FROM public.memberships m JOIN public.platform_admins pa ON pa.user_id = m.user_id
+                           WHERE m.org_id = p_org AND m.role = 'admin' AND m.is_active) THEN 'owner_admin_membership_missing' END,
+    CASE WHEN cardinality(v_left) > 0 THEN 'rows_left:' || array_to_string(v_left, ',') END,
+    CASE WHEN EXISTS (SELECT 1 FROM public.msg_channels c WHERE c.org_id = p_org AND c.mode = 'mock' AND (c.ingest_enabled OR c.send_enabled))
+         THEN 'mock_channel_active' END,
+    CASE WHEN EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                       WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relrowsecurity) THEN 'public_tables_without_rls' END
+  ]::text[], NULL);
+  -- the uploaded files of the wiped rows stay in Storage until the owner empties '<org>/' in the three buckets (runbook
+  -- step «التخزين»): listed as a to-do, not a blocker (the folders are emptied after the run)
+  v_st := app.convert_storage_objects(p_org);
+  RETURN jsonb_build_object('ok', cardinality(v_bl) = 0, 'blockers', to_jsonb(v_bl),
+                            'todo', to_jsonb(array_remove(ARRAY[
+                              CASE WHEN coalesce((v_st ->> 'documents')::int, 0) + coalesce((v_st ->> 'finance')::int, 0)
+                                        + coalesce((v_st ->> 'messages')::int, 0) > 0
+                                   THEN 'storage_objects_left:' || (v_st ->> 'folder') END,
+                              CASE WHEN v_st ? 'note' THEN 'storage_objects_unknown:' || (v_st ->> 'folder') END]::text[], NULL)),
+                            'slug', o.slug, 'ref_prefix', o.ref_prefix, 'next_transaction_ref',
+                            o.ref_prefix || '-' || extract(year FROM (now() AT TIME ZONE 'Asia/Riyadh'))::int || '-' ||
+                            lpad((coalesce((SELECT c.last_value FROM public.org_counters c WHERE c.org_id = p_org AND c.scope = 'transaction'
+                                              AND c.year = extract(year FROM (now() AT TIME ZONE 'Asia/Riyadh'))::int), 0) + 1)::text, 6, '0'),
+                            'mfa_required', false);
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 5. preview (read-only; SQL Editor only)
+-- ---------------------------------------------------------------------
+-- SELECT public.reconvert_org_preview('<org uuid>', '<new-slug>', '<NEW PREFIX>');
+CREATE OR REPLACE FUNCTION public.reconvert_org_preview(p_org uuid, p_slug text DEFAULT NULL, p_ref_prefix text DEFAULT NULL) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+DECLARE
+  o       public.organizations;
+  v_t     text;
+  v_n     bigint;
+  v_rows  jsonb := '{}'::jsonb;
+  v_keep  jsonb := '{}'::jsonb;
+  v_total bigint := 0;
+  v_err   text[];
+  v_slug  text := lower(btrim(coalesce(p_slug, '')));
+  v_pfx   text := upper(btrim(coalesce(p_ref_prefix, '')));
+  v_daf   jsonb;
+BEGIN
+  IF nullif(current_setting('request.jwt.claims', true), '') IS NOT NULL THEN
+    PERFORM app.fail('MRS_FORBIDDEN', 'sql_editor_only');
+  END IF;
+  SELECT * INTO o FROM public.organizations x WHERE x.id = p_org;
+  IF o.id IS NULL THEN PERFORM app.fail('MRS_NOT_FOUND', 'organization'); END IF;
+  FOREACH v_t IN ARRAY app.convert_delete_tables() LOOP
+    EXECUTE format('SELECT count(*) FROM %s WHERE org_id = $1', v_t) INTO v_n USING p_org;
+    v_rows := v_rows || jsonb_build_object(split_part(v_t, '.', 2), v_n);
+    v_total := v_total + v_n;
+  END LOOP;
+  FOREACH v_t IN ARRAY app.convert_keep_tables() LOOP
+    IF v_t IN ('public.memberships', 'public.org_counters', 'public.org_usage_counters') THEN CONTINUE; END IF;
+    EXECUTE format('SELECT count(*) FROM %s WHERE org_id = $1', v_t) INTO v_n USING p_org;
+    v_keep := v_keep || jsonb_build_object(v_t, v_n);
+  END LOOP;
+  v_err := CASE WHEN p_slug IS NULL AND p_ref_prefix IS NULL THEN ARRAY['slug_and_prefix_not_given']
+                ELSE app.reconvert_input_errors(p_org, p_slug, p_ref_prefix, NULL, NULL) END;
+  v_daf := app.convert_daftra_pushed(p_org);
+  RETURN jsonb_build_object(
+    'org_id', o.id, 'slug', o.slug, 'name_ar', o.name_ar, 'name_en', o.name_en, 'ref_prefix', o.ref_prefix,
+    'environment', o.environment, 'deploy_environment', app.deploy_environment(),
+    'runs_before', (SELECT coalesce(jsonb_agg(jsonb_build_object('run_no', c.run_no, 'kind', c.kind, 'from_slug', c.from_slug,
+                                                                  'to_slug', c.to_slug, 'converted_at', c.converted_at) ORDER BY c.run_no), '[]'::jsonb)
+                      FROM app.org_conversions c WHERE c.org_id = p_org),
+    'new_slug', nullif(v_slug, ''), 'new_ref_prefix', nullif(v_pfx, ''),
+    'first_transaction_ref_after', CASE WHEN cardinality(v_err) = 0
+                                        THEN v_pfx || '-' || extract(year FROM (now() AT TIME ZONE 'Asia/Riyadh'))::int || '-000001' END,
+    'confirm_phrase', CASE WHEN cardinality(v_err) = 0 THEN 'WIPE-ALL-DATA-' || o.slug || '-TO-' || v_slug || '-' || v_pfx END,
+    'input_errors', to_jsonb(v_err),
+    'used_prefixes', to_jsonb(app.reconvert_used_prefixes(p_org)),
+    'reserved_prefixes', to_jsonb(app.reconvert_reserved_prefixes()),
+    'would_delete', v_rows, 'would_delete_total', v_total,
+    'kept', v_keep,
+    'counters_reset', (SELECT coalesce(jsonb_agg(jsonb_build_object('scope', c.scope, 'year', c.year, 'last_value', c.last_value)
+                                                 ORDER BY c.scope, c.year), '[]'::jsonb)
+                         FROM public.org_counters c WHERE c.org_id = p_org),
+    'memberships_kept', (SELECT coalesce(jsonb_agg(jsonb_build_object('email', app.mask_email(u.email), 'role', m.role)
+                                                   ORDER BY u.email), '[]'::jsonb)
+                           FROM public.memberships m JOIN public.platform_admins pa ON pa.user_id = m.user_id
+                           LEFT JOIN auth.users u ON u.id = m.user_id
+                          WHERE m.org_id = p_org AND m.role = 'admin'),
+    'memberships_removed', (SELECT coalesce(jsonb_agg(jsonb_build_object('email', app.mask_email(u.email), 'role', m.role)
+                                                      ORDER BY u.email, m.role), '[]'::jsonb)
+                              FROM public.memberships m LEFT JOIN auth.users u ON u.id = m.user_id
+                             WHERE m.org_id = p_org
+                               AND NOT (m.role = 'admin' AND EXISTS (SELECT 1 FROM public.platform_admins pa WHERE pa.user_id = m.user_id))),
+    'branches', (SELECT coalesce(jsonb_agg(b.code ORDER BY b.code), '[]'::jsonb) FROM public.branches b WHERE b.org_id = p_org),
+    'msg_channels', (SELECT coalesce(jsonb_agg(jsonb_build_object('address', c.address, 'mode', c.mode, 'status', c.status)
+                                               ORDER BY c.address), '[]'::jsonb)
+                       FROM public.msg_channels c WHERE c.org_id = p_org),
+    'accounting_link', (SELECT jsonb_build_object('mode', d.mode, 'status', d.status, 'subdomain', d.subdomain)
+                          FROM public.daftra_connections d WHERE d.org_id = p_org),
+    'ai_settings_kept', EXISTS (SELECT 1 FROM app.ai_settings s WHERE s.org_id = p_org),
+    'storage_objects', app.convert_storage_objects(p_org),
+    'daftra_pushed', v_daf - 'connection',
+    'accounts_without_access_after', app.convert_accounts_without_access(p_org),
+    'warnings', to_jsonb(array_remove(ARRAY[
+      CASE WHEN v_daf ->> 'ack' IS NOT NULL THEN 'daftra_documents_exist:' || (v_daf ->> 'invoices') || '-' || (v_daf ->> 'clients') END,
+      CASE WHEN EXISTS (SELECT 1 FROM public.organizations x WHERE x.id <> p_org AND x.ref_prefix = v_pfx) THEN 'ref_prefix_used_by_another_org' END
+    ]::text[], NULL)),
+    'blockers', to_jsonb(app.reconvert_check(p_org)));
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 6. the re-conversion (SQL Editor only)
+-- ---------------------------------------------------------------------
+-- SELECT public.reconvert_org('<org uuid>', '<slug>', '<PREFIX>', 'WIPE-ALL-DATA-<current-slug>-TO-<slug>-<PREFIX>', '<name_ar>|NULL', '<name_en>|NULL');
+CREATE OR REPLACE FUNCTION public.reconvert_org(p_org uuid, p_slug text, p_ref_prefix text, p_confirm text,
+                                                p_name_ar text DEFAULT NULL, p_name_en text DEFAULT NULL) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE
+  o          public.organizations;
+  n          public.organizations;
+  v_slug     text := lower(btrim(coalesce(p_slug, '')));
+  v_prefix   text := upper(btrim(coalesce(p_ref_prefix, '')));
+  v_err      text[];
+  v_block    text[];
+  v_storage  jsonb;
+  v_daftra   jsonb;
+  v_w        jsonb;
+  v_noacc    jsonb;
+  v_total    bigint;
+  v_run      int;
+  v_summary  jsonb;
+BEGIN
+  IF nullif(current_setting('request.jwt.claims', true), '') IS NOT NULL THEN
+    PERFORM app.fail('MRS_FORBIDDEN', 'sql_editor_only');
+  END IF;
+  PERFORM set_config('lock_timeout', '15s', true);
+  SELECT * INTO o FROM public.organizations x WHERE x.id = p_org FOR UPDATE;
+  IF o.id IS NULL THEN PERFORM app.fail('MRS_NOT_FOUND', 'organization'); END IF;
+  v_err := app.reconvert_input_errors(p_org, p_slug, p_ref_prefix, p_name_ar, p_name_en);
+  IF cardinality(v_err) > 0 THEN PERFORM app.fail('MRS_INVALID', array_to_string(v_err, ' ')); END IF;
+  -- the phrase names the org being wiped (its current slug) and the new slug / prefix
+  IF p_confirm IS DISTINCT FROM 'WIPE-ALL-DATA-' || o.slug || '-TO-' || v_slug || '-' || v_prefix THEN
+    PERFORM app.fail('MRS_INVALID', 'confirm');
+  END IF;
+  v_block := app.reconvert_check(p_org);
+  IF cardinality(v_block) > 0 THEN PERFORM app.fail('MRS_FORBIDDEN', array_to_string(v_block, ' ')); END IF;
+
+  v_storage := app.convert_storage_objects(p_org);
+  v_daftra := app.convert_daftra_pushed(p_org);
+  v_w := app.reconvert_wipe(p_org);
+  v_noacc := app.convert_accounts_without_access(p_org);
+
+  UPDATE public.organizations x
+     SET slug = v_slug, ref_prefix = v_prefix,
+         name_ar = coalesce(nullif(btrim(p_name_ar), ''), x.name_ar),
+         name_en = CASE WHEN p_name_en IS NULL THEN x.name_en ELSE nullif(btrim(p_name_en), '') END
+   WHERE x.id = p_org
+  RETURNING * INTO n;
+
+  SELECT sum(value::bigint) INTO v_total FROM jsonb_each_text(v_w -> 'deleted');
+  SELECT coalesce(max(c.run_no), 1) + 1 INTO v_run FROM app.org_conversions c WHERE c.org_id = p_org;
+  v_summary := jsonb_build_object(
+    'org_id', p_org, 'run_no', v_run, 'kind', 'reconvert',
+    'from_slug', o.slug, 'slug', n.slug, 'from_ref_prefix', o.ref_prefix, 'ref_prefix', n.ref_prefix,
+    'from_name_ar', o.name_ar, 'name_ar', n.name_ar, 'name_en', n.name_en, 'environment', n.environment,
+    'deleted', (v_w -> 'deleted') || jsonb_build_object('memberships', (v_w ->> 'memberships')::int),
+    'deleted_total', v_total + (v_w ->> 'memberships')::int,
+    'reset', jsonb_build_object('org_counters', (v_w ->> 'org_counters')::int, 'org_usage_counters', (v_w ->> 'org_usage_counters')::int),
+    'mock_channels_disabled', (v_w ->> 'mock_channels_disabled')::int,
+    'guards_bypassed', cardinality(app.convert_delete_guards()),
+    'kept', jsonb_build_object(
+      'branches',    (SELECT count(*) FROM public.branches b WHERE b.org_id = p_org),
+      'memberships', (SELECT count(*) FROM public.memberships m WHERE m.org_id = p_org),
+      'msg_channels', (SELECT count(*) FROM public.msg_channels c WHERE c.org_id = p_org),
+      'daftra_connections', (SELECT count(*) FROM public.daftra_connections d WHERE d.org_id = p_org),
+      'ai_settings', (SELECT count(*) FROM app.ai_settings s WHERE s.org_id = p_org),
+      'audit_log',   (SELECT count(*) FROM public.audit_log a WHERE a.org_id = p_org)),
+    'storage_objects_left', v_storage,
+    'daftra_documents_left', v_daftra - 'connection',
+    'accounts_without_access', v_noacc);
+
+  INSERT INTO app.org_conversions (org_id, run_no, kind, from_slug, to_slug, converted_by, summary)
+  VALUES (p_org, v_run, 'reconvert', o.slug, n.slug, left(session_user::text, 63), v_summary);
+
+  RETURN v_summary || jsonb_build_object('ready', app.reconvert_ready(p_org), 'health_check', public.health_check());
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 7. privileges: SQL Editor (postgres) only — no API role, not even the Edge Functions' service_role
+-- ---------------------------------------------------------------------
+REVOKE EXECUTE ON FUNCTION app.reconvert_reserved_prefixes(), app.reconvert_used_prefixes(uuid),
+  app.reconvert_input_errors(uuid, text, text, text, text), app.reconvert_check(uuid), app.reconvert_wipe(uuid),
+  app.reconvert_ready(uuid), app.next_org_seq(uuid, text), app.tg_org_seq(), app.msg_tx_ref_ok(text)
+FROM PUBLIC, anon, authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.reconvert_org_preview(uuid, text, text),
+  public.reconvert_org(uuid, text, text, text, text, text)
+FROM PUBLIC, anon, authenticated, service_role;
+-- review_msg_extraction: CREATE OR REPLACE keeps its ACL (20261107000100); restated
+REVOKE ALL ON FUNCTION public.review_msg_extraction(uuid, text, text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.review_msg_extraction(uuid, text, text, text) TO authenticated;

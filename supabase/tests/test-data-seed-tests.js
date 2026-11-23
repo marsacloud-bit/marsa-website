@@ -292,6 +292,19 @@ async function secSeed() {
                                                                         OR r.truck_id NOT IN (SELECT id FROM trucks WHERE plate_no ~ '^TST[0-9]+$'))) foreign_fleet`);
     return (Number(r.drv) === 8 && Number(r.trk) === 6 && Number(r.drv_new) === 8 && Number(r.foreign_fleet) === 0) || J(r);
   });
+  await check('storage gate (20261206000100): every Jeddah test container with an appointment is settled (paid TSTSTG… / none), some earlier ones still issued / sent / not answered; nothing outside the gate ports', async () => {
+    const r = await one(`WITH c AS (SELECT k.id, t.port_code, s.storage_state st, s.storage_invoice_no inv,
+                                         EXISTS (SELECT 1 FROM port_appointments a WHERE a.container_id = k.id) booked
+                                    FROM containers k JOIN transactions t ON t.id = k.transaction_id
+                                    LEFT JOIN container_storage s ON s.container_id = k.id
+                                   WHERE t.bl_number LIKE 'TESTBL%' AND t.org_id = '${ORG}')
+      SELECT count(*) FILTER (WHERE port_code = 'SAJED' AND booked) booked_jed,
+             count(*) FILTER (WHERE port_code = 'SAJED' AND booked AND (st IS NULL OR st NOT IN ('paid','none'))) booked_unsettled,
+             count(*) FILTER (WHERE st = 'paid' AND inv !~ '^TSTSTG[0-9]{6}$') bad_inv,
+             count(*) FILTER (WHERE port_code = 'SAJED' AND NOT booked AND (st IS NULL OR st IN ('issued','sent'))) open_jed,
+             count(*) FILTER (WHERE port_code <> 'SAJED' AND st IS NOT NULL) outside FROM c`);
+    return (Number(r.booked_jed) > 0 && Number(r.booked_unsettled) === 0 && Number(r.bad_inv) === 0 && Number(r.open_jed) > 0 && Number(r.outside) === 0) || J(r);
+  });
   await check('Ro-Ro and air transactions each in at least 3 statuses (container-less stage skip exercised by both)', async () => {
     const r = await one(`SELECT count(DISTINCT operational_status) FILTER (WHERE cargo_unit_type = 'roro') roro,
                                 count(DISTINCT operational_status) FILTER (WHERE mode = 'air') air,
@@ -546,6 +559,9 @@ const NOSU_SETUP = `
   CREATE ROLE marsa_owner_test NOSUPERUSER NOLOGIN NOBYPASSRLS;
   GRANT authenticated, anon TO marsa_owner_test;
   DO $nosu$ DECLARE r record; BEGIN
+    -- the cleanup's temp tables need TEMPORARY on the database: the Supabase postgres role has it (PUBLIC keeps the
+    -- default TEMP grant there), PGlite's template1 grants it to nobody
+    EXECUTE format('GRANT TEMPORARY ON DATABASE %I TO marsa_owner_test', current_database());
     FOR r IN SELECT n.nspname FROM pg_namespace n WHERE n.nspname NOT LIKE 'pg\\_%' AND n.nspname <> 'information_schema' LOOP
       EXECUTE format('GRANT USAGE, CREATE ON SCHEMA %I TO marsa_owner_test', r.nspname);
     END LOOP;

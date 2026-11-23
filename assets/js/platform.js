@@ -980,9 +980,16 @@
      The key is typed once and sent to the database (kept in Supabase Vault); it is never read back — the list shows
      its last 4 characters. "Test" asks the ai-extract Edge Function to list the provider's models with the saved key;
      the list then fills the model choices. An office's own key is a later stage (the table is ready for it).
+     23 Nov 2026: each row shows where its key comes from (key_source: vault = saved here; env = never saved here, the
+     Edge Function secret is used if one is set; none = deleted here, no key at all, the secret is not used). The test
+     checks the key saved here only. Claude's model is fixed (model_locked); a price must be above 0.
      ====================================================================== */
   var aiBody = $('[data-pf-ai]'), AI_COLS = 6, aiRows = [];
-  var AI_NOTE_KEYS = { ok: 'aiTestOk', no_key: 'aiTestNoKey', key_rejected: 'aiTestRejected', busy: 'aiTestBusy', unreachable: 'aiTestUnreachable' };
+  var AI_NOTE_KEYS = { ok: 'aiTestOk', no_key: 'aiTestNoKey', key_rejected: 'aiTestRejected', busy: 'aiTestBusy', unreachable: 'aiTestUnreachable',
+    lookup_failed: 'aiTestLookupFailed' };
+  var AI_SRC_KEYS = { vault: 'aiSrcVault', env: 'aiSrcEnv', none: 'aiSrcNone' };
+  // the server's detail codes of the model dialog → a plain message
+  var AI_SAVE_ERR = { model_taken: 'aiModelTaken', model_locked: 'aiModelLocked', price: 'aiPriceBad', model: 'aiModelBad' };
   function aiName(p) { var k = 'aiProv_' + p, v = tr(k); return v && v !== 'platform.' + k ? v : p; }
   function aiPrice(v) { var n = num(v); return n == null ? '—' : '$' + fmtNum(n); }
   function renderAi() {
@@ -991,10 +998,12 @@
     clear(aiBody);
     aiRows.forEach(function (p) {
       var k = p.key || null;
+      var src = AI_SRC_KEYS[p.key_source] ? p.key_source : (k ? 'vault' : 'env');
       var keyCell = k
         ? [h('span', { class: 'badge badge-success', text: tr('aiKeySaved') }), ' ', h('span', { class: 'pf-mono', dir: 'ltr', text: '•••• ' + k.last4 }),
            h('span', { class: 'pf-sub', text: tr('aiKeySetAt', { when: fmtDate(k.set_at), who: k.set_by_name || '—' }) })]
         : [h('span', { class: 'badge badge-muted', text: tr('aiKeyNone') })];
+      keyCell.push(h('span', { class: 'pf-sub', 'data-pf-ai-src': src, text: tr(AI_SRC_KEYS[src]) }));
       var test = !k ? h('span', { class: 'pf-sub', text: '—' }) : (k.tested_at
         ? [h('span', { class: 'badge ' + (k.test_ok ? 'badge-success' : 'badge-danger'), text: tr(AI_NOTE_KEYS[k.test_note] || 'aiTestUnreachable') }),
            h('span', { class: 'pf-sub', text: fmtDate(k.tested_at) })]
@@ -1077,9 +1086,11 @@
   function openAiModelDialog(p) {
     var d = mkDialog('pf-ai-model-dialog', tr('aiModelTitle', { name: aiName(p.provider) }), { wide: true });
     var listed = p.key && Array.isArray(p.key.test_models) ? p.key.test_models : [];
+    var locked = p.model_locked === true;
     var fm = fieldEl({ id: 'pf-ai-model', label: tr('aiModelLabel'), dir: 'ltr', required: true, value: p.model, max: 64,
-      hint: listed.length ? tr('aiModelHintListed', { n: fmtNum(listed.length) }) : tr('aiModelHintNone') });
-    if (listed.length) {
+      hint: locked ? tr('aiModelLockedHint') : (listed.length ? tr('aiModelHintListed', { n: fmtNum(listed.length) }) : tr('aiModelHintNone')) });
+    if (locked) fm.input.readOnly = true;
+    if (listed.length && !locked) {
       var dl = h('datalist', { id: 'pf-ai-model-list' });
       listed.forEach(function (m) { dl.appendChild(h('option', { value: m })); });
       fm.input.setAttribute('list', 'pf-ai-model-list');
@@ -1100,16 +1111,18 @@
       d.error('');
       var model = inputVal(fm.input).toLowerCase(), pin = inputVal(fi.input).replace(/[٠-٩]/g, function (c) { return String(c.charCodeAt(0) - 1632); }).replace('٫', '.'), pout = inputVal(fo.input).replace(/[٠-٩]/g, function (c) { return String(c.charCodeAt(0) - 1632); }).replace('٫', '.');
       if (!/^[a-z0-9][a-z0-9.-]{0,63}$/.test(model)) { d.error(tr('aiModelBad')); return; }
-      var payload = { model: model, is_active: !!fa.input.checked };
+      var payload = { is_active: !!fa.input.checked };
+      if (!locked) payload.model = model;                       // Claude's model is fixed by the server
+      if (!locked && aiRows.some(function (x) { return x.provider !== p.provider && x.model === model; })) { d.error(tr('aiModelTaken')); return; }
       if (pin !== '' || pout !== '') {
         var a = Number(pin), b = Number(pout);
-        if (pin === '' || pout === '' || !isFinite(a) || !isFinite(b) || a < 0 || b < 0 || a > 1000 || b > 1000) { d.error(tr('aiPriceBad')); return; }
+        if (pin === '' || pout === '' || !isFinite(a) || !isFinite(b) || a <= 0 || b <= 0 || a > 1000 || b > 1000) { d.error(tr('aiPriceBad')); return; }
         payload.price_in = Math.round(a * 10000) / 10000; payload.price_out = Math.round(b * 10000) / 10000;
       }
       busy(ok, true);
       api.platformAiSaveProvider(p.provider, payload).then(function (r) {
         busy(ok, false);
-        if (r.error) { d.error(errText(r.error)); return; }
+        if (r.error) { var ek = AI_SAVE_ERR[r.error.field]; d.error(ek ? tr(ek) : errText(r.error)); return; }
         d.close();
         showMsg(tr('aiModelSavedMsg', { name: aiName(p.provider) }), 'success');
         loadAi();

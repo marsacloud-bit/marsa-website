@@ -10,14 +10,15 @@
     1. adapter.js helpers: zero-insensitive codes, Riyadh date (Intl), dates, KSA check, CustomModel, containers, error codes
     2. the request guard: HF5 (no write on an existing invoice), resolve-only products, purchase drafts (zero tax, ?send=draft)
     3. worker + MOCK adapter (contexts in the DB contract shape): the Egypt-configured account, a code with leading zeros,
-       a required custom field missing, a suspended / inactive client, a date stored differently, the opening zero line,
+       a required custom field missing, a suspended / inactive client, a date stored differently, the opening line (500 SAR),
        HF5, product_match, client_import (paging, 0 rows), invoice_lookup (number, several composite matches, another
        client), legacy_scan (batches + cursor resume), supplier_search, purchase_push (zero tax, dedupe, lost response)
     4. worker + LIVE adapter over the stub: the exact requests of each kind; no write on a non-KSA account or under HF5
     5. end to end: PGlite (shim + every migration + seed, the step-7 defaults UNCHANGED: HF5 + resolve-only) + the REAL
        worker + the live adapter over the stub — probe (Egypt → refused, KSA → connected), product match + confirm,
        custom fields, the created draft (Riyadh date, po_number, CustomModel, read-back, daftra_url), date_mismatch,
-       HF5 manual_in_daftra with no PUT, the opening draft on a declaration, client import, invoice lookup (review / blocked),
+       HF5 manual_in_daftra with no PUT, the opening draft on a declaration (500 SAR clearance line; issued → no
+       issued_mismatch), client import, invoice lookup (review / blocked),
        client_mismatch on pull, legacy scan in batches, supplier search, the purchase draft per trip
     6. the single-file bundle (scripts/bundle-edge-function.py daftra-sync) carries the new code
 
@@ -89,7 +90,7 @@ function pushCtx(o) {
     intent: { id: 'i-1', transaction_id: 't-1', transaction_ref: 'MRS-2026-000101', operational_ref: x.ref || 'MRS-2026-000101/F', po_number: x.ref || 'MRS-2026-000101/F',
       currency: 'SAR', purpose: 'final', origin: x.origin, status: 'open', sync_state: 'pending', external_invoice_id: x.ext, pushed_hash: x.pushedHash || null,
       remote_version: null, invoice_date: x.invoice_date, notes: null, daftra_url: null, custom_fields: x.cf,
-      opening_line: x.opening ? { item_key: 'item:customs_clearance', description: '', quantity: 1, unit_price: 0, vat_rate: 15 } : null,
+      opening_line: x.opening ? { item_key: 'item:customs_clearance', description: '', quantity: 1, unit_price: 500, vat_rate: 15 } : null,   // 20261205000100: 500 SAR
       client: { link_id: 'L-1', client_id: 'cl-1', client_ref: 'MRSC-cl-1', external_id: x.clientExt, status: x.clientStatus, data: { name: 'عميل الاختبار' },
         pushed_snapshot: null, active: x.active },
       items: x.items || [{ link_id: 'I-1', item_key: 'item:customs_clearance', product_code: 'MRS-item-customs_clearance', external_product_id: null,
@@ -317,13 +318,13 @@ async function secMock() {
     const raw = m.control.invoice(r.effects.external_invoice_id).lines_raw;
     return (r.outcome === 'ok' && raw.length === 2 && raw[1].item === 'موعد خروج' && raw[1].daftra_description === 'TAS123456' && raw.every(l => l.line_ref !== lref('A3'))) || J(raw);
   });
-  await check('opening intent: ONE zero line (clearance product, empty description) + po_number = the transaction ref; needs a linked client', async () => {
+  await check('opening intent: ONE clearance line at the context price (500 SAR + 15 %: read back 575), clearance product, empty description + po_number = the transaction ref; needs a linked client', async () => {
     const { m, cl, p } = setup();
     const r = await runJob(pushCtx({ clientExt: cl.id, origin: 'opening', opening: true, ref: 'MRS-2026-000101', lines: [] }), m, { deps: AD, clock });
     const inv = m.control.invoice(r.effects.external_invoice_id);
     const r2 = await runJob(pushCtx({ clientExt: null, clientStatus: 'pending', origin: 'opening', opening: true, lines: [] }), m, { deps: AD, clock });
-    return (r.outcome === 'ok' && inv.reference === 'MRS-2026-000101' && inv.lines.length === 1 && inv.lines[0].unit_price === '0.00' && inv.lines[0].product_id === p.id
-      && inv.lines_raw[0].daftra_description === '' && inv.lines_raw[0].line_ref === null && r.effects.read_back.line_count === 1 && r.effects.read_back.total === '0.00'
+    return (r.outcome === 'ok' && inv.reference === 'MRS-2026-000101' && inv.lines.length === 1 && inv.lines[0].unit_price === '500.00' && inv.lines[0].product_id === p.id
+      && inv.lines_raw[0].daftra_description === '' && inv.lines_raw[0].line_ref === null && r.effects.read_back.line_count === 1 && r.effects.read_back.total === '575.00'
       && r2.error.code === 'client_not_linked' && r2.calls.length === 0) || J({ r: r.effects, inv, r2: r2.error });
   });
   await check('HF5: an existing draft that differs is NEVER updated (draft_update_disabled, no updateDraftInvoice); found by reference → adopted as is', async () => {
@@ -827,7 +828,7 @@ async function secE2E() {
     return (r && r.details.remote_client_id === OTHER_EXT && i.remote_client_id === OTHER_EXT) || J({ r, i });
   });
 
-  /* --- opening zero draft on a declaration */
+  /* --- opening draft on a declaration: the customs clearance line at the catalogue price (500 SAR, 20261205000100) */
   await rpc('admin', `SELECT public.set_daftra_write_policy($1, $2, 'test: owner setting') r`, [A, { auto_draft_on_declaration: true }]);
   await rpc('mgr', `SELECT public.save_daftra_product_code($1, $2, $3) r`, [A, 'item:customs_clearance', '000186']);
   await q(`UPDATE public.daftra_item_links SET external_product_id = $2, status = 'linked' WHERE org_id = $1 AND item_key = 'item:customs_clearance'`, [A, P186]);
@@ -835,13 +836,25 @@ async function secE2E() {
   const wo = writes().length;
   await addDecl(t3, 'DCL-E2E-3');
   await runAll();
-  await check('opening: the declaration opens ONE zero draft — po_number = the transaction ref, one clearance item at 0, empty description, the custom fields', async () => {
+  await check('opening: the declaration opens ONE draft — po_number = the transaction ref, one clearance item at 500 SAR (the catalogue price), empty description, the custom fields; no read-back mismatch', async () => {
     const i = await one(`SELECT * FROM public.billing_intents WHERE transaction_id = $1 AND origin = 'opening'`, [t3.id]);
     const w = writes().slice(wo);
     const b = w[0] && w[0].body;
-    return (i && i.status === 'draft' && w.length === 1 && b.Invoice.po_number === t3.ref && b.InvoiceItem.length === 1 && b.InvoiceItem[0].unit_price === 0
+    return (i && i.status === 'draft' && w.length === 1 && b.Invoice.po_number === t3.ref && b.InvoiceItem.length === 1 && b.InvoiceItem[0].unit_price === 500
+      && Number(i.remote_total) === 575
       && b.InvoiceItem[0].description === '' && b.InvoiceItem[0].product_id === Number(P186) && b.CustomModel.cf_decl[0] === 'DCL-E2E-3'
       && (await one(`SELECT count(*)::int n FROM public.billing_review_items WHERE intent_id = $1 AND kind IN ('readback_mismatch','date_mismatch')`, [i.id])).n === 0) || J({ i, b });
+  });
+  // the accountant issues the opening draft in Daftra (500 + 15 % = 575); the pull freezes it — the opening line is not a
+  // billing line, and the HF5 totals check counts it: no false issued_mismatch
+  const io = await one(`SELECT * FROM public.billing_intents WHERE transaction_id = $1 AND origin = 'opening'`, [t3.id]);
+  S.control.issue(io.external_invoice_id);
+  await rpc('acc', `SELECT public.request_billing_pull($1) r`, [io.id]);
+  await runAll();
+  await check('opening issued in Daftra (575 with the 500 SAR clearance line) → pull: intent issued, NO issued_mismatch', async () => {
+    const i = await one(`SELECT status, remote_total FROM public.billing_intents WHERE id = $1`, [io.id]);
+    const mm = await q(`SELECT kind, details FROM public.billing_review_items WHERE intent_id = $1 AND kind IN ('issued_mismatch','readback_mismatch')`, [io.id]);
+    return (i.status === 'issued' && Number(i.remote_total) === 575 && mm.length === 0) || J({ i, mm });
   });
   await rpc('admin', `SELECT public.set_daftra_write_policy($1, $2, 'test: owner setting') r`, [A, { auto_draft_on_declaration: false }]);
 

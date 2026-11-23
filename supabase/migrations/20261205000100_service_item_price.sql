@@ -16,12 +16,21 @@
 --      default service rate, 15). The employee edits the amount in the draft in the accounting program; Marsa never
 --      updates an existing draft (allow_draft_update stays as set).
 --   5. public.test_daftra_custom_fields (20261123000100 body, re-created): the dry run shows the same price.
+--   6. app.bill_opening_total(intent, snapshot): the opening line's total (net + VAT). The opening line is sent from the job
+--      context and is NOT a billing_intent_line, so the totals checks that compare the accounting program's total with the
+--      synced lines must add it, or a 500 SAR opening draft would raise a false mismatch:
+--   7. app.bill_apply_push_ok (20261123000100 body, re-created): the read-back of a created draft expects lines + the opening
+--      line Marsa sent (catalogue price × (1 + service VAT)) — no false readback_mismatch 'total'.
+--   8. app.bill_mark_issued (20261123000100 body, re-created): the HF5 issued check (official total = synced lines) adds the
+--      opening line as the issued invoice shows it (snapshot: the first unmarked line of the opening product, the amount the
+--      employee may have changed; no snapshot lines → the catalogue line) — no false issued_mismatch at issue time.
 --   CREATE OR REPLACE keeps each re-created function's privileges.
 --   Re-runnable (ADD COLUMN IF NOT EXISTS / DROP CONSTRAINT IF EXISTS + ADD / CREATE OR REPLACE / UPDATE … WHERE NULL).
 --   Data: sets default_price = 500 on the customs_clearance item of every existing org (only where it is NULL).
 --   Re-pasting 20261123000100 after this file brings back the zero opening line: re-paste this file straight after.
---   Down-path: re-create app.bill_job_context, public.test_daftra_custom_fields (20261123000100) and
---   app.tg_org_service_items_before (20261117000100) verbatim; DROP FUNCTION app.opening_unit_price(uuid, text);
+--   Down-path: re-create app.bill_job_context, public.test_daftra_custom_fields, app.bill_apply_push_ok, app.bill_mark_issued
+--   (20261123000100) and app.tg_org_service_items_before (20261117000100) verbatim;
+--   DROP FUNCTION app.bill_opening_total(public.billing_intents, jsonb); DROP FUNCTION app.opening_unit_price(uuid, text);
 --   ALTER TABLE public.org_service_items DROP COLUMN default_price; DELETE FROM public.schema_versions WHERE version = '20261205000100'.
 --   No BEGIN/COMMIT (the SQL editor wraps the run).
 -- =====================================================================
@@ -33,7 +42,9 @@ BEGIN
     RAISE EXCEPTION 'SERVICE ITEM PRICE preflight: apply tx_stage_sets first (schema_versions lacks 20261204000100)';
   END IF;
   IF to_regclass('public.org_service_items') IS NULL OR to_regprocedure('app.bill_job_context(public.billing_sync_jobs,uuid,text)') IS NULL
-     OR to_regprocedure('public.test_daftra_custom_fields(uuid)') IS NULL OR to_regprocedure('app.tg_org_service_items_before()') IS NULL THEN
+     OR to_regprocedure('public.test_daftra_custom_fields(uuid)') IS NULL OR to_regprocedure('app.tg_org_service_items_before()') IS NULL
+     OR to_regprocedure('app.bill_mark_issued(public.billing_intents,jsonb)') IS NULL
+     OR to_regprocedure('app.bill_apply_push_ok(public.billing_intents,jsonb,uuid)') IS NULL THEN
     RAISE EXCEPTION 'SERVICE ITEM PRICE preflight: org_service_items (20261117000100) or bill_job_context / test_daftra_custom_fields (20261123000100) missing';
   END IF;
 END $pre$;
@@ -223,4 +234,217 @@ BEGIN
     'unmapped', to_jsonb(v_un), 'client_linked', v_l.status IN ('linked','drift') AND v_l.external_id IS NOT NULL,
     'account_check', CASE WHEN v_conn.id IS NOT NULL THEN app.daftra_account_check(v_conn) END,
     'ok', jsonb_array_length(v_cf -> 'missing') = 0 AND cardinality(v_un) = 0);
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 6. the opening line's total (net + VAT) for the totals checks: the opening line is sent from the job context, it is not
+--    a billing_intent_line, so the read-back (bill_apply_push_ok) and the HF5 issued check (bill_mark_issued) add it
+--    p_snap NULL / without lines → what Marsa sends (the catalogue price, the connection's service VAT rate);
+--    p_snap.lines → the line as the accounting program shows it; none → 0. The opening line is an unmarked (no [MRSL-])
+--    line whose product is the opening item's live product, else a product that item was ever linked to, else no product
+--    (pushed without a link); among those the earliest created one (lowest numeric Daftra line id; the snapshot sorts
+--    foreign lines by their JSON, not by invoice order), so a line the accountant adds later by hand — another product, or
+--    the same product again — is not taken for it
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.bill_opening_total(p_i public.billing_intents, p_snap jsonb) RETURNS numeric
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_conn jsonb; v_key text; v_rate numeric; v_pid text; v_pids text[]; x jsonb; v_q numeric; v_p numeric; v_net numeric;
+        c_num constant text := '^-?[0-9]{1,12}(\.[0-9]{1,6})?$';
+BEGIN
+  IF p_i.id IS NULL OR p_i.origin IS DISTINCT FROM 'opening' THEN RETURN 0; END IF;
+  v_conn := app.bill_conn_json(p_i.org_id);
+  v_key := coalesce(v_conn ->> 'opening_item', 'item:customs_clearance');
+  v_rate := coalesce(CASE WHEN (v_conn ->> 'default_service_vat_rate') ~ c_num THEN (v_conn ->> 'default_service_vat_rate')::numeric END, 15);
+  IF jsonb_typeof(p_snap -> 'lines') = 'array' THEN
+    SELECT i.external_product_id INTO v_pid FROM public.daftra_item_links i
+     WHERE i.org_id = p_i.org_id AND i.item_key = v_key AND i.status <> 'retired';
+    SELECT coalesce(array_agg(i.external_product_id) FILTER (WHERE i.external_product_id IS NOT NULL), ARRAY[]::text[]) INTO v_pids
+      FROM public.daftra_item_links i WHERE i.org_id = p_i.org_id AND i.item_key = v_key;
+    SELECT e.v INTO x FROM jsonb_array_elements(p_snap -> 'lines') WITH ORDINALITY e(v, n)
+     WHERE jsonb_typeof(e.v) = 'object' AND nullif(e.v ->> 'line_ref', '') IS NULL
+       AND (nullif(e.v ->> 'product_id', '') IS NULL OR e.v ->> 'product_id' = ANY (v_pids))
+     ORDER BY CASE WHEN v_pid IS NOT NULL AND e.v ->> 'product_id' = v_pid THEN 0
+                   WHEN nullif(e.v ->> 'product_id', '') IS NOT NULL THEN 1 ELSE 2 END,
+              CASE WHEN (e.v ->> 'id') ~ '^[0-9]{1,18}$' THEN (e.v ->> 'id')::numeric END NULLS LAST, e.n
+     LIMIT 1;
+    IF x IS NULL THEN RETURN 0; END IF;
+    v_q := CASE WHEN (x ->> 'quantity') ~ c_num THEN (x ->> 'quantity')::numeric ELSE 1 END;
+    v_p := CASE WHEN (x ->> 'unit_price') ~ c_num THEN (x ->> 'unit_price')::numeric ELSE 0 END;
+    IF (x ->> 'tax_rate') ~ c_num THEN v_rate := (x ->> 'tax_rate')::numeric; END IF;
+  ELSE
+    v_q := 1;
+    v_p := app.opening_unit_price(p_i.org_id, v_key);
+  END IF;
+  v_net := round(v_q * v_p, 2);
+  RETURN v_net + round(v_net * v_rate / 100, 2);
+END $$;
+REVOKE ALL ON FUNCTION app.bill_opening_total(public.billing_intents, jsonb) FROM PUBLIC, anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- 7. the read-back of a created draft expects the opening line too (20261123000100 body; only the expected total changed)
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.bill_apply_push_ok(p_i public.billing_intents, p_eff jsonb, p_job uuid) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_i public.billing_intents; v_ext text; v_state text; v_by text; v_ph text; v_rh text; v_tot numeric[]; v_url text;
+        v_rb jsonb; v_rbd date; v_rbc text; v_rbt numeric; v_link text; v_diff text[] := '{}'; v_exp numeric;
+BEGIN
+  v_ext := app.bill_ext_id(app.bill_rtext(p_eff, 'external_invoice_id', 64), 'external_invoice_id');
+  IF v_ext IS NULL THEN PERFORM app.fail('MRS_INVALID', 'external_invoice_id'); END IF;
+  IF p_i.external_invoice_id IS NOT NULL AND p_i.external_invoice_id <> v_ext THEN PERFORM app.fail('MRS_INVALID', 'external_invoice_id'); END IF;
+  PERFORM app.bill_check_invoice_free(p_i.org_id, p_i.id, v_ext);
+  v_state := coalesce(app.bill_rtext(p_eff, 'remote_state', 20), 'draft');
+  IF v_state NOT IN ('draft','issued','cancelled') THEN PERFORM app.fail('MRS_INVALID', 'remote_state'); END IF;
+  IF v_state <> 'draft' THEN
+    -- the read-back is no longer a draft: frozen (handled as a pull)
+    PERFORM app.bill_apply_pull(p_i, p_eff || jsonb_build_object('external_invoice_id', v_ext));
+    RETURN;
+  END IF;
+  v_by := app.bill_rtext(p_eff, 'found_by', 20);
+  IF v_by IS NULL OR v_by NOT IN ('ref','created','existing') THEN PERFORM app.fail('MRS_INVALID', 'found_by'); END IF;
+  v_ph := app.bill_hash(app.bill_rtext(p_eff, 'pushed_hash', 64), 'pushed_hash');
+  IF v_ph IS NULL THEN PERFORM app.fail('MRS_INVALID', 'pushed_hash'); END IF;
+  v_rh := app.bill_hash(app.bill_rtext(p_eff, 'remote_hash', 64), 'remote_hash');
+  v_tot := app.bill_totals(p_eff -> 'remote_totals');
+  v_url := app.bill_rtext(p_eff, 'daftra_url', 500);                                                                 -- L7
+  IF v_url IS NOT NULL AND v_url !~ '^https://[A-Za-z0-9.-]+(/[A-Za-z0-9_./?=&%-]*)?$' THEN PERFORM app.fail('MRS_INVALID', 'daftra_url'); END IF;
+  v_rb := p_eff -> 'read_back';
+  IF v_rb IS NOT NULL AND jsonb_typeof(v_rb) NOT IN ('object','null') THEN PERFORM app.fail('MRS_INVALID', 'read_back'); END IF;
+  UPDATE public.billing_intents i SET external_invoice_id = v_ext, status = CASE WHEN i.status = 'open' THEN 'draft' ELSE i.status END,
+         daftra_number = coalesce(app.bill_rtext(p_eff, 'daftra_number', 60), i.daftra_number),
+         daftra_status = coalesce(app.bill_rtext(p_eff, 'daftra_status', 40), i.daftra_status),
+         remote_version = coalesce(app.bill_rtext(p_eff, 'remote_version', 64), i.remote_version),
+         pushed_hash = v_ph, remote_hash = coalesce(v_rh, v_ph), pushed_at = now(), last_synced_at = now(),
+         remote_net = coalesce(v_tot[1], i.remote_net), remote_vat = coalesce(v_tot[2], i.remote_vat), remote_total = coalesce(v_tot[3], i.remote_total),
+         daftra_url = coalesce(v_url, i.daftra_url),                                                                   -- L7
+         conflict = NULL, last_error_code = NULL, last_error_message = NULL
+   WHERE i.id = p_i.id RETURNING * INTO v_i;
+  PERFORM app.bill_line_results(v_i, p_eff -> 'line_results');
+  UPDATE public.billing_intents i SET sync_state = CASE WHEN app.bill_has_pending(i.id) THEN 'pending' ELSE 'synced' END
+   WHERE i.id = p_i.id;
+  -- L7: the read-back of the draft just created (legacy assertDaftraInvoiceDateSafe_): date / client / total
+  IF jsonb_typeof(v_rb) = 'object' THEN
+    BEGIN v_rbd := app.bill_rtext(v_rb, 'date', 10)::date;
+    EXCEPTION WHEN invalid_datetime_format OR datetime_field_overflow THEN PERFORM app.fail('MRS_INVALID', 'read_back'); END;
+    v_rbc := app.bill_ext_id(app.bill_rtext(v_rb, 'client_id', 64), 'read_back');
+    v_rbt := app.fin_money(v_rb, 'total');
+    -- review (legacy assertDaftraInvoiceDateSafe_): a created draft whose stored date cannot be read is a date_mismatch too
+    IF v_i.invoice_date IS NOT NULL AND (v_rbd IS DISTINCT FROM v_i.invoice_date) AND (v_rbd IS NOT NULL OR v_by = 'created') THEN
+      PERFORM app.daftra_review_open(v_i.org_id, v_i.transaction_id, v_i.id, 'date_mismatch',
+        jsonb_build_object('expected', v_i.invoice_date, 'stored', v_rbd, 'time_zone', 'Asia/Riyadh', 'daftra_number', v_i.daftra_number));
+    END IF;
+    SELECT l.external_id INTO v_link FROM public.daftra_client_links l
+     WHERE l.org_id = v_i.org_id AND l.client_id = v_i.client_id AND l.status IN ('linked','drift');
+    IF v_rbc IS NOT NULL AND v_link IS NOT NULL AND v_rbc <> v_link THEN v_diff := v_diff || 'client'::text; END IF;
+    SELECT coalesce(sum(l.total_amount), 0) INTO v_exp FROM public.billing_intent_lines l WHERE l.intent_id = v_i.id AND l.state = 'synced';
+    v_exp := v_exp + app.bill_opening_total(v_i, NULL);                                -- 20261205000100: + the opening line sent
+    IF v_rbt IS NOT NULL AND v_by = 'created' AND v_rbt <> v_exp THEN v_diff := v_diff || 'total'::text; END IF;
+    IF (v_rb ->> 'line_count') ~ '^[0-9]{1,4}$' AND v_by = 'created'
+       AND (v_rb ->> 'line_count')::int <> (SELECT count(*)::int FROM public.billing_intent_lines l WHERE l.intent_id = v_i.id AND l.state = 'synced')
+                                            + (CASE WHEN v_i.origin = 'opening' THEN 1 ELSE 0 END) THEN
+      v_diff := v_diff || 'lines'::text;
+    END IF;
+    IF cardinality(v_diff) > 0 THEN
+      PERFORM app.daftra_review_open(v_i.org_id, v_i.transaction_id, v_i.id, 'readback_mismatch',
+        jsonb_build_object('fields', to_jsonb(v_diff), 'expected_total', v_exp, 'stored_total', v_rbt, 'expected_client_id', v_link,
+                           'stored_client_id', v_rbc, 'line_count', v_rb -> 'line_count'));
+    END IF;
+  END IF;
+  PERFORM app.bill_event(v_i.org_id, v_i.transaction_id, 'draft_synced', 'billing_intent', v_i.id,
+    jsonb_build_object('job_id', p_job, 'found_by', v_by, 'origin', v_i.origin));
+  PERFORM app.bill_tx_financial(v_i.transaction_id);
+  PERFORM app.daftra_manual_refresh(v_i.id);                                                                          -- L7
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 8. the HF5 issued check counts the opening line (20261123000100 body; only the opening total added)
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.bill_mark_issued(p_i public.billing_intents, p_eff jsonb) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_snap jsonb := p_eff -> 'remote_snapshot'; v_refs text[]; v_inv uuid[] := '{}'; v_late uuid[] := '{}'; v_l public.billing_intent_lines;
+        v_hash text := p_eff ->> 'remote_hash'; v_held jsonb; v_det jsonb; v_hf5 boolean := NOT app.daftra_allow_update(p_i.org_id);
+        v_tot numeric[] := app.bill_totals(p_eff -> 'remote_totals'); v_lines numeric;
+        v_man public.billing_review_items; v_hand uuid[] := '{}'; v_exp numeric; v_as_listed boolean := false;
+        v_open numeric := 0;                                                                   -- 20261205000100
+BEGIN
+  v_refs := ARRAY(SELECT x ->> 'line_ref' FROM jsonb_array_elements(CASE WHEN jsonb_typeof(v_snap -> 'lines') = 'array' THEN v_snap -> 'lines' ELSE '[]'::jsonb END) x
+                   WHERE jsonb_typeof(x) = 'object' AND x ->> 'line_ref' IS NOT NULL);
+  -- 20261205000100: the opening line (customs clearance at the catalogue price, no [MRSL-] marker, not a billing line) is on
+  -- the issued invoice too: the HF5 totals check counts it (as Daftra shows it: the employee may have changed the amount)
+  IF v_hf5 AND p_i.origin = 'opening' THEN v_open := app.bill_opening_total(p_i, v_snap); END IF;
+  -- review (HF5): the lines an OPEN manual_in_daftra item asked the accountant to add / remove by hand carry no [MRSL-] marker
+  -- on the issued invoice. When the official total equals the synced lines + the listed additions, the hand edit is taken as
+  -- done (the additions are invoiced, the removals removed; item resolved 'issued_as_listed'). Otherwise they are HELD: not
+  -- removed, no late_charge, the item stays open (details.issued) and a human decides (done_in_daftra → invoiced; dismiss →
+  -- not billed: removed + late_charge); the totals mismatch item is raised as before.
+  IF v_hf5 AND p_i.origin <> 'linked' THEN
+    SELECT * INTO v_man FROM public.billing_review_items r WHERE r.intent_id = p_i.id AND r.kind = 'manual_in_daftra' AND r.status = 'open' FOR UPDATE;
+    IF v_man.id IS NOT NULL THEN
+      v_hand := ARRAY(SELECT (x ->> 'line_id')::uuid FROM jsonb_array_elements(coalesce(v_man.details -> 'add', '[]'::jsonb) || coalesce(v_man.details -> 'remove', '[]'::jsonb)) x
+                       WHERE x ->> 'line_id' ~ '^[0-9a-f-]{36}$');
+      SELECT coalesce(sum(l.total_amount) FILTER (WHERE l.state = 'synced' OR (l.state = 'pending_add' AND l.id = ANY (v_hand))), 0) INTO v_exp
+        FROM public.billing_intent_lines l WHERE l.intent_id = p_i.id AND NOT (l.line_ref = ANY (v_refs) AND l.state = 'pending_remove');
+      v_as_listed := v_tot[3] IS NOT NULL AND v_tot[3] = v_exp + v_open;                                    -- 20261205000100
+    END IF;
+  END IF;
+  FOR v_l IN SELECT * FROM public.billing_intent_lines l WHERE l.intent_id = p_i.id AND l.state <> 'removed' ORDER BY l.id FOR UPDATE LOOP
+    IF v_l.line_ref = ANY (v_refs) OR (v_l.manual_in_daftra AND v_l.state = 'synced') THEN                         -- L7
+      UPDATE public.billing_intent_lines l SET state = 'synced', pushed = true WHERE l.id = v_l.id AND (l.state <> 'synced' OR NOT l.pushed);
+      v_inv := v_inv || v_l.charge_id;
+    ELSIF v_l.id = ANY (v_hand) AND v_l.state IN ('pending_add','pending_remove') THEN                               -- review
+      IF v_as_listed AND v_l.state = 'pending_add' THEN
+        UPDATE public.billing_intent_lines l SET state = 'synced', manual_in_daftra = true, pushed = true WHERE l.id = v_l.id;
+        v_inv := v_inv || v_l.charge_id;
+      ELSIF v_as_listed THEN
+        UPDATE public.billing_intent_lines l SET state = 'removed', removed_at = now(), removed_reason = coalesce(v_l.removed_reason, 'removed_in_daftra')
+         WHERE l.id = v_l.id;
+      END IF;                                                                     -- else held for the open manual_in_daftra item
+    ELSE
+      UPDATE public.billing_intent_lines l SET state = 'removed', removed_at = now(),
+             removed_reason = CASE WHEN v_l.state = 'pending_remove' THEN coalesce(v_l.removed_reason, 'not_on_issued') ELSE 'not_on_issued' END
+       WHERE l.id = v_l.id;
+      IF v_l.state <> 'pending_remove' THEN v_late := v_late || v_l.charge_id; END IF;
+    END IF;
+  END LOOP;
+  PERFORM app.bill_set_charges(v_inv, 'invoiced');
+  INSERT INTO public.billing_review_items (org_id, transaction_id, intent_id, charge_id, kind, details)
+  SELECT p_i.org_id, p_i.transaction_id, p_i.id, c, 'late_charge', jsonb_build_object('reason', 'not_on_issued') FROM unnest(v_late) c
+  ON CONFLICT (charge_id, kind) WHERE status = 'open' DO NOTHING;
+  -- backstop: a line Marsa already removed locally whose line_ref is on the issued invoice (its charge is held, never
+  -- billed twice, until a human resolves the mismatch)
+  SELECT coalesce(jsonb_agg(jsonb_build_object('line_ref', l.line_ref, 'line_id', l.id, 'charge_id', l.charge_id) ORDER BY l.line_ref), '[]'::jsonb)
+    INTO v_held
+    FROM public.billing_intent_lines l
+   WHERE l.intent_id = p_i.id AND l.state = 'removed' AND l.line_ref = ANY (v_refs)
+     AND NOT EXISTS (SELECT 1 FROM public.billing_intent_lines o WHERE o.charge_id = l.charge_id AND o.state <> 'removed');
+  SELECT coalesce(sum(l.total_amount), 0) INTO v_lines FROM public.billing_intent_lines l WHERE l.intent_id = p_i.id AND l.state = 'synced';
+  IF (NOT v_hf5 AND p_i.pushed_hash IS NOT NULL AND v_hash IS DISTINCT FROM p_i.pushed_hash)
+     OR (v_hf5 AND p_i.origin <> 'linked' AND v_tot[3] IS NOT NULL AND v_tot[3] <> v_lines + v_open)                     -- L7; 20261205000100
+     OR jsonb_array_length(v_held) > 0 THEN
+    -- the same redaction and bounds as the conflict path (bill_apply_conflict); an oversize snapshot / diff is dropped
+    v_det := jsonb_build_object('diff', app.bill_diff_cap(p_eff -> 'diff'), 'pushed_hash', p_i.pushed_hash, 'remote_hash', v_hash,
+                                'remote_snapshot', app.bill_redact(CASE WHEN jsonb_typeof(v_snap) = 'object' THEN v_snap END),
+                                'removed_on_remote', v_held);
+    IF jsonb_array_length(v_held) = 0 THEN v_det := v_det - 'removed_on_remote'; END IF;
+    IF v_hf5 THEN v_det := v_det || jsonb_build_object('reason', 'totals', 'remote_total', v_tot[3], 'lines_total', v_lines); END IF;   -- L7
+    IF v_hf5 AND v_open <> 0 THEN v_det := v_det || jsonb_build_object('opening_total', v_open); END IF;                 -- 20261205000100
+    v_det := app.bill_bound_details(v_det);
+    INSERT INTO public.billing_review_items (org_id, transaction_id, intent_id, kind, details)
+    VALUES (p_i.org_id, p_i.transaction_id, p_i.id, 'issued_mismatch', v_det)
+    ON CONFLICT (intent_id, kind) WHERE status = 'open' AND charge_id IS NULL DO NOTHING;
+  END IF;
+  UPDATE public.billing_intents i SET status = 'issued', issued_at = coalesce(i.issued_at, now()), sync_state = 'synced', conflict = NULL
+   WHERE i.id = p_i.id;
+  -- L7: nothing is left to change by hand on an issued invoice (Daftra is the truth; late charges are their own items).
+  -- review: an item whose listed lines are held stays open (issued: true) for the human decision
+  IF v_man.id IS NOT NULL AND NOT v_as_listed AND cardinality(v_hand) > 0
+     AND EXISTS (SELECT 1 FROM public.billing_intent_lines l WHERE l.id = ANY (v_hand) AND l.state IN ('pending_add','pending_remove')) THEN
+    UPDATE public.billing_review_items r SET details = r.details || jsonb_build_object('issued', true, 'issued_total', v_tot[3], 'expected_total', v_exp)
+     WHERE r.id = v_man.id;
+  ELSE
+    UPDATE public.billing_review_items r SET status = 'resolved', resolution = CASE WHEN v_as_listed THEN 'issued_as_listed' ELSE 'issued' END,
+           resolved_at = now()
+     WHERE r.intent_id = p_i.id AND r.kind = 'manual_in_daftra' AND r.status = 'open';
+  END IF;
+  PERFORM app.bill_event(p_i.org_id, p_i.transaction_id, 'issued', 'billing_intent', p_i.id,
+    jsonb_build_object('charge_ids', to_jsonb(v_inv), 'late_charge_ids', CASE WHEN cardinality(v_late) > 0 THEN to_jsonb(v_late) END));
 END $$;

@@ -7,6 +7,8 @@
 --   demo_org_present, seed_rows, platform_admins [{email (masked), totp_verified}], msg_channels_mock,
 --   daftra_connections_mock, orgs_by_environment, extensions {pg_cron, pg_net, pg_trgm, supabase_vault}, cron_jobs,
 --   converted_orgs, auth_users_without_access, warnings, blockers (empty = ready for real data)
+-- platform_admins[].totp_verified is information only: two-step verification is not required (owner decision 15 Nov 2026,
+-- 20261129000100_mfa_off), so an admin without a verified TOTP factor is neither a blocker nor a warning.
 -- auth_users_without_access: sign-in accounts that are not platform admins and have no active membership (after an
 -- in-place conversion: the test accounts, to delete in Authentication → Users). Reported in warnings, not a blocker
 -- (an invited person between sign-up and acceptance is one too).
@@ -122,8 +124,6 @@ SELECT jsonb_build_object(
            CASE WHEN c.demo THEN 'demo_org_present' END,
            CASE WHEN c.seed > 0 THEN 'seed_rows_present' END,
            CASE WHEN jsonb_array_length(c.admins) = 0 THEN 'no_platform_admin' END,
-           CASE WHEN EXISTS (SELECT 1 FROM jsonb_array_elements(c.admins) a WHERE NOT (a ->> 'totp_verified')::boolean)
-                THEN 'platform_admin_without_totp' END,
            CASE WHEN coalesce((c.orgs ->> 'staging')::int, 0) > 0 THEN 'staging_orgs_present' END,
            CASE WHEN c.ext ->> 'pg_cron' IS NULL THEN 'pg_cron_missing' END
          ]::text[], NULL)

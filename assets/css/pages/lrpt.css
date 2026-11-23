@@ -228,3 +228,5 @@
   background: #fff; border: 1px solid var(--border-strong, #cfd6dd); border-radius: 8px; box-shadow: 0 6px 18px rgba(0, 0, 0, .12);
   padding: 8px 10px; max-block-size: 240px; overflow: auto; text-align: start;
 }
+/* the last rows of a longer table: the list opens upwards, else the table scroller (.table-wrap, overflow) clips it */
+.rpt-table tbody tr:nth-last-child(-n+3):not(:nth-child(-n+3)) .lrpt-ctr-pop { inset-block-start: auto; inset-block-end: calc(100% + 4px); max-block-size: 180px; }

@@ -2203,13 +2203,17 @@
       orgP.then(function (oid) {
         if (oid && !S.orgId) S.orgId = oid;
         var jobs = [];
+        // the importer check failing (error / no answer / call missing) says so instead of «جارٍ التحقق…» for ever;
+        // the employee then checks by hand and ticks the confirmation (as for a name not read)
+        if (D.matchName && !D.match && !has('matchClientV2')) D.matchFailed = true;
         if (D.matchName && has('matchClientV2') && !D.match) {
+          D.matchFailed = false;
           jobs.push(API.matchClientV2({ orgId: oid || undefined, name: D.matchName }).then(function (r) {
-            if (!r || r.error || !r.data) return;
+            if (!r || r.error || !r.data) { D.matchFailed = true; return; }
             var MV = window.MarsaDocBatch && window.MarsaDocBatch.pure && window.MarsaDocBatch.pure.matchView;
             D.match = typeof MV === 'function' ? MV(r.data) : { candidates: r.data.candidates || [], preselect: r.data.suggested && r.data.best ? r.data.best.client_id : null, state: 'none' };
             if (!D.clientSel) D.clientSel = D.match.preselect || (D.match.state === 'review' && D.match.candidates[0] ? D.match.candidates[0].client_id : '__new');
-          }, function () { /* the staff choose by hand */ }));
+          }, function () { D.matchFailed = true; /* the staff choose by hand */ }));
         }
         if (has('listBranches') && !D.branches) {
           jobs.push(API.listBranches(oid || undefined).then(function (r) {
@@ -2217,7 +2221,8 @@
           }, function () { D.branches = []; }));
         }
         return Promise.all(jobs);
-      }).then(function () { if (S.draft === D && D.open) renderDraftPanel(); });
+      }).then(function () { if (S.draft === D && D.open) renderDraftPanel(); },
+        function () { if (!D.match) D.matchFailed = true; if (S.draft === D && D.open) renderDraftPanel(); });
     }
     function confirmDraft() {
       var D = draftState();
@@ -2503,7 +2508,7 @@
       if (!NT || !NT.clientId) return 'ok';
       if (!D || !D.matchName) return 'noname';
       var m = D.match;
-      if (!m) return 'pending';
+      if (!m) return D.matchFailed ? 'failed' : 'pending';
       var cands = Array.isArray(m.candidates) ? m.candidates : [];
       if (m.preselect === NT.clientId) return 'ok';
       if (m.preselect && m.preselect !== NT.clientId) return 'other';
@@ -2584,9 +2589,12 @@
         var o = sel.options[sel.selectedIndex];
         NT.clientId = sel.value || null; NT.name = sel.value && o ? String(o.textContent).split(' — ')[0] : '';
         // a client changed after the reading: the draft panel starts again with the new client
-        if (S.draft && !S.draft.txId) { S.draft.match = null; S.draft.open = false; S.draft.autoOpened = false; S.draft.confirmClient = false; S.draft.clientSel = ''; S.draft.clientId = null; }
+        if (S.draft && !S.draft.txId) { S.draft.match = null; S.draft.matchFailed = false; S.draft.open = false; S.draft.autoOpened = false; S.draft.confirmClient = false; S.draft.clientSel = ''; S.draft.clientId = null; }
         renderNewTx(); syncRun();
         if (S.result) renderDraftPanel();
+        // renderNewTx rebuilt the step: the keyboard / screen-reader focus goes back to the (new) client list
+        var again = $('ocr-nt-client');
+        if (again && !again.disabled) { try { again.focus({ preventScroll: true }); } catch (e) { try { again.focus(); } catch (x) { /* noop */ } } }
       });
       q.disabled = sel.disabled = !!(S.running || S.saving || made);
       pick.appendChild(q); pick.appendChild(sel);

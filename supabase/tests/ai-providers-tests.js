@@ -112,8 +112,8 @@ async function secFile() {
     const body = nx < 0 ? all.slice(i + h.length) : all.slice(i + h.length, nx);
     return (i > 0 && (body === s || body + '\n' === s) && all.indexOf(h, i + 1) < 0 && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles())) || 'bundle';
   });
-  const LATER_PHASES = ['20261209000100_ai_keys.sql'];
-  await check('this file is the latest migration (later phases excepted)', () => JSON.stringify(migFiles().filter(f => f > MIG)) === JSON.stringify(LATER_PHASES) || 'later ' + JSON.stringify(migFiles().filter(f => f > MIG)));
+  const LATER_PHASES = ['20261209000100_ai_keys.sql', '20261211000100_reconvert.sql'];
+  await check('this file is the latest migration (later phases excepted)', () => (migFiles().includes(LATER_PHASES[0]) && migFiles().filter(f => f > MIG).every(f => LATER_PHASES.includes(f))) || 'later ' + JSON.stringify(migFiles().filter(f => f > MIG)));
   await check('the extraction trigger is the 20261119000100 body with the engine check only changed', () => {
     const old = fs.readFileSync(path.join(MIG_DIR, '20261119000100_legacy_docs.sql'), 'utf8');
     const cut = t => { const a = t.indexOf('CREATE OR REPLACE FUNCTION app.tg_document_extractions_before()'); return t.slice(a, t.indexOf('END $$;', a)); };
@@ -460,7 +460,9 @@ async function secStatic() {
     const o = idx.match(/keys\.openai\b/g) || [], g = idx.match(/keys\.gemini\b/g) || [];
     return (J(r) === J([1, 1]) && o.length === 6 && g.length === 6 && (idx.match(/headers\['authorization'\] = 'Bearer ' \+ keys\.openai;/g) || []).length === 2
       && (idx.match(/headers\['x-goog-api-key'\] = keys\.gemini;/g) || []).length === 2 && /ready: \{ openai: keys\.openai !== '', gemini: keys\.gemini !== '' \},/.test(idx)
-      && /const r = await service\(\)\.rpc\('ai_provider_keys', \{ p_org: org \}\);/.test(idx) && /return ready\(\);/.test(idx)
+      && /r = await service\(\)\.rpc\('ai_provider_keys', \{ p_org: org \}\);/.test(idx) && /return \{ \.\.\.ready\(\), sources: \{ \.\.\.source \}, failed: s\.failed === true \};/.test(idx)
+      // 23 Nov 2026: the secret stays only for source 'env'; the key test uses the Vault key only
+      && /else if \(source\[p\] !== 'env'\) keys\[p\] = '';/.test(idx) && /if \(source\[provider\] !== 'vault'\) return \{ status: 0, models: \[\] \};/.test(idx)
       && J(idx.match(/console\.\w+\([^)]*\)/g)) === J(['console.error(text)'])) || J({ r, o: o.length, g: g.length });
   });
   await check('index.ts send(): the model id is checked before it goes into the Gemini address; a deadline aborts the call; the answer is never logged', () =>

@@ -642,7 +642,7 @@ blockers                    : []
 public_tables_without_rls   : 0
 demo_org_present            : false
 seed_rows                   : 0
-platform_admins             : every entry totp_verified = true
+platform_admins             : at least one entry (totp_verified is information only: MFA off, 20261129000100)
 cron_jobs                   : marsa_refresh_alerts, marsa_idem_purge, marsa_client_errors_purge (active)
 ```
 

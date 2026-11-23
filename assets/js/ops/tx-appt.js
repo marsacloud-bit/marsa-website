@@ -127,6 +127,8 @@
       a.appendChild(el('button', { class: 'btn btn-sm btn-secondary', type: 'button', text: T('rd_go_proofs'), onclick: function (e) {
         if (e && e.preventDefault) e.preventDefault();
         var d = typeof document !== 'undefined' ? document.getElementById('tx-empty-return') : null;
+        // the proofs live in the «إرجاع الفارغ» tab: open it first, else the scroll lands on a hidden panel
+        if (d && typeof api.revealInTab === 'function') api.revealInTab(d);
         if (d && d.scrollIntoView) d.scrollIntoView({ behavior: 'smooth', block: 'start' });
       } }));
     });

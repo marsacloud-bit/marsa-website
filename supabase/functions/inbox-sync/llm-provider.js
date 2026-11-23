@@ -380,7 +380,8 @@
         if (!/^[A-Z0-9][A-Z0-9/-]{2,29}$/.test(normalized) || !/\d/.test(normalized) || !tailIs(fold(rawIn).replace(/\s/g, ''), normalized)) return null;
       } else if (kind === 'tx_ref') {
         normalized = fold(n0).replace(/\s/g, '');
-        if (!/^MRS-\d{4}-\d{6}$/.test(normalized) || fold(rawIn).replace(/\s/g, '') !== normalized) return null;
+        // <ref_prefix>-YYYY-NNNNNN, any org prefix of 2-5 capital letters (20261211000100); not a REQ- / MSG- / IMP- reference
+        if (!/^(?!(?:REQ|MSG|IMP)-)[A-Z]{2,5}-\d{4}-\d{6}$/.test(normalized) || fold(rawIn).replace(/\s/g, '') !== normalized) return null;
         confidence = 0.95;
       } else if (kind === 'appointment_no') {
         normalized = fold(n0).replace(/\s/g, '');
@@ -419,7 +420,8 @@
         'You extract shipping and customs references from one part of a business message received by a customs-clearance office in Saudi Arabia.',
         DATA_RULE,
         'Kinds: container_no (ISO 6346: 4 letters + 7 digits), bl_number (bill of lading number), declaration_no (customs declaration number, digits), ' +
-          'invoice_no, tx_ref (the office reference MRS-YYYY-NNNNNN), appointment_no, date.',
+          'invoice_no, tx_ref (the office transaction reference: 2 to 5 capital letters, a dash, the year, a dash, six digits, e.g. ABC-2026-000123; ' +
+          'not a REQ-, MSG- or IMP- reference), appointment_no, date.',
         'For each item copy `raw` exactly, character for character, as it appears in the text. `normalized` is the canonical form: upper case, ' +
           'no spaces or dashes inside references; dates as YYYY-MM-DD.',
         'ambiguous: true for a numeric date whose day and month could be swapped. deadline_phrase: true when the date is introduced as a deadline ' +

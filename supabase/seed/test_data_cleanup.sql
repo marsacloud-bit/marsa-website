@@ -31,7 +31,12 @@
 -- exclusive lock on each touched table: run it at a quiet moment.
 -- The only change to a non-test row: a real driver whose «last truck used» (drivers.last_truck_id, set by the movement
 -- form) is a test truck gets that pointer cleared (NULL) instead of being deleted with the truck (listed in a NOTICE).
--- Not undone: the MRS-… / PAY-… / CUS-… number counters (the next real numbers simply continue after the test ones);
+-- Not undone: the MRS-… transaction number counter (the next real numbers simply continue after the test ones).
+-- The per-org PAY- / CUS- counters (org_counters scopes 'payment' / 'custody', 20261211000100) go back to the highest
+-- number still used in the org once its test payments / custody entries are deleted (the counter row is removed when
+-- none is left, as before the seed), so a counter row the seed created does not stay behind; never lower than a
+-- number still in use, so no reference can be reused inside the org.
+-- Also not undone:
 -- uploaded files in Storage (rows of documents are deleted, the files are listed in a NOTICE — delete them in the
 -- Storage screen). The monthly transaction usage counter is reduced by the deleted test transactions.
 -- =====================================================================
@@ -242,6 +247,21 @@ BEGIN
    WHERE l.org_id = v_org AND l.row_id IS NULL
      AND l.table_name IN (SELECT split_part(x, '.', 2) FROM unnest(v_tables) x)
      AND coalesce(l.new_data, l.old_data) ->> 'transaction_id' IN (SELECT id::text FROM _test_cleanup_root WHERE tbl = 'transactions');
+
+  -- the per-org PAY- / CUS- counters (20261211000100; skipped before it): back to the highest number still in use in the
+  -- org (row removed when none is left), only for a table whose test rows were deleted here
+  IF to_regprocedure('app.next_org_seq(uuid, text)') IS NOT NULL THEN
+    FOR r IN SELECT x.scope, x.tbl FROM (VALUES ('payment', 'client_disbursements'), ('custody', 'client_custody_entries')) x(scope, tbl)
+              WHERE EXISTS (SELECT 1 FROM _test_cleanup_gone g WHERE g.tbl = x.tbl) LOOP
+      EXECUTE format('SELECT max(z.seq) FROM public.%I z WHERE z.org_id = $1', r.tbl) INTO v_n USING v_org;
+      IF v_n IS NULL THEN
+        DELETE FROM public.org_counters c WHERE c.org_id = v_org AND c.scope = r.scope AND c.year = 0;
+      ELSE
+        UPDATE public.org_counters c SET last_value = v_n
+         WHERE c.org_id = v_org AND c.scope = r.scope AND c.year = 0 AND c.last_value > v_n;
+      END IF;
+    END LOOP;
+  END IF;
 
   -- ------------------------------------------------------------------ guards back on, exactly as they were
   FOR i IN 0 .. jsonb_array_length(v_trg) - 1 LOOP
