@@ -183,7 +183,10 @@ const savedRow = (o) => Object.assign({ id: 'e0000000-0000-4000-8000-00000000000
     const out = {};
     for (const [n, d, t, v] of fixtures()) {
       const r = await runHandler(X, H, { answer: d, body: { doc_type: t, prompt_version: v === 'ai-doc-v3' ? v : undefined } });
-      out[n] = r.res.status + ':' + h16(r.res.body) + ':' + crypto.createHash('sha256').update(J(r.log.rpc)).digest('hex').slice(0, 8);
+      // 20261208000100 (AI providers) adds provider / fell_back / tried to the v3 answer: left out of the golden comparison
+      const b = r.res.body ? JSON.parse(r.res.body) : null;
+      if (b) { delete b.provider; delete b.fell_back; delete b.tried; }
+      out[n] = r.res.status + ':' + h16(b ? J(b) : r.res.body) + ':' + crypto.createHash('sha256').update(J(r.log.rpc)).digest('hex').slice(0, 8);
     }
     return J(out) === J(GOLDEN_H) || J(out);
   });

@@ -115,7 +115,7 @@
   function extractionRow(o) {
     var res = o.res || {}, file = o.file || {};
     var row = { doc_type: 'empty_return_receipt', source_name: String(file.name || 'eir').slice(0, 255), source_sha256: o.sha256 || res.source_sha256 || '',
-      source_mime: o.mime || null, source_size: file.size != null ? file.size : null, source_pages: null, engine: res.model || 'claude-opus-5-5', languages: 'auto',
+      source_mime: o.mime || null, source_size: file.size != null ? file.size : null, source_pages: null, engine: res.engine || 'claude-opus-5-5', languages: 'auto',
       mean_confidence: res.mean_confidence == null ? null : Math.min(100, Math.max(0, Number(res.mean_confidence))), raw_text: String(res.raw_text || '').slice(0, 200000),
       extracted_fields: res.extracted_fields && typeof res.extracted_fields === 'object' ? res.extracted_fields : {}, qr_payload: null, line_items: [],
       ai_usage_id: res.usage_id };

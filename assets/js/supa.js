@@ -117,6 +117,7 @@
       MRS_APPT_DRAFT_LIMIT: 'تجاوزت حد المسودة ({f}): 20 بطاقة و25 ميغابايت لكل معاملة كحد أقصى.',
       MRS_APPT_CARD_DUPLICATE: 'بطاقة الموعد هذه مقروءة من قبل ({f}): معتمدة في حركة قائمة، أو بانتظار الاعتماد في مسودة معاملة أخرى (يمكن نقل تلك المسودة إلى هنا).',
       MRS_APPT_CONTAINER_NOT_IN_TX: 'رقم الحاوية في البطاقة ليس من حاويات هذه المعاملة ({f}). اختر حاوية المعاملة أو أضفها قبل الاعتماد.',
+      MRS_STORAGE_UNPAID: 'لا يُحجز الموعد قبل سداد فاتورة الأرضيات للحاوية {f}. سجّل السداد في قسم «الأرضيات» بصفحة المعاملة، أو اطلب موافقة المسؤول.',
       MRS_APPT_PARTY_REQUIRED: 'حدد جهة النقل للبطاقة (مورد أو شركة نقل أو مباشر) واسمها قبل الاعتماد.',
       MRS_DATETIME_REQUIRED: 'أدخل التاريخ والوقت معًا ({f}): التاريخ وحده لا يكفي.',
       MRS_EMPTY_RETURN_CLOSED: 'إثبات إعادة الفارغ هذا مغلق ({f}): المعتمد لا يُعتمد مرة أخرى، والملغى لا يُعدَّل.',
@@ -513,6 +514,9 @@
       'MRS_BAD_TRANSITION:cancelled': 'هذا السجل ملغى ولا يقبل التعديل.',
       'MRS_BAD_TRANSITION:delivered': 'تم النقل لهذه الحركة؛ لا تُعدَّل بياناتها التشغيلية ولا تُلغى.',
       'MRS_FORBIDDEN:cost': 'قيمة النقل وعائد المؤسسة متاحان لصلاحيات المالية ومدير العمليات فقط.',
+      'MRS_STORAGE_UNPAID:transaction': 'لا يُحجز الموعد قبل سداد فواتير الأرضيات لحاويات هذه المعاملة، أو موافقة المسؤول.',
+      'MRS_FORBIDDEN:storage_override': 'الموافقة على حجز الموعد قبل سداد الأرضيات لمدير العمليات أو مدير الفرع أو المشرف أو مدير المؤسسة فقط.',
+      'MRS_CONFLICT:storage_override': 'توجد موافقة سابقة على حجز الموعد لهذه المعاملة.',
       'MRS_BAD_TRANSITION:same_status': 'المعاملة في هذه المرحلة بالفعل (ربما تقدّمت تلقائيًا). حدّث الصفحة.',
       // legacy step 3 (20261119000100)
       'MRS_NOT_FOUND:doc_batch': 'حزمة المستندات غير موجودة أو لا تملك صلاحية عرضها (المسودات مفصولة حسب الفرع).',
@@ -1737,6 +1741,29 @@
   function platformListPlans() { return rpc('platform_list_plans'); }
   // payload = {name_ar, name_en?, sort?, is_active?, limits:{…six keys, null = unlimited}, price_monthly_sar?, notes?}; code immutable once created
   function platformSavePlan(code, payload) { return rpc('platform_save_plan', { p_code: code, p_payload: payload || {} }); }
+  // AI provider keys (20261209000100, owner 22 Nov 2026) — platform admins. The key is sent once to the database
+  // (kept in Vault) and never read back: the list carries the last 4 characters only.
+  var AI_PROVIDER_CODES = ['anthropic', 'openai', 'gemini'];
+  function platformAiProviders() { return rpc('platform_ai_providers'); }
+  function platformAiSetKey(provider, key) {
+    if (AI_PROVIDER_CODES.indexOf(provider) === -1) return Promise.resolve(fail('MRS_INVALID', 'provider'));
+    var k = String(key == null ? '' : key).trim();
+    if (k.length < 20 || k.length > 400 || /\s/.test(k)) return Promise.resolve(fail('MRS_INVALID', 'key'));
+    return rpc('platform_ai_set_key', { p_provider: provider, p_key: k });
+  }
+  function platformAiClearKey(provider) { return rpc('platform_ai_clear_key', { p_provider: provider }); }
+  function platformAiSaveProvider(provider, payload) { return rpc('platform_ai_save_provider', { p_provider: provider, p_payload: payload || {} }); }
+  // the connection test: the Edge Function lists the provider's models with the saved key → {provider, ok, note, models}
+  function platformAiTestKey(provider) {
+    if (!configured) return demoOnly();
+    if (AI_PROVIDER_CODES.indexOf(provider) === -1) return Promise.resolve(fail('MRS_INVALID', 'provider'));
+    return ready().then(function (c) {
+      return c.functions.invoke('ai-extract', { body: { action: 'provider_test', provider: provider } }).then(function (res) {
+        if (res && !res.error && res.data && typeof res.data === 'object' && typeof res.data.ok === 'boolean') return ok(res.data);
+        return aiEdgeError(res && res.error);
+      }, function (e) { return { data: null, error: normalizeError(e) }; });
+    }, function (e) { return { data: null, error: normalizeError(e) }; });
+  }
   // → [{org_id, slug, name_ar, name_en, is_active, plan_code, plan_name_ar, plan_name_en, status, period_start, period_end,
   //     limit_overrides, limits, usage, over_limit[], status_reason, suspended_at, updated_at}]
   function platformListSubscriptions() { return rpc('platform_list_subscriptions'); }
@@ -1975,6 +2002,18 @@
   function driverDirectory(q, o) {
     o = o || {};
     return inActiveOrg(o.orgId, function (oid) { return rpc('driver_directory', { p_org: oid, p_q: q == null ? null : String(q) }); });
+  }
+  // owner stage 3د (20261207000100): the «السائقون» directory → [{ id, full_name, phone, driver_class, license_no, is_active,
+  //   truck_plate, party { id, name_ar, name_en, phone, cr_number, contact_name } | null }] (staff; 500 rows, active first)
+  function listDriversDirectory(q, o) {
+    o = o || {};
+    return inActiveOrg(o.orgId, function (oid) { return rpc('list_drivers', { p_org: oid, p_q: q == null || q === '' ? null : String(q) }); });
+  }
+  // save one driver with its class, party and truck (transport writers): p = { id?, full_name, phone, driver_class,
+  //   carrier_id?, truck_plate?, license_no?, is_active? } → the driver as listDriversDirectory returns it
+  function saveDriverEntry(p, o) {
+    o = o || {};
+    return inActiveOrg(o.orgId, function (oid) { return rpc('save_driver', { p_org: oid, p: p || {} }); });
   }
   // terminal operators for a port (mapped first; operators mapped to no port are included) → [{party_id, name_ar, name_en, mapped}]
   function portOperators(portCode, o) {
@@ -2415,6 +2454,37 @@
       });
     });
   }
+  // owner stage 3ج (20261206000100): the storage gate of a transaction → { applies, port_code, blocked, containers [{ id,
+  //   container_no, storage_state, storage_invoice_no, storage_amount, storage_sent_at, storage_paid_at, storage_note }],
+  //   override { reason, approved_by_name, approved_at } | null, can_override }
+  function txStorageGate(txId) { return rpc('tx_storage_gate', { p_tx: txId }); }
+  // the manager approval to book before the storage is paid (senior ops; reason 3 … 500)
+  function approveStorageOverride(txId, reason) { return rpc('approve_storage_override', { p_tx: txId, p_reason: String(reason || '') }); }
+  // a container's storage answer (transport writers, RLS): patch = { storage_state, storage_invoice_no?, storage_amount?, storage_note? }
+  function updateContainerStorage(id, patch) {
+    var allowed = ['storage_state', 'storage_invoice_no', 'storage_amount', 'storage_note'], row = {};
+    Object.keys(patch || {}).forEach(function (k) { if (allowed.indexOf(k) !== -1) row[k] = patch[k]; });
+    return online(function (c) {
+      return c.from('containers').update(row).eq('id', id)
+        .select('id,container_no,storage_state,storage_invoice_no,storage_amount,storage_sent_at,storage_paid_at,storage_note').single();
+    });
+  }
+  // owner stage 3ب (20261205000100): the default price of a service item (customs_clearance = the opening draft invoice line)
+  // f = { orgId?, code } → { id, code, name_ar, name_en, default_price } | null (an error before the migration: no column yet)
+  function getServiceItemPrice(f) {
+    f = f || {};
+    return inActiveOrg(f.orgId, function (oid) {
+      return online(function (c) {
+        return c.from('org_service_items').select('id,code,name_ar,name_en,default_price').eq('org_id', oid).eq('code', String(f.code || '')).maybeSingle();
+      });
+    });
+  }
+  // (id, price | null) → the row; RLS: the org admin / accounts manager only
+  function setServiceItemPrice(id, price) {
+    return online(function (c) {
+      return c.from('org_service_items').update({ default_price: price }).eq('id', id).select('id,code,default_price').single();
+    });
+  }
   // o = { orgId?, name (consignee block or name), vatNumber?, crNumber?, limit? } → { source_name, latin_key, candidates
   //   [{client_id, name_ar, name_en, confidence 0..100, method, review, reasons}], best {client_id, confidence, method} | null,
   //   suggested, conflict, confirmed:false, thresholds {suggest:90, review:70} }   (never links: confirm with confirmClientMatch)
@@ -2730,7 +2800,7 @@
   var EXT_LIST_COLS = 'id,org_id,transaction_id,document_id,doc_type,source_name,source_sha256,source_mime,source_size,source_pages,' +
     'engine,languages,mean_confidence,extracted_fields,qr_payload,reviewed_fields,review_status,review_note,reviewed_by,reviewed_at,' +
     'created_by,created_at,voided_at,void_reason';
-  var EXT_COLS = EXT_LIST_COLS + ',raw_text,line_items';
+  var EXT_COLS = EXT_LIST_COLS + ',raw_text,line_items,ai_usage_id';   // ai_usage_id: an AI reading of any provider (20261208000100)
   var EXT_INSERT = ['org_id', 'transaction_id', 'document_id', 'doc_type', 'source_name', 'source_sha256', 'source_mime', 'source_size',
     'source_pages', 'engine', 'languages', 'mean_confidence', 'raw_text', 'extracted_fields', 'qr_payload', 'line_items',
     'ai_usage_id',    // AI reading (20261114000100): sent only when set (pickKeys skips undefined)
@@ -4846,7 +4916,9 @@
     platformReissueAdminInvitation: platformReissueAdminInvitation,
     platformRecentErrors: platformRecentErrors,
     // G7 plans / subscriptions / usage (platform admin) + the org admin's own subscription
-    platformListPlans: platformListPlans, platformSavePlan: platformSavePlan, platformListSubscriptions: platformListSubscriptions,
+    platformListPlans: platformListPlans, platformSavePlan: platformSavePlan,
+    platformAiProviders: platformAiProviders, platformAiSetKey: platformAiSetKey, platformAiClearKey: platformAiClearKey,
+    platformAiSaveProvider: platformAiSaveProvider, platformAiTestKey: platformAiTestKey, platformListSubscriptions: platformListSubscriptions,
     platformSetOrgPlan: platformSetOrgPlan, platformSuspendOrg: platformSuspendOrg, platformActivateOrg: platformActivateOrg,
     platformOrgUsage: platformOrgUsage, platformRecountUsage: platformRecountUsage, orgSubscription: orgSubscription,
     // requests
@@ -4890,7 +4962,7 @@
     listPayments: listPayments, txDisbursements: txDisbursements, checkPaymentDuplicates: checkPaymentDuplicates,
     matchPaymentTransaction: matchPaymentTransaction, saveCustodyEntry: saveCustodyEntry, voidCustodyEntry: voidCustodyEntry,
     listCustodyEntries: listCustodyEntries, custodyBalances: custodyBalances, clientCustodyBalance: clientCustodyBalance,
-    listServiceItems: listServiceItems,
+    listServiceItems: listServiceItems, getServiceItemPrice: getServiceItemPrice, setServiceItemPrice: setServiceItemPrice, txStorageGate: txStorageGate, approveStorageOverride: approveStorageOverride, updateContainerStorage: updateContainerStorage, listDriversDirectory: listDriversDirectory, saveDriverEntry: saveDriverEntry,
     // 20261201000100: legacy gaps (client category / Daftra code, follow-up employee)
     setClientLegacyFields: setClientLegacyFields, setTransactionResponsible: setTransactionResponsible, listAssignableStaff: listAssignableStaff,
     listContainers: listContainers, addContainer: addContainer, updateContainer: updateContainer,

@@ -948,13 +948,20 @@
     let start = 0;
     content.forEach((b, i) => { if (b && b.type === 'fallback') start = i + 1; });
     const text = content.slice(start).filter(b => b && b.type === 'text' && typeof b.text === 'string').map(b => b.text).join('');
+    const data = answerOf(text, version, docType);
+    if (data === null) return { ok: false, code: 'bad_output', usage, model };
+    return { ok: true, data, usage, model };
+  }
+  // the model's JSON text → the checked answer object, or null (not JSON / not the expected shape). Shared by every
+  // provider: the answer of OpenAI / Gemini goes through exactly the same checks as Claude's.
+  function answerOf(text, version, docType) {
     let data;
-    try { data = JSON.parse(text); } catch (e) { return { ok: false, code: 'bad_output', usage, model }; }
+    try { data = JSON.parse(text); } catch (e) { return null; }
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
     if (isV3(version) && !isOps(docType) && !isPay(docType)) blankToNull(data);
     const okShape = isV3(version) && isOps(docType) ? shapeOkOps(data, docType)
       : (isV3(version) && isPay(docType) ? shapeOkPay(data, docType) : shapeOk(data, version));
-    if (!okShape) return { ok: false, code: 'bad_output', usage, model };
-    return { ok: true, data, usage, model };
+    return okShape ? data : null;
   }
   // 20261122000100: the payment document output
   function shapeOkPay(d, docType) {
@@ -2057,6 +2064,138 @@
     return { code: 'internal', status: 500, settle: 'unknown' };
   }
 
+  /* ------------------------------------------------------------------ other providers (owner, 21 Nov 2026) */
+  // The reading is one layer with several providers behind it, tried in the order the organisation chose (ai_access →
+  // providers). Every provider gets the SAME request (system prompt, instruction text, file, schema, max tokens) built
+  // by buildRequest() for Claude; OpenAI and Gemini are reached with plain HTTPS JSON by index.ts (the keys stay
+  // there), and their answers go through the same answerOf() checks and postProcess() as Claude's. JSON mode + the
+  // schema in the prompt (not the providers' strict schema modes, whose schema subsets differ from Claude's): an
+  // answer that does not match the schema is 'bad_output' and the next provider is tried.
+  const PROVIDERS = Object.freeze(['anthropic', 'openai', 'gemini']);
+  const PROVIDER_DEADLINE_MS = 100000;       // one non-last attempt: leaves time for the next provider
+  const PROVIDER_MIN_MS = 20000;             // a later provider is tried only with at least this much time left
+  function specOf(params) {
+    const c = params && params.messages && params.messages[0] && Array.isArray(params.messages[0].content) ? params.messages[0].content : [];
+    const fb = c.find(b => b && (b.type === 'document' || b.type === 'image')) || null;
+    const tb = c.find(b => b && b.type === 'text') || null;
+    const oc = (params && params.output_config) || {};
+    return {
+      system: typeof params.system === 'string' ? params.system : '',
+      text: tb ? tb.text : '',
+      media_type: fb && fb.source ? fb.source.media_type : null,
+      data: fb && fb.source ? fb.source.data : '',
+      schema: oc.format && oc.format.schema ? oc.format.schema : null,
+      max_tokens: int(params.max_tokens) || MAX_TOKENS,
+      effort: oc.effort === 'low' ? 'low' : 'medium'
+    };
+  }
+  function schemaText(schema) {
+    return 'Answer with ONE JSON object only (no prose, no code fence) that matches this JSON Schema exactly ' +
+      '(every listed key present; null where a value is not printed): ' + JSON.stringify(schema);
+  }
+  // POST /v1/responses body (OpenAI Responses API): the file first, then the instruction; JSON mode; nothing stored
+  function buildOpenAi(params, model) {
+    const s = specOf(params);
+    const file = s.media_type === 'application/pdf'
+      ? { type: 'input_file', filename: 'document.pdf', file_data: 'data:application/pdf;base64,' + s.data }
+      : { type: 'input_image', image_url: 'data:' + s.media_type + ';base64,' + s.data, detail: 'high' };
+    return {
+      model, instructions: s.system, store: false, max_output_tokens: s.max_tokens, reasoning: { effort: s.effort },
+      text: { format: { type: 'json_object' } },
+      input: [{ role: 'user', content: [file, { type: 'input_text', text: s.text + '\n\n' + schemaText(s.schema) }] }]
+    };
+  }
+  // POST v1beta/models/{model}:generateContent body (Gemini API)
+  function buildGemini(params) {
+    const s = specOf(params);
+    return {
+      systemInstruction: { parts: [{ text: s.system }] },
+      contents: [{ role: 'user', parts: [{ inlineData: { mimeType: s.media_type, data: s.data } }, { text: s.text + '\n\n' + schemaText(s.schema) }] }],
+      generationConfig: { responseMimeType: 'application/json', maxOutputTokens: s.max_tokens }
+    };
+  }
+  // a model may still wrap the JSON in a code fence
+  function unfence(t) {
+    const m = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/i.exec(t || '');
+    return m ? m[1] : (t || '');
+  }
+  // provider answer → {stop: end_turn | max_tokens | refusal | other, text, usage {input_tokens, output_tokens}, model}
+  function normOpenAi(j, model) {
+    const o = j && typeof j === 'object' ? j : {};
+    const u = o.usage || {};
+    const usage = { input_tokens: int(u.input_tokens), output_tokens: int(u.output_tokens) };
+    const served = typeof o.model === 'string' && MODEL_RE.test(o.model) ? o.model : model;
+    const parts = [];
+    (Array.isArray(o.output) ? o.output : []).forEach(it => {
+      if (it && it.type === 'message' && Array.isArray(it.content)) it.content.forEach(p => { if (p) parts.push(p); });
+    });
+    let stop = 'other';
+    const reason = o.incomplete_details && o.incomplete_details.reason;
+    if (parts.some(p => p.type === 'refusal')) stop = 'refusal';
+    else if (o.status === 'incomplete') stop = reason === 'max_output_tokens' ? 'max_tokens' : (reason === 'content_filter' ? 'refusal' : 'other');
+    else if (o.status === 'completed') stop = 'end_turn';
+    const text = parts.filter(p => p.type === 'output_text' && typeof p.text === 'string').map(p => p.text).join('');
+    return { stop, text: unfence(text), usage, model: served };
+  }
+  const GEMINI_REFUSALS = Object.freeze(['SAFETY', 'RECITATION', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'SPII', 'IMAGE_SAFETY', 'LANGUAGE']);
+  function normGemini(j, model) {
+    const o = j && typeof j === 'object' ? j : {};
+    const u = o.usageMetadata || {};
+    // thinking tokens are billed as output
+    const usage = { input_tokens: int(u.promptTokenCount), output_tokens: int(u.candidatesTokenCount) + int(u.thoughtsTokenCount) };
+    const served = typeof o.modelVersion === 'string' && MODEL_RE.test(o.modelVersion) ? o.modelVersion : model;
+    const cand = Array.isArray(o.candidates) && o.candidates[0] ? o.candidates[0] : null;
+    const fr = cand && cand.finishReason;
+    let stop = 'other';
+    if (o.promptFeedback && o.promptFeedback.blockReason) stop = 'refusal';
+    else if (fr === 'STOP') stop = 'end_turn';
+    else if (fr === 'MAX_TOKENS') stop = 'max_tokens';
+    else if (GEMINI_REFUSALS.indexOf(fr) !== -1) stop = 'refusal';
+    const parts = cand && cand.content && Array.isArray(cand.content.parts) ? cand.content.parts : [];
+    const text = parts.filter(p => p && !p.thought && typeof p.text === 'string').map(p => p.text).join('');
+    return { stop, text: unfence(text), usage, model: served };
+  }
+  // normalised answer → the parseMessage result shape {ok, data | code, usage {input_tokens, output_tokens, attempts}, model}
+  function parseAnswer(n, version, docType) {
+    const usage = { input_tokens: n.usage.input_tokens, output_tokens: n.usage.output_tokens,
+      attempts: [{ model: n.model, input_tokens: n.usage.input_tokens, output_tokens: n.usage.output_tokens }] };
+    if (n.stop === 'refusal') return { ok: false, code: 'refused', usage, model: n.model };
+    if (n.stop === 'max_tokens') return { ok: false, code: 'truncated', usage, model: n.model };
+    if (n.stop !== 'end_turn') return { ok: false, code: 'bad_output', usage, model: n.model };
+    const data = answerOf(n.text, version, docType);
+    return data === null ? { ok: false, code: 'bad_output', usage, model: n.model } : { ok: true, data, usage, model: n.model };
+  }
+  // a failed HTTPS call of OpenAI / Gemini → {code, status, settle} (as classifyCallError): e is {status} for an HTTP
+  // error answer, {notSent: true} when index.ts did not send it; anything else (the deadline, a lost connection) may
+  // have run → 'unknown'
+  function classifyHttpError(e) {
+    const st = e && Number.isInteger(e.status) ? e.status : null;
+    if (e && e.name === 'AiError') return { code: e.code, status: e.status, settle: 'error' };
+    // index.ts refused to send (no key / a bad model id / no time left): nothing ran
+    if (e && e.notSent === true) return { code: 'not_configured', status: 503, settle: 'error' };
+    if (st === 429) return { code: 'upstream_busy', status: 503, settle: 'error' };
+    if (st === 401 || st === 403) return { code: 'not_configured', status: 503, settle: 'error' };
+    if (st === 503 || st === 529) return { code: 'upstream_busy', status: 503, settle: 'unknown' };
+    if (st !== null && st >= 500) return { code: 'upstream_error', status: 502, settle: 'unknown' };
+    if (st !== null && st >= 400) return { code: 'upstream_error', status: 502, settle: 'error' };
+    return { code: 'upstream_error', status: 502, settle: 'unknown' };
+  }
+  // the organisation's order (ai_access.providers [{provider, model}]) → the providers this server can call, in order.
+  // Without the list (a database before 20261208000100): Claude alone, as before. `ready` = {anthropic, openai, gemini}
+  // booleans (each provider's key is set in index.ts).
+  function providerChain(access, ready) {
+    const r = ready || {};
+    const list = access && Array.isArray(access.providers) ? access.providers : null;
+    const out = [];
+    if (!list) { if (r.anthropic) out.push({ provider: 'anthropic', model: MODEL }); return out; }
+    list.forEach(p => {
+      if (!p || PROVIDERS.indexOf(p.provider) === -1 || !r[p.provider] || out.some(x => x.provider === p.provider)) return;
+      if (p.provider === 'anthropic') { out.push({ provider: 'anthropic', model: MODEL }); return; }
+      if (typeof p.model === 'string' && MODEL_RE.test(p.model)) out.push({ provider: p.provider, model: p.model });
+    });
+    return out;
+  }
+
   const API = {
     MODEL, ENGINE, EFFORT, MAX_TOKENS, MAX_TOKENS_DOC, maxTokensFor, BETAS, FALLBACKS, MAX_BYTES, MAX_IMAGE_BYTES, PROMPT_VERSION, MEDIA_TYPES, DOC_TYPES,
     DETECTED_TYPES, KIND_OF, ALL_KEYS, KEYS_FOR, MATCH_KEYS, INCOTERMS, MAX_WEIGHT_KG, MAX_PACKAGES, SYSTEM,
@@ -2075,7 +2214,10 @@
     normSaMobile, normPlate, localDateTime,
     // payment documents (20261122000100)
     PAY_TYPES, PAY_DETECTED, PAY_INVOICE_KEYS, PAY_PROOF_KEYS, PAY_METHODS, SYSTEM_PAY, MAX_PAY_BYTES, PAY_MAX_DOCS, PAY_MAX_TOTAL_BYTES,
-    isPay, isPaymentChannel, roughPartyMatch, payMethod, tasStrict
+    isPay, isPaymentChannel, roughPartyMatch, payMethod, tasStrict,
+    // other providers (owner, 21 Nov 2026)
+    PROVIDERS, PROVIDER_DEADLINE_MS, PROVIDER_MIN_MS, specOf, buildOpenAi, buildGemini, normOpenAi, normGemini, parseAnswer, answerOf,
+    classifyHttpError, providerChain
   };
   (typeof module === 'object' && module.exports) ? (module.exports = API) : (globalThis.MarsaAiExtract = Object.assign(globalThis.MarsaAiExtract || {}, API));
 })();

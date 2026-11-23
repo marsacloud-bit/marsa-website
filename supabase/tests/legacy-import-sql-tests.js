@@ -323,7 +323,7 @@ async function secFile() {
      && !/INSERT INTO public\.(empty_return_proofs|billing_intents|client_charges)/.test(src) && !/net\.http|functions\.invoke/.test(src)
      && /'suggested'/.test(src) && /'review_status', 'pending'/.test(src)) || 'approval');
   // later phases may follow this file (20261126000100 doc_match_packing: document_matches.packing_extraction_id; no import object)
-  const LATER_PHASES = ['20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql'];
+  const LATER_PHASES = ['20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql'];
   await check('this file is the latest migration (or only listed later phases follow it)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER_PHASES.includes(f))) || 'unexpected later files: ' + later.join(', ');

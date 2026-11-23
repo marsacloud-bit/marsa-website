@@ -92,6 +92,8 @@
     var IMG_EXT = ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'heic', 'heif'];
     // AI reading (Claude): what the Edge Function accepts
     var ENGINE_AI = 'claude-opus-5-5';
+    // an AI reading: Claude's engine name, or (owner 21 Nov 2026: OpenAI / Gemini) any reading tied to its usage row
+    function isAiJob(j) { return !!j && (j.engine === ENGINE_AI || !!(j.ai && j.ai.usageId)); }
     var AI_MAX_FILE = 10 * 1024 * 1024;           // PDF
     var AI_MAX_IMAGE = 5 * 1024 * 1024;           // image (the API's per-image limit)
     var AI_MEDIA = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', pdf: 'application/pdf' };
@@ -905,7 +907,7 @@
       j.extracted = P.plainFields(fields, P.DB_FIELD_KEYS);
       j.text = String(res.raw_text || '').slice(0, MAX_TEXT);
       j.confidence = res.mean_confidence == null ? null : Number(res.mean_confidence);
-      j.engine = res.reused && res.engine ? String(res.engine) : ENGINE_AI; j.langs = 'auto';
+      j.engine = res.engine ? String(res.engine) : ENGINE_AI; j.langs = 'auto';
       var maxPage = 0;
       (res.fields || []).forEach(function (f) { if (f && f.page > maxPage) maxPage = f.page; });
       j.pages = maxPage || null; j.pageCount = j.pages;
@@ -1252,14 +1254,14 @@
       box.textContent = '';
       var typeName = (DOC_TYPES.filter(function (t) { return t[0] === j.docType; })[0] || DOC_TYPES[6])[1];
       box.appendChild(badge('badge-navy', typeName));
-      if (j.engine === ENGINE_AI) {
+      if (isAiJob(j)) {
         box.appendChild(badge('badge-teal', T('ai_badge')));
         if (j.confidence != null) box.appendChild(badge(j.confidence < LOW_CONF ? 'badge-warning' : 'badge-success', T('ai_conf', { n: Math.round(j.confidence) })));
         if (j.ai && j.ai.costUsd != null && !j.ai.reused) box.appendChild(badge('badge-blue', T('ai_cost', { usd: j.ai.costUsd.toFixed(4) })));
       } else if (j.confidence != null) box.appendChild(badge(j.confidence < LOW_CONF ? 'badge-warning' : 'badge-success', 'متوسط دقة القراءة: ' + Math.round(j.confidence) + '%'));
       else box.appendChild(badge('badge-success', 'نص PDF أصلي (دون تعرّف ضوئي)'));
       if (j.pages) box.appendChild(badge('badge-blue', 'الصفحات: ' + j.pages + (j.truncated ? ' (أول ' + MAX_PAGES + ' من ' + j.pageCount + ')' : '')));
-      if (j.langs && j.engine !== ENGINE_AI) box.appendChild(badge('badge-blue', 'اللغة: ' + (LANG_LABEL[j.langs] || j.langs)));
+      if (j.langs && !isAiJob(j)) box.appendChild(badge('badge-blue', 'اللغة: ' + (LANG_LABEL[j.langs] || j.langs)));
       if (j.qr) box.appendChild(badge('badge-teal', 'رمز QR للفاتورة الإلكترونية ✓'));
       else if (j.qrOther) box.appendChild(badge('badge-warning', 'رمز QR غير مطابق لصيغة الفاتورة الإلكترونية'));
       if (j.saved) box.appendChild(badge('badge-success', j.saved.where === 'server' ? 'محفوظ على الخادم' : 'محفوظ على هذا الجهاز'));
@@ -1278,7 +1280,7 @@
       // the AI found another kind of document than the one picked: the type (and the sections) follow it
       if (j.ai && j.ai.typeFrom && j.ai.typeFrom !== j.docType) box.appendChild(badge('badge-warning', T('ai_type_set', { from: docTypeLabel(j.ai.typeFrom), to: docTypeLabel(j.docType) })));
       // the weak-reading alert (fields v2) says more and replaces this one
-      $('ocr-low-conf').hidden = !(j.confidence != null && j.confidence < LOW_CONF) || !!(fxWeak && !fxWeak.hidden && j.engine !== ENGINE_AI);
+      $('ocr-low-conf').hidden = !(j.confidence != null && j.confidence < LOW_CONF) || !!(fxWeak && !fxWeak.hidden && !isAiJob(j));
     }
 
     /* fields form */
@@ -1613,7 +1615,7 @@
       var blKeys = ['bl_number', 'vessel', 'voyage', 'port_of_loading', 'port_of_discharge', 'shipper', 'consignee'];
       var looksBl = (j.docType === 'commercial_invoice' || j.docType === 'operator_invoice') &&
         blKeys.filter(function (k) { return hasVal(j, k); }).length >= 3 && !hasVal(j, 'invoice_number') && !hasVal(j, 'total');
-      var weak = j.engine !== ENGINE_AI && (lowConf || mostEmpty);
+      var weak = !isAiJob(j) && (lowConf || mostEmpty);
       var show = weak || looksBl;
       fxWeak.hidden = !show;
       // this alert says more (and offers the AI reading); without it the plain low-confidence alert is back
@@ -1879,7 +1881,7 @@
     typeSel.addEventListener('change', function () { var j = current(); if (j) { j.docType = this.value; if (j.ai) j.ai.typeFrom = null; renderMeta(j); renderFields(j); } });   // sections follow the type; edits live in j.fields
     $('ocr-reextract').addEventListener('click', function () {
       var j = current();
-      if (j && j.engine === ENGINE_AI) { toast(T('ai_reextract_off'), 'info'); return; }
+      if (isAiJob(j)) { toast(T('ai_reextract_off'), 'info'); return; }
       if (!j) return;
       var edited = Object.keys(j.fields).some(function (k) { return j.fields[k].source === 'manual'; });
       if (!edited) { reextract(j); return; }
@@ -2052,9 +2054,9 @@
         languages: String(j.langs || 'ara+eng').slice(0, 40), mean_confidence: j.confidence == null ? null : Math.min(100, Math.max(0, j.confidence)),
         raw_text: String(j.text || '').slice(0, MAX_TEXT), extracted_fields: P.plainFields(j.extracted || {}, SAVE_KEYS), qr_payload: j.qr || null,
         line_items: (j.machineItems || []).map(function (x) { return Object.assign({}, x); })
-      }, j.engine === ENGINE_AI && j.ai && j.ai.usageId ? { ai_usage_id: j.ai.usageId, languages: 'auto', qr_payload: null } : {},
+      }, isAiJob(j) && j.ai && j.ai.usageId ? { ai_usage_id: j.ai.usageId, languages: 'auto', qr_payload: null } : {},
       // ai-doc-v3: the machine detail (containers, confidences, detected type) — bound to the usage row's file hash
-      j.engine === ENGINE_AI && j.ai && j.ai.usageId && j.ai.detail ? { ai_detail: j.ai.detail } : {});
+      isAiJob(j) && j.ai && j.ai.usageId && j.ai.detail ? { ai_detail: j.ai.detail } : {});
     }
     // order-independent: jsonb returns keys sorted by length, not in insertion order
     var ITEM_KEYS = ['description', 'hs_code', 'quantity', 'unit_price', 'amount'].concat(ITEM_EXTRA.map(function (c) { return c[0]; }));
@@ -2279,7 +2281,7 @@
           text: row.raw_text || '', confidence: row.mean_confidence == null ? null : Number(row.mean_confidence), engine: row.engine,
           pages: row.source_pages, pageCount: row.source_pages, qr: row.qr_payload || null, sha256: row.source_sha256,
           extracted: row.extracted_fields || {}, machineItems: [], saved: { id: row.id, where: where, row: row } };
-        var isAi = row.engine === ENGINE_AI;
+        var isAi = row.engine === ENGINE_AI || !!row.ai_usage_id;
         var res = isAi ? { fields: {} } : P.extractFields(j.text, j.docType);
         if (j.qr && !isAi) res = P.mergeQr(res, j.qr);
         var stored = row.reviewed_fields || row.extracted_fields || {};

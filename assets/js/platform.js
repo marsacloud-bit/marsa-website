@@ -976,9 +976,153 @@
   var ppr = $('[data-pf-plans-reload]'); if (ppr) ppr.addEventListener('click', loadPlans);
 
   /* ======================================================================
+     AI PROVIDER KEYS (20261209000100, owner 22 Nov 2026) — the platform's keys, model ids and prices.
+     The key is typed once and sent to the database (kept in Supabase Vault); it is never read back — the list shows
+     its last 4 characters. "Test" asks the ai-extract Edge Function to list the provider's models with the saved key;
+     the list then fills the model choices. An office's own key is a later stage (the table is ready for it).
+     ====================================================================== */
+  var aiBody = $('[data-pf-ai]'), AI_COLS = 6, aiRows = [];
+  var AI_NOTE_KEYS = { ok: 'aiTestOk', no_key: 'aiTestNoKey', key_rejected: 'aiTestRejected', busy: 'aiTestBusy', unreachable: 'aiTestUnreachable' };
+  function aiName(p) { var k = 'aiProv_' + p, v = tr(k); return v && v !== 'platform.' + k ? v : p; }
+  function aiPrice(v) { var n = num(v); return n == null ? '—' : '$' + fmtNum(n); }
+  function renderAi() {
+    if (!aiBody) return;
+    if (!aiRows.length) { emptyRow(aiBody, AI_COLS, tr('aiEmpty')); return; }
+    clear(aiBody);
+    aiRows.forEach(function (p) {
+      var k = p.key || null;
+      var keyCell = k
+        ? [h('span', { class: 'badge badge-success', text: tr('aiKeySaved') }), ' ', h('span', { class: 'pf-mono', dir: 'ltr', text: '•••• ' + k.last4 }),
+           h('span', { class: 'pf-sub', text: tr('aiKeySetAt', { when: fmtDate(k.set_at), who: k.set_by_name || '—' }) })]
+        : [h('span', { class: 'badge badge-muted', text: tr('aiKeyNone') })];
+      var test = !k ? h('span', { class: 'pf-sub', text: '—' }) : (k.tested_at
+        ? [h('span', { class: 'badge ' + (k.test_ok ? 'badge-success' : 'badge-danger'), text: tr(AI_NOTE_KEYS[k.test_note] || 'aiTestUnreachable') }),
+           h('span', { class: 'pf-sub', text: fmtDate(k.tested_at) })]
+        : h('span', { class: 'badge badge-warning', text: tr('aiTestNever') }));
+      var setBtn = h('button', { class: 'btn btn-sm ' + (k ? 'btn-ghost' : 'btn-primary'), type: 'button', text: k ? tr('aiKeyReplace') : tr('aiKeySet'),
+        on: { click: function () { openAiKeyDialog(p); } } });
+      var testBtn = k ? h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: tr('aiTest'), on: { click: function () { aiTest(p, testBtn); } } }) : null;
+      var modelBtn = h('button', { class: 'btn btn-sm btn-ghost', type: 'button', text: tr('aiModelEdit'), on: { click: function () { openAiModelDialog(p); } } });
+      var delBtn = k ? h('button', { class: 'btn btn-sm btn-ghost adm-text-danger', type: 'button', text: tr('aiKeyDelete'), on: { click: function () { aiClear(p, delBtn); } } }) : null;
+      aiBody.appendChild(h('tr', { class: p.is_active ? null : 'pf-row-off', 'data-pf-ai-row': p.provider }, [
+        h('td', null, [h('strong', { text: aiName(p.provider) }), p.is_active ? null : h('span', { class: 'pf-sub', text: tr('aiOff') })]),
+        h('td', null, keyCell),
+        h('td', { class: 'pf-nowrap' }, h('span', { class: 'pf-mono', dir: 'ltr', text: p.model })),
+        h('td', { class: 'pf-nowrap', dir: 'ltr', text: aiPrice(p.price_in) + ' / ' + aiPrice(p.price_out) }),
+        h('td', null, test),
+        h('td', null, h('div', { class: 'pf-row-actions' }, [setBtn, testBtn, modelBtn, delBtn]))
+      ]));
+    });
+  }
+  function loadAi() {
+    if (!api || typeof api.platformAiProviders !== 'function' || !aiBody) return Promise.resolve();
+    emptyRow(aiBody, AI_COLS, tr('loading'), true);
+    return api.platformAiProviders().then(function (r) {
+      if (r.error) { emptyRow(aiBody, AI_COLS, errText(r.error)); return; }
+      aiRows = Array.isArray(r.data) ? r.data : [];
+      renderAi();
+    });
+  }
+  function aiTest(p, btn) {
+    busy(btn, true);
+    return api.platformAiTestKey(p.provider).then(function (r) {
+      busy(btn, false);
+      if (r.error) { showMsg(errText(r.error), 'danger'); return loadAi(); }
+      var d = r.data || {};
+      showMsg(tr(d.ok ? 'aiTestDone' : 'aiTestFailed', { name: aiName(p.provider), note: tr(AI_NOTE_KEYS[d.note] || 'aiTestUnreachable') }), d.ok ? 'success' : 'warning');
+      return loadAi();
+    });
+  }
+  function openAiKeyDialog(p) {
+    var d = mkDialog('pf-ai-key-dialog', tr('aiKeyTitle', { name: aiName(p.provider) }));
+    var f = fieldEl({ id: 'pf-ai-key', label: tr('aiKeyLabel'), type: 'password', dir: 'ltr', required: true, hint: tr('aiKeyHint') });
+    f.input.setAttribute('autocomplete', 'new-password');
+    d.body.appendChild(h('p', { class: 'text-muted text-sm', text: tr('aiKeyLead') }));
+    d.body.appendChild(f.group);
+    var ok = footButtons(d, tr('aiKeySave'));
+    d.form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      d.error('');
+      var key = inputVal(f.input);
+      if (key.length < 20 || key.length > 400 || /\s/.test(key)) { d.error(tr('aiKeyBad')); return; }
+      busy(ok, true);
+      api.platformAiSetKey(p.provider, key).then(function (r) {
+        busy(ok, false);
+        f.input.value = '';
+        if (r.error) { d.error(errText(r.error)); return; }
+        d.close();
+        showMsg(tr('aiKeySavedMsg', { name: aiName(p.provider) }), 'success');
+        // test straight away with the new key
+        return loadAi().then(function () {
+          var row = aiRows.filter(function (x) { return x.provider === p.provider; })[0];
+          if (row) return aiTest(row, null);
+        });
+      });
+    });
+    d.open();
+    try { f.input.focus(); } catch (e) { /* ignore */ }
+  }
+  function aiClear(p, btn) {
+    return ask({ title: tr('aiKeyDeleteTitle', { name: aiName(p.provider) }), text: tr('aiKeyDeleteText'), danger: true, okText: tr('aiKeyDelete') }).then(function (yes) {
+      if (!yes) return;
+      busy(btn, true);
+      return api.platformAiClearKey(p.provider).then(function (r) {
+        busy(btn, false);
+        if (r.error) { showMsg(errText(r.error), 'danger'); return; }
+        showMsg(tr('aiKeyDeletedMsg', { name: aiName(p.provider) }), 'success');
+        return loadAi();
+      });
+    });
+  }
+  function openAiModelDialog(p) {
+    var d = mkDialog('pf-ai-model-dialog', tr('aiModelTitle', { name: aiName(p.provider) }), { wide: true });
+    var listed = p.key && Array.isArray(p.key.test_models) ? p.key.test_models : [];
+    var fm = fieldEl({ id: 'pf-ai-model', label: tr('aiModelLabel'), dir: 'ltr', required: true, value: p.model, max: 64,
+      hint: listed.length ? tr('aiModelHintListed', { n: fmtNum(listed.length) }) : tr('aiModelHintNone') });
+    if (listed.length) {
+      var dl = h('datalist', { id: 'pf-ai-model-list' });
+      listed.forEach(function (m) { dl.appendChild(h('option', { value: m })); });
+      fm.input.setAttribute('list', 'pf-ai-model-list');
+      fm.group.appendChild(dl);
+    }
+    var fi = fieldEl({ id: 'pf-ai-price-in', label: tr('aiPriceIn'), type: 'text', inputmode: 'decimal', dir: 'ltr', max: 12,
+      value: num(p.price_in) == null ? '' : p.price_in });
+    var fo = fieldEl({ id: 'pf-ai-price-out', label: tr('aiPriceOut'), type: 'text', inputmode: 'decimal', dir: 'ltr', max: 12,
+      value: num(p.price_out) == null ? '' : p.price_out });
+    var fa = fieldEl({ id: 'pf-ai-active', label: tr('aiActive'), type: 'checkbox', value: p.is_active, full: true });
+    // the prices are text fields with a decimal keyboard: a number field shows Arabic-Indic digits in an Arabic page,
+    // and the owner wants 0-9 (CLAUDE.md); the value is checked here before it is sent
+    d.body.appendChild(h('p', { class: 'text-muted text-sm', text: tr('aiModelLead') }));
+    d.body.appendChild(grid([fm.group, fa.group, fi.group, fo.group]));
+    var ok = footButtons(d, tr('save'));
+    d.form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      d.error('');
+      var model = inputVal(fm.input).toLowerCase(), pin = inputVal(fi.input).replace(/[٠-٩]/g, function (c) { return String(c.charCodeAt(0) - 1632); }).replace('٫', '.'), pout = inputVal(fo.input).replace(/[٠-٩]/g, function (c) { return String(c.charCodeAt(0) - 1632); }).replace('٫', '.');
+      if (!/^[a-z0-9][a-z0-9.-]{0,63}$/.test(model)) { d.error(tr('aiModelBad')); return; }
+      var payload = { model: model, is_active: !!fa.input.checked };
+      if (pin !== '' || pout !== '') {
+        var a = Number(pin), b = Number(pout);
+        if (pin === '' || pout === '' || !isFinite(a) || !isFinite(b) || a < 0 || b < 0 || a > 1000 || b > 1000) { d.error(tr('aiPriceBad')); return; }
+        payload.price_in = Math.round(a * 10000) / 10000; payload.price_out = Math.round(b * 10000) / 10000;
+      }
+      busy(ok, true);
+      api.platformAiSaveProvider(p.provider, payload).then(function (r) {
+        busy(ok, false);
+        if (r.error) { d.error(errText(r.error)); return; }
+        d.close();
+        showMsg(tr('aiModelSavedMsg', { name: aiName(p.provider) }), 'success');
+        loadAi();
+      });
+    });
+    d.open();
+  }
+  var air = $('[data-pf-ai-reload]'); if (air) air.addEventListener('click', loadAi);
+
+  /* ======================================================================
      TOP BAR + BOOT
      ====================================================================== */
-  function loadAll() { hideMsg(); return Promise.all([runHealth(), loadOrgs().then(loadErrors), loadSubs(), loadPlans()]); }
+  function loadAll() { hideMsg(); return Promise.all([runHealth(), loadOrgs().then(loadErrors), loadSubs(), loadPlans(), loadAi()]); }
   var refresh = $('[data-pf-refresh]');
   if (refresh) refresh.addEventListener('click', loadAll);
   var hr = $('[data-pf-health-run]'); if (hr) hr.addEventListener('click', runHealth);
@@ -1013,6 +1157,7 @@
     setShellTitle(); renderOrgs(); renderErrors();
     if (subsLoaded) renderSubs();
     if (plans.length) renderPlans();
+    if (aiRows.length) renderAi();
   });
   // the platform console is not scoped to the active organization: nothing to reload on marsa:orgchange
 

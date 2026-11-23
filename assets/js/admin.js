@@ -872,6 +872,97 @@
     });
   }
 
+  /* owner reorg (20 Nov 2026): the transaction page in tabs instead of one long scroll. The header, the stages and
+     the 'top' sections stay above; every card / section moves into its tab (nothing removed). A section may declare
+     { tab } itself; otherwise TX_TAB_OF decides; unknown ones go to «الملخص». The chosen tab is kept per transaction
+     for this browser session; the first visit opens the tab of the current stage. A tab shows a red ✗ / yellow !
+     while a shown node inside it carries data-tab-flag="danger" / "warning" (storage unpaid, driver not classified…). */
+  var TX_TABS = ['summary', 'docs', 'containers', 'transport', 'return', 'finance', 'log'];
+  var TX_TAB_OF = { completeness: 'summary', checklist: 'summary', declarations: 'docs', declaration_reading: 'docs', bls: 'docs',
+    shipment_docs: 'docs', containers: 'containers', storage: 'containers', appointments: 'transport', appointment_cards: 'transport',
+    driver_classify: 'transport', movements: 'transport', carrier_order: 'transport', trips: 'transport', empty_return: 'return', exceptions: 'log',
+    'fin-payments': 'finance', 'fin-pay-docs': 'docs', 'fin-costs': 'finance', 'fin-margin': 'finance', 'bill-invoices': 'finance', 'msg-thread': 'log', 'audit-trail': 'log' };
+  var TX_TAB_OF_STAGE = { 'new': 'docs', in_progress: 'docs', customs_declaration: 'docs', appointment: 'transport', transport: 'transport', empty_return: 'return' };
+  function txTabStore(id, v) {
+    var k = 'mrs.txtab.' + id;
+    try { if (v === undefined) return window.sessionStorage.getItem(k); window.sessionStorage.setItem(k, v); } catch (e) { /* private mode: no memory */ }
+    return null;
+  }
+  function txTabs(out, t, sections) {
+    var bar = el('div', { class: 'adm-txtabs', role: 'tablist', 'aria-label': tl('txtab_aria') });
+    var wrap = el('div', { class: 'adm-txtabs-wrap' }, [bar]);
+    var panels = {}, btns = {};
+    TX_TABS.forEach(function (k) {
+      var b = el('button', { class: 'adm-txtab', type: 'button', role: 'tab', id: 'txtab-' + k, 'aria-controls': 'txpanel-' + k, 'aria-selected': 'false', tabindex: '-1', 'data-txtab': k },
+        [el('span', { text: tl('txtab_' + k) }), el('span', { class: 'adm-txtab-flag', 'aria-hidden': 'true', hidden: true })]);
+      b.addEventListener('click', function () { show(k, true); });
+      bar.appendChild(b); btns[k] = b;
+      panels[k] = el('div', { class: 'adm-txpanel', role: 'tabpanel', id: 'txpanel-' + k, 'aria-labelledby': 'txtab-' + k, 'data-txtab-panel': k, hidden: true });
+      wrap.appendChild(panels[k]);
+    });
+    bar.addEventListener('keydown', function (e) {
+      var i = TX_TABS.indexOf(e.target && e.target.getAttribute && e.target.getAttribute('data-txtab'));
+      if (i === -1) return;
+      var rtl = (document.documentElement.getAttribute('dir') || 'rtl') === 'rtl', n = null;
+      if (e.key === 'ArrowLeft') n = rtl ? i + 1 : i - 1;
+      else if (e.key === 'ArrowRight') n = rtl ? i - 1 : i + 1;
+      else if (e.key === 'Home') n = 0; else if (e.key === 'End') n = TX_TABS.length - 1;
+      if (n === null) return;
+      e.preventDefault();
+      n = (n + TX_TABS.length) % TX_TABS.length;
+      show(TX_TABS[n], true); btns[TX_TABS[n]].focus();
+    });
+    function put(k, node) { if (node) panels[TX_TABS.indexOf(k) === -1 ? 'summary' : k].appendChild(node); }
+    put('summary', out.querySelector('.adm-txc-summary'));
+    Array.prototype.slice.call(out.querySelectorAll('.adm-txc-containers')).forEach(function (n) { put('containers', n); });
+    put('docs', out.querySelector('.adm-txc-docs'));
+    var logCard = out.querySelector('.adm-txc-log');
+    var list = Array.isArray(OPS.txSections) ? OPS.txSections : [];
+    Array.prototype.slice.call(sections.children).forEach(function (box) {
+      var id = box.getAttribute('data-section'), s = list.filter(function (x) { return x && x.id === id; })[0];
+      put((s && s.tab) || TX_TAB_OF[id] || 'summary', box);
+    });
+    put('log', logCard);
+    sections.parentNode.insertBefore(wrap, sections);
+    sections.parentNode.removeChild(sections);
+    function show(k, remember) {
+      TX_TABS.forEach(function (x) {
+        var on = x === k;
+        btns[x].setAttribute('aria-selected', on ? 'true' : 'false');
+        btns[x].tabIndex = on ? 0 : -1;
+        btns[x].classList.toggle('is-active', on);
+        panels[x].hidden = !on;
+      });
+      if (remember) txTabStore(t.id, k);
+    }
+    // a flag counts only while its node is shown inside the panel (a hidden card does not flag)
+    function flags() {
+      TX_TABS.forEach(function (k) {
+        var tone = null;
+        Array.prototype.slice.call(panels[k].querySelectorAll('[data-tab-flag]')).forEach(function (n) {
+          for (var p = n; p && p !== panels[k]; p = p.parentNode) { if (p.hidden) return; }
+          var f = n.getAttribute('data-tab-flag');
+          if (f === 'danger' || (f === 'warning' && !tone)) tone = f;
+        });
+        var fl = btns[k].querySelector('.adm-txtab-flag');
+        fl.hidden = !tone;
+        fl.className = 'adm-txtab-flag' + (tone ? ' is-' + tone : '');
+        fl.textContent = tone === 'danger' ? '✗' : tone === 'warning' ? '!' : '';
+        btns[k].setAttribute('aria-label', tl('txtab_' + k) + (tone ? ' — ' + tl('txtab_flag_' + tone) : ''));
+        // a tab with nothing to show for this transaction / role (finance for a clerk, empty return for Ro-Ro) hides
+        btns[k].hidden = !panels[k].textContent.trim() && !panels[k].querySelector('input, select, textarea, button, img, table') && btns[k].getAttribute('aria-selected') !== 'true';
+      });
+    }
+    if (typeof MutationObserver === 'function') {
+      var pend = false;
+      new MutationObserver(function () { if (pend) return; pend = true; setTimeout(function () { pend = false; flags(); }, 60); })
+        .observe(wrap, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden', 'data-tab-flag'] });
+    }
+    var saved = txTabStore(t.id);
+    show(TX_TABS.indexOf(saved) !== -1 ? saved : (TX_TAB_OF_STAGE[t.operational_status] || 'summary'), false);
+    flags();
+  }
+
   // client detail sections (legacy step 6: custody balance), sorted by order; each fails on its own
   function renderClientSections(host, client) {
     var list = (Array.isArray(OPS.clientSections) ? OPS.clientSections : []).filter(function (s) { return s && typeof s.render === 'function'; })
@@ -912,7 +1003,7 @@
   // Each link carries data-nav-id so MarsaShell.setActive / setBadge('alerts') find it.
   var NAV_EXTERNAL = ['bulk', 'ocr', 'platform', 'help'];  // G7: help = the user guide (help.html), the "link from admin"
   // daily work → G3 operations → G6a reports & search → G6b messaging → G4 operating finance → G5 billing → management (unknown module views go last, stable)
-  var NAV_ORDER = ['dashboard', 'requests', 'transactions', 'register', 'clients', 'messages', 'imports', 'alerts', 'schedule', 'exceptions', 'parties',
+  var NAV_ORDER = ['dashboard', 'requests', 'transactions', 'register', 'clients', 'messages', 'imports', 'alerts', 'schedule', 'exceptions', 'parties', 'drivers',
     'search', 'reports', 'fasah_recon',
     'inbox', 'contacts', 'templates', 'channels',
     'costs', 'payables', 'payments', 'custody', 'margins', 'demurrage', 'billing', 'daftra',
@@ -926,7 +1017,7 @@
   // #transactions still works and opens the register, see route()).
   var NAV_GROUPS = [
     { id: 'daily', items: ['dashboard', 'requests', 'register', 'transactions', 'clients', 'messages', 'imports'] },
-    { id: 'ops', items: ['alerts', 'schedule', 'exceptions', 'parties'] },
+    { id: 'ops', items: ['alerts', 'schedule', 'exceptions', 'parties', 'drivers'] },
     { id: 'reports', items: ['search', 'reports', 'fasah_recon'] },
     { id: 'msg', items: ['inbox', 'contacts', 'templates', 'channels'] },
     { id: 'finance', items: ['costs', 'payables', 'payments', 'custody', 'margins', 'demurrage', 'billing', 'daftra'] },
@@ -1008,8 +1099,8 @@
     if (SH && typeof SH.setBadge === 'function') { try { SH.setBadge('alerts'); SH.setBadge('inbox'); } catch (e) { /* helper optional */ } }
     refreshRequestsBadge();
   }
-  // Owner decision 2026-11-19: the menu names the accounting program the org is connected to («إعدادات دفترة», later
-  // «إعدادات قيود», «إعدادات أودو»…), never a fixed program in the billing item. Today the only connector is Daftra
+  // Owner decision 2026-11-20 (replaces 2026-11-19): the menu item is the generic «الربط المحاسبي» (accounting link), so
+  // the menu never suggests the platform works with one program only; the connected program's name shows inside the page. Today the only connector is Daftra
   // (supabase/functions/daftra-sync, views #billing / #daftra), so the provider is 'daftra'; a second connector adds its
   // id here (from the org's settings) and its name key 'admin.acct_name_<id>'.
   function accountingProvider() { return 'daftra'; }
@@ -2438,12 +2529,12 @@
         } else {
           status += '<p class="text-sm text-muted">' + T.common.notAllowed + '</p>';
         }
-        html += '<div class="adm-cols adm-cols-wide">' + card('بيانات المعاملة', info + (LX ? '<div data-lx-details></div>' : '')) + card('الحالة', status) + '</div>';
+        html += '<div class="adm-cols adm-cols-wide adm-txc-summary">' + card('بيانات المعاملة', info + (LX ? '<div data-lx-details></div>' : '')) + card('الحالة', status) + '</div>';
 
         // containers (a Ro-Ro transaction carries a vehicle instead: no containers, no empty return)
         if (roro && LX) {
           html += card(esc(LX.t('roro_card')), kv([[LX.t('k_chassis'), ltr(t.chassis_no), true], [LX.t('k_plate'), ltr(t.vehicle_plate_no), true]]) +
-            '<p class="form-hint">' + esc(LX.t('roro_card_hint')) + '</p>');
+            '<p class="form-hint">' + esc(LX.t('roro_card_hint')) + '</p>', '', 'adm-txc-containers');
         } else {
         var cRows = (t.containers || []).slice().sort(function (a, b) { return a.container_no < b.container_no ? -1 : 1; }).map(function (c) {
           var ev = docs.filter(function (d) { return d.id === c.evidence_document_id; })[0];
@@ -2457,23 +2548,26 @@
         });
         html += card('الحاويات وإرجاع الفارغ', table(['رقم الحاوية', 'النوع', 'آخر موعد للإرجاع', 'مكان الإرجاع', 'حالة الإرجاع', 'دليل الإرجاع', ''], cRows) +
           '<p class="form-hint">الإثبات الوحيد المقبول لإرجاع الحاوية هو «' + esc(lbl('document_kind', 'empty_return_receipt')) + '» بعد تأكيد تصنيفه من الموظف. إيصال التسليم (EIR) وتعليمات الإرجاع ليست إثباتًا.</p>',
-          canTr ? '<button class="btn btn-sm btn-primary" type="button" data-act="ctr-add" data-tx="' + esc(t.id) + '">' + icon('plus') + 'إضافة حاوية</button>' : '');
+          canTr ? '<button class="btn btn-sm btn-primary" type="button" data-act="ctr-add" data-tx="' + esc(t.id) + '">' + icon('plus') + 'إضافة حاوية</button>' : '', 'adm-txc-containers');
         }
 
         // documents
         var upload = '';
         if (canAt(t.branch_id, R.staff)) {
-          upload = '<form class="adm-upload" data-form="doc-upload" data-tx="' + esc(t.id) + '">' +
+          // owner reorg: a later document only — the first ones come from «معاملة جديدة بالقراءة»; folded until asked for
+          upload = '<details class="adm-upload-more"><summary class="btn btn-sm btn-secondary">' + icon('plus') + esc(tl('txdoc_add_other')) + '</summary>' +
+            '<p class="form-hint">' + esc(tl('txdoc_add_hint')) + '</p>' +
+            '<form class="adm-upload" data-form="doc-upload" data-tx="' + esc(t.id) + '">' +
             field({ name: 'file', label: 'الملف', type: 'file', req: true, attrs: ' accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.xlsx,.csv"' }) +
             field({ name: 'kind', label: 'نوع المستند (كما ورد)', type: 'select', options: opts('document_kind', 'other') }) +
             field({ name: 'visibility', label: 'الظهور', type: 'select', options: opts('visibility', 'internal') }) +
             field({ name: 'source', label: 'المصدر', type: 'select', options: opts('doc_source', 'staff_scan', false, ['upload', 'staff_scan', 'email', 'whatsapp']) }) +
             field({ name: 'sourceRef', label: 'مرجع المصدر (اختياري)', attrs: ' maxlength="255"', hint: 'مثل: اسم المرسل أو رقم الرسالة' }) +
             '<button class="btn btn-primary btn-sm" type="submit">رفع المستند</button></form>' +
-            '<p class="form-hint">الحد الأقصى 25 ميغابايت. الأصل يُحفظ كما هو مع بصمته (SHA-256)، والتصحيح يكون برفع نسخة جديدة أو إلغاء المستند مع ذكر السبب.</p>';
+            '<p class="form-hint">الحد الأقصى 25 ميغابايت. الأصل يُحفظ كما هو مع بصمته (SHA-256)، والتصحيح يكون برفع نسخة جديدة أو إلغاء المستند مع ذكر السبب.</p></details>';
         }
         var voidToggle = '<label class="check adm-voided-toggle"><input type="checkbox" data-act="toggle-voided"' + (S.showVoided ? ' checked' : '') + '> إظهار المستندات الملغاة</label>';
-        html += card('المستندات', (res[1].error ? alertBox('danger', errText(res[1].error)) : docsTable(docs, { tx: t })) + upload, voidToggle);
+        html += card('المستندات', (res[1].error ? alertBox('danger', errText(res[1].error)) : docsTable(docs, { tx: t })) + upload, voidToggle, 'adm-txc-docs');
 
         // events (append-only)
         var evHtml = res[2].error ? alertBox('danger', errText(res[2].error)) : timeline(events, docs);
@@ -2482,7 +2576,7 @@
             field({ name: 'note', label: 'إضافة ملاحظة', type: 'textarea', rows: 2, req: true, attrs: ' maxlength="2000"', full: true }) +
             '<button class="btn btn-sm btn-primary" type="submit">إضافة إلى السجل</button></form>';
         }
-        html += card('سجل الأحداث', '<p class="form-hint">السجل للإضافة فقط: لا يُعدّل ولا يُحذف. للتصحيح أضف ملاحظة جديدة توضّح السبب.</p>' + evHtml);
+        html += card('سجل الأحداث', '<p class="form-hint">السجل للإضافة فقط: لا يُعدّل ولا يُحذف. للتصحيح أضف ملاحظة جديدة توضّح السبب.</p>' + evHtml, '', 'adm-txc-log');
         // G3 sections (MarsaOps.txSections) are DOM nodes: the escaped markup above becomes a fragment first
         var tpl = document.createElement('template');
         tpl.innerHTML = html;
@@ -2501,6 +2595,7 @@
         var sections = el('div', { class: 'ops-tx-sections' });
         out.appendChild(sections);
         renderTxSections(sections, t);
+        txTabs(out, t, sections);
         return out;
       });
     });
@@ -3507,6 +3602,51 @@
     }
     return card;
   }
+  // owner stage 3ب (2026-11-20, 20261205000100): «رسوم التخليص الافتراضية» — the price of the customs clearance line in the
+  // draft invoice opened in the accounting program when the preliminary declaration is approved (500 SAR by default).
+  // The org admin / accounts manager change it (RLS); others see it. Before the migration the column does not exist yet:
+  // the card says so instead of failing the page.
+  function clearancePriceCard() {
+    if (!api || typeof api.getServiceItemPrice !== 'function') return Promise.resolve(null);
+    var orgId = S.orgId;
+    return call('getServiceItemPrice', { orgId: orgId, code: 'customs_clearance' }).then(function (r) {
+      if (S.orgId !== orgId) return null;
+      if (r.error) {
+        var missing = /default_price/.test(String(r.error.message || '')) || r.error.code === '42703';
+        return dCard(t('price_title'), [dAlert(missing ? 'info' : 'warning', missing ? t('price_not_ready') : apiErr(r.error))]);
+      }
+      var row = r.data;
+      if (!row) return dCard(t('price_title'), [dAlert('warning', t('price_no_item'))]);
+      var canEdit = S.memberships.some(function (m) { return (m.role === 'admin' || m.role === 'accounts_manager') && !m.branch_id; });
+      var inp = el('input', { class: 'form-control num', id: 'adg-clearance-price', type: 'text', maxlength: '12', dir: 'ltr', lang: 'en', inputmode: 'decimal', autocomplete: 'off' });   // text, not number: a number field shows ٠-٩ in an Arabic browser; owner rule 0-9
+      inp.value = row.default_price == null ? '' : String(Number(row.default_price));
+      inp.disabled = !canEdit;
+      var msg = el('p', { class: 'form-hint', role: 'status' });
+      var btn = canEdit ? el('button', { class: 'btn btn-primary', type: 'button', text: T.common.save }) : null;
+      if (btn) btn.addEventListener('click', function () {
+        // Arabic-Indic / Persian digits and the Arabic decimal comma typed by habit are read as 0-9 and «.»
+        var raw = String(inp.value || '').trim().replace(/[٠-٩]/g, function (d) { return String(d.charCodeAt(0) - 0x0660); })
+          .replace(/[۰-۹]/g, function (d) { return String(d.charCodeAt(0) - 0x06F0); }).replace(/[٫,]/g, '.').replace(/\s/g, '');
+        var v = raw === '' ? null : (/^\d+(\.\d{1,2})?$/.test(raw) ? Number(raw) : NaN);
+        if (v !== null && (!isFinite(v) || v < 0 || v > 1000000)) { msg.textContent = t('price_invalid'); return; }
+        btn.disabled = true; msg.textContent = '';
+        call('setServiceItemPrice', row.id, v === null ? null : Math.round(v * 100) / 100).then(function (res) {
+          btn.disabled = false;
+          if (res.error) { msg.textContent = apiErr(res.error); return; }
+          toast(T.common.saved, 'success');
+          msg.textContent = t('price_saved');
+        });
+      });
+      return dCard(t('price_title'), [
+        el('div', { class: 'form-group' }, [
+          el('label', { class: 'form-label', for: 'adg-clearance-price', text: t('price_label') }), inp,
+          el('span', { class: 'form-hint', text: t('price_hint') })
+        ]),
+        canEdit ? null : el('p', { class: 'text-sm text-muted', text: t('price_read_only') }),
+        msg, btn ? el('div', { class: 'btn-group' }, [btn]) : null
+      ]);
+    });
+  }
   var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
   function renderOrg() {
     return L.getOrgRow(S.orgId).then(function (r) {
@@ -3569,13 +3709,18 @@
       });
       out.appendChild(dCard(t('org_settings'), [dAlert('info', t('org_settings_info')), form]));
       out.appendChild(orgLogoCard(st));
-      return aiSettingsCard().then(function (card) { if (card) out.appendChild(card); return out; });
+      return clearancePriceCard().then(function (pc) { if (pc) out.appendChild(pc); }).then(function () {
+        return aiSettingsCard().then(function (card) { if (card) out.appendChild(card); return out; });
+      });
     });
   }
 
   /* ------------------------------------------------------------------
      القراءة بالذكاء الاصطناعي — org admin (aal2): ai_get_settings / ai_save_settings (20261114000100).
-     Off by default; switching on needs the explicit consent checkbox (document contents go to Anthropic).
+     Off by default; switching on needs the explicit consent checkbox (document contents go to the providers).
+     20261208000100 (owner, 21 Nov 2026): the providers order (Claude / OpenAI / Gemini), tried in turn; adding a
+     provider the last consent did not name asks for the consent again. Without the providers list (older database)
+     the card is as before (Claude only).
      ------------------------------------------------------------------ */
   function aiNum(v, digits) {
     var n = Number(v);
@@ -3588,9 +3733,14 @@
     return call('aiGetSettings', S.orgId).then(function (r) {
       if (r.error) return dCard(t('ai_title'), [dAlert('danger', apiErr(r.error))]);
       var a = r.data || {}, u = a.usage || {}, m = u.month || {};
+      // the providers order (20261208000100): codes of app.ai_providers, labels from i18n (ai_prov_<code>)
+      var provs = Array.isArray(a.providers) ? a.providers.map(function (x) { return x && x.provider; }).filter(Boolean) : null;
+      var order = Array.isArray(a.provider_order) ? a.provider_order.slice() : ['anthropic'];
+      var consented = Array.isArray(a.consent_providers) ? a.consent_providers : [];
+      var provName = function (c) { var k = 'ai_prov_' + c, v = t(k); return v && v !== k ? v : c; };
       var status = dKv([
         [t('ai_status'), a.enabled ? dBadge('success', t('ai_on')) : dBadge('warning', t('ai_off'))],
-        [t('ai_model'), dLtr(a.model || 'claude-opus-5-5')],
+        provs ? [t('ai_order_now'), order.map(provName).join(isEn() ? ' → ' : ' ← ')] : [t('ai_model'), dLtr(a.model || 'claude-opus-5-5')],
         [t('ai_consent_at'), a.consent_ack_at ? fmtWhen(a.consent_ack_at, true) : T.common.none]
       ]);
       var usage = dKv([
@@ -3599,33 +3749,65 @@
         [t('ai_ok') + ' / ' + t('ai_refused') + ' / ' + t('ai_errors'), aiNum(m.ok) + ' / ' + aiNum(m.refused) + ' / ' + aiNum(m.error)],
         [t('ai_tokens'), aiNum(m.input_tokens) + ' / ' + aiNum(m.output_tokens)],
         [t('ai_cost'), t('ai_of', { a: '$' + aiNum(Number(m.cost_usd || 0) + Number(m.held_usd || 0), 2), b: '$' + aiNum(a.monthly_budget_usd, 2) })]
-      ]);
+      ].concat(provs ? [
+        [t('ai_by_provider'), Object.keys(m.by_provider || {}).length
+          ? Object.keys(m.by_provider).map(function (c) { return provName(c) + ': ' + aiNum(m.by_provider[c]); }).join(' · ') : T.common.none],
+        [t('ai_fell_back'), aiNum(m.fell_back || 0)]
+      ] : []));
+      // three choices: provider 1 (required), 2 and 3 (optional)
+      var orderFields = provs ? [0, 1, 2].map(function (i) {
+        return dField({ name: 'ai_order_' + i, label: t('ai_order_n', { n: i + 1 }), type: 'select', value: order[i] || '',
+          options: (i ? [['', t('ai_order_none')]] : []).concat(provs.map(function (c) { return [c, provName(c)]; })) });
+      }) : [];
+      var form = null;
+      var readOrder = function () {
+        return orderFields.map(function (f, i) { return form.elements['ai_order_' + i].value; }).filter(Boolean);
+      };
       var msg = el('p', { class: 'form-error', role: 'alert', hidden: true });
       var saveBtn = el('button', { class: 'btn btn-primary', type: 'submit', text: T.common.save });
-      var consent = dField({ name: 'ai_consent', label: t('ai_consent'), type: 'checkbox', value: false, full: true });
-      var form = el('form', { class: 'adm-org-form adm-ai-form', novalidate: true }, [
+      var consent = dField({ name: 'ai_consent', label: t('ai_consent', { list: order.map(provName).join('، ') }), type: 'checkbox', value: false, full: true });
+      form = el('form', { class: 'adm-org-form adm-ai-form', novalidate: true }, [
         dGrid([
-          dField({ name: 'ai_enabled', label: t('ai_enabled'), type: 'checkbox', value: !!a.enabled, full: true }),
+          dField({ name: 'ai_enabled', label: t('ai_enabled'), type: 'checkbox', value: !!a.enabled, full: true })
+        ].concat(provs ? [el('div', { class: 'adm-full adm-ai-order' }, [el('h4', { text: t('ai_order') }), el('p', { class: 'form-hint', text: t('ai_order_hint') }),
+          el('div', { class: 'adm-ai-order-grid' }, orderFields)])] : []).concat([
+          // the consent sits under the order it names
           consent,
           dField({ name: 'daily_request_cap', label: t('ai_daily_cap'), type: 'number', value: a.daily_request_cap, ltr: true, hint: t('ai_daily_cap_hint') }),
           dField({ name: 'monthly_budget_usd', label: t('ai_budget'), type: 'number', value: a.monthly_budget_usd, ltr: true, hint: t('ai_budget_hint') })
-        ]),
+        ])),
         msg, el('div', { class: 'btn-group' }, saveBtn)
       ]);
-      // the consent box is asked only when switching on (off → on)
-      var syncConsent = function () { consent.hidden = !!a.enabled || !form.elements.ai_enabled.checked; };
-      form.elements.ai_enabled.addEventListener('change', syncConsent); syncConsent();
+      // the consent box is asked when switching on (off → on), and when the order adds a provider the last consent did
+      // not name; its text names the providers of the order being saved
+      var needsConsent = function () {
+        if (!form.elements.ai_enabled.checked) return false;
+        if (!a.enabled) return true;
+        return !!provs && readOrder().some(function (c) { return consented.indexOf(c) === -1; });
+      };
+      var syncConsent = function () {
+        consent.hidden = !needsConsent();
+        var lbl = consent.querySelector('label.check');
+        var list = (provs ? readOrder() : order).map(provName).join('، ');
+        if (lbl && lbl.lastChild && lbl.lastChild.nodeType === 3) lbl.lastChild.nodeValue = t('ai_consent', { list: list });
+      };
+      form.elements.ai_enabled.addEventListener('change', syncConsent);
+      orderFields.forEach(function (f, i) { form.elements['ai_order_' + i].addEventListener('change', syncConsent); });
+      syncConsent();
       form.addEventListener('submit', function (e) {
         e.preventDefault();
         msg.hidden = true;
         var on = !!form.elements.ai_enabled.checked, ack = !!form.elements.ai_consent.checked;
         var cap = Number(form.elements.daily_request_cap.value), budget = Number(form.elements.monthly_budget_usd.value);
+        var newOrder = provs ? readOrder() : null;
+        var dup = !!newOrder && (newOrder.length < 1 || newOrder.some(function (c, i) { return newOrder.indexOf(c) !== i; }));
         var bad = !Number.isInteger(cap) || cap < 1 || cap > 1000 ? t('ai_err_cap')
           : (!isFinite(budget) || budget < 0 || budget > 10000 || Math.round(budget * 100) !== budget * 100 ? t('ai_err_budget')
-            : (on && !a.enabled && !ack ? t('ai_consent_required') : null));
+            : (dup ? t('ai_err_order') : (needsConsent() && !ack ? t('ai_consent_required') : null)));
         if (bad) { msg.textContent = bad; msg.hidden = false; return; }
         var payload = { enabled: on, daily_request_cap: cap, monthly_budget_usd: budget };
-        if (on && !a.enabled) payload.consent_ack = true;
+        if (newOrder) payload.provider_order = newOrder;
+        if (needsConsent()) payload.consent_ack = true;
         saveBtn.disabled = true;
         call('aiSaveSettings', S.orgId, payload).then(function (res) {
           saveBtn.disabled = false;

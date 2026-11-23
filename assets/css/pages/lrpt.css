@@ -206,3 +206,25 @@
 /* «الحالة»: a single internal status from a deep link (#register?status=transport) — shown, kept, clearable */
 .lrpt-st-exact { display: inline-flex; align-items: center; gap: var(--space-2, 8px); flex-wrap: wrap; margin-block-start: var(--space-2, 8px); font-size: var(--fs-sm); }
 .lrpt-draft-pill { display: inline-flex; }
+/* owner note 2026-11-20: the header no longer sets the column width. Labels wrap to two lines between words (as
+   «عدد الحاويات»); the small filter arrow sits in the bottom inline-end corner of every header (bottom-left in Arabic);
+   the importer column gets more room, the containers column shows one number + «+N» (a small floating list) */
+.lrpt-statement .rpt-table thead th { white-space: normal; position: relative; padding: 6px 5px 16px; line-height: 1.25; font-size: 12.5px; }
+.lrpt-statement .rpt-table tbody td { padding: 6px 5px; font-size: 13px; }   /* every column fits 1366 px with the side menu */
+.lrpt-statement .rpt-table th.has-cf .rpt-th-label { display: block; overflow-wrap: normal; word-break: keep-all; }
+.lrpt-statement .rpt-table thead .cf-btn {
+  position: absolute; inset-block-end: 1px; inset-inline-end: 1px; margin: 0; inline-size: 16px; block-size: 14px; font-size: 10px;
+}
+.lrpt-statement .rpt-table tbody td:nth-child(2) { min-inline-size: 165px; }
+.lrpt-ctrs.is-one { display: inline-flex; flex-direction: row; align-items: center; gap: 4px; position: relative; font-weight: 600; }
+.lrpt-ctr-more {
+  border: 1px solid var(--border-strong, #cfd6dd); border-radius: 10px; background: #fff; color: var(--teal); cursor: pointer;
+  font: inherit; font-size: 11px; font-weight: 700; line-height: 1; padding: 1px 4px;
+}
+.lrpt-ctr-more:hover, .lrpt-ctr-more:focus-visible, .lrpt-ctr-more[aria-expanded="true"] { background: var(--teal); border-color: var(--teal); color: #fff; }
+.lrpt-ctr-more:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+.lrpt-ctr-pop {
+  position: absolute; inset-block-start: calc(100% + 4px); inset-inline-start: 0; z-index: 30; display: flex; flex-direction: column; gap: 3px;
+  background: #fff; border: 1px solid var(--border-strong, #cfd6dd); border-radius: 8px; box-shadow: 0 6px 18px rgba(0, 0, 0, .12);
+  padding: 8px 10px; max-block-size: 240px; overflow: auto; text-align: start;
+}

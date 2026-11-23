@@ -14,6 +14,13 @@
                            client.beta.messages.stream(params, {signal}) → finalMessage() (extract.js callClaude)
     deps.claudeTimeoutMs   optional: the whole Claude call's deadline in ms (default CLAUDE_DEADLINE_MS, 135 s), also
                            bounded by REQUEST_BUDGET_MS from the start of the request (the 150 s idle timeout)
+    deps.ready             optional {openai, gemini}: booleans, that provider's key is set (owner, 21 Nov 2026)
+    deps.send(provider, model, body, {deadlineMs})
+                           optional: one HTTPS JSON call to OpenAI / Gemini made by index.ts (the key is added there)
+                           → {status, json}; rejects on the deadline / a lost connection. Without it only Claude is used.
+    deps.loadKeys(org)     optional (22 Nov 2026): index.ts reads the keys saved on the platform page for this org (Vault,
+                           service RPC ai_provider_keys) into its own request scope → {anthropic, openai, gemini} booleans
+    deps.listModels(p)     optional: the provider's model list with the saved key → {status, models} (the key test)
     deps.now()             optional: the clock in ms (default Date.now; tests)
     deps.sdk               the Anthropic class (typed error classes for classifyCallError)
     deps.log(text)         fixed-text log line (never a token, a key, an error message or document content)
@@ -124,7 +131,7 @@
       const quickReq = v.reading_mode === 'quick';
       const isQuickRow = x => !!(X.isQuickDetail && x.ai_detail && X.isQuickDetail(x.ai_detail));
       const live = r.data.filter(x => x && x.id && (!kind || x.doc_type === kind) && (quickReq || !isQuickRow(x)));
-      const rows = live.filter(x => x.engine === X.ENGINE && x.ai_detail && x.ai_detail.prompt_version === X.PROMPT_VERSION_V3 && x.ai_usage_id);
+      const rows = live.filter(x => (x.engine === X.ENGINE || !!x.ai_usage_id) && x.ai_detail && x.ai_detail.prompt_version === X.PROMPT_VERSION_V3 && x.ai_usage_id);
       const pick = f => rows.find(f) || null;
       const v3 = v.transaction_id
         ? (pick(x => x.transaction_id === v.transaction_id) || pick(x => !x.transaction_id))
@@ -137,7 +144,9 @@
   // engine / prompt version are the row's own: an OCR / v2 reading is never presented as an ai-doc-v3 Claude reading.
   function reusedBody(row, X) {
     const det = row.ai_detail || {};
-    const isV3 = row.engine === X.ENGINE && det.prompt_version === X.PROMPT_VERSION_V3;
+    // an AI reading: Claude's engine name, or any reading linked to its usage row (OpenAI / Gemini: the model's name)
+    const isAi = row.engine === X.ENGINE || !!row.ai_usage_id;
+    const isV3 = isAi && det.prompt_version === X.PROMPT_VERSION_V3;
     const quick = isV3 && !!(X.isQuickDetail && X.isQuickDetail(det));
     const meta = {};
     (Array.isArray(det.fields) ? det.fields : []).forEach(f => { if (f && typeof f.name === 'string') meta[f.name] = f; });
@@ -146,8 +155,8 @@
       confidence: meta[k] && Number.isFinite(meta[k].confidence) ? meta[k].confidence : 0, page: meta[k] ? meta[k].page || null : null,
       valid: meta[k] ? meta[k].valid !== false : true }));
     const body = {
-      usage_id: row.ai_usage_id || null, engine: row.engine || null, model: row.engine === X.ENGINE ? X.MODEL : null,
-      prompt_version: isV3 ? X.PROMPT_VERSION_V3 : (row.engine === X.ENGINE ? X.PROMPT_VERSION : null),
+      usage_id: row.ai_usage_id || null, engine: row.engine || null, model: row.engine === X.ENGINE ? X.MODEL : (isAi ? row.engine : null),
+      prompt_version: isV3 ? X.PROMPT_VERSION_V3 : (isAi ? X.PROMPT_VERSION : null),
       doc_type: det.doc_type || row.doc_type, detected_type: det.detected_type || row.doc_type, kind: row.doc_type,
       transaction_id: row.transaction_id || null, fields, extracted_fields: ex, line_items: Array.isArray(row.line_items) ? row.line_items : [],
       containers: Array.isArray(det.containers) ? det.containers : [], warnings: Array.isArray(det.warnings) ? det.warnings : [],
@@ -162,6 +171,34 @@
     // a saved quick reading says so (a full one carries no reading_mode, as before)
     if (quick) body.reading_mode = 'quick';
     return body;
+  }
+
+  // owner 22 Nov 2026 — the connection test of the platform page («مفاتيح الذكاء الاصطناعي»): platform admins only (the
+  // caller's own platform_ai_providers RPC answers), the provider's model list read with the saved key (index.ts
+  // listModels), the result recorded (ai_record_key_test, service role). → {ok, note, models}; never the key.
+  const TEST_NOTES = { 0: 'no_key', 401: 'key_rejected', 403: 'key_rejected', 429: 'busy' };
+  async function providerTest(body, userDb, d, X, origin, log) {
+    const provider = body && typeof body.provider === 'string' ? body.provider : '';
+    if ((X.PROVIDERS || []).indexOf(provider) === -1) return fail('bad_request', 400, origin);
+    const who = await userDb.rpc('platform_ai_providers', {});
+    if (!who || who.error) {
+      const c = mrs(who && who.error);
+      return fail(c === 'MRS_MFA_REQUIRED' ? 'mfa_required' : 'forbidden', 403, origin);
+    }
+    if (typeof d.loadKeys !== 'function' || typeof d.listModels !== 'function') return fail('not_configured', 503, origin);
+    try { await d.loadKeys(null); } catch (e) { log('ai-extract: key lookup failed'); }
+    let r;
+    try { r = await d.listModels(provider); } catch (e) { r = { status: 599, models: [] }; }
+    const st = r && Number.isInteger(r.status) ? r.status : 599;
+    const ok = st === 200;
+    const note = ok ? 'ok' : (TEST_NOTES[st] || 'unreachable');
+    const models = (r && Array.isArray(r.models) ? r.models : []).filter(m => typeof m === 'string' && /^[a-z0-9][a-z0-9.-]{0,63}$/.test(m)).slice(0, 200);
+    log('ai-extract: key test ' + provider + ' (' + note + ')');
+    try {
+      const rec = await d.serviceClient().rpc('ai_record_key_test', { p_provider: provider, p_ok: ok, p_note: note, p_models: models });
+      if (rec && rec.error) log('ai-extract: key test record failed');
+    } catch (e) { log('ai-extract: key test record failed'); }
+    return json({ provider, ok, note, models }, 200, origin);
   }
 
   async function handleRequest(req, deps) {
@@ -205,6 +242,8 @@
     let v;
     try {
       const body = JSON.parse(raw);
+      // owner 22 Nov 2026: the platform page's key test ({action: 'provider_test', provider}) — no file, no reading
+      if (body && body.action === 'provider_test') { raw = ''; return await providerTest(body, userDb, d, X, origin, log); }
       // a non-PDF body above the image envelope is refused before the base64 is decoded
       if (raw.length > MAX_BODY && !(body && body.file && body.file.media_type === 'application/pdf')) throw new X.AiError('too_large', 413);
       v = X.validateRequest(body);
@@ -240,12 +279,25 @@
         return json(reusedBody(prior, X), 200, origin);
       }
     }
-    if (!d.modelConfigured) return fail('not_configured', 503, origin);
+    // the providers to try, in the organisation's order, that this server holds a key for (owner, 21 Nov 2026)
+    // the keys saved on the platform page (index.ts loadKeys: Vault through the service RPC; booleans only here), else the
+    // Edge Function secrets
+    let ready = Object.assign({}, d.ready || {}, { anthropic: !!d.modelConfigured });
+    if (typeof d.loadKeys === 'function') {
+      try { const rk = await d.loadKeys(v.org_id); if (rk && typeof rk === 'object') ready = { anthropic: !!rk.anthropic, openai: !!rk.openai, gemini: !!rk.gemini }; }
+      catch (e) { log('ai-extract: key lookup failed'); }
+    }
+    if (typeof d.send !== 'function') { ready.openai = false; ready.gemini = false; }
+    const chain = X.providerChain ? X.providerChain(acc.data, ready) : (d.modelConfigured ? [{ provider: 'anthropic', model: X.MODEL }] : []);
+    const withMeta = !!(acc.data && Array.isArray(acc.data.providers));
+    if (!chain.length) return fail('not_configured', 503, origin);
 
     /* -------------------------------------------------------------- reserve */
+    // the hold covers one full reading per provider that may be tried (capped as ai_reserve's p_est_usd)
+    const hold1 = X.estimateHoldUsd(v.media_type, v.bytes, v.pages, X.maxTokensFor(v.doc_type, v.prompt_version, v.reading_mode));
     const svc = d.serviceClient();
     const res = await svc.rpc('ai_reserve', { p_org: v.org_id, p_user: user.id, p_purpose: 'doc_extract',
-      p_est_usd: X.estimateHoldUsd(v.media_type, v.bytes, v.pages, X.maxTokensFor(v.doc_type, v.prompt_version, v.reading_mode)) });
+      p_est_usd: Math.round(Math.min(50, hold1 * chain.length) * 10000) / 10000 });
     if (res.error || typeof res.data !== 'string') {
       const c = mrs(res.error);
       if (c === 'MRS_AI_DISABLED') return fail('ai_disabled', 403, origin);
@@ -270,38 +322,39 @@
       }
     }
 
-    /* -------------------------------------------------------------- Claude */
-    // settle defaults to 'unknown' (charge the hold): only a proven outcome lowers it
+    /* -------------------------------------------------------------- the reading: each provider in turn */
+    // owner, 21 Nov 2026: the providers are tried in the organisation's order (chain). The next one is tried after a
+    // technical error / timeout, a refusal, a cut-off answer or an answer that fails the shape checks; every attempt's
+    // tokens are settled at its own model. settle defaults to 'unknown' (charge the hold): only a proven outcome lowers it
     let settle = { status: 'unknown', model: X.MODEL, input: 0, output: 0, attempts: null };
-    let out = null;
+    let out = null, served = null;
     let errCode = 'upstream_error', errStatus = 502;
-    let msg = null;
-    try {
-      const params = X.buildRequest(v);
-      v.data_b64 = '';
-      // the HTTP status, the API error type (a fixed enum) and the API's own short reason (printable ASCII only, any
-      // key-like token removed, ≤ 240 chars — the API's validation text, never document content) say why a call failed
-      const why = e => {
-        const st = e && Number.isInteger(e.status) ? e.status : 0;
-        const ty = e && typeof e.type === 'string' && /^[a-z_]{1,40}$/.test(e.type) ? e.type : '-';
-        const body = e && e.error && typeof e.error === 'object' ? e.error : null;
-        const raw = body && body.error && typeof body.error.message === 'string' ? body.error.message : '';
-        const reason = raw.replace(/sk-ant-[A-Za-z0-9_-]+/g, '[key]').replace(/[^\x20-\x7E]/g, '?').slice(0, 240);
-        return 'http ' + st + ', ' + ty + (reason ? ', ' + reason : '');
-      };
-      const fail1 = e => {
-        const c = X.classifyCallError(e, d.sdk);
-        errCode = c.code; errStatus = c.status;
-        settle = { status: c.settle, model: X.MODEL, input: 0, output: 0, attempts: null };
-        log('ai-extract: claude call failed (' + c.code + ', ' + c.settle + ', ' + why(e) + ')');
-      };
-      // one deadline for the call (and the rare 400 retry, which is answered before the model runs)
-      const claudeMs = Number.isFinite(d.claudeTimeoutMs) && d.claudeTimeoutMs > 0 ? d.claudeTimeoutMs : CLAUDE_DEADLINE_MS;
-      const deadline = Math.min(now() + claudeMs, t0 + REQUEST_BUDGET_MS);
-      // < 1 s left → 0: callClaude refuses without sending (AiError upstream_error, settled 'error' at no cost)
-      const left = () => { const r = deadline - now(); return r >= 1000 ? r : 0; };
+    const tried = [];                                   // {provider, model, outcome, ms}: the log and the response
+    const attempts = [];                                // ai_settle p_attempts
+    let anyUnknown = false, lastStatus = 'error', lastModel = X.MODEL;
+    let params = null;
+    try { params = X.buildRequest(v); } catch (e) { params = null; }
+    v.data_b64 = '';
+    // the HTTP status, the API error type (a fixed enum) and the API's own short reason (printable ASCII only, any
+    // key-like token removed, ≤ 240 chars — the API's validation text, never document content) say why a call failed
+    const why = e => {
+      const st = e && Number.isInteger(e.status) ? e.status : 0;
+      const ty = e && typeof e.type === 'string' && /^[a-z_]{1,40}$/.test(e.type) ? e.type : '-';
+      const body = e && e.error && typeof e.error === 'object' ? e.error : null;
+      const raw = body && body.error && typeof body.error.message === 'string' ? body.error.message : '';
+      const reason = raw.replace(/sk-ant-[A-Za-z0-9_-]+/g, '[key]').replace(/sk-[A-Za-z0-9_-]{8,}/g, '[key]').replace(/AIza[A-Za-z0-9_-]+/g, '[key]')
+        .replace(/[^\x20-\x7E]/g, '?').slice(0, 240);
+      return 'http ' + st + ', ' + ty + (reason ? ', ' + reason : '');
+    };
+    const failed = e => {
+      const c = X.classifyCallError(e, d.sdk);
+      log('ai-extract: claude call failed (' + c.code + ', ' + c.settle + ', ' + why(e) + ')');
+      return c;
+    };
+    // one Claude attempt (streamed SDK call, the 400 retry without the fallback beta) → {msg} | {fail: {code, status, settle}}
+    async function readClaude(ms) {
       try {
-        msg = await X.callClaude(d.claudeClient(), params, { deadlineMs: left() });
+        return { msg: await X.callClaude(d.claudeClient(), params, { deadlineMs: ms() }) };
       } catch (e) {
         const st = e && Number.isInteger(e.status) ? e.status : 0;
         // a 400 is rejected before the model runs (nothing billed). When the request carried the server-side
@@ -311,28 +364,80 @@
           log('ai-extract: claude call rejected (' + why(e) + '); retrying without the fallback beta');
           const p2 = Object.assign({}, params);
           delete p2.betas; delete p2.fallbacks;
-          try { msg = await X.callClaude(d.claudeClient(), p2, { deadlineMs: left() }); }
-          catch (e2) { fail1(e2); }
-        } else {
-          fail1(e);
+          try { return { msg: await X.callClaude(d.claudeClient(), p2, { deadlineMs: ms() }) }; }
+          catch (e2) { return { fail: failed(e2) }; }
         }
+        return { fail: failed(e) };
       }
-      if (msg) {
-        const parsed = X.parseMessage(msg, v.prompt_version, v.doc_type);
-        settle = { input: parsed.usage.input_tokens, output: parsed.usage.output_tokens, model: parsed.model,
-          attempts: parsed.usage.attempts, status: parsed.ok ? 'ok' : (parsed.code === 'refused' ? 'refused' : 'error') };
-        if (parsed.ok) {
-          try { out = X.postProcess(parsed.data, v.doc_type, v.prompt_version, v.reading_mode); }
-          catch (e) { settle.status = 'error'; errCode = 'internal'; errStatus = 500; log('ai-extract: post-processing failed'); }
-        } else if (parsed.code === 'refused') { errCode = 'refused'; errStatus = 422; }
-        else if (parsed.code === 'truncated') { errCode = 'truncated'; errStatus = 422; }
-        else { errCode = 'bad_output'; errStatus = 502; }
+    }
+    // one OpenAI / Gemini attempt through index.ts' send(provider, model, body, {deadlineMs}) → {status, json}
+    async function readHttp(p, ms) {
+      try {
+        const body = p.provider === 'openai' ? X.buildOpenAi(params, p.model) : X.buildGemini(params);
+        const r = await d.send(p.provider, p.model, body, { deadlineMs: ms() });
+        if (!r || !Number.isInteger(r.status)) throw new Error('no answer');
+        if (r.status < 200 || r.status > 299) throw { status: r.status };
+        return { norm: p.provider === 'openai' ? X.normOpenAi(r.json, p.model) : X.normGemini(r.json, p.model) };
+      } catch (e) {
+        log('ai-extract: ' + p.provider + ' call failed (http ' + (e && Number.isInteger(e.status) ? e.status : 0) + ')');
+        return { fail: X.classifyHttpError(e) };
       }
-    } catch (e) {
+    }
+    if (!params) {
       // building the request failed: nothing was sent
       settle = { status: 'error', model: X.MODEL, input: 0, output: 0, attempts: null };
       errCode = 'internal'; errStatus = 500;
       log('ai-extract: request build failed');
+    } else {
+      // one deadline for all the attempts (and the rare 400 retry, which is answered before the model runs)
+      const claudeMs = Number.isFinite(d.claudeTimeoutMs) && d.claudeTimeoutMs > 0 ? d.claudeTimeoutMs : CLAUDE_DEADLINE_MS;
+      const deadline = Math.min(now() + claudeMs, t0 + REQUEST_BUDGET_MS);
+      // < 1 s left → 0: the call is refused without sending (upstream_error, settled 'error' at no cost)
+      const left = () => { const r = deadline - now(); return r >= 1000 ? r : 0; };
+      for (let i = 0; i < chain.length && !out; i++) {
+        const p = chain[i], isLast = i === chain.length - 1;
+        if (i > 0 && left() < X.PROVIDER_MIN_MS) { log('ai-extract: no time left for the next provider'); break; }
+        // a provider that is not the last one leaves time for the next
+        const ms = () => (isLast ? left() : Math.min(left(), X.PROVIDER_DEADLINE_MS));
+        const t1 = now(), before = attempts.length;
+        const r = p.provider === 'anthropic' ? await readClaude(ms) : await readHttp(p, ms);
+        lastModel = p.model;
+        let outcome;
+        if (r.fail) {
+          errCode = r.fail.code; errStatus = r.fail.status;
+          if (r.fail.settle === 'unknown') anyUnknown = true;
+          lastStatus = 'error';
+          outcome = r.fail.code;
+        } else {
+          const parsed = r.msg ? X.parseMessage(r.msg, v.prompt_version, v.doc_type) : X.parseAnswer(r.norm, v.prompt_version, v.doc_type);
+          (parsed.usage.attempts || []).forEach(a => attempts.push(a));
+          lastModel = parsed.model;
+          if (parsed.ok) {
+            try { out = X.postProcess(parsed.data, v.doc_type, v.prompt_version, v.reading_mode); served = { provider: p.provider, model: parsed.model, engine: p.provider === 'anthropic' ? X.ENGINE : p.model }; outcome = 'ok'; }
+            catch (e) { errCode = 'internal'; errStatus = 500; lastStatus = 'error'; outcome = 'internal'; log('ai-extract: post-processing failed'); }
+          } else if (parsed.code === 'refused') { errCode = 'refused'; errStatus = 422; lastStatus = 'refused'; outcome = 'refused'; }
+          else if (parsed.code === 'truncated') { errCode = 'truncated'; errStatus = 422; lastStatus = 'error'; outcome = 'truncated'; }
+          else { errCode = 'bad_output'; errStatus = 502; lastStatus = 'error'; outcome = 'bad_output'; }
+        }
+        const took = Math.max(0, now() - t1);
+        tried.push({ provider: p.provider, model: lastModel, outcome, ms: took });
+        // a database with the providers list (20261208000100) keeps every attempt with its provider, outcome and time
+        // (ai_settle → app.ai_usage.provider / call_meta), also an attempt that billed nothing
+        if (withMeta) {
+          if (attempts.length === before) attempts.push({ model: lastModel, input_tokens: 0, output_tokens: 0 });
+          const mine = attempts.slice(before);
+          mine.forEach(x => { x.provider = p.provider; });
+          Object.assign(mine[mine.length - 1], { outcome, ms: took });
+        }
+        if (!out && !isLast) log('ai-extract: ' + p.provider + ' did not answer (' + outcome + '); trying the next provider');
+      }
+      const tok = attempts.slice(0, 10);
+      settle = {
+        status: out ? 'ok' : (anyUnknown ? 'unknown' : lastStatus),
+        model: served ? served.model : lastModel,
+        input: tok.reduce((s, a) => s + a.input_tokens, 0), output: tok.reduce((s, a) => s + a.output_tokens, 0),
+        attempts: tok.length ? tok : null
+      };
     }
 
     /* -------------------------------------------------------------- settle (always, once) */
@@ -351,7 +456,10 @@
     }
 
     const body = {
-      usage_id: reservation, engine: X.ENGINE, model: settle.model, prompt_version: v3 ? X.PROMPT_VERSION_V3 : X.PROMPT_VERSION,
+      // engine: Claude's readings keep the engine name they always had (claude-opus-5-5, also when a fallback model served
+      // them); an OpenAI / Gemini reading is named by the model id it was asked for (app.ai_providers: app.ai_is_engine
+      // accepts it; the provider may answer with a dated variant, which stays in model)
+      usage_id: reservation, engine: served ? served.engine : X.ENGINE, model: settle.model, prompt_version: v3 ? X.PROMPT_VERSION_V3 : X.PROMPT_VERSION,
       doc_type: out.doc_type, detected_type: out.detected_type, kind: out.kind, transaction_id: v.transaction_id,
       fields: out.fields, extracted_fields: out.extracted_fields, line_items: out.line_items, warnings: out.warnings,
       mean_confidence: out.mean_confidence, raw_text: out.raw_text,
@@ -366,6 +474,8 @@
       body.empty_return = out.empty_return || null;   // v3 EIR (20261121000100), else null
       body.payment = out.payment || null;             // v3 payment document (20261122000100), else null
       body.reused = false; body.extraction_id = null;
+      // which provider read it, whether an earlier one in the order failed, and each attempt (provider, model, outcome, ms)
+      body.provider = served ? served.provider : null; body.fell_back = tried.length > 1; body.tried = tried;
       if (out.reading_mode === 'quick') body.reading_mode = 'quick';   // quick reading (2026-11-14); a full one: absent, as before
     }
     return json(body, 200, origin);

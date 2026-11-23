@@ -54,7 +54,7 @@
     // columns
     c_seq: 'م', c_ref: 'رقم المعاملة', c_importer: 'المستورد', c_client: 'العميل', c_declaration_no: 'رقم البيان', c_declaration_date: 'تاريخ البيان', c_declaration_date_short: 'تاريخه', c_container_count: 'عدد الحاويات', c_containers: 'الحاويات', c_port_short: 'الميناء', c_bl_number: 'رقم البوليصة',
     c_unit_count: 'عدد الوحدات', c_unit: 'وحدة الشحن', unit_chassis: 'شاسيه: {v}', unit_plate: 'لوحة: {v}', c_port: 'الميناء / المنفذ', c_operator: 'المشغل', c_agent: 'الوكيل الملاحي', c_vessel: 'الباخرة',
-    c_tx_status: 'حالة المعاملة', c_daftra: 'فاتورة دفترة', c_stage: 'مرحلة البيان', c_attention: 'المتابعة', c_employee: 'الموظف', c_updated_at: 'آخر تحديث',
+    new_tx_read: 'معاملة جديدة بالقراءة', new_tx_manual: 'إدخال يدوي', c_tx_status: 'حالة المعاملة', c_daftra: 'الفاتورة', c_stage: 'مرحلة البيان', c_attention: 'المتابعة', c_employee: 'الموظف', c_updated_at: 'آخر تحديث',
     c_driver: 'السائق', c_driver_phone: 'جوال السائق', c_truck: 'الشاحنة', c_container_no: 'رقم الحاوية', c_appointment_at: 'موعد الخروج', c_destination: 'الوجهة',
     c_transport_value: 'قيمة النقل', c_revenue: 'عائد المؤسسة', c_return_location: 'موقع الإعادة', c_return_deadline: 'آخر موعد للإعادة', c_returned_at: 'تاريخ الإعادة',
     c_return_status: 'حالة الإعادة', c_movement_status: 'حالة الحركة', c_appointment_no: 'رقم الموعد', c_notes: 'ملاحظات',
@@ -202,7 +202,7 @@
     sort_paid_asc: 'Payment date (oldest)', sort_amount_desc: 'Amount (highest)', sort_created_desc: 'Entry date (newest)',
     c_seq: '#', c_ref: 'Transaction', c_importer: 'Importer', c_client: 'Client', c_declaration_no: 'Declaration no.', c_declaration_date: 'Declaration date', c_declaration_date_short: 'Date', c_container_count: 'Containers', c_containers: 'Container nos.', c_port_short: 'Port', c_bl_number: 'B/L no.',
     c_unit_count: 'Units', c_unit: 'Cargo unit', unit_chassis: 'Chassis: {v}', unit_plate: 'Plate: {v}', c_port: 'Port', c_operator: 'Operator', c_agent: 'Shipping agent', c_vessel: 'Vessel',
-    c_tx_status: 'Transaction status', c_daftra: 'Daftra invoice', c_stage: 'Declaration stage', c_attention: 'Follow-up', c_employee: 'Employee', c_updated_at: 'Last update',
+    new_tx_read: 'New transaction from documents', new_tx_manual: 'Manual entry', c_tx_status: 'Transaction status', c_daftra: 'Invoice', c_stage: 'Declaration stage', c_attention: 'Follow-up', c_employee: 'Employee', c_updated_at: 'Last update',
     c_driver: 'Driver', c_driver_phone: 'Driver phone', c_truck: 'Truck', c_container_no: 'Container no.', c_appointment_at: 'Gate-out appointment', c_destination: 'Destination',
     c_transport_value: 'Transport value', c_revenue: 'Revenue', c_return_location: 'Return location', c_return_deadline: 'Return deadline', c_returned_at: 'Returned at',
     c_return_status: 'Return status', c_movement_status: 'Movement status', c_appointment_no: 'Appointment no.', c_notes: 'Notes',

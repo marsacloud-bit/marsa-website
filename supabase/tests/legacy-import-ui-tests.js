@@ -194,7 +194,7 @@ check('admin.html: limp.css after lrpt.css; i18n/limp.js after i18n.js; imp/lega
     && order(ADMIN_HTML, ['assets/js/i18n.js', 'assets/i18n/lrpt.js', 'assets/i18n/limp.js', 'assets/js/supa.js', 'assets/js/app-shell.js', 'assets/js/legacy-norm.js', 'assets/js/xlsx-lite.js',
       'assets/js/ops/alerts.js', 'assets/js/rpt/xlsx.js', 'assets/js/rpt/export.js', 'assets/js/rpt/rules.js', 'assets/js/imp/legacy-import.js', 'assets/js/admin.js'])) || 'order');
 check('sw.js: VERSION bumped past step 8 (2026-11-24.3) with a comment, the three new files precached', () => {
-  const v = (/^var VERSION = '(\d{4}-\d{2}-\d{2}\.\d+)';\s+\/\/ (?:legacy step 9|owner reorg)/m.exec(SW) || [])[1] || '';
+  const v = (/^var VERSION = '(\d{4}-\d{2}-\d{2}\.\d+)';\s+\/\/ (?:legacy step 9|owner reorg|owner: )/m.exec(SW) || [])[1] || '';
   return (v && v.localeCompare('2026-11-24.3', 'en', { numeric: true }) > 0 && ['assets/js/imp/legacy-import.js', 'assets/i18n/limp.js', 'assets/css/pages/limp.css'].every(f => SW.indexOf("'" + f + "'") !== -1)) || v;
 });
 check('app-shell NAV: legacy_import (orgAdmin + owner) in «الإدارة» with its fallback labels; itemVisible hides owner items from a branch admin', () =>

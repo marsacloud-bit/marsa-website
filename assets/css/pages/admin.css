@@ -301,3 +301,28 @@ a.adm-mini-row:focus-visible { outline: none; box-shadow: var(--ring); }
 /* Owner request 2026-11-19: the staff work area uses the full screen width (the 1200px page container left large
    empty margins on wide screens and squeezed the transactions table), keeping the side gutter */
 .adm-section > .container { max-width: none; }
+
+/* ---- owner reorg (2026-11-20): the transaction page in tabs (admin.js txTabs) ---- */
+.adm-txtabs-wrap { margin-block-start: 12px; }
+.adm-txtabs { display: flex; flex-wrap: wrap; gap: 4px; border-block-end: 2px solid var(--border); margin-block-end: 14px; }
+.adm-txtab { display: inline-flex; align-items: center; gap: 6px; padding: 9px 14px; border: 0; background: transparent; font: inherit; font-weight: 600;
+  color: var(--text-muted, #5b6470); cursor: pointer; border-block-end: 3px solid transparent; margin-block-end: -2px; border-radius: 8px 8px 0 0; }
+.adm-txtab:hover { background: var(--surface-2, #f4f5f6); color: var(--text, #1f2328); }
+.adm-txtab.is-active { color: var(--brand, #0f766e); border-block-end-color: var(--brand, #0f766e); background: var(--surface, #fff); }
+.adm-txtab:focus-visible { outline: 2px solid var(--brand, #0f766e); outline-offset: 2px; }
+.adm-txtab-flag { inline-size: 20px; block-size: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; color: #fff; }
+.adm-txtab-flag[hidden], .adm-txtab[hidden] { display: none; }
+.adm-txtab-flag.is-danger { background: #b91c1c; }
+.adm-txtab-flag.is-warning { background: #d4a106; }
+.adm-txpanel > * + * { margin-block-start: 14px; }
+@media (max-width: 640px) { .adm-txtab { padding: 8px 10px; font-size: .9rem; } }
+/* owner reorg: «إضافة مستند آخر» folded under one button in the documents card */
+/* AI reading: the providers order (20261208000100), three choices on one row */
+.adm-ai-order h4 { margin: 4px 0 2px; }
+.adm-ai-order-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 18px; margin-top: 8px; }
+.adm-ai-order-grid .form-group { margin: 0; min-width: 0; }
+@media (max-width: 640px) { .adm-ai-order-grid { grid-template-columns: minmax(0, 1fr); } }
+.adm-upload-more { margin-block-start: 12px; }
+.adm-upload-more > summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.adm-upload-more > summary::-webkit-details-marker { display: none; }
+.adm-upload-more[open] > summary { margin-block-end: 10px; }

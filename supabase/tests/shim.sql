@@ -91,3 +91,30 @@ GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO anon, authenticated, service_role;
+
+-- Supabase Vault (20261209000100 stores the AI provider keys there). The real Vault encrypts the secret at rest and
+-- decrypts it in vault.decrypted_secrets; this stand-in keeps the same names and signatures in plain text (tests only).
+-- No API role gets any privilege on it (as on Supabase: only SECURITY DEFINER code reaches it).
+CREATE SCHEMA IF NOT EXISTS vault;
+CREATE TABLE IF NOT EXISTS vault.secrets (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text UNIQUE,
+  description text NOT NULL DEFAULT '',
+  secret text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE OR REPLACE VIEW vault.decrypted_secrets AS
+  SELECT s.id, s.name, s.description, s.secret, s.secret AS decrypted_secret, s.created_at, s.updated_at FROM vault.secrets s;
+CREATE OR REPLACE FUNCTION vault.create_secret(new_secret text, new_name text DEFAULT NULL, new_description text DEFAULT '', new_key_id uuid DEFAULT NULL)
+RETURNS uuid LANGUAGE sql AS $$
+  INSERT INTO vault.secrets (secret, name, description) VALUES (new_secret, new_name, coalesce(new_description, '')) RETURNING id
+$$;
+CREATE OR REPLACE FUNCTION vault.update_secret(secret_id uuid, new_secret text DEFAULT NULL, new_name text DEFAULT NULL, new_description text DEFAULT NULL, new_key_id uuid DEFAULT NULL)
+RETURNS void LANGUAGE sql AS $$
+  UPDATE vault.secrets s SET secret = coalesce(new_secret, s.secret), name = coalesce(new_name, s.name),
+         description = coalesce(new_description, s.description), updated_at = now() WHERE s.id = secret_id
+$$;
+REVOKE ALL ON SCHEMA vault FROM PUBLIC;
+REVOKE ALL ON ALL TABLES IN SCHEMA vault FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION vault.create_secret(text, text, text, uuid), vault.update_secret(uuid, text, text, text, uuid) FROM PUBLIC;

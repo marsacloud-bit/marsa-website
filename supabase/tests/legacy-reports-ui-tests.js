@@ -338,7 +338,7 @@ check('regression: movements export verify leaves cancelled movements out of the
 });
 check('follow-up file: the legacy 14 columns (م … فاتورة دفترة) for finance readers, 13 without the Daftra column; the status cell carries the attention tone', () => {
   const cols = K.defs.tx_followup.columns({ finRead: true }), labels = cols.map(c => c.label);
-  const want = ['م', 'رقم المعاملة', 'المستورد', 'رقم البيان', 'تاريخ البيان', 'رقم البوليصة', 'عدد الوحدات', 'وحدة الشحن', 'الميناء / المنفذ', 'المشغل', 'الوكيل الملاحي', 'الباخرة', 'حالة المعاملة', 'فاتورة دفترة'];
+  const want = ['م', 'رقم المعاملة', 'المستورد', 'رقم البيان', 'تاريخ البيان', 'رقم البوليصة', 'عدد الوحدات', 'وحدة الشحن', 'الميناء / المنفذ', 'المشغل', 'الوكيل الملاحي', 'الباخرة', 'حالة المعاملة', 'الفاتورة'];
   const st = cols.filter(c => c.key === 'status')[0];
   return (J(labels) === J(want) && K.defs.tx_followup.columns({ finRead: false }).length === 13 && st.tone({ attention: { level: 'critical' } }) === 'danger'
     && st.tone({ attention: { level: 'warning' } }) === 'warning' && st.tone({}) === null && K.defs.tx_followup.seq === true) || J(labels);
@@ -615,7 +615,7 @@ function rtApi(calls, rows) {
     check('table: 3 rows, stage row tones + the attention stripe class, the Daftra column for a finance reader, a totals row', () => {
       const r = trs(), h = root.querySelectorAll('.lrpt-table-card thead th').map(th => th.textContent);
       return (r.length === 3 && /lrpt-stage-released/.test(r[0].className) && /lrpt-row-critical/.test(r[0].className) && /lrpt-row-warning/.test(r[1].className)
-        && h.some(x => /فاتورة دفترة/.test(x)) && !!root.querySelector('.lrpt-table-card tfoot .rpt-total-row') && /متأخرة 1 · متابعة 1/.test(root.querySelector('tfoot').textContent)) || J(h);
+        && h.some(x => x.replace('▾', '') === 'الفاتورة') && !!root.querySelector('.lrpt-table-card tfoot .rpt-total-row') && /متأخرة 1 · متابعة 1/.test(root.querySelector('tfoot').textContent)) || J(h);
     });
     check('regression: the totals row under «عدد الوحدات» is totals.units (Ro-Ro = 1), not the container count', () => {
       const td = root.querySelector('.lrpt-table-card tfoot [data-key="unit_count"]');
@@ -623,12 +623,13 @@ function rtApi(calls, rows) {
     });
     check('«كشف المعاملات»: the 13 columns of the legacy statement, in order (Daftra for a finance reader)', () => {
       const h = root.querySelectorAll('.lrpt-table-card thead th').map(th => th.querySelector('.rpt-th-label') ? th.querySelector('.rpt-th-label').textContent : th.textContent.replace('▾', ''));
-      const want = ['رقم المعاملة', 'المستورد', 'رقم البيان', 'تاريخه', 'رقم البوليصة', 'عدد الحاويات', 'الحاويات', 'الميناء', 'المشغل', 'الوكيل الملاحي', 'الباخرة', 'حالة المعاملة', 'فاتورة دفترة'];
+      const want = ['رقم المعاملة', 'المستورد', 'رقم البيان', 'تاريخه', 'رقم البوليصة', 'عدد الحاويات', 'الحاويات', 'الميناء', 'المشغل', 'الوكيل الملاحي', 'الباخرة', 'حالة المعاملة', 'الفاتورة'];
       return (J(h) === J(want) && root.classList.contains('lrpt-statement')) || J(h);
     });
-    check('cells: container numbers one per line, the late badge with hours under the status, Daftra «Draft» / the invoice number, «—» without a declaration, Ro-Ro', () => {
+    check('cells: one container number + a «+N» button (owner note 2026-11-20), the late badge with hours under the status, Daftra «Draft» / the invoice number, «—» without a declaration, Ro-Ro', () => {
       const r = trs(), nos = r[0].querySelectorAll('.lrpt-ctrs-no').map(x => x.textContent);
-      return (J(nos) === J(['MSCU1234567', 'MSCU7654321']) && /متأخرة · 120 س/.test(r[0].querySelector('.lrpt-stcell').textContent)
+      const more = r[0].querySelector('.lrpt-ctr-more');
+      return (J(nos) === J(['MSCU1234567']) && more && /\+1/.test(more.textContent) && /متأخرة · 120 س/.test(r[0].querySelector('.lrpt-stcell').textContent)
         && r[0].querySelector('.lrpt-dft-draft').textContent === 'Draft' && r[2].querySelector('.lrpt-dft-no').textContent === 'INV-9' && /Ro-Ro/.test(r[2].textContent)) || J({ nos, t: r[0].textContent });
     });
     check('review fixes: Ro-Ro shows chassis + plate in «الحاويات»; more than 3 containers → focusable with the full list', () => {
@@ -760,11 +761,14 @@ function rtApi(calls, rows) {
     await R.render(r4, mkApi(ctx, rtApi(calls), ['clearance_staff'], { newTx: () => { opened++; } })); await settle(20);
     const nb = r4.querySelector('[data-act="new-tx"]');
     if (nb) nb.click();
-    check('«معاملة جديدة» in the register header when opsApi.newTx is given; a click calls it once', () =>
-      (nb && nb.textContent === 'admin.txnew_btn' && /btn-primary/.test(nb.className) && opened === 1) || (nb ? nb.outerHTML : 'no button'));
+    check('owner 3أ: «معاملة جديدة بالقراءة» (primary link to ocr.html#new-tx) + the manual form as a quieter «إدخال يدوي»; a click calls it once', () => {
+      const rb = r4.querySelector('[data-act="new-tx-read"]');
+      return (nb && nb.textContent === 'إدخال يدوي' && !/btn-primary/.test(nb.className) && opened === 1
+        && rb && rb.getAttribute('href') === 'ocr.html#new-tx' && /btn-primary/.test(rb.className) && rb.textContent === 'معاملة جديدة بالقراءة') || (nb ? nb.outerHTML + (rb ? rb.outerHTML : ' no read button') : 'no button');
+    });
     const r5 = ctx.document.createElement('div'); ctx.document.body.appendChild(r5);
     await R.render(r5, mkApi(ctx, rtApi(calls), ['accountant'], { newTx: null })); await settle(20);
-    check('no «معاملة جديدة» when opsApi.newTx is null (no right to create)', () => !r5.querySelector('[data-act="new-tx"]') || 'button shown');
+    check('no «معاملة جديدة» when opsApi.newTx is null (no right to create)', () => (!r5.querySelector('[data-act="new-tx"]') && !r5.querySelector('[data-act="new-tx-read"]')) || 'button shown');
   }
   {
     const ctx = context(), calls = [];
@@ -776,7 +780,7 @@ function rtApi(calls, rows) {
     check('a dashboard tile link (?stage=released&status=transport&branchId=…) becomes the filters', () =>
       (rt && rt[1].declaration_status === 'released' && rt[1].operational_status === 'transport' && rt[1].branch_id === BR) || J(rt));
     check('a non-finance reader: no Daftra column, no «مسودات دفترة فقط» chip, no Daftra filter', () =>
-      (!root.querySelectorAll('thead th').some(th => /فاتورة دفترة/.test(th.textContent)) && !root.querySelector('[data-quick="daftra_draft"]') && !root.querySelector('[name="daftra_state"]')
+      (!root.querySelectorAll('thead th').some(th => th.textContent.replace('▾', '') === 'الفاتورة') && !root.querySelector('[data-quick="daftra_draft"]') && !root.querySelector('[name="daftra_state"]')
         && !root.querySelector('.lrpt-dft-banner')) || 'daftra visible');
     check('the advanced filters are open when the query set one of them; every field has a label', () => {
       const det = root.querySelector('.lrpt-adv');

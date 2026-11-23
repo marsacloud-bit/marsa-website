@@ -121,6 +121,23 @@
 -- seeded with the owner's seven steps per org; tx_lifecycle + 'steps' / 'stage_set'; under_billing and closed stay manual,
 -- no automatic move added; re-runnable, adds one default stage set per org).
 -- After re-pasting 20261118000100, re-paste the tx_stage_sets file straight after.
+-- A live DB that already has tx_stage_sets (health_check() = 20261204000100) pastes
+-- supabase/migrations/20261205000100_service_item_price.sql alone (org_service_items.default_price; customs clearance 500 SAR
+-- per org; the opening draft invoice line takes that price instead of 0; re-runnable, sets the price only where it is empty).
+-- After re-pasting 20261123000100, re-paste the service_item_price file straight after.
+-- A live DB that already has service_item_price (health_check() = 20261205000100) pastes
+-- supabase/migrations/20261206000100_storage_gate.sql alone (containers.storage_*; storage_gate_ports with SAJED per org;
+-- tx_storage_overrides; an appointment is refused while a container's storage invoice is unpaid unless a manager approved;
+-- re-runnable, adds one gate port row per org, changes no container or appointment).
+-- A live DB that already has storage_gate (health_check() = 20261206000100) pastes
+-- supabase/migrations/20261207000100_driver_classes.sql alone (drivers.driver_class individual / company / contractor;
+-- list_drivers / save_driver for the «السائقون» page; re-runnable, changes no data).
+-- A live DB that already has driver_classes (health_check() = 20261207000100) pastes
+-- supabase/migrations/20261208000100_ai_providers.sql alone (AI reading providers anthropic / openai / gemini in the order
+-- each org chooses, consent per provider, provider + attempts in the usage ledger; re-runnable, changes no setting).
+-- A live DB that already has ai_providers (health_check() = 20261208000100) pastes
+-- supabase/migrations/20261209000100_ai_keys.sql alone (AI provider keys kept in Supabase Vault, model ids and prices set from
+-- the platform page; needs the supabase_vault extension; re-runnable, stores no key).
 DO $guard$
 BEGIN
   -- stops immediately if the Arabic text was pasted with the wrong encoding
@@ -47459,3 +47476,1434 @@ $$;
 REVOKE EXECUTE ON FUNCTION app.seed_tx_stage_sets(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION app.tx_stage_set_for(uuid) FROM PUBLIC, anon;
 REVOKE EXECUTE ON FUNCTION app.default_stage_steps() FROM PUBLIC, anon;
+
+-- ===== migrations/20261205000100_service_item_price.sql =====
+-- =====================================================================
+-- 20261205000100_service_item_price — the customs clearance line of the opening draft invoice at a set price
+-- (2026-11-20, owner stage 3ب, docs/owner/transaction-stages-request.md; branch owner/ui-reorg)
+--   Owner: when the preliminary declaration is approved, the draft invoice opened in the accounting program carries ONE
+--   line, customs clearance with VAT, 500 SAR, which the employee may change. Until now that opening line was sent at 0
+--   (legacy zero line; 20261123000100). The price is now a SETTING of the org's service catalogue, not a value in code:
+--   1. public.org_service_items.default_price numeric(12,2) NULL (0 … 1 000 000; NULL = no default price). The table keeps
+--      its RLS (staff read; accounts managers / admins insert / update; no DELETE), audit and guards (20261117000100).
+--   2. customs_clearance gets 500 for every existing org where it is still NULL; a new org gets it through
+--      app.tg_org_service_items_before (re-created: the template row customs_clearance inserted without a price → 500).
+--      The org changes it any time (organisation settings → «رسوم التخليص الافتراضية»).
+--   3. app.opening_unit_price(org, item_key): the default price of an 'item:<code>' key of the org's catalogue, else 0.
+--      Not tied to Daftra: any accounting connector reads the same catalogue price.
+--   4. app.bill_job_context (20261123000100 body, re-created): intent.opening_line.unit_price = app.opening_unit_price(…)
+--      instead of 0 (the worker already sends the context value; no worker change). VAT unchanged (the connection's
+--      default service rate, 15). The employee edits the amount in the draft in the accounting program; Marsa never
+--      updates an existing draft (allow_draft_update stays as set).
+--   5. public.test_daftra_custom_fields (20261123000100 body, re-created): the dry run shows the same price.
+--   CREATE OR REPLACE keeps each re-created function's privileges.
+--   Re-runnable (ADD COLUMN IF NOT EXISTS / DROP CONSTRAINT IF EXISTS + ADD / CREATE OR REPLACE / UPDATE … WHERE NULL).
+--   Data: sets default_price = 500 on the customs_clearance item of every existing org (only where it is NULL).
+--   Re-pasting 20261123000100 after this file brings back the zero opening line: re-paste this file straight after.
+--   Down-path: re-create app.bill_job_context, public.test_daftra_custom_fields (20261123000100) and
+--   app.tg_org_service_items_before (20261117000100) verbatim; DROP FUNCTION app.opening_unit_price(uuid, text);
+--   ALTER TABLE public.org_service_items DROP COLUMN default_price; DELETE FROM public.schema_versions WHERE version = '20261205000100'.
+--   No BEGIN/COMMIT (the SQL editor wraps the run).
+-- =====================================================================
+
+DO $pre$
+BEGIN
+  IF to_regclass('public.schema_versions') IS NULL
+     OR NOT EXISTS (SELECT 1 FROM public.schema_versions WHERE version = '20261204000100') THEN
+    RAISE EXCEPTION 'SERVICE ITEM PRICE preflight: apply tx_stage_sets first (schema_versions lacks 20261204000100)';
+  END IF;
+  IF to_regclass('public.org_service_items') IS NULL OR to_regprocedure('app.bill_job_context(public.billing_sync_jobs,uuid,text)') IS NULL
+     OR to_regprocedure('public.test_daftra_custom_fields(uuid)') IS NULL OR to_regprocedure('app.tg_org_service_items_before()') IS NULL THEN
+    RAISE EXCEPTION 'SERVICE ITEM PRICE preflight: org_service_items (20261117000100) or bill_job_context / test_daftra_custom_fields (20261123000100) missing';
+  END IF;
+END $pre$;
+
+INSERT INTO public.schema_versions (version, name) VALUES ('20261205000100', 'service_item_price')
+ON CONFLICT (version) DO NOTHING;
+
+-- ---------------------------------------------------------------------
+-- 1. the default price of a service item
+-- ---------------------------------------------------------------------
+ALTER TABLE public.org_service_items ADD COLUMN IF NOT EXISTS default_price numeric(12,2);
+ALTER TABLE public.org_service_items DROP CONSTRAINT IF EXISTS org_service_items_default_price_check;
+ALTER TABLE public.org_service_items ADD CONSTRAINT org_service_items_default_price_check
+  CHECK (default_price IS NULL OR (default_price >= 0 AND default_price <= 1000000));
+COMMENT ON COLUMN public.org_service_items.default_price IS 'Default price in SAR before VAT (20261205000100); NULL = none. customs_clearance = the opening draft invoice line (500 by default).';
+
+-- ---------------------------------------------------------------------
+-- 2. customs clearance 500 SAR: existing orgs now, new orgs on seeding
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.tg_org_service_items_before() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+BEGIN
+  NEW.name_ar := btrim(NEW.name_ar);
+  NEW.name_en := nullif(btrim(coalesce(NEW.name_en, '')), '');
+  IF NEW.fin_service IS NOT NULL AND NOT app.is_code('fin_service', NEW.fin_service) THEN
+    PERFORM app.fail('MRS_INVALID', 'fin_service');
+  END IF;
+  -- 20261205000100: the template's customs clearance item starts at 500 SAR (a setting the org changes afterwards)
+  IF TG_OP = 'INSERT' AND NEW.code = 'customs_clearance' AND NEW.source = 'template' AND NEW.default_price IS NULL THEN
+    NEW.default_price := 500;
+  END IF;
+  RETURN NEW;
+END $$;
+
+UPDATE public.org_service_items s SET default_price = 500
+ WHERE s.code = 'customs_clearance' AND s.default_price IS NULL;
+
+-- ---------------------------------------------------------------------
+-- 3. the price of an opening line: the catalogue's default price of 'item:<code>', else 0
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.opening_unit_price(p_org uuid, p_item text) RETURNS numeric
+LANGUAGE sql STABLE SET search_path = '' AS $$
+  SELECT coalesce((SELECT s.default_price FROM public.org_service_items s
+                    WHERE s.org_id = p_org AND s.is_active AND p_item LIKE 'item:%' AND s.code = substr(p_item, 6)), 0)::numeric
+$$;
+REVOKE ALL ON FUNCTION app.opening_unit_price(uuid, text) FROM PUBLIC, anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- 4. the job context: the opening line at the catalogue price (20261123000100 body; only the opening line changed)
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.bill_job_context(j public.billing_sync_jobs, p_attempt uuid, p_prev text) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_ctx jsonb; v_conn jsonb := app.bill_conn_json(j.org_id); v_l public.daftra_client_links; v_it public.daftra_item_links;
+        v_i public.billing_intents; v_t public.transactions; v_items jsonb := '[]'::jsonb; k text; v_r public.daftra_runs;
+        v_p public.daftra_purchase_drafts; v_cl public.clients; v_open jsonb; v_sl public.daftra_supplier_links; v_keys jsonb;
+        v_trip public.transport_trips; v_pdesc text;
+BEGIN
+  v_ctx := jsonb_build_object(
+    'job', jsonb_build_object('id', j.id, 'org_id', j.org_id, 'kind', j.kind, 'attempt_no', j.attempts, 'options', j.options,
+                              'expected_hash', j.expected_hash, 'previous_status', p_prev),
+    'attempt_id', p_attempt,
+    'connection', jsonb_build_object('mode', v_conn ->> 'mode', 'status', v_conn ->> 'status', 'subdomain', v_conn -> 'subdomain',
+                                     'capabilities', v_conn -> 'capabilities',
+                                     'settings', jsonb_build_object('default_service_vat_rate', v_conn -> 'default_service_vat_rate',
+                                                                    'allowed_vat_rates', v_conn -> 'allowed_vat_rates',
+                                                                    'reimbursable_tax_code', v_conn -> 'reimbursable_tax_code',
+                                                                    'invoice_notes', v_conn -> 'invoice_notes'),
+                                     -- L7: what the worker must enforce before any write (and the request guard in daftra-live.js)
+                                     'policy', jsonb_build_object('allow_draft_update', coalesce((v_conn ->> 'allow_draft_update')::boolean, false),
+                                                                  'allow_product_create', coalesce((v_conn ->> 'allow_product_create')::boolean, false),
+                                                                  'products', CASE WHEN coalesce((v_conn ->> 'allow_product_create')::boolean, false)
+                                                                                   THEN 'create_missing' ELSE 'resolve_only' END),
+                                     'account', v_conn -> 'account_check',
+                                     'custom_field_map', coalesce(v_conn -> 'custom_field_map', '{}'::jsonb),
+                                     'today', to_char(app.rpt_today(), 'YYYY-MM-DD'), 'time_zone', 'Asia/Riyadh'));
+  IF j.client_link_id IS NOT NULL THEN
+    SELECT * INTO v_l FROM public.daftra_client_links l WHERE l.id = j.client_link_id;
+    v_ctx := v_ctx || jsonb_build_object('client', app.bill_ctx_client(v_l));
+  ELSIF j.item_link_id IS NOT NULL THEN
+    SELECT * INTO v_it FROM public.daftra_item_links i WHERE i.id = j.item_link_id;
+    v_ctx := v_ctx || jsonb_build_object('item', app.bill_ctx_item(v_it));
+  ELSIF j.intent_id IS NOT NULL THEN
+    SELECT * INTO v_i FROM public.billing_intents i WHERE i.id = j.intent_id;
+    SELECT * INTO v_t FROM public.transactions t WHERE t.id = v_i.transaction_id;
+    SELECT * INTO v_cl FROM public.clients c WHERE c.id = v_i.client_id;
+    v_l := app.bill_ensure_client_link(v_i.org_id, v_i.client_id);
+    FOR k IN SELECT DISTINCT l.item_key FROM public.billing_intent_lines l WHERE l.intent_id = v_i.id AND l.state <> 'removed'
+             UNION SELECT v_conn ->> 'opening_item' WHERE v_i.origin = 'opening' ORDER BY 1 LOOP
+      v_items := v_items || jsonb_build_array(app.bill_ctx_item(app.bill_ensure_item(v_i.org_id, k)));
+    END LOOP;
+    IF v_i.origin = 'opening' THEN                                                                                   -- L7
+      -- 20261205000100: the opening line's price = the service item's default price (customs clearance 500 SAR by default)
+      v_open := jsonb_build_object('item_key', v_conn ->> 'opening_item', 'description', '', 'quantity', 1,
+                                   'unit_price', app.opening_unit_price(v_i.org_id, v_conn ->> 'opening_item'),
+                                   'vat_rate', coalesce((v_conn ->> 'default_service_vat_rate')::numeric, 15));
+    END IF;
+    v_ctx := v_ctx || jsonb_build_object('intent', jsonb_build_object(
+      'id', v_i.id, 'transaction_id', v_i.transaction_id, 'transaction_ref', v_t.ref, 'operational_ref', v_i.operational_ref,
+      'currency', v_i.currency, 'purpose', v_i.purpose, 'status', v_i.status, 'sync_state', v_i.sync_state,
+      'external_invoice_id', v_i.external_invoice_id, 'pushed_hash', v_i.pushed_hash, 'remote_version', v_i.remote_version,
+      'invoice_date', to_char(coalesce(v_i.invoice_date, app.rpt_today()), 'YYYY-MM-DD'), 'notes', v_conn -> 'invoice_notes',   -- L7: Riyadh
+      'origin', v_i.origin, 'po_number', v_i.operational_ref, 'daftra_url', v_i.daftra_url,                              -- L7
+      'custom_fields', app.daftra_custom_fields(v_i.transaction_id), 'opening_line', v_open,
+      'client', app.bill_ctx_client(v_l) || jsonb_build_object('active', coalesce(v_cl.is_active, false)), 'items', v_items,
+      'lines', coalesce((SELECT jsonb_agg(jsonb_build_object('line_id', l.id, 'line_ref', l.line_ref, 'state', l.state, 'pushed', l.pushed,
+                                                             'remote_line_id', l.remote_line_id, 'item_key', l.item_key, 'description', l.description,
+                                                             'quantity', l.quantity, 'unit_price', l.unit_price, 'vat_rate', l.vat_rate,
+                                                             'net_amount', l.net_amount, 'vat_amount', l.vat_amount, 'total_amount', l.total_amount,
+                                                             'daftra_description', l.daftra_description, 'manual_in_daftra', l.manual_in_daftra)   -- L7
+                                          ORDER BY l.line_ref)
+                           FROM public.billing_intent_lines l WHERE l.intent_id = v_i.id AND l.state <> 'removed'), '[]'::jsonb)));
+  ELSIF j.run_id IS NOT NULL THEN                                                                                     -- L7
+    SELECT * INTO v_r FROM public.daftra_runs r WHERE r.id = j.run_id;
+    v_ctx := v_ctx || jsonb_build_object('run', jsonb_build_object('id', v_r.id, 'kind', v_r.kind, 'params', v_r.params,
+      'cursor', coalesce(v_r.cursor, '{}'::jsonb), 'pages_done', v_r.pages,
+      'page_size', coalesce((v_r.params ->> 'page_size')::int, 100), 'pages_per_job', coalesce((v_r.params ->> 'pages_per_job')::int, 5)));
+    IF v_r.kind = 'product_match' THEN
+      v_ctx := v_ctx || jsonb_build_object('products', coalesce((
+        SELECT jsonb_agg(jsonb_build_object('item_key', i.item_key, 'link_id', i.id, 'remote_product_code', i.remote_product_code,
+                                            'remote_code_norm', i.remote_code_norm, 'name_ar', i.name_ar) ORDER BY i.item_key)
+          FROM public.daftra_item_links i
+         WHERE i.org_id = j.org_id AND i.status <> 'retired'
+           AND (jsonb_typeof(v_r.params -> 'item_keys') IS DISTINCT FROM 'array' OR v_r.params -> 'item_keys' ? i.item_key)), '[]'::jsonb));
+    END IF;
+  ELSIF j.transaction_id IS NOT NULL THEN                                                                             -- L7: invoice_lookup
+    SELECT * INTO v_t FROM public.transactions t WHERE t.id = j.transaction_id;
+    SELECT * INTO v_l FROM public.daftra_client_links l WHERE l.org_id = v_t.org_id AND l.client_id = v_t.client_id AND l.status <> 'unlinked';
+    v_keys := app.daftra_tx_keys(v_t.id);
+    v_ctx := v_ctx || jsonb_build_object('transaction', jsonb_build_object('id', v_t.id, 'ref', v_t.ref,
+      'client_external_id', CASE WHEN v_l.status IN ('linked','drift') THEN v_l.external_id END,
+      'declaration_nos', v_keys -> 'declaration_nos', 'bl_numbers', v_keys -> 'bl_numbers', 'containers', v_keys -> 'containers',
+      'cargo_unit_type', v_keys -> 'cargo_unit_type'),
+      'lookup', jsonb_build_object('mode', j.options ->> 'mode', 'number', j.options ->> 'number'));
+  ELSIF j.purchase_id IS NOT NULL THEN                                                                                -- L7: purchase_push
+    SELECT * INTO v_p FROM public.daftra_purchase_drafts p WHERE p.id = j.purchase_id;
+    SELECT * INTO v_t FROM public.transactions t WHERE t.id = v_p.transaction_id;
+    SELECT * INTO v_sl FROM public.daftra_supplier_links s WHERE s.id = v_p.supplier_link_id;
+    SELECT * INTO v_it FROM public.daftra_item_links i WHERE i.org_id = v_p.org_id AND i.item_key = v_p.item_key AND i.status <> 'retired';
+    -- review: the legacy line description (ensureMovementPurchaseDraftR12_): transaction | client | declaration | container |
+    -- driver | appointment (TAS), the parts that exist, ≤ 900 characters
+    SELECT * INTO v_trip FROM public.transport_trips r WHERE r.id = v_p.trip_id;
+    v_pdesc := left(concat_ws(' | ',
+      'المعاملة: ' || v_t.ref,
+      'العميل: ' || (SELECT c.name_ar FROM public.clients c WHERE c.id = v_t.client_id),
+      'البيان: ' || (SELECT d.declaration_no FROM public.customs_declarations d WHERE d.transaction_id = v_t.id AND d.status NOT IN ('cancelled','replaced')
+                      ORDER BY d.created_at DESC, d.id DESC LIMIT 1),
+      'الحاوية: ' || (SELECT k.container_no FROM public.containers k WHERE k.id = v_trip.container_id),
+      'السائق: ' || (SELECT dr.full_name FROM public.drivers dr WHERE dr.id = v_trip.driver_id),
+      'الموعد: ' || (SELECT app.norm_tas(pa.appointment_no) FROM public.port_appointments pa WHERE pa.id = v_trip.appointment_id)), 900);
+    v_ctx := v_ctx || jsonb_build_object('purchase', jsonb_build_object('id', v_p.id, 'reference', v_p.reference, 'trip_id', v_p.trip_id,
+      'transaction_id', v_p.transaction_id, 'transaction_ref', v_t.ref, 'supplier_external_id', v_sl.external_supplier_id,
+      'supplier_name', v_sl.name, 'external_purchase_id', v_p.external_purchase_id, 'status', v_p.status,
+      'invoice_date', to_char(coalesce(v_p.invoice_date, app.rpt_today()), 'YYYY-MM-DD'),
+      'item', CASE WHEN v_it.id IS NOT NULL THEN app.bill_ctx_item(v_it) END,
+      'lines', jsonb_build_array(jsonb_build_object('item_key', v_p.item_key, 'description', coalesce(nullif(v_pdesc, ''), v_t.ref), 'quantity', 1,
+                                                    'unit_price', v_p.amount, 'vat_rate', 0)),
+      'amount', v_p.amount, 'currency', v_p.currency, 'tax', 0));
+  END IF;
+  RETURN v_ctx;
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 5. the dry run shows the same opening price (20261123000100 body; only the opening line changed)
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.test_daftra_custom_fields(p_tx uuid) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_t public.transactions; v_conn public.daftra_connections; v_l public.daftra_client_links; v_cf jsonb; v_un text[];
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  SELECT * INTO v_t FROM public.transactions t WHERE t.id = p_tx;
+  IF v_t.id IS NULL OR NOT app.has_tx_role(v_t.id, app.staff_roles()) THEN PERFORM app.fail('MRS_NOT_FOUND', 'transaction'); END IF;
+  IF NOT app.daftra_is_owner(v_t.org_id) THEN PERFORM app.fail('MRS_FORBIDDEN', 'owner_only'); END IF;
+  SELECT * INTO v_conn FROM public.daftra_connections c WHERE c.org_id = v_t.org_id;
+  SELECT * INTO v_l FROM public.daftra_client_links l WHERE l.org_id = v_t.org_id AND l.client_id = v_t.client_id AND l.status <> 'unlinked';
+  v_cf := app.daftra_custom_fields(v_t.id);
+  v_un := app.daftra_unmapped(v_t.org_id, ARRAY[coalesce(v_conn.opening_item, 'item:customs_clearance')]);
+  RETURN jsonb_build_object('transaction_id', v_t.id, 'ref', v_t.ref, 'would_send', false, 'dry_run', true,
+    'payload', jsonb_build_object('invoice_date', to_char(app.rpt_today(), 'YYYY-MM-DD'), 'time_zone', 'Asia/Riyadh',
+      'po_number', v_t.ref, 'draft', 1, 'client_external_id', CASE WHEN v_l.status IN ('linked','drift') THEN v_l.external_id END,
+      'opening_line', jsonb_build_object('item_key', coalesce(v_conn.opening_item, 'item:customs_clearance'),
+        'remote_product_code', (SELECT i.remote_product_code FROM public.daftra_item_links i WHERE i.org_id = v_t.org_id
+                                  AND i.item_key = coalesce(v_conn.opening_item, 'item:customs_clearance') AND i.status <> 'retired'),
+        'description', '', 'quantity', 1,
+        'unit_price', app.opening_unit_price(v_t.org_id, coalesce(v_conn.opening_item, 'item:customs_clearance'))),   -- 20261205000100
+      'custom_fields', v_cf -> 'payload'),
+    'fields', v_cf -> 'fields', 'values', app.daftra_custom_values(v_t.id), 'missing', v_cf -> 'missing',
+    'unmapped', to_jsonb(v_un), 'client_linked', v_l.status IN ('linked','drift') AND v_l.external_id IS NOT NULL,
+    'account_check', CASE WHEN v_conn.id IS NOT NULL THEN app.daftra_account_check(v_conn) END,
+    'ok', jsonb_array_length(v_cf -> 'missing') = 0 AND cardinality(v_un) = 0);
+END $$;
+
+-- ===== migrations/20261206000100_storage_gate.sql =====
+-- =====================================================================
+-- 20261206000100_storage_gate — no appointment while a container's storage (groundage) invoice is unpaid, with a
+-- manager override (2026-11-20, owner stage 3ج, docs/owner/transaction-stages-request.md; branch owner/ui-reorg)
+--   Owner (Jeddah customs update): the storage invoice issued with the container now falls on the clearance office, so it
+--   goes to the client to pay BEFORE the appointment is booked. Recording an appointment for a container whose storage is
+--   not settled is refused; a manager may approve booking before payment (who / when / why kept); the follow-up goes on.
+--   Jeddah only today — a per-org, per-port SETTING, so another port is a row, not a migration.
+--   1. public.status_labels domain 'container_storage_state' (a value list in settings, not a CHECK):
+--        none  = no storage invoice · issued = issued, not yet sent to the client · sent = sent, awaiting payment ·
+--        paid  = paid. NULL on a container = not answered yet.
+--   2. public.containers + storage_state / storage_invoice_no / storage_amount / storage_sent_at / storage_paid_at /
+--      storage_note (staff edit them like the other container columns: RLS transport writers, audited by trg_audit).
+--      app.tg_containers_storage_before: the state must be a status_labels code; sent_at / paid_at stamped when reached.
+--   3. public.storage_gate_ports (org_id, port_code → customs_ports, is_active): the ports where the gate applies. Staff read,
+--      the org admin inserts / updates (no DELETE: is_active), audited. Every existing org gets SAJED (Jeddah Islamic Port);
+--      a new org gets it through app.tg_organizations_seed_storage_gate.
+--   4. public.tx_storage_overrides: the manager approval to book before payment (one live per transaction; insert only
+--      through approve_storage_override; staff of the transaction read; audited).
+--   5. app.storage_gate_block(tx, container) → NULL | 'unpaid': the gate applies (an active storage_gate_ports row for the
+--      transaction's port, a container transaction, not cancelled), no live override, and the container (or, without one,
+--      any container of the transaction) has storage_state NULL / issued / sent.
+--   6. app.tg_port_appointments_storage_gate: BEFORE INSERT on port_appointments (every path: create_appointment,
+--      save_movement, approve_appointment_draft → save_movement) → app.fail('MRS_STORAGE_UNPAID', container_no | 'transaction').
+--      Not for a reschedule (rescheduled_from_id: the booking already exists), a closed status (completed / missed /
+--      cancelled) or a run without a user request (app.auto_lifecycle_on() false: the legacy import, maintenance).
+--   7. public.tx_storage_gate(p_tx) → {applies, port_code, blocked, containers [{id, container_no, storage_state, …}],
+--      override {reason, approved_by_name, approved_at} | null, can_override} — staff of the transaction.
+--      public.approve_storage_override(p_tx, p_reason) → the override row — senior ops (operations_manager, branch_manager,
+--      supervisor, admin) of the transaction; reason 3 … 500 characters; one live override (a second → MRS_CONFLICT).
+--   8. conversion: app.convert_keep_tables (20261204000100 body) + storage_gate_ports (kept); app.convert_delete_tables
+--      (20261128000100 body) + tx_storage_overrides (deleted, before the transactions).
+--   Re-runnable (IF NOT EXISTS / CREATE OR REPLACE / DROP … IF EXISTS + CREATE / ON CONFLICT).
+--   Re-pasting 20261128000100 or 20261204000100 after this file drops the two tables from the conversion lists: re-paste
+--   this file straight after.
+--   Data: one storage_gate_ports row (SAJED) per existing organisation; no existing container or appointment changes.
+--   Down-path: re-create app.convert_keep_tables (20261204000100) and app.convert_delete_tables (20261128000100) verbatim;
+--   DROP TRIGGER trg_storage_gate ON public.port_appointments, trg_storage_before ON public.containers,
+--   trg_seed_storage_gate ON public.organizations; DROP FUNCTION public.approve_storage_override(uuid, text),
+--   public.tx_storage_gate(uuid), app.tg_port_appointments_storage_gate(), app.storage_gate_block(uuid, uuid), app.storage_gate_applies(uuid),
+--   app.tg_containers_storage_before(), app.tg_organizations_seed_storage_gate(); DROP TABLE public.tx_storage_overrides,
+--   public.storage_gate_ports; ALTER TABLE public.containers DROP COLUMN storage_state, storage_invoice_no, storage_amount,
+--   storage_sent_at, storage_paid_at, storage_note; DELETE FROM public.status_labels WHERE domain = 'container_storage_state';
+--   DELETE FROM public.schema_versions WHERE version = '20261206000100'.
+--   No BEGIN/COMMIT (the SQL editor wraps the run).
+-- =====================================================================
+
+DO $pre$
+BEGIN
+  IF to_regclass('public.schema_versions') IS NULL
+     OR NOT EXISTS (SELECT 1 FROM public.schema_versions WHERE version = '20261205000100') THEN
+    RAISE EXCEPTION 'STORAGE GATE preflight: apply service_item_price first (schema_versions lacks 20261205000100)';
+  END IF;
+  IF to_regclass('public.port_appointments') IS NULL OR to_regclass('public.customs_ports') IS NULL
+     OR to_regprocedure('app.senior_ops_roles()') IS NULL OR to_regprocedure('app.auto_lifecycle_on()') IS NULL THEN
+    RAISE EXCEPTION 'STORAGE GATE preflight: port_appointments / customs_ports / senior_ops_roles / auto_lifecycle_on missing';
+  END IF;
+END $pre$;
+
+INSERT INTO public.schema_versions (version, name) VALUES ('20261206000100', 'storage_gate')
+ON CONFLICT (version) DO NOTHING;
+
+-- ---------------------------------------------------------------------
+-- 1. the storage states (settings)
+-- ---------------------------------------------------------------------
+INSERT INTO public.status_labels (domain, code, sort, label_ar, label_en, client_visible) VALUES
+  ('container_storage_state', 'none',   1, 'لا توجد أرضيات',                    'No storage invoice',          false),
+  ('container_storage_state', 'issued', 2, 'صدرت فاتورة أرضيات — لم تُرسل للعميل', 'Storage invoice not sent yet', false),
+  ('container_storage_state', 'sent',   3, 'أُرسلت للعميل — بانتظار السداد',       'Sent to the client — unpaid', false),
+  ('container_storage_state', 'paid',   4, 'سُددت الأرضيات',                      'Storage paid',                false)
+ON CONFLICT (domain, code) DO UPDATE SET sort = EXCLUDED.sort, label_ar = EXCLUDED.label_ar, label_en = EXCLUDED.label_en,
+  client_visible = EXCLUDED.client_visible;
+
+-- ---------------------------------------------------------------------
+-- 2. the storage columns of a container
+-- ---------------------------------------------------------------------
+ALTER TABLE public.containers ADD COLUMN IF NOT EXISTS storage_state text;
+ALTER TABLE public.containers ADD COLUMN IF NOT EXISTS storage_invoice_no text;
+ALTER TABLE public.containers ADD COLUMN IF NOT EXISTS storage_amount numeric(12,2);
+ALTER TABLE public.containers ADD COLUMN IF NOT EXISTS storage_sent_at timestamptz;
+ALTER TABLE public.containers ADD COLUMN IF NOT EXISTS storage_paid_at timestamptz;
+ALTER TABLE public.containers ADD COLUMN IF NOT EXISTS storage_note text;
+ALTER TABLE public.containers DROP CONSTRAINT IF EXISTS containers_storage_fields_check;
+ALTER TABLE public.containers ADD CONSTRAINT containers_storage_fields_check CHECK (
+  (storage_invoice_no IS NULL OR char_length(storage_invoice_no) BETWEEN 1 AND 60)
+  AND (storage_amount IS NULL OR (storage_amount >= 0 AND storage_amount <= 10000000))
+  AND (storage_note IS NULL OR char_length(storage_note) <= 500));
+COMMENT ON COLUMN public.containers.storage_state IS 'Storage (groundage) invoice state (20261206000100): status_labels container_storage_state; NULL = not answered yet.';
+
+-- definer: the state list (status_labels via app.is_code) is checked whoever writes; not callable directly (REVOKE below)
+CREATE OR REPLACE FUNCTION app.tg_containers_storage_before() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+BEGIN
+  IF NEW.storage_state IS NOT NULL AND NOT app.is_code('container_storage_state', NEW.storage_state) THEN
+    PERFORM app.fail('MRS_INVALID', 'storage_state');
+  END IF;
+  NEW.storage_invoice_no := nullif(btrim(coalesce(NEW.storage_invoice_no, '')), '');
+  NEW.storage_note := nullif(btrim(coalesce(NEW.storage_note, '')), '');
+  IF NEW.storage_state IS DISTINCT FROM (CASE WHEN TG_OP = 'UPDATE' THEN OLD.storage_state END) THEN
+    IF NEW.storage_state = 'sent' AND NEW.storage_sent_at IS NULL THEN NEW.storage_sent_at := now(); END IF;
+    IF NEW.storage_state = 'paid' AND NEW.storage_paid_at IS NULL THEN NEW.storage_paid_at := now(); END IF;
+    IF NEW.storage_state IS NULL OR NEW.storage_state IN ('none', 'issued') THEN NEW.storage_sent_at := NULL; NEW.storage_paid_at := NULL; END IF;
+    IF NEW.storage_state = 'sent' THEN NEW.storage_paid_at := NULL; END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION app.tg_containers_storage_before() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS trg_storage_before ON public.containers;
+CREATE TRIGGER trg_storage_before BEFORE INSERT OR UPDATE ON public.containers
+  FOR EACH ROW EXECUTE FUNCTION app.tg_containers_storage_before();
+
+-- ---------------------------------------------------------------------
+-- 3. the ports where the gate applies (per org; Jeddah today)
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.storage_gate_ports (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id      uuid NOT NULL REFERENCES public.organizations(id) ON DELETE RESTRICT,
+  port_code   text NOT NULL REFERENCES public.customs_ports(code),
+  is_active   boolean NOT NULL DEFAULT true,
+  created_by  uuid,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT storage_gate_ports_uniq UNIQUE (org_id, port_code),
+  UNIQUE (id, org_id)
+);
+COMMENT ON TABLE public.storage_gate_ports IS 'Storage gate (20261206000100): ports where an unpaid storage invoice blocks the appointment (per org; SAJED seeded).';
+
+-- the manager approval to book before the storage is paid
+CREATE TABLE IF NOT EXISTS public.tx_storage_overrides (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id          uuid NOT NULL REFERENCES public.organizations(id) ON DELETE RESTRICT,
+  transaction_id  uuid NOT NULL,
+  reason          text NOT NULL CHECK (char_length(reason) BETWEEN 3 AND 500),
+  approved_by     uuid NOT NULL,
+  approved_at     timestamptz NOT NULL DEFAULT now(),
+  revoked_at      timestamptz,
+  created_by      uuid,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT tx_storage_overrides_tx_fk FOREIGN KEY (transaction_id, org_id) REFERENCES public.transactions(id, org_id) ON DELETE CASCADE,
+  UNIQUE (id, org_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS tx_storage_overrides_live ON public.tx_storage_overrides (transaction_id) WHERE revoked_at IS NULL;
+COMMENT ON TABLE public.tx_storage_overrides IS 'Storage gate (20261206000100): a manager approved booking the appointment before the storage invoice is paid (who / when / why).';
+
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['storage_gate_ports','tx_storage_overrides'] LOOP
+    EXECUTE format('DROP TRIGGER IF EXISTS trg_touch ON public.%I', t);
+    EXECUTE format('CREATE TRIGGER trg_touch BEFORE UPDATE ON public.%I FOR EACH ROW EXECUTE FUNCTION app.touch_updated_at()', t);
+    EXECUTE format('DROP TRIGGER IF EXISTS trg_stamp ON public.%I', t);
+    EXECUTE format('CREATE TRIGGER trg_stamp BEFORE INSERT ON public.%I FOR EACH ROW EXECUTE FUNCTION app.tg_stamp_creator()', t);
+    EXECUTE format('DROP TRIGGER IF EXISTS trg_guard ON public.%I', t);
+    EXECUTE format('CREATE TRIGGER trg_guard BEFORE UPDATE ON public.%I FOR EACH ROW EXECUTE FUNCTION app.tg_guard_generic(''id'', ''org_id'', ''created_by'', ''created_at'')', t);
+    EXECUTE format('DROP TRIGGER IF EXISTS trg_audit ON public.%I', t);
+    EXECUTE format('CREATE TRIGGER trg_audit AFTER INSERT OR UPDATE OR DELETE ON public.%I FOR EACH ROW EXECUTE FUNCTION app.tg_audit()', t);
+    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('REVOKE ALL ON public.%I FROM anon', t);
+    EXECUTE format('REVOKE TRUNCATE, REFERENCES, TRIGGER ON public.%I FROM authenticated', t);
+  END LOOP;
+END $$;
+DROP TRIGGER IF EXISTS trg_guard ON public.tx_storage_overrides;
+CREATE TRIGGER trg_guard BEFORE UPDATE ON public.tx_storage_overrides
+  FOR EACH ROW EXECUTE FUNCTION app.tg_guard_generic('id', 'org_id', 'transaction_id', 'reason', 'approved_by', 'approved_at', 'created_by', 'created_at');
+
+SELECT app.drop_policies(t) FROM unnest(ARRAY['storage_gate_ports','tx_storage_overrides']) t;
+-- the gate ports: staff read; the org admin edits (no DELETE: is_active)
+CREATE POLICY storage_gate_ports_select ON public.storage_gate_ports FOR SELECT TO authenticated USING (app.is_staff(org_id));
+CREATE POLICY storage_gate_ports_insert ON public.storage_gate_ports FOR INSERT TO authenticated
+  WITH CHECK (app.has_role(org_id, ARRAY['admin']));
+CREATE POLICY storage_gate_ports_update ON public.storage_gate_ports FOR UPDATE TO authenticated
+  USING (app.has_role(org_id, ARRAY['admin'])) WITH CHECK (app.has_role(org_id, ARRAY['admin']));
+REVOKE DELETE ON public.storage_gate_ports FROM authenticated;
+GRANT SELECT, INSERT, UPDATE ON public.storage_gate_ports TO authenticated;
+-- the overrides: staff of the transaction read; written only by approve_storage_override (definer)
+CREATE POLICY tx_storage_overrides_select ON public.tx_storage_overrides FOR SELECT TO authenticated
+  USING (app.has_tx_role(transaction_id, app.staff_roles()));
+REVOKE INSERT, UPDATE, DELETE ON public.tx_storage_overrides FROM authenticated;
+GRANT SELECT ON public.tx_storage_overrides TO authenticated;
+
+-- Jeddah for every existing org; a new org gets it on creation
+INSERT INTO public.storage_gate_ports (org_id, port_code)
+SELECT o.id, 'SAJED' FROM public.organizations o
+ WHERE EXISTS (SELECT 1 FROM public.customs_ports p WHERE p.code = 'SAJED')
+ON CONFLICT (org_id, port_code) DO NOTHING;
+
+CREATE OR REPLACE FUNCTION app.tg_organizations_seed_storage_gate() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.customs_ports p WHERE p.code = 'SAJED') THEN
+    INSERT INTO public.storage_gate_ports (org_id, port_code) VALUES (NEW.id, 'SAJED') ON CONFLICT (org_id, port_code) DO NOTHING;
+  END IF;
+  RETURN NULL;
+END $$;
+REVOKE ALL ON FUNCTION app.tg_organizations_seed_storage_gate() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS trg_seed_storage_gate ON public.organizations;
+CREATE TRIGGER trg_seed_storage_gate AFTER INSERT ON public.organizations
+  FOR EACH ROW EXECUTE FUNCTION app.tg_organizations_seed_storage_gate();
+
+-- ---------------------------------------------------------------------
+-- 5. the gate
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.storage_gate_applies(p_tx uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT EXISTS (SELECT 1 FROM public.transactions t
+                   JOIN public.storage_gate_ports g ON g.org_id = t.org_id AND g.port_code = t.port_code AND g.is_active
+                  WHERE t.id = p_tx AND t.cancelled_at IS NULL AND coalesce(t.cargo_unit_type, 'container') = 'container')
+$$;
+REVOKE ALL ON FUNCTION app.storage_gate_applies(uuid) FROM PUBLIC, anon, authenticated;
+
+-- NULL = the appointment may be recorded; 'unpaid' = refused (no live override and a container not settled)
+CREATE OR REPLACE FUNCTION app.storage_gate_block(p_tx uuid, p_container uuid) RETURNS text
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT CASE WHEN app.storage_gate_applies(p_tx)
+               AND NOT EXISTS (SELECT 1 FROM public.tx_storage_overrides o WHERE o.transaction_id = p_tx AND o.revoked_at IS NULL)
+               AND EXISTS (SELECT 1 FROM public.containers c
+                            WHERE c.transaction_id = p_tx AND (p_container IS NULL OR c.id = p_container)
+                              AND (c.storage_state IS NULL OR c.storage_state IN ('issued', 'sent')))
+              THEN 'unpaid' END
+$$;
+REVOKE ALL ON FUNCTION app.storage_gate_block(uuid, uuid) FROM PUBLIC, anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- 6. every new booking passes the gate
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.tg_port_appointments_storage_gate() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_no text;
+BEGIN
+  IF NEW.rescheduled_from_id IS NOT NULL OR NEW.status IN ('completed', 'missed', 'cancelled') OR NOT app.auto_lifecycle_on() THEN
+    RETURN NEW;
+  END IF;
+  IF app.storage_gate_block(NEW.transaction_id, NEW.container_id) IS NOT NULL THEN
+    SELECT c.container_no INTO v_no FROM public.containers c
+     WHERE c.transaction_id = NEW.transaction_id AND (NEW.container_id IS NULL OR c.id = NEW.container_id)
+       AND (c.storage_state IS NULL OR c.storage_state IN ('issued', 'sent'))
+     ORDER BY c.container_no LIMIT 1;
+    PERFORM app.fail('MRS_STORAGE_UNPAID', coalesce(v_no, 'transaction'));
+  END IF;
+  RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION app.tg_port_appointments_storage_gate() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS trg_storage_gate ON public.port_appointments;
+CREATE TRIGGER trg_storage_gate BEFORE INSERT ON public.port_appointments
+  FOR EACH ROW EXECUTE FUNCTION app.tg_port_appointments_storage_gate();
+
+-- ---------------------------------------------------------------------
+-- 7. read + override
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.tx_storage_gate(p_tx uuid) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_t public.transactions; v_o public.tx_storage_overrides; v_applies boolean;
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  SELECT * INTO v_t FROM public.transactions t WHERE t.id = p_tx;
+  IF v_t.id IS NULL OR NOT app.has_tx_role(v_t.id, app.staff_roles()) THEN PERFORM app.fail('MRS_NOT_FOUND', 'transaction'); END IF;
+  v_applies := app.storage_gate_applies(v_t.id);
+  SELECT * INTO v_o FROM public.tx_storage_overrides o WHERE o.transaction_id = v_t.id AND o.revoked_at IS NULL;
+  RETURN jsonb_build_object(
+    'applies', v_applies, 'port_code', v_t.port_code,
+    'blocked', app.storage_gate_block(v_t.id, NULL) IS NOT NULL,
+    'containers', coalesce((SELECT jsonb_agg(jsonb_build_object('id', c.id, 'container_no', c.container_no, 'storage_state', c.storage_state,
+                                              'storage_invoice_no', c.storage_invoice_no, 'storage_amount', c.storage_amount,
+                                              'storage_sent_at', c.storage_sent_at, 'storage_paid_at', c.storage_paid_at,
+                                              'storage_note', c.storage_note) ORDER BY c.container_no)
+                              FROM public.containers c WHERE c.transaction_id = v_t.id), '[]'::jsonb),
+    'override', CASE WHEN v_o.id IS NOT NULL THEN jsonb_build_object('id', v_o.id, 'reason', v_o.reason, 'approved_at', v_o.approved_at,
+                       'approved_by_name', (SELECT p.full_name FROM public.profiles p WHERE p.id = v_o.approved_by)) END,
+    'can_override', v_applies AND app.has_tx_role(v_t.id, app.senior_ops_roles()));
+END $$;
+REVOKE EXECUTE ON FUNCTION public.tx_storage_gate(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.tx_storage_gate(uuid) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.approve_storage_override(p_tx uuid, p_reason text) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_t public.transactions; v_o public.tx_storage_overrides; v_r text := btrim(coalesce(p_reason, ''));
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  SELECT * INTO v_t FROM public.transactions t WHERE t.id = p_tx FOR UPDATE;
+  IF v_t.id IS NULL OR NOT app.has_tx_role(v_t.id, app.staff_roles()) THEN PERFORM app.fail('MRS_NOT_FOUND', 'transaction'); END IF;
+  IF NOT app.has_tx_role(v_t.id, app.senior_ops_roles()) THEN PERFORM app.fail('MRS_FORBIDDEN', 'storage_override'); END IF;
+  IF v_t.cancelled_at IS NOT NULL THEN PERFORM app.fail('MRS_BAD_TRANSITION', 'cancelled'); END IF;
+  IF char_length(v_r) NOT BETWEEN 3 AND 500 THEN PERFORM app.fail('MRS_INVALID', 'reason'); END IF;
+  IF EXISTS (SELECT 1 FROM public.tx_storage_overrides o WHERE o.transaction_id = v_t.id AND o.revoked_at IS NULL) THEN
+    PERFORM app.fail('MRS_CONFLICT', 'storage_override');
+  END IF;
+  INSERT INTO public.tx_storage_overrides (org_id, transaction_id, reason, approved_by)
+  VALUES (v_t.org_id, v_t.id, v_r, auth.uid()) RETURNING * INTO v_o;
+  RETURN jsonb_build_object('id', v_o.id, 'transaction_id', v_o.transaction_id, 'reason', v_o.reason, 'approved_at', v_o.approved_at);
+END $$;
+REVOKE EXECUTE ON FUNCTION public.approve_storage_override(uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.approve_storage_override(uuid, text) TO authenticated;
+
+-- ---------------------------------------------------------------------
+-- 8. conversion (20261115000100 convert_in_place): the gate ports are settings, KEPT; the overrides are transaction data,
+--    DELETED before the transactions — app.convert_keep_tables (20261204000100 body + public.storage_gate_ports) and
+--    app.convert_delete_tables (20261128000100 body + public.tx_storage_overrides) re-created
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.convert_keep_tables() RETURNS text[]
+LANGUAGE sql IMMUTABLE SET search_path = '' AS $$
+  SELECT ARRAY[
+    'public.branches', 'public.memberships', 'public.org_counters', 'public.org_usage_counters',
+    'public.msg_channels', 'public.msg_settings', 'public.msg_auto_reply_policies', 'public.msg_templates',
+    'public.msg_instructions', 'public.daftra_connections', 'public.daftra_item_links', 'public.document_requirements',
+    'public.org_subscriptions', 'public.subscription_events', 'app.ai_settings',
+    'public.org_service_items',                                                                         -- LEGACY
+    'public.tx_stage_sets', 'public.tx_stage_steps',                                                    -- owner stages
+    'public.storage_gate_ports',                                                                        -- storage gate (20261206000100)
+    -- append-only / log tables
+    'public.audit_log', 'public.report_exports', 'app.ai_usage', 'public.operational_alert_runs', 'public.client_errors'
+  ]::text[]
+$$;
+
+CREATE OR REPLACE FUNCTION app.convert_delete_tables() RETURNS text[]
+LANGUAGE sql IMMUTABLE SET search_path = '' AS $$
+  SELECT ARRAY[
+    -- intake / clients / access
+    'public.service_requests', 'public.clients', 'public.client_aliases', 'public.client_users', 'public.invitations',
+    'public.idempotency_keys', 'public.import_batches', 'public.import_rows', 'public.contact_messages',
+    -- operations
+    'public.tx_storage_overrides',                                                                                -- SG (20261206000100)
+    'public.transactions', 'public.transaction_events', 'public.transaction_bls', 'public.bills_of_lading',
+    'public.customs_declarations', 'public.containers', 'public.documents', 'public.document_extractions',
+    'public.document_matches',
+    'public.doc_batches', 'public.doc_batch_documents', 'public.transaction_shipment_data',
+    'public.shipment_invoice_items', 'public.shipment_packing_items',
+    'public.declaration_approvals', 'public.declaration_items', 'public.hs_reference',
+    'public.parties', 'public.party_ports',
+    'public.drivers', 'public.trucks', 'public.transport_trips', 'public.port_appointments',
+    'public.appointment_drafts', 'public.appointment_draft_cards', 'public.empty_return_proofs',
+    'public.demurrage_cases', 'public.operational_exceptions', 'public.operational_alerts',
+    -- costs (G4)
+    'public.cost_accruals', 'public.cost_adjustments', 'public.cost_allocations', 'public.client_charges',
+    'public.charge_collections', 'public.supplier_invoices', 'public.supplier_invoice_lines', 'public.supplier_payments',
+    'public.finance_documents',
+    'public.client_disbursements', 'public.disbursement_allocations', 'public.payment_documents',                -- PAY
+    'public.client_custody_entries',                                                                              -- PAY
+    -- billing (G5)
+    'public.billing_intents', 'public.billing_intent_lines', 'public.billing_review_items', 'public.billing_sync_jobs',
+    'public.billing_sync_attempts', 'public.daftra_client_links', 'public.daftra_mock_accounts',
+    'public.daftra_runs', 'public.daftra_client_import_rows', 'public.daftra_invoice_candidates',                -- L7
+    'public.daftra_supplier_links', 'public.daftra_purchase_drafts',                                              -- L7
+    -- inbox (G6b)
+    'public.msg_threads', 'public.msg_messages', 'public.msg_message_events', 'public.msg_attachments',
+    'public.msg_extractions', 'public.msg_summaries', 'public.msg_classifications', 'public.msg_ai_runs',
+    'public.msg_replies', 'public.msg_reply_versions', 'public.msg_reply_approvals', 'public.msg_outbound',
+    'public.msg_delivery_events', 'public.msg_jobs', 'public.msg_job_attempts', 'public.msg_thread_links',
+    'public.msg_contacts', 'public.msg_contact_addresses', 'public.msg_contact_authorizations', 'public.msg_mock_mailboxes',
+    -- legacy import (LI): staged rows, then the runs (transactions.import_run_id points to a run)
+    'public.legacy_import_rows', 'public.legacy_import_runs',
+    -- RX: empty-return extension requests
+    'public.return_extension_requests'
+  ]::text[]
+$$;
+REVOKE EXECUTE ON FUNCTION app.convert_delete_tables() FROM PUBLIC, anon, authenticated, service_role;
+
+-- ===== migrations/20261207000100_driver_classes.sql =====
+-- =====================================================================
+-- 20261207000100_driver_classes — the drivers directory: classification (individual / company or establishment /
+-- contractor), the party it belongs to, the truck it works on (2026-11-20, owner stage 3د,
+-- docs/owner/transaction-stages-request.md; branch owner/ui-reorg)
+--   Owner: one place for the drivers, easy to reach: name, mobile, the truck plate, the classification (individual,
+--   belongs to an establishment / company, or to a contractor) and that company's / contractor's details.
+--   The tables exist (public.drivers / public.trucks / public.parties, 20261103000100; last_truck_id 20261118000100).
+--   1. public.status_labels domain 'driver_class' (settings, not a CHECK): individual · company · contractor.
+--   2. public.drivers.driver_class text NULL (NULL = not classified yet, e.g. a driver created from an appointment card).
+--      app.tg_drivers_class_before: the class must be a status_labels code; an individual has no party (carrier_id NULL).
+--      A company or a contractor is a party with the kind 'carrier' (its details — name, phone, CR, contact — live on the
+--      party: «الجهات والناقلون»); no new party kind, so the parties kinds CHECK is untouched.
+--   3. public.list_drivers(p_org, p_q) → [{id, full_name, phone, driver_class, license_no, is_active, truck_plate,
+--      party {id, name_ar, name_en, phone, cr_number, contact_name}}] — staff of the org; search by name / phone / plate /
+--      party name; 500 rows (active first).
+--   4. public.save_driver(p_org, p) → the driver row as list_drivers returns it — transport writers of the org.
+--      keys: id?, full_name, phone (Saudi mobile, normalised), driver_class, carrier_id (company / contractor), truck_plate
+--      (found by its normalised plate in the org or created with the driver's party), license_no, is_active.
+--      Another active driver with the same mobile → MRS_CONFLICT phone. An inactive truck plate → MRS_INVALID truck_plate.
+--   Re-runnable (IF NOT EXISTS / CREATE OR REPLACE / DROP … IF EXISTS + CREATE / ON CONFLICT).
+--   Data: none changed (existing drivers stay unclassified until edited).
+--   Down-path: DROP FUNCTION public.save_driver(uuid, jsonb), public.list_drivers(uuid, text), app.driver_json(public.drivers), app.tg_drivers_class_before()
+--   (+ DROP TRIGGER trg_class ON public.drivers); ALTER TABLE public.drivers DROP COLUMN driver_class;
+--   DELETE FROM public.status_labels WHERE domain = 'driver_class'; DELETE FROM public.schema_versions WHERE version = '20261207000100'.
+--   No BEGIN/COMMIT (the SQL editor wraps the run).
+-- =====================================================================
+
+DO $pre$
+BEGIN
+  IF to_regclass('public.schema_versions') IS NULL
+     OR NOT EXISTS (SELECT 1 FROM public.schema_versions WHERE version = '20261206000100') THEN
+    RAISE EXCEPTION 'DRIVER CLASSES preflight: apply storage_gate first (schema_versions lacks 20261206000100)';
+  END IF;
+  IF to_regclass('public.drivers') IS NULL OR to_regclass('public.trucks') IS NULL OR to_regprocedure('app.norm_sa_phone(text,boolean)') IS NULL
+     OR to_regprocedure('app.transport_writer_roles()') IS NULL THEN
+    RAISE EXCEPTION 'DRIVER CLASSES preflight: drivers / trucks / norm_sa_phone / transport_writer_roles missing';
+  END IF;
+END $pre$;
+
+INSERT INTO public.schema_versions (version, name) VALUES ('20261207000100', 'driver_classes')
+ON CONFLICT (version) DO NOTHING;
+
+-- ---------------------------------------------------------------------
+-- 1. the classes (settings)
+-- ---------------------------------------------------------------------
+INSERT INTO public.status_labels (domain, code, sort, label_ar, label_en, client_visible) VALUES
+  ('driver_class', 'individual', 1, 'فردي',                    'Individual',                         false),
+  ('driver_class', 'company',    2, 'تابع لمؤسسة أو شركة',     'Belongs to an establishment / company', false),
+  ('driver_class', 'contractor', 3, 'تابع لمتعهد',             'Belongs to a contractor',            false)
+ON CONFLICT (domain, code) DO UPDATE SET sort = EXCLUDED.sort, label_ar = EXCLUDED.label_ar, label_en = EXCLUDED.label_en,
+  client_visible = EXCLUDED.client_visible;
+
+-- ---------------------------------------------------------------------
+-- 2. the class of a driver
+-- ---------------------------------------------------------------------
+ALTER TABLE public.drivers ADD COLUMN IF NOT EXISTS driver_class text;
+COMMENT ON COLUMN public.drivers.driver_class IS 'Driver classification (20261207000100): status_labels driver_class; NULL = not classified yet. company / contractor → carrier_id = the party (kind carrier).';
+
+-- definer: the class list (status_labels via app.is_code) is checked whoever writes; not callable directly
+CREATE OR REPLACE FUNCTION app.tg_drivers_class_before() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+BEGIN
+  IF NEW.driver_class IS NOT NULL AND NOT app.is_code('driver_class', NEW.driver_class) THEN
+    PERFORM app.fail('MRS_INVALID', 'driver_class');
+  END IF;
+  IF NEW.driver_class = 'individual' AND NEW.carrier_id IS NOT NULL THEN
+    PERFORM app.fail('MRS_INVALID', 'carrier_id');
+  END IF;
+  RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION app.tg_drivers_class_before() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS trg_class ON public.drivers;
+CREATE TRIGGER trg_class BEFORE INSERT OR UPDATE ON public.drivers FOR EACH ROW EXECUTE FUNCTION app.tg_drivers_class_before();
+
+-- ---------------------------------------------------------------------
+-- 3. the directory
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.driver_json(d public.drivers) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT jsonb_build_object('id', d.id, 'full_name', d.full_name, 'phone', d.phone, 'driver_class', d.driver_class,
+    'license_no', d.license_no, 'is_active', d.is_active, 'updated_at', d.updated_at,
+    'truck_plate', (SELECT k.plate_no FROM public.trucks k WHERE k.id = d.last_truck_id),
+    'party', (SELECT jsonb_build_object('id', p.id, 'name_ar', p.name_ar, 'name_en', p.name_en, 'phone', p.phone,
+                                        'cr_number', p.cr_number, 'contact_name', p.contact_name, 'is_active', p.is_active)
+                FROM public.parties p WHERE p.id = d.carrier_id))
+$$;
+REVOKE ALL ON FUNCTION app.driver_json(public.drivers) FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.list_drivers(p_org uuid, p_q text DEFAULT NULL) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_q text := nullif(btrim(coalesce(p_q, '')), ''); v_qp text;
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  IF p_org IS NULL OR NOT app.is_staff(p_org) THEN PERFORM app.fail('MRS_FORBIDDEN', 'organization'); END IF;
+  IF v_q IS NOT NULL AND char_length(v_q) > 60 THEN PERFORM app.fail('MRS_INVALID', 'q'); END IF;
+  v_qp := app.norm_sa_phone(v_q, false);
+  RETURN coalesce((
+    SELECT jsonb_agg(app.driver_json(d) ORDER BY d.is_active DESC, d.full_name, d.id)
+      FROM (SELECT d.* FROM public.drivers d
+             WHERE d.org_id = p_org
+               AND (v_q IS NULL
+                    OR d.full_name ILIKE '%' || v_q || '%'
+                    OR d.phone LIKE '%' || v_q || '%'
+                    OR (v_qp IS NOT NULL AND app.norm_sa_phone(d.phone, false) = v_qp)
+                    OR EXISTS (SELECT 1 FROM public.trucks k WHERE k.id = d.last_truck_id AND k.plate_no ILIKE '%' || replace(v_q, ' ', '') || '%')
+                    OR EXISTS (SELECT 1 FROM public.parties p WHERE p.id = d.carrier_id AND (p.name_ar ILIKE '%' || v_q || '%' OR p.name_en ILIKE '%' || v_q || '%')))
+             ORDER BY d.is_active DESC, d.full_name, d.id LIMIT 500) d), '[]'::jsonb);
+END $$;
+REVOKE EXECUTE ON FUNCTION public.list_drivers(uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.list_drivers(uuid, text) TO authenticated;
+
+-- ---------------------------------------------------------------------
+-- 4. save a driver (with its class, party and truck)
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.save_driver(p_org uuid, p jsonb) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_id uuid; v_d public.drivers; v_name text; v_phone_raw text; v_phone text; v_class text; v_carrier uuid;
+        v_plate_raw text; v_plate text; v_k public.trucks; v_lic text; v_active boolean;
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  IF p_org IS NULL OR NOT app.has_role(p_org, app.transport_writer_roles()) THEN PERFORM app.fail('MRS_FORBIDDEN', 'organization'); END IF;
+  PERFORM app.only_keys(p, ARRAY['id','full_name','phone','driver_class','carrier_id','truck_plate','license_no','is_active']);
+  v_id := app.puuid(p, 'id');
+  IF v_id IS NOT NULL THEN
+    SELECT * INTO v_d FROM public.drivers d WHERE d.id = v_id AND d.org_id = p_org FOR UPDATE;
+    IF v_d.id IS NULL THEN PERFORM app.fail('MRS_NOT_FOUND', 'driver'); END IF;
+  END IF;
+  v_name := app.ptext(p, 'full_name', 120);
+  IF v_name IS NULL OR char_length(v_name) < 2 THEN PERFORM app.fail('MRS_REQUIRED', 'full_name'); END IF;
+  v_phone_raw := app.ptext(p, 'phone', 30);
+  IF v_phone_raw IS NULL THEN PERFORM app.fail('MRS_REQUIRED', 'phone'); END IF;
+  v_phone := app.norm_sa_phone(v_phone_raw, false);
+  IF v_phone IS NULL THEN PERFORM app.fail('MRS_INVALID', 'phone'); END IF;
+  v_class := app.ptext(p, 'driver_class', 30);
+  IF v_class IS NULL THEN PERFORM app.fail('MRS_REQUIRED', 'driver_class'); END IF;
+  IF NOT app.is_code('driver_class', v_class) THEN PERFORM app.fail('MRS_INVALID', 'driver_class'); END IF;
+  v_carrier := app.puuid(p, 'carrier_id');
+  IF v_class = 'individual' THEN v_carrier := NULL;
+  ELSE
+    IF v_carrier IS NULL THEN PERFORM app.fail('MRS_REQUIRED', 'carrier_id'); END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.parties x WHERE x.id = v_carrier AND x.org_id = p_org AND 'carrier' = ANY (x.kinds)) THEN
+      PERFORM app.fail('MRS_INVALID', 'carrier_id');
+    END IF;
+  END IF;
+  v_lic := app.ptext(p, 'license_no', 30);
+  v_active := CASE WHEN p ? 'is_active' THEN coalesce((p ->> 'is_active')::boolean, true) ELSE coalesce(v_d.is_active, true) END;
+  -- one active driver per mobile in the org (compared normalised: the registry may keep older spellings)
+  IF v_active AND EXISTS (SELECT 1 FROM public.drivers o WHERE o.org_id = p_org AND o.is_active AND o.id IS DISTINCT FROM v_id
+                            AND (o.phone = v_phone OR app.norm_sa_phone(o.phone, false) = v_phone)) THEN
+    PERFORM app.fail('MRS_CONFLICT', 'phone');
+  END IF;
+  v_plate_raw := app.ptext(p, 'truck_plate', 30);
+  IF v_plate_raw IS NOT NULL THEN
+    v_plate := app.norm_code(replace(translate(v_plate_raw, 'أإآ', 'ااا'), '-', ''));
+    IF v_plate IS NULL OR char_length(v_plate) NOT BETWEEN 2 AND 20 THEN PERFORM app.fail('MRS_INVALID', 'truck_plate'); END IF;
+    SELECT * INTO v_k FROM public.trucks k WHERE k.org_id = p_org AND k.plate_no = v_plate;
+    IF v_k.id IS NULL THEN
+      INSERT INTO public.trucks (org_id, carrier_id, plate_no, created_by) VALUES (p_org, v_carrier, v_plate, auth.uid()) RETURNING * INTO v_k;
+    ELSIF NOT v_k.is_active THEN
+      PERFORM app.fail('MRS_INVALID', 'truck_plate');
+    END IF;
+  END IF;
+  IF v_d.id IS NULL THEN
+    INSERT INTO public.drivers (org_id, carrier_id, full_name, phone, driver_class, license_no, is_active, last_truck_id, created_by)
+    VALUES (p_org, v_carrier, v_name, v_phone, v_class, v_lic, v_active, v_k.id, auth.uid()) RETURNING * INTO v_d;
+  ELSE
+    UPDATE public.drivers d SET carrier_id = v_carrier, full_name = v_name, phone = v_phone, driver_class = v_class, license_no = v_lic,
+           is_active = v_active, last_truck_id = CASE WHEN p ? 'truck_plate' THEN v_k.id ELSE d.last_truck_id END
+     WHERE d.id = v_d.id RETURNING * INTO v_d;
+  END IF;
+  RETURN app.driver_json(v_d);
+END $$;
+REVOKE EXECUTE ON FUNCTION public.save_driver(uuid, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.save_driver(uuid, jsonb) TO authenticated;
+
+-- ===== migrations/20261208000100_ai_providers.sql =====
+-- =====================================================================
+-- 20261208000100_ai_providers — AI reading with several providers, tried in the order each organisation chooses
+-- (2026-11-21, owner request; branch owner/ui-reorg)
+--   Owner: start with Gemini or OpenAI (keys he holds), Claude when needed; if one fails or is slow, the next one reads.
+--   CLAUDE.md «القراءة بالذكاء الاصطناعي»: one reading layer, providers behind one interface, the order is a setting,
+--   the next provider on a technical error / timeout / an answer that fails the checks; provider, model, time and
+--   whether a fallback ran are recorded with every reading.
+--   1. app.ai_providers — the providers the platform can call (anthropic · openai · gemini) and the model id each is
+--      asked for. Platform-wide (the SQL Editor tunes the model ids, like app.ai_prices). Seeded; re-run keeps tuned rows.
+--      The keys are Edge Function secrets (one per provider, set by the owner), never in the database.
+--   2. app.ai_settings + provider_order text[] (the organisation's order, default {anthropic}: unchanged behaviour) and
+--      consent_providers text[] (the providers the admin's last consent named). Existing consents named Anthropic only.
+--   3. app.ai_provider_chain(org) → [{provider, model}] = provider_order ∩ active providers ∩ consented providers;
+--      public.ai_access + 'providers' (the Edge Function tries them in this order; a provider without its key is skipped).
+--   4. public.ai_save_settings + key provider_order (1–3 distinct active providers). A provider the last consent did
+--      not name needs consent_ack = true in the same call (document contents are then sent to that provider too);
+--      off → on stamps the consent for the whole order. ai_settings_json + provider_order, consent_providers, providers
+--      (the active list with their models) and usage by provider.
+--   5. app.ai_usage + provider, call_meta (per attempt: provider, model, outcome, ms). public.ai_settle (same signature)
+--      stores them from the extra keys of p_attempts ({model, input_tokens, output_tokens, provider?, outcome?, ms?}).
+--   6. app.ai_is_engine(engine): an AI reading's engine is Claude's name (app.ai_model()) or a model of app.ai_providers /
+--      app.ai_prices; app.tg_document_extractions_before re-created with it (body otherwise identical to 20261119000100).
+--   Prices: an OpenAI / Gemini model without its app.ai_prices row is priced at the highest row (conservative, as
+--   before); add the real list prices with INSERT … ON CONFLICT from the SQL Editor.
+--   Re-runnable (IF NOT EXISTS / CREATE OR REPLACE / ON CONFLICT DO NOTHING keeps tuned rows and settings).
+--   Data: none changed except consent_providers = {anthropic} on rows whose consent was given (it named Anthropic).
+--   Down-path: re-paste the 20261114000100 / 20261119000100 bodies of the re-created functions; DROP FUNCTION
+--   app.ai_provider_chain(uuid), app.ai_is_engine(text); ALTER TABLE app.ai_usage DROP COLUMN call_meta, DROP COLUMN
+--   provider; ALTER TABLE app.ai_settings DROP COLUMN consent_providers, DROP COLUMN provider_order; DROP TABLE
+--   app.ai_providers; DELETE FROM public.schema_versions WHERE version = '20261208000100'.
+--   No BEGIN/COMMIT (the SQL editor wraps the run).
+-- =====================================================================
+
+DO $pre$
+BEGIN
+  IF to_regclass('public.schema_versions') IS NULL
+     OR NOT EXISTS (SELECT 1 FROM public.schema_versions WHERE version = '20261207000100') THEN
+    RAISE EXCEPTION 'AI PROVIDERS preflight: apply driver_classes first (schema_versions lacks 20261207000100)';
+  END IF;
+  IF to_regclass('app.ai_settings') IS NULL OR to_regclass('app.ai_usage') IS NULL OR to_regclass('app.ai_prices') IS NULL
+     OR to_regprocedure('app.ai_usage_source_ok(uuid,text)') IS NULL THEN
+    RAISE EXCEPTION 'AI PROVIDERS preflight: ai_documents / legacy_docs missing';
+  END IF;
+END $pre$;
+
+INSERT INTO public.schema_versions (version, name) VALUES ('20261208000100', 'ai_providers')
+ON CONFLICT (version) DO NOTHING;
+
+-- ---------------------------------------------------------------------
+-- 1. the providers (platform settings)
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS app.ai_providers (
+  provider    text PRIMARY KEY CHECK (provider ~ '^[a-z][a-z0-9_]{1,30}$'),
+  model       text NOT NULL CHECK (model ~ '^[a-z0-9][a-z0-9.-]{0,63}$'),
+  is_active   boolean NOT NULL DEFAULT true,
+  sort        int NOT NULL DEFAULT 0,
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE app.ai_providers IS 'AI reading providers the ai-extract Edge Function can call (20261208000100) and the model id each is asked for. Platform-wide; tuned from the SQL Editor (UPDATE app.ai_providers SET model = … WHERE provider = …). The Edge Function calls a provider only when its key secret is set. anthropic always uses the model the function is built for (app.ai_model()).';
+-- the model ids are a starting point: confirm them against each provider's model list before switching the order
+INSERT INTO app.ai_providers (provider, model, sort) VALUES
+  ('anthropic', 'claude-opus-5-5', 1),
+  ('openai',    'gpt-6.2-astra',   2),
+  ('gemini',    'gemini-3.8-flash', 3)
+ON CONFLICT (provider) DO NOTHING;
+ALTER TABLE app.ai_providers ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON app.ai_providers FROM PUBLIC, anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------
+-- 2. the organisation's order and the providers its consent named
+-- ---------------------------------------------------------------------
+ALTER TABLE app.ai_settings ADD COLUMN IF NOT EXISTS provider_order text[] NOT NULL DEFAULT ARRAY['anthropic']::text[];
+ALTER TABLE app.ai_settings ADD COLUMN IF NOT EXISTS consent_providers text[];
+COMMENT ON COLUMN app.ai_settings.provider_order IS 'AI reading providers in the order they are tried (20261208000100): app.ai_providers codes, 1–3, distinct. Set by public.ai_save_settings.';
+COMMENT ON COLUMN app.ai_settings.consent_providers IS 'The providers named by the admin''s last consent (document contents are sent to them). A provider outside it is never called (app.ai_provider_chain).';
+-- the consents given before this file named Anthropic only
+UPDATE app.ai_settings s SET consent_providers = ARRAY['anthropic']::text[]
+ WHERE s.consent_ack_at IS NOT NULL AND s.consent_providers IS NULL;
+
+-- the ledger: which provider answered, and every attempt (set by public.ai_settle, section 5)
+ALTER TABLE app.ai_usage ADD COLUMN IF NOT EXISTS provider text CHECK (provider IS NULL OR provider ~ '^[a-z][a-z0-9_]{1,30}$');
+ALTER TABLE app.ai_usage ADD COLUMN IF NOT EXISTS call_meta jsonb CHECK (call_meta IS NULL OR (jsonb_typeof(call_meta) = 'array'
+  AND jsonb_array_length(call_meta) <= 10 AND octet_length(call_meta::text) <= 4000));
+COMMENT ON COLUMN app.ai_usage.provider IS 'The provider whose answer was used (20261208000100); NULL = none answered / an older row.';
+COMMENT ON COLUMN app.ai_usage.call_meta IS 'Per attempt (20261208000100): [{provider, model, outcome, ms}] — outcome ok / refused / truncated / bad_output / upstream_* / not_configured / internal. More than one entry = a fallback ran. Codes and numbers only.';
+
+-- settings with defaults (no row = off, 50 / day, 20 USD / month, Claude only)
+CREATE OR REPLACE FUNCTION app.ai_settings_of(p_org uuid) RETURNS app.ai_settings
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v app.ai_settings;
+BEGIN
+  SELECT * INTO v FROM app.ai_settings s WHERE s.org_id = p_org;
+  IF v.org_id IS NULL THEN
+    v.org_id := p_org; v.enabled := false; v.daily_request_cap := 50; v.monthly_budget_usd := 20;
+    v.provider_order := ARRAY['anthropic']::text[];                                                    -- PROVIDERS
+  END IF;
+  RETURN v;
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 3. the chain the Edge Function tries
+-- ---------------------------------------------------------------------
+-- [{provider, model}] in the organisation's order: active providers its consent named (empty when AI is off)
+CREATE OR REPLACE FUNCTION app.ai_provider_chain(p_org uuid) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT coalesce(jsonb_agg(jsonb_build_object('provider', p.provider,
+           'model', CASE WHEN p.provider = 'anthropic' THEN app.ai_model() ELSE p.model END) ORDER BY o.n), '[]'::jsonb)
+    FROM app.ai_settings_of(p_org) s
+    CROSS JOIN LATERAL unnest(s.provider_order) WITH ORDINALITY AS o(code, n)
+    JOIN app.ai_providers p ON p.provider = o.code AND p.is_active
+   WHERE s.enabled AND o.code = ANY (coalesce(s.consent_providers, ARRAY[]::text[]))
+$$;
+
+-- the engine name of an AI reading: Claude's (app.ai_model()) or a provider / priced model id. SECURITY DEFINER: the
+-- extraction trigger runs as the inserting staff member, who cannot read app.ai_providers / app.ai_prices.
+CREATE OR REPLACE FUNCTION app.ai_is_engine(p_engine text) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT p_engine IS NOT NULL AND (p_engine = app.ai_model()
+    OR EXISTS (SELECT 1 FROM app.ai_providers p WHERE p.model = p_engine)
+    OR EXISTS (SELECT 1 FROM app.ai_prices p WHERE p.model = p_engine))
+$$;
+
+-- ai_access(p_org) — as 20261114000100 + 'providers' (the chain)
+CREATE OR REPLACE FUNCTION public.ai_access(p_org uuid) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+DECLARE s app.ai_settings; v_today int;
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  IF p_org IS NULL OR NOT app.is_staff(p_org) THEN PERFORM app.fail('MRS_FORBIDDEN'); END IF;
+  s := app.ai_settings_of(p_org);
+  SELECT count(*)::int INTO v_today FROM app.ai_usage u
+   WHERE u.org_id = p_org AND u.purpose = 'doc_extract' AND u.created_at >= app.ai_day_start();
+  RETURN jsonb_build_object('org_id', p_org, 'enabled', s.enabled, 'can_use', s.enabled, 'model', app.ai_model(),
+    'provider', 'anthropic', 'daily_request_cap', s.daily_request_cap, 'today_requests', v_today,
+    'daily_remaining', greatest(s.daily_request_cap - v_today, 0),
+    'providers', app.ai_provider_chain(p_org));                                                        -- PROVIDERS
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 4. settings: the order, the consent per provider, usage by provider
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.ai_usage_json(p_org uuid) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT jsonb_build_object(
+    -- the daily cap counts document readings only
+    'today_requests', (SELECT count(*)::int FROM app.ai_usage u WHERE u.org_id = p_org AND u.purpose = 'doc_extract'
+                         AND u.created_at >= app.ai_day_start()),
+    'month', (SELECT jsonb_build_object(
+                'requests', count(*)::int,
+                'ok', count(*) FILTER (WHERE u.status = 'ok')::int,
+                'refused', count(*) FILTER (WHERE u.status = 'refused')::int,
+                'error', count(*) FILTER (WHERE u.status = 'error')::int,
+                'reserved', count(*) FILTER (WHERE u.status = 'reserved')::int,
+                'input_tokens', coalesce(sum(u.input_tokens), 0)::bigint,
+                'output_tokens', coalesce(sum(u.output_tokens), 0)::bigint,
+                'cost_usd', round(coalesce(sum(u.cost_usd) FILTER (WHERE u.status <> 'reserved'), 0), 4),
+                'held_usd', round(coalesce(sum(u.reserved_usd) FILTER (WHERE u.status = 'reserved'), 0), 4),
+                'by_purpose', coalesce((SELECT jsonb_object_agg(z.purpose, z.n)
+                                          FROM (SELECT x.purpose, count(*)::int n FROM app.ai_usage x
+                                                 WHERE x.org_id = p_org AND x.created_at >= app.ai_month_start()
+                                                 GROUP BY x.purpose) z), '{}'::jsonb),
+                -- PROVIDERS: the readings each provider answered this month, and how many needed a fallback
+                'by_provider', coalesce((SELECT jsonb_object_agg(z.provider, z.n)
+                                           FROM (SELECT x.provider, count(*)::int n FROM app.ai_usage x
+                                                  WHERE x.org_id = p_org AND x.created_at >= app.ai_month_start()
+                                                    AND x.status = 'ok' AND x.provider IS NOT NULL
+                                                  GROUP BY x.provider) z), '{}'::jsonb),
+                'fell_back', (SELECT count(*)::int FROM app.ai_usage x
+                               WHERE x.org_id = p_org AND x.created_at >= app.ai_month_start()
+                                 AND jsonb_array_length(coalesce(x.call_meta, '[]'::jsonb)) > 1))
+                FROM app.ai_usage u WHERE u.org_id = p_org AND u.created_at >= app.ai_month_start()),
+    'month_start', app.ai_month_start())
+$$;
+
+CREATE OR REPLACE FUNCTION app.ai_settings_json(p_org uuid) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT jsonb_build_object(
+    'org_id', s.org_id, 'enabled', s.enabled, 'consent_ack_at', s.consent_ack_at, 'consent_ack_by', s.consent_ack_by,
+    'consent_version', s.consent_version, 'daily_request_cap', s.daily_request_cap,
+    'monthly_budget_usd', s.monthly_budget_usd, 'updated_at', s.updated_at,
+    'exists', EXISTS (SELECT 1 FROM app.ai_settings x WHERE x.org_id = p_org),
+    'model', app.ai_model(), 'provider', 'anthropic',
+    -- PROVIDERS
+    'provider_order', to_jsonb(s.provider_order), 'consent_providers', to_jsonb(coalesce(s.consent_providers, ARRAY[]::text[])),
+    'providers', (SELECT coalesce(jsonb_agg(jsonb_build_object('provider', p.provider,
+                    'model', CASE WHEN p.provider = 'anthropic' THEN app.ai_model() ELSE p.model END) ORDER BY p.sort, p.provider), '[]'::jsonb)
+                    FROM app.ai_providers p WHERE p.is_active),
+    'usage', app.ai_usage_json(p_org))
+    FROM app.ai_settings_of(p_org) s
+$$;
+
+-- ai_save_settings(p_org, {enabled, consent_ack, daily_request_cap, monthly_budget_usd, provider_order}) — org admin
+-- (aal2). As 20261114000100, + provider_order: 1–3 distinct active providers. While on (or switching on), a provider the
+-- last consent did not name needs consent_ack = true in the same call; the consent then names the whole order.
+CREATE OR REPLACE FUNCTION public.ai_save_settings(p_org uuid, p_payload jsonb) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v app.ai_settings; v_old jsonb; v_new jsonb; v_b boolean; v_i int; v_n numeric; v_changed text[];
+        v_order text[]; v_ack boolean;
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  IF p_org IS NULL OR NOT app.has_role(p_org, ARRAY['admin']) THEN PERFORM app.fail('MRS_FORBIDDEN'); END IF;
+  PERFORM app.only_keys(p_payload, ARRAY['enabled','consent_ack','daily_request_cap','monthly_budget_usd','provider_order']);
+  INSERT INTO app.ai_settings (org_id, updated_by) VALUES (p_org, auth.uid()) ON CONFLICT (org_id) DO NOTHING;
+  SELECT * INTO v FROM app.ai_settings s WHERE s.org_id = p_org FOR UPDATE;
+  v_old := to_jsonb(v);
+
+  IF p_payload ? 'daily_request_cap' THEN
+    v_i := app.msg_rint(p_payload, 'daily_request_cap', 1, 1000);
+    IF v_i IS NULL THEN PERFORM app.fail('MRS_INVALID', 'daily_request_cap'); END IF;
+    v.daily_request_cap := v_i;
+  END IF;
+  IF p_payload ? 'monthly_budget_usd' THEN
+    v_n := app.msg_rnum(p_payload, 'monthly_budget_usd', 0, 10000);
+    IF v_n IS NULL OR v_n <> round(v_n, 2) THEN PERFORM app.fail('MRS_INVALID', 'monthly_budget_usd'); END IF;
+    v.monthly_budget_usd := v_n;
+  END IF;
+  IF p_payload ? 'consent_ack' AND app.msg_rbool(p_payload, 'consent_ack') IS NULL THEN
+    PERFORM app.fail('MRS_INVALID', 'consent_ack');
+  END IF;
+  v_ack := app.msg_rbool(p_payload, 'consent_ack') IS TRUE;
+  -- PROVIDERS: the order — 1–3 distinct codes of active providers, kept as given
+  IF p_payload ? 'provider_order' THEN
+    IF jsonb_typeof(p_payload -> 'provider_order') <> 'array' OR jsonb_array_length(p_payload -> 'provider_order') NOT BETWEEN 1 AND 3
+       OR EXISTS (SELECT 1 FROM jsonb_array_elements(p_payload -> 'provider_order') e WHERE jsonb_typeof(e) <> 'string') THEN
+      PERFORM app.fail('MRS_INVALID', 'provider_order');
+    END IF;
+    SELECT array_agg(e #>> '{}' ORDER BY n) INTO v_order FROM jsonb_array_elements(p_payload -> 'provider_order') WITH ORDINALITY AS t(e, n);
+    IF (SELECT count(DISTINCT x) FROM unnest(v_order) x) <> cardinality(v_order)
+       OR EXISTS (SELECT 1 FROM unnest(v_order) x WHERE NOT EXISTS (SELECT 1 FROM app.ai_providers p WHERE p.provider = x AND p.is_active)) THEN
+      PERFORM app.fail('MRS_INVALID', 'provider_order');
+    END IF;
+    v.provider_order := v_order;
+  END IF;
+  IF p_payload ? 'enabled' THEN
+    v_b := app.msg_rbool(p_payload, 'enabled');
+    IF v_b IS NULL THEN PERFORM app.fail('MRS_INVALID', 'enabled'); END IF;
+    IF v_b AND NOT v.enabled THEN
+      -- off → on: the explicit consent (document contents and inbox message text are sent to the providers of the
+      -- order) is required now
+      IF NOT v_ack THEN PERFORM app.fail('MRS_REQUIRED', 'ai_consent'); END IF;
+      v.consent_ack_at := now(); v.consent_ack_by := auth.uid(); v.consent_version := 'ai-doc-inbox-v2';
+      v.consent_providers := v.provider_order;                                                        -- PROVIDERS
+    END IF;
+    v.enabled := v_b;
+  END IF;
+  -- PROVIDERS: while on, a provider the consent did not name needs the consent again (it then names the whole order)
+  IF v.enabled AND NOT (v.provider_order <@ coalesce(v.consent_providers, ARRAY[]::text[])) THEN
+    IF NOT v_ack THEN PERFORM app.fail('MRS_REQUIRED', 'ai_consent'); END IF;
+    v.consent_ack_at := now(); v.consent_ack_by := auth.uid(); v.consent_version := 'ai-doc-inbox-v2';
+    v.consent_providers := v.provider_order;
+  END IF;
+
+  UPDATE app.ai_settings s SET enabled = v.enabled, consent_ack_at = v.consent_ack_at, consent_ack_by = v.consent_ack_by,
+         consent_version = v.consent_version, daily_request_cap = v.daily_request_cap,
+         monthly_budget_usd = v.monthly_budget_usd, provider_order = v.provider_order,
+         consent_providers = v.consent_providers, updated_by = auth.uid(), updated_at = now()
+   WHERE s.org_id = p_org
+  RETURNING to_jsonb(s) INTO v_new;
+  SELECT array_agg(k ORDER BY k) INTO v_changed FROM jsonb_object_keys(v_new) k
+   WHERE (v_new -> k) IS DISTINCT FROM (v_old -> k) AND k NOT IN ('updated_at','updated_by');
+  IF v_changed IS NOT NULL THEN
+    INSERT INTO public.audit_log (org_id, table_name, row_id, action, changed_fields, old_data, new_data, actor, actor_role)
+    VALUES (p_org, 'ai_settings', p_org::text, 'UPDATE', v_changed, v_old, v_new, auth.uid(), auth.jwt() ->> 'role');
+  END IF;
+  RETURN app.ai_settings_json(p_org);
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 5. the settle: which provider answered, and every attempt
+-- ---------------------------------------------------------------------
+-- ai_settle — as 20261114000100 (same signature and pricing). PROVIDERS: an attempt may carry provider, outcome and ms
+-- (ai-extract, 20261208000100); they are kept in call_meta, and the provider of the last 'ok' attempt in provider.
+CREATE OR REPLACE FUNCTION public.ai_settle(p_reservation uuid, p_input_tokens int, p_output_tokens int, p_status text,
+                                            p_model text DEFAULT NULL, p_attempts jsonb DEFAULT NULL)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE u app.ai_usage; v_model text; v_cost numeric := 0; v_in bigint := 0; v_out bigint := 0; v_status text;
+        a jsonb; v_am text; v_ai bigint; v_ao bigint;
+        v_meta jsonb := '[]'::jsonb; v_prov text; v_ok text; v_oc text; v_ms numeric;
+BEGIN
+  IF coalesce(auth.role(), '') <> 'service_role' THEN PERFORM app.fail('MRS_FORBIDDEN', 'service_only'); END IF;
+  IF p_status IS NULL OR p_status NOT IN ('ok','refused','error','unknown') THEN PERFORM app.fail('MRS_INVALID', 'status'); END IF;
+  IF p_input_tokens IS NULL OR p_input_tokens NOT BETWEEN 0 AND 50000000 THEN PERFORM app.fail('MRS_INVALID', 'input_tokens'); END IF;
+  IF p_output_tokens IS NULL OR p_output_tokens NOT BETWEEN 0 AND 50000000 THEN PERFORM app.fail('MRS_INVALID', 'output_tokens'); END IF;
+  IF p_attempts IS NOT NULL AND (jsonb_typeof(p_attempts) <> 'array' OR jsonb_array_length(p_attempts) NOT BETWEEN 1 AND 10) THEN
+    PERFORM app.fail('MRS_INVALID', 'attempts');
+  END IF;
+  SELECT * INTO u FROM app.ai_usage x WHERE x.id = p_reservation;
+  IF u.id IS NULL THEN PERFORM app.fail('MRS_NOT_FOUND', 'reservation'); END IF;
+  PERFORM 1 FROM app.ai_settings x WHERE x.org_id = u.org_id FOR UPDATE;          -- same order as ai_reserve
+  SELECT * INTO u FROM app.ai_usage x WHERE x.id = p_reservation FOR UPDATE;
+  IF u.status <> 'reserved' THEN PERFORM app.fail('MRS_BAD_TRANSITION', 'settled'); END IF;
+  v_model := coalesce(nullif(btrim(p_model), ''), u.model);
+  IF v_model !~ '^[a-z0-9][a-z0-9.-]{0,63}$' THEN PERFORM app.fail('MRS_INVALID', 'model'); END IF;
+
+  IF p_attempts IS NULL THEN
+    v_in := p_input_tokens; v_out := p_output_tokens;
+    v_cost := app.ai_cost_usd(v_model, p_input_tokens, p_output_tokens);
+  ELSE
+    FOR a IN SELECT e FROM jsonb_array_elements(p_attempts) e LOOP
+      IF jsonb_typeof(a) <> 'object' OR jsonb_typeof(a -> 'input_tokens') <> 'number' OR jsonb_typeof(a -> 'output_tokens') <> 'number'
+         OR (a ? 'model' AND jsonb_typeof(a -> 'model') NOT IN ('string','null')) THEN
+        PERFORM app.fail('MRS_INVALID', 'attempts');
+      END IF;
+      v_am := coalesce(nullif(btrim(a ->> 'model'), ''), u.model);
+      IF v_am !~ '^[a-z0-9][a-z0-9.-]{0,63}$' THEN PERFORM app.fail('MRS_INVALID', 'attempts'); END IF;
+      IF (a ->> 'input_tokens')::numeric <> trunc((a ->> 'input_tokens')::numeric) OR (a ->> 'output_tokens')::numeric <> trunc((a ->> 'output_tokens')::numeric)
+         OR (a ->> 'input_tokens')::numeric NOT BETWEEN 0 AND 50000000 OR (a ->> 'output_tokens')::numeric NOT BETWEEN 0 AND 50000000 THEN
+        PERFORM app.fail('MRS_INVALID', 'attempts');
+      END IF;
+      v_ai := (a ->> 'input_tokens')::bigint; v_ao := (a ->> 'output_tokens')::bigint;
+      v_in := v_in + v_ai; v_out := v_out + v_ao;
+      v_cost := v_cost + app.ai_cost_usd(v_am, v_ai::int, v_ao::int);
+      -- PROVIDERS: the attempt's provider / outcome / time (codes and numbers only; anything else is dropped)
+      v_prov := CASE WHEN jsonb_typeof(a -> 'provider') = 'string' AND (a ->> 'provider') ~ '^[a-z][a-z0-9_]{1,30}$' THEN a ->> 'provider' END;
+      IF v_prov IS NOT NULL THEN
+        v_oc := CASE WHEN jsonb_typeof(a -> 'outcome') = 'string' AND (a ->> 'outcome') ~ '^[a-z_]{1,30}$' THEN a ->> 'outcome' END;
+        v_ms := CASE WHEN jsonb_typeof(a -> 'ms') = 'number' AND (a ->> 'ms')::numeric BETWEEN 0 AND 3600000 THEN round((a ->> 'ms')::numeric) END;
+        v_meta := v_meta || jsonb_build_array(jsonb_strip_nulls(jsonb_build_object('provider', v_prov, 'model', v_am, 'outcome', v_oc, 'ms', v_ms)));
+        IF v_oc = 'ok' THEN v_ok := v_prov; END IF;
+      END IF;
+    END LOOP;
+    IF v_in > 50000000 OR v_out > 50000000 THEN PERFORM app.fail('MRS_INVALID', 'attempts'); END IF;
+  END IF;
+
+  v_status := CASE WHEN p_status = 'unknown' THEN 'error' ELSE p_status END;
+  IF p_status = 'unknown' THEN v_cost := greatest(v_cost, u.reserved_usd); END IF;
+  UPDATE app.ai_usage x SET status = v_status, model = v_model, input_tokens = v_in::int, output_tokens = v_out::int,
+         cost_usd = v_cost, unknown_outcome = (p_status = 'unknown'),
+         provider = CASE WHEN v_status = 'ok' THEN v_ok END,                                            -- PROVIDERS
+         call_meta = CASE WHEN jsonb_array_length(v_meta) > 0 THEN v_meta END                            -- PROVIDERS
+   WHERE x.id = p_reservation;
+  RETURN jsonb_build_object('id', u.id, 'status', v_status, 'unknown_outcome', p_status = 'unknown', 'model', v_model,
+    'input_tokens', v_in, 'output_tokens', v_out, 'cost_usd', v_cost);
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 6. an AI reading saved by another provider
+-- ---------------------------------------------------------------------
+-- tg_document_extractions_before (20261119000100). PROVIDERS: the AI engine check uses app.ai_is_engine (Claude's
+-- engine name or an OpenAI / Gemini model id); the body is otherwise identical.
+CREATE OR REPLACE FUNCTION app.tg_document_extractions_before() RETURNS trigger
+LANGUAGE plpgsql SET search_path = '' AS $$
+DECLARE v_doc public.documents;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF app.is_api_caller() THEN
+      NEW.created_by := auth.uid();
+      NEW.created_at := now();
+      NEW.reviewed_by := NULL; NEW.reviewed_at := NULL;
+      NEW.voided_at := NULL; NEW.voided_by := NULL; NEW.void_reason := NULL;
+      -- AI: the engine name and the usage link go together, and the link must be the caller's own 'ok' reading
+      IF NEW.ai_usage_id IS NOT NULL OR app.ai_is_engine(NEW.engine) THEN                                    -- PROVIDERS
+        IF NEW.ai_usage_id IS NULL OR NOT app.ai_is_engine(NEW.engine)                                       -- PROVIDERS
+           OR NOT app.ai_usage_claimable(NEW.ai_usage_id, NEW.org_id) THEN
+          PERFORM app.fail('MRS_INVALID', 'ai_usage_id');
+        END IF;
+      END IF;
+      -- DOCS: the ai-doc-v3 detail belongs to an AI reading only
+      IF NEW.ai_detail IS NOT NULL AND NEW.ai_usage_id IS NULL THEN PERFORM app.fail('MRS_INVALID', 'ai_detail'); END IF;   -- DOCS
+      -- REVIEW: an ai-doc-v3 reading is saved under the hash of the bytes Claude read (bound by the Edge Function)
+      IF NEW.ai_detail IS NOT NULL AND NOT app.ai_usage_source_ok(NEW.ai_usage_id, NEW.source_sha256) THEN               -- DOCS
+        PERFORM app.fail('MRS_INVALID', 'source_sha256');                                                                -- DOCS
+      END IF;                                                                                                            -- DOCS
+    END IF;
+    -- saved already reviewed (edited before the first save) → stamp the reviewer
+    IF NEW.review_status <> 'unreviewed' THEN
+      NEW.reviewed_by := coalesce(auth.uid(), NEW.reviewed_by);
+      NEW.reviewed_at := now();
+    END IF;
+  ELSE
+    IF app.is_api_caller() THEN
+      IF OLD.voided_at IS NOT NULL THEN PERFORM app.fail('MRS_IMMUTABLE', 'voided_at'); END IF;
+      PERFORM app.guard_immutable(to_jsonb(OLD), to_jsonb(NEW), ARRAY[
+        'id','org_id','source_name','source_sha256','source_mime','source_size','source_pages',
+        'engine','languages','mean_confidence','raw_text','extracted_fields','qr_payload',
+        'reviewed_by','reviewed_at','voided_by','created_by','created_at','ai_usage_id','ai_detail']);    -- DOCS
+      IF OLD.transaction_id IS NOT NULL AND NEW.transaction_id IS DISTINCT FROM OLD.transaction_id THEN
+        PERFORM app.fail('MRS_IMMUTABLE', 'transaction_id');
+      END IF;
+      IF OLD.document_id IS NOT NULL AND NEW.document_id IS DISTINCT FROM OLD.document_id THEN
+        PERFORM app.fail('MRS_IMMUTABLE', 'document_id');
+      END IF;
+    END IF;
+    IF NEW.review_status IS DISTINCT FROM OLD.review_status
+       OR NEW.reviewed_fields IS DISTINCT FROM OLD.reviewed_fields
+       OR NEW.line_items IS DISTINCT FROM OLD.line_items
+       OR NEW.review_note IS DISTINCT FROM OLD.review_note
+       OR NEW.doc_type IS DISTINCT FROM OLD.doc_type THEN
+      NEW.reviewed_by := coalesce(auth.uid(), NEW.reviewed_by);
+      NEW.reviewed_at := now();
+    END IF;
+    IF NEW.voided_at IS NOT NULL AND OLD.voided_at IS NULL THEN
+      NEW.voided_by := auth.uid();
+      NEW.voided_at := now();
+    END IF;
+  END IF;
+
+  -- the attached original must be a live document of the same transaction
+  IF NEW.document_id IS NOT NULL AND (TG_OP = 'INSERT' OR NEW.document_id IS DISTINCT FROM OLD.document_id) THEN
+    SELECT * INTO v_doc FROM public.documents d WHERE d.id = NEW.document_id;
+    IF v_doc.id IS NULL OR NEW.transaction_id IS NULL
+       OR v_doc.transaction_id IS DISTINCT FROM NEW.transaction_id OR v_doc.voided_at IS NOT NULL THEN
+      PERFORM app.fail('MRS_INVALID', 'document_id');
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 7. privileges
+-- ---------------------------------------------------------------------
+REVOKE EXECUTE ON FUNCTION app.ai_provider_chain(uuid), app.ai_settings_of(uuid), app.ai_usage_json(uuid), app.ai_settings_json(uuid)
+FROM PUBLIC, anon, authenticated, service_role;
+-- called from the (SECURITY INVOKER) extraction trigger, i.e. as the inserting staff member: authenticated only
+REVOKE EXECUTE ON FUNCTION app.ai_is_engine(text) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION app.ai_is_engine(text) TO authenticated;
+REVOKE EXECUTE ON FUNCTION app.tg_document_extractions_before() FROM PUBLIC, anon, authenticated;
+-- staff / org admin RPCs (as 20261114000100)
+REVOKE ALL ON FUNCTION public.ai_access(uuid), public.ai_save_settings(uuid, jsonb) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.ai_access(uuid), public.ai_save_settings(uuid, jsonb) TO authenticated;
+-- Edge Function RPC: service_role only
+REVOKE ALL ON FUNCTION public.ai_settle(uuid, int, int, text, text, jsonb) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.ai_settle(uuid, int, int, text, text, jsonb) TO service_role;
+
+-- ===== migrations/20261209000100_ai_keys.sql =====
+-- =====================================================================
+-- 20261209000100_ai_keys — the AI providers' keys, model ids and prices managed from the platform page
+-- (2026-11-22, owner request; branch owner/ui-reorg)
+--   Owner: the keys are entered from the site's settings, not in code or in the hosting dashboard. Both kinds will exist:
+--   the platform's keys (used for every office by default) and, later, an office's own key. This file builds the
+--   platform keys; the table already carries org_id so an office key can be added without a new design.
+--   1. app.ai_provider_keys — one row per (provider, scope): the Supabase Vault secret that holds the key (encrypted at
+--      rest by Vault), its last 4 characters, who set it and when, and the last connection test. org_id NULL = the
+--      platform's key. The key itself is NEVER in this table, in a return value to a browser, in the audit log or in a
+--      log line.
+--   2. public.platform_ai_providers() — platform admins: each provider, its model id, active flag, prices, whether a key
+--      is saved (last 4 only) and the last test.
+--      public.platform_ai_set_key(provider, key) / platform_ai_clear_key(provider) — platform admins: store / replace /
+--      remove the platform key in Vault (audit row without the key).
+--      public.platform_ai_save_provider(provider, {model, is_active, price_in, price_out}) — platform admins: the model id
+--      asked for and its prices (app.ai_providers + app.ai_prices).
+--   3. public.ai_provider_keys(org) — service_role only (the ai-extract Edge Function): the key to use per provider for an
+--      organisation (its own key first — none yet — then the platform's). public.ai_record_key_test(provider, ok, note,
+--      models) — service_role only: the result of the connection test the platform page asked the Edge Function for.
+--   Needs Supabase Vault (Database → Extensions → supabase_vault; on by default in Supabase projects).
+--   Re-runnable (IF NOT EXISTS / CREATE OR REPLACE). Data: none changed; no key is stored by this file.
+--   4. the in-place conversion keeps app.ai_provider_keys (app.convert_keep_tables re-created: the 20261206000100 body + this table).
+--   Down-path: re-create app.convert_keep_tables (20261206000100 body); SELECT vault secret ids from app.ai_provider_keys and DELETE them from vault.secrets; DROP FUNCTION
+--   public.ai_record_key_test(text, boolean, text, jsonb), public.ai_provider_keys(uuid),
+--   public.platform_ai_save_provider(text, jsonb), public.platform_ai_clear_key(text), public.platform_ai_set_key(text, text),
+--   public.platform_ai_providers(), app.ai_key_json(app.ai_provider_keys); DROP TABLE app.ai_provider_keys;
+--   DELETE FROM public.schema_versions WHERE version = '20261209000100'.
+--   No BEGIN/COMMIT (the SQL editor wraps the run).
+-- =====================================================================
+
+DO $pre$
+BEGIN
+  IF to_regclass('public.schema_versions') IS NULL
+     OR NOT EXISTS (SELECT 1 FROM public.schema_versions WHERE version = '20261208000100') THEN
+    RAISE EXCEPTION 'AI KEYS preflight: apply ai_providers first (schema_versions lacks 20261208000100)';
+  END IF;
+  IF to_regclass('vault.secrets') IS NULL OR to_regclass('vault.decrypted_secrets') IS NULL THEN
+    RAISE EXCEPTION 'AI KEYS preflight: Supabase Vault is not enabled (Database → Extensions → supabase_vault)';
+  END IF;
+END $pre$;
+
+INSERT INTO public.schema_versions (version, name) VALUES ('20261209000100', 'ai_keys')
+ON CONFLICT (version) DO NOTHING;
+
+-- ---------------------------------------------------------------------
+-- 1. the keys (references to Vault secrets)
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS app.ai_provider_keys (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider     text NOT NULL REFERENCES app.ai_providers(provider) ON DELETE RESTRICT,
+  org_id       uuid REFERENCES public.organizations(id) ON DELETE RESTRICT,     -- NULL = the platform's key
+  secret_id    uuid NOT NULL,                                                   -- vault.secrets.id
+  key_last4    text NOT NULL CHECK (key_last4 ~ '^[A-Za-z0-9_-]{4}$'),
+  set_by       uuid,
+  set_at       timestamptz NOT NULL DEFAULT now(),
+  tested_at    timestamptz,
+  test_ok      boolean,
+  test_note    text CHECK (test_note IS NULL OR test_note ~ '^[a-z_]{1,40}$'),
+  test_models  jsonb CHECK (test_models IS NULL OR (jsonb_typeof(test_models) = 'array' AND jsonb_array_length(test_models) <= 200
+                            AND octet_length(test_models::text) <= 12000))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ai_provider_keys_scope_uidx ON app.ai_provider_keys (provider, coalesce(org_id, '00000000-0000-0000-0000-000000000000'::uuid));
+COMMENT ON TABLE app.ai_provider_keys IS 'AI provider keys (20261209000100): a reference to the Supabase Vault secret that holds the key, its last 4 characters and the last connection test. org_id NULL = the platform key (all offices); an office key (org_id) is a later stage. The key is never stored here and never returned to a browser.';
+ALTER TABLE app.ai_provider_keys ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON app.ai_provider_keys FROM PUBLIC, anon, authenticated, service_role;
+
+-- the row as the platform page sees it (no secret id, no key)
+CREATE OR REPLACE FUNCTION app.ai_key_json(k app.ai_provider_keys) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT CASE WHEN k.id IS NULL THEN NULL ELSE jsonb_build_object('last4', k.key_last4, 'set_at', k.set_at,
+    'set_by_name', (SELECT p.full_name FROM public.profiles p WHERE p.id = k.set_by),
+    'tested_at', k.tested_at, 'test_ok', k.test_ok, 'test_note', k.test_note, 'test_models', coalesce(k.test_models, '[]'::jsonb)) END
+$$;
+
+-- ---------------------------------------------------------------------
+-- 2. the platform page
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.platform_ai_providers() RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  IF NOT app.is_platform_admin() THEN PERFORM app.fail('MRS_FORBIDDEN'); END IF;
+  RETURN coalesce((SELECT jsonb_agg(jsonb_build_object(
+      'provider', p.provider, 'model', p.model, 'is_active', p.is_active, 'sort', p.sort,
+      'price_in', (SELECT x.input_usd_per_mtok FROM app.ai_prices x WHERE x.model = p.model),
+      'price_out', (SELECT x.output_usd_per_mtok FROM app.ai_prices x WHERE x.model = p.model),
+      'key', (SELECT app.ai_key_json(k) FROM app.ai_provider_keys k WHERE k.provider = p.provider AND k.org_id IS NULL))
+      ORDER BY p.sort, p.provider) FROM app.ai_providers p), '[]'::jsonb);
+END $$;
+
+-- store or replace the platform key of a provider in Vault. The key: 20–400 printable characters without spaces.
+CREATE OR REPLACE FUNCTION public.platform_ai_set_key(p_provider text, p_key text) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE k app.ai_provider_keys; v_key text := btrim(coalesce(p_key, '')); v_sid uuid; v_last4 text;
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  IF NOT app.is_platform_admin() THEN PERFORM app.fail('MRS_FORBIDDEN'); END IF;
+  IF NOT EXISTS (SELECT 1 FROM app.ai_providers p WHERE p.provider = p_provider) THEN PERFORM app.fail('MRS_INVALID', 'provider'); END IF;
+  IF char_length(v_key) NOT BETWEEN 20 AND 400 OR v_key !~ '^[\x21-\x7E]+$' THEN PERFORM app.fail('MRS_INVALID', 'key'); END IF;
+  v_last4 := right(v_key, 4);
+  IF v_last4 !~ '^[A-Za-z0-9_-]{4}$' THEN v_last4 := 'xxxx'; END IF;
+  SELECT * INTO k FROM app.ai_provider_keys x WHERE x.provider = p_provider AND x.org_id IS NULL FOR UPDATE;
+  IF k.id IS NULL THEN
+    v_sid := vault.create_secret(v_key, 'ai_key:platform:' || p_provider, 'AI provider key (platform) — set from the platform page');
+    INSERT INTO app.ai_provider_keys (provider, org_id, secret_id, key_last4, set_by) VALUES (p_provider, NULL, v_sid, v_last4, auth.uid())
+    RETURNING * INTO k;
+  ELSE
+    PERFORM vault.update_secret(k.secret_id, v_key);
+    UPDATE app.ai_provider_keys x SET key_last4 = v_last4, set_by = auth.uid(), set_at = now(),
+           tested_at = NULL, test_ok = NULL, test_note = NULL, test_models = NULL
+     WHERE x.id = k.id RETURNING * INTO k;
+  END IF;
+  v_key := NULL;
+  -- the audit row names the provider and the last 4 characters only
+  INSERT INTO public.audit_log (org_id, table_name, row_id, action, changed_fields, old_data, new_data, actor, actor_role)
+  VALUES (NULL, 'ai_provider_keys', k.id::text, 'UPDATE', ARRAY['key'], NULL,
+          jsonb_build_object('provider', p_provider, 'scope', 'platform', 'last4', v_last4), auth.uid(), auth.jwt() ->> 'role');
+  RETURN app.ai_key_json(k);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.platform_ai_clear_key(p_provider text) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE k app.ai_provider_keys;
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  IF NOT app.is_platform_admin() THEN PERFORM app.fail('MRS_FORBIDDEN'); END IF;
+  SELECT * INTO k FROM app.ai_provider_keys x WHERE x.provider = p_provider AND x.org_id IS NULL FOR UPDATE;
+  IF k.id IS NULL THEN RETURN jsonb_build_object('provider', p_provider, 'removed', false); END IF;
+  DELETE FROM vault.secrets s WHERE s.id = k.secret_id;
+  DELETE FROM app.ai_provider_keys x WHERE x.id = k.id;
+  INSERT INTO public.audit_log (org_id, table_name, row_id, action, changed_fields, old_data, new_data, actor, actor_role)
+  VALUES (NULL, 'ai_provider_keys', k.id::text, 'DELETE', ARRAY['key'],
+          jsonb_build_object('provider', p_provider, 'scope', 'platform', 'last4', k.key_last4), NULL, auth.uid(), auth.jwt() ->> 'role');
+  RETURN jsonb_build_object('provider', p_provider, 'removed', true);
+END $$;
+
+-- the model id asked for, on / off, and its prices (USD per million tokens; a price row per model id)
+CREATE OR REPLACE FUNCTION public.platform_ai_save_provider(p_provider text, p_payload jsonb) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE p app.ai_providers; v_old jsonb; v_in numeric; v_out numeric; v_model text;
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  IF NOT app.is_platform_admin() THEN PERFORM app.fail('MRS_FORBIDDEN'); END IF;
+  PERFORM app.only_keys(p_payload, ARRAY['model','is_active','price_in','price_out']);
+  SELECT * INTO p FROM app.ai_providers x WHERE x.provider = p_provider FOR UPDATE;
+  IF p.provider IS NULL THEN PERFORM app.fail('MRS_INVALID', 'provider'); END IF;
+  v_old := to_jsonb(p);
+  IF p_payload ? 'model' THEN
+    v_model := btrim(coalesce(p_payload ->> 'model', ''));
+    IF jsonb_typeof(p_payload -> 'model') <> 'string' OR v_model !~ '^[a-z0-9][a-z0-9.-]{0,63}$' THEN PERFORM app.fail('MRS_INVALID', 'model'); END IF;
+    p.model := v_model;
+  END IF;
+  IF p_payload ? 'is_active' THEN
+    IF jsonb_typeof(p_payload -> 'is_active') <> 'boolean' THEN PERFORM app.fail('MRS_INVALID', 'is_active'); END IF;
+    p.is_active := (p_payload ->> 'is_active')::boolean;
+  END IF;
+  IF p_payload ? 'price_in' OR p_payload ? 'price_out' THEN
+    -- both prices together (a missing one is NULL: IS DISTINCT FROM, not <>)
+    IF jsonb_typeof(p_payload -> 'price_in') IS DISTINCT FROM 'number' OR jsonb_typeof(p_payload -> 'price_out') IS DISTINCT FROM 'number' THEN
+      PERFORM app.fail('MRS_INVALID', 'price');
+    END IF;
+    v_in := (p_payload ->> 'price_in')::numeric; v_out := (p_payload ->> 'price_out')::numeric;
+    IF v_in < 0 OR v_in > 1000 OR v_out < 0 OR v_out > 1000 OR v_in <> round(v_in, 4) OR v_out <> round(v_out, 4) THEN
+      PERFORM app.fail('MRS_INVALID', 'price');
+    END IF;
+  END IF;
+  UPDATE app.ai_providers x SET model = p.model, is_active = p.is_active, updated_at = now() WHERE x.provider = p.provider;
+  IF v_in IS NOT NULL THEN
+    INSERT INTO app.ai_prices (model, input_usd_per_mtok, output_usd_per_mtok) VALUES (p.model, v_in, v_out)
+    ON CONFLICT (model) DO UPDATE SET input_usd_per_mtok = EXCLUDED.input_usd_per_mtok, output_usd_per_mtok = EXCLUDED.output_usd_per_mtok;
+  END IF;
+  INSERT INTO public.audit_log (org_id, table_name, row_id, action, changed_fields, old_data, new_data, actor, actor_role)
+  VALUES (NULL, 'ai_providers', p.provider, 'UPDATE', ARRAY(SELECT jsonb_object_keys(p_payload) ORDER BY 1), v_old,
+          to_jsonb(p) || jsonb_build_object('price_in', v_in, 'price_out', v_out), auth.uid(), auth.jwt() ->> 'role');
+  RETURN (SELECT e FROM jsonb_array_elements(public.platform_ai_providers()) e WHERE e ->> 'provider' = p.provider);
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 3. the Edge Function (service role)
+-- ---------------------------------------------------------------------
+-- {anthropic: key | null, openai: …, gemini: …} for an organisation: its own key first (a later stage), then the
+-- platform's. Active providers only. p_org NULL = the platform keys (the connection test from the platform page).
+CREATE OR REPLACE FUNCTION public.ai_provider_keys(p_org uuid) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+BEGIN
+  IF coalesce(auth.role(), '') <> 'service_role' THEN PERFORM app.fail('MRS_FORBIDDEN', 'service_only'); END IF;
+  RETURN coalesce((SELECT jsonb_object_agg(p.provider, (
+      SELECT d.decrypted_secret FROM app.ai_provider_keys k JOIN vault.decrypted_secrets d ON d.id = k.secret_id
+       WHERE k.provider = p.provider AND (k.org_id = p_org OR k.org_id IS NULL)
+       ORDER BY (k.org_id IS NULL) LIMIT 1))
+    FROM app.ai_providers p WHERE p.is_active), '{}'::jsonb);
+END $$;
+
+-- the connection test's result (ok, a fixed note code, the model ids the provider listed)
+CREATE OR REPLACE FUNCTION public.ai_record_key_test(p_provider text, p_ok boolean, p_note text, p_models jsonb DEFAULT NULL)
+RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_models jsonb;
+BEGIN
+  IF coalesce(auth.role(), '') <> 'service_role' THEN PERFORM app.fail('MRS_FORBIDDEN', 'service_only'); END IF;
+  IF p_ok IS NULL OR (p_note IS NOT NULL AND p_note !~ '^[a-z_]{1,40}$') THEN PERFORM app.fail('MRS_INVALID', 'test'); END IF;
+  -- model ids only (the same pattern as app.ai_providers.model), at most 200
+  SELECT jsonb_agg(m ORDER BY m) INTO v_models FROM (
+    SELECT DISTINCT e #>> '{}' m FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_models) = 'array' THEN p_models ELSE '[]'::jsonb END) e
+     WHERE jsonb_typeof(e) = 'string' AND (e #>> '{}') ~ '^[a-z0-9][a-z0-9.-]{0,63}$' LIMIT 200) z;
+  UPDATE app.ai_provider_keys k SET tested_at = now(), test_ok = p_ok, test_note = p_note, test_models = v_models
+   WHERE k.provider = p_provider AND k.org_id IS NULL;
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 4. the in-place conversion (20261115000100) keeps the keys: configuration, not test data. app.convert_keep_tables =
+--    the 20261206000100 body + app.ai_provider_keys (a table with org_id must be classified, or the conversion refuses)
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.convert_keep_tables() RETURNS text[]
+LANGUAGE sql IMMUTABLE SET search_path = '' AS $$
+  SELECT ARRAY[
+    'public.branches', 'public.memberships', 'public.org_counters', 'public.org_usage_counters',
+    'public.msg_channels', 'public.msg_settings', 'public.msg_auto_reply_policies', 'public.msg_templates',
+    'public.msg_instructions', 'public.daftra_connections', 'public.daftra_item_links', 'public.document_requirements',
+    'public.org_subscriptions', 'public.subscription_events', 'app.ai_settings',
+    'public.org_service_items',                                                                         -- LEGACY
+    'public.tx_stage_sets', 'public.tx_stage_steps',                                                    -- owner stages
+    'public.storage_gate_ports',                                                                        -- storage gate (20261206000100)
+    'app.ai_provider_keys',                                                                            -- AI keys (20261209000100): configuration, kept
+    -- append-only / log tables
+    'public.audit_log', 'public.report_exports', 'app.ai_usage', 'public.operational_alert_runs', 'public.client_errors'
+  ]::text[]
+$$;
+
+-- ---------------------------------------------------------------------
+-- 5. privileges
+-- ---------------------------------------------------------------------
+REVOKE EXECUTE ON FUNCTION app.ai_key_json(app.ai_provider_keys), app.convert_keep_tables() FROM PUBLIC, anon, authenticated, service_role;
+-- platform admin RPCs (the functions check app.is_platform_admin)
+REVOKE ALL ON FUNCTION public.platform_ai_providers(), public.platform_ai_set_key(text, text), public.platform_ai_clear_key(text),
+  public.platform_ai_save_provider(text, jsonb) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.platform_ai_providers(), public.platform_ai_set_key(text, text), public.platform_ai_clear_key(text),
+  public.platform_ai_save_provider(text, jsonb) TO authenticated;
+-- Edge Function RPCs: service_role only
+REVOKE ALL ON FUNCTION public.ai_provider_keys(uuid), public.ai_record_key_test(text, boolean, text, jsonb)
+FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.ai_provider_keys(uuid), public.ai_record_key_test(text, boolean, text, jsonb) TO service_role;

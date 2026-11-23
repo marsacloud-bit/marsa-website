@@ -813,3 +813,27 @@ button.ocr-mx-recent-open { background: none; border: 0; padding: 0; font: inher
 .ocr-mx-rs-vals { display: grid; gap: 2px; margin-top: 4px; overflow-wrap: anywhere; }
 .ocr-mx-rs-vals em { font-style: normal; color: var(--text-muted, #64748b); }
 .ocr-history li.is-current { background: rgba(20, 163, 168, .08); box-shadow: inset -3px 0 0 var(--teal, #14a3a8); }
+
+/* ---- ocr.html#new-tx (owner note 2026-11-20, stage 3أ): client first, then the documents; the declaration step locked ---- */
+.ocr-nt { border: 1px solid var(--border); border-radius: 12px; background: #FAFBFA; padding: 16px; margin-block: 12px 16px; }
+.ocr-nt-h { margin: 0 0 4px; font-size: 1.15rem; font-weight: 800; }
+.ocr-nt-steps { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.ocr-nt-step { display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
+.ocr-nt-num {
+  flex: none; inline-size: 32px; block-size: 32px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 800; border: 2px solid var(--border-strong, #cfd6dd); background: #fff; color: var(--muted);
+}
+.ocr-nt-step.is-active .ocr-nt-num { border-color: var(--teal); color: var(--teal); }
+.ocr-nt-step.is-done .ocr-nt-num { border-color: #15803d; background: #15803d; color: #fff; }
+.ocr-nt-step.is-locked > .ocr-nt-num, .ocr-nt-step.is-waiting > .ocr-nt-num, .ocr-nt-step.is-locked .ocr-nt-title, .ocr-nt-step.is-waiting .ocr-nt-title,
+.ocr-nt-step.is-locked .btn, .ocr-nt-step.is-locked .form-hint, .ocr-nt-step.is-waiting .form-hint { opacity: .65; }   /* the storage reminder stays at full strength */
+.ocr-nt-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.ocr-nt-title { font-size: var(--fs-sm, .95rem); }
+.ocr-nt-pick { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px; max-inline-size: 720px; }
+.ocr-nt-pick .form-hint { grid-column: 1 / -1; margin: 0; }
+@media (max-width: 640px) { .ocr-nt-pick { grid-template-columns: 1fr; } }
+.ocr-nt-client { display: flex; flex-direction: column; gap: 6px; margin-block-end: 8px; }
+.ocr-nt-client-name { margin: 0; font-weight: 800; }
+.ocr-nt-match { margin: 0; }
+.ocr-nt-mark { font-weight: 800; }
+.ocr-nt-remind { margin: 4px 0 0; padding: 6px 10px; border-radius: 8px; background: #FEF6D8; border: 1px solid #F2D675; color: #6B5300; font-size: var(--fs-sm, .9rem); }

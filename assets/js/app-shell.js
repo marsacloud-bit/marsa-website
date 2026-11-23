@@ -167,7 +167,8 @@
       { id: 'alerts', key: 'ops.nav_alerts', href: 'admin.html#alerts', icon: 'bell', allow: R.staff, badge: 'alerts' },
       { id: 'schedule', key: 'ops.nav_schedule', href: 'admin.html#schedule', icon: 'calendar', allow: R.staff },
       { id: 'exceptions', key: 'ops.nav_exceptions', href: 'admin.html#exceptions', icon: 'flag', allow: R.staff },
-      { id: 'parties', key: 'ops.nav_parties', href: 'admin.html#parties', icon: 'truck', allow: R.staff }
+      { id: 'parties', key: 'ops.nav_parties', href: 'admin.html#parties', icon: 'truck', allow: R.staff },
+      { id: 'drivers', key: 'ops.nav_drivers', href: 'admin.html#drivers', icon: 'user', allow: R.staff }
     ] },
     // G6a reports & advanced search (assets/js/rpt/*.js views, allow 'staff')
     { id: 'insight', key: 'rpt.nav_group', items: [
@@ -232,7 +233,7 @@
   var PAGE_NAV = { platform: 'platform', ocr: 'ocr', bulk: 'bulk', portal: 'portal', help: 'help', offline: null };
   var OPS_NAV = {
     ar: { 'ops.nav_group': 'العمليات', 'ops.nav_alerts': 'التنبيهات', 'ops.nav_schedule': 'الجدول اليومي', 'ops.nav_exceptions': 'الاستثناءات',
-      'ops.nav_parties': 'الجهات والناقلون', 'ops.nav_requirements': 'قواعد المستندات', 'ops.nav_alerts_badge': 'التنبيهات المفتوحة: {n}',
+      'ops.nav_parties': 'الجهات والناقلون', 'ops.nav_drivers': 'السائقون', 'ops.nav_requirements': 'قواعد المستندات', 'ops.nav_alerts_badge': 'التنبيهات المفتوحة: {n}',
       'fin.nav_group': 'المالية التشغيلية', 'fin.nav_costs': 'فواتير الموردين', 'fin.nav_payables': 'المستحقات والمدفوعات',
       'fin.nav_margins': 'الهامش والتكاليف', 'fin.nav_demurrage': 'الأرضيات والغرامات',
       'pay.nav_payments': 'السدادات والمصروفات', 'pay.nav_custody': 'عهدة العملاء',
@@ -245,7 +246,7 @@
       'msg.nav_templates': 'القوالب والتعليمات', 'msg.nav_channels': 'القنوات', 'msg.nav_inbox_badge': 'محادثات غير مسندة أو تحتاج مراجعة ربط: {n}',
       'app.grp_support': 'المساعدة', 'app.nav_help': 'دليل الاستخدام' },
     en: { 'ops.nav_group': 'Operations', 'ops.nav_alerts': 'Alerts', 'ops.nav_schedule': 'Daily schedule', 'ops.nav_exceptions': 'Exceptions',
-      'ops.nav_parties': 'Parties & carriers', 'ops.nav_requirements': 'Document rules', 'ops.nav_alerts_badge': 'Open alerts: {n}',
+      'ops.nav_parties': 'Parties & carriers', 'ops.nav_drivers': 'Drivers', 'ops.nav_requirements': 'Document rules', 'ops.nav_alerts_badge': 'Open alerts: {n}',
       'fin.nav_group': 'Operating finance', 'fin.nav_costs': 'Supplier invoices', 'fin.nav_payables': 'Payables & payments',
       'fin.nav_margins': 'Margins & costs', 'fin.nav_demurrage': 'Storage & demurrage',
       'pay.nav_payments': 'Payments & disbursements', 'pay.nav_custody': 'Client custody',
