@@ -479,3 +479,7 @@ html[lang="en"] .h-word small { direction: ltr; }
 .h-sbox:nth-child(odd) rect { fill: rgba(91, 75, 168, .22); }
 .h-story-stamp { opacity: 0; }
 .h-story-cable { fill: rgba(38, 33, 47, .25); }
+/* owner 2026-11-24 (2): the mark on the RIGHT of «Blue Sea», the words tucked against it — same in both languages */
+.h-logo { direction: ltr; flex-direction: row-reverse; gap: 6px; }
+.h-word { text-align: right; align-items: flex-end; }
+.h-word small { text-align: right; }
