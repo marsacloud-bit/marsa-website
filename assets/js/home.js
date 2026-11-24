@@ -389,6 +389,83 @@
     doc.addEventListener('visibilitychange', function () { if (doc.hidden) liveStop(); });
   }
 
+  /* ---------------- the port story: the ship docks, the crane unloads EVERY container one after the other into the
+     customs yard, «تم الفسح», the containers leave, the ship sails on — then again (owner 2026-11-24) ---------------- */
+  function initPort() {
+    var svgEl = doc.querySelector('[data-h-port]');
+    if (!svgEl || REDUCED) return;
+    var fleet = svgEl.querySelector('[data-h-fleet]'), trolley = svgEl.querySelector('[data-h-trolley]');
+    var cable = svgEl.querySelector('[data-h-cable]'), stamp = svgEl.querySelector('[data-h-stamp]');
+    var boxes = Array.prototype.slice.call(svgEl.querySelectorAll('.h-sbox'));
+    if (!fleet || !trolley || !cable || !boxes.length) return;
+    var T0 = 897, CAB = 29, LIFT = 30;                                   // trolley centre, cable top, carried box top
+    var COLS = [1112, 1148, 1184, 1220], ROWS = [88, 72];                // the yard: 4 columns x 2 rows
+    var st = { seen: false };
+    function ease(p) { return p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2; }
+    function waitSeen() {
+      return new Promise(function (res) { (function chk() { if (st.seen && !doc.hidden) res(); else setTimeout(chk, 400); })(); });
+    }
+    function tween(ms, fn) {
+      return waitSeen().then(function () {
+        return new Promise(function (res) {
+          var t0 = null;
+          function step(ts) {
+            if (t0 == null) t0 = ts;
+            var p = Math.min(1, (ts - t0) / ms);
+            fn(ease(p));
+            if (p < 1) requestAnimationFrame(step); else res();
+          }
+          requestAnimationFrame(step);
+        });
+      });
+    }
+    function wait(ms) { return waitSeen().then(function () { return new Promise(function (r) { setTimeout(r, ms); }); }); }
+    function lerp(a, b, p) { return a + (b - a) * p; }
+    var tx = 0, ch = 3;   // trolley offset, cable height
+    function setTrolley(v) { tx = v; trolley.setAttribute('transform', 'translate(' + v + ' 0)'); }
+    function setCable(h) { ch = h; cable.setAttribute('height', String(Math.max(1, h))); }
+    function setBox(b, dx, dy, op) { b._dx = dx; b._dy = dy; b.setAttribute('transform', 'translate(' + dx + ' ' + dy + ')'); if (op != null) b.style.opacity = op; }
+    function setFleet(x) { fleet.setAttribute('transform', 'translate(' + x + ' 0)'); }
+    function setStamp(s, op) { stamp.style.opacity = op; stamp.setAttribute('transform', 'translate(1166 44) scale(' + s + ') translate(-1166 -44)'); }
+    // unload order: the top row first, then the bottom row
+    var order = boxes.slice().sort(function (a, b) { return Number(a.getAttribute('data-y')) - Number(b.getAttribute('data-y')) || Number(a.getAttribute('data-x')) - Number(b.getAttribute('data-x')); });
+    function reset() {
+      boxes.forEach(function (b) { setBox(b, 0, 0, 1); });
+      setTrolley(0); setCable(3); setStamp(0.3, 0); setFleet(-1000);
+    }
+    function unload(b, k) {
+      var bx = Number(b.getAttribute('data-x')), by = Number(b.getAttribute('data-y'));
+      var sx = COLS[k % COLS.length], sy = ROWS[Math.floor(k / COLS.length) % ROWS.length];
+      var over = bx + 15 - T0, slot = sx + 15 - T0;
+      var t1 = tx, c1 = ch;
+      return tween(520, function (p) { setTrolley(lerp(t1, over, p)); setCable(lerp(c1, 3, p)); })                 // over the box
+        .then(function () { return tween(340, function (p) { setCable(lerp(3, by - CAB, p)); }); })                // cable down
+        .then(function () { return tween(420, function (p) { setBox(b, 0, lerp(0, LIFT - by, p)); setCable(lerp(by - CAB, LIFT - CAB, p)); }); })   // lift
+        .then(function () { return tween(680, function (p) { setTrolley(lerp(over, slot, p)); setBox(b, lerp(0, sx - bx, p), LIFT - by); }); })      // carry
+        .then(function () { return tween(420, function (p) { setBox(b, sx - bx, lerp(LIFT - by, sy - by, p)); setCable(lerp(LIFT - CAB, sy - CAB, p)); }); })   // set down
+        .then(function () { return tween(260, function (p) { setCable(lerp(sy - CAB, 3, p)); }); });              // cable up
+    }
+    function cycle() {
+      reset();
+      return tween(4200, function (p) { setFleet(lerp(-1000, 0, 1 - Math.pow(1 - p, 3))); })                      // sail in, slow down
+        .then(function () { return wait(500); })
+        .then(function () { return order.reduce(function (pr, b, k) { return pr.then(function () { return unload(b, k); }); }, Promise.resolve()); })
+        .then(function () { var t1 = tx; return tween(500, function (p) { setTrolley(lerp(t1, 0, p)); }); })
+        .then(function () { return tween(520, function (p) { setStamp(p < 0.7 ? lerp(0.3, 1.18, p / 0.7) : lerp(1.18, 1, (p - 0.7) / 0.3), Math.min(1, p * 2)); }); })   // «تم الفسح»
+        .then(function () { return wait(1800); })
+        .then(function () { return tween(800, function (p) { boxes.forEach(function (b) { b.style.opacity = String(1 - p); }); setStamp(1, 1 - p); }); })   // cleared, gone
+        .then(function () { return wait(400); })
+        .then(function () { return tween(3800, function (p) { setFleet(lerp(0, -1100, p * p)); }); })              // the empty ship sails on
+        .then(function () { return wait(600); })
+        .then(cycle);
+    }
+    if (IO) {
+      new IntersectionObserver(function (es) { es.forEach(function (e) { st.seen = e.isIntersecting; }); }, { threshold: 0.05 }).observe(svgEl);
+    } else st.seen = true;
+    reset();
+    cycle();
+  }
+
   initMarquee();
   paint();
   paintMarquee();
@@ -397,5 +474,6 @@
   initCounters();
   initJourney();
   initLive();
+  initPort();
   window.addEventListener('marsa:langchange', function () { setTimeout(function () { paintMarquee(); revealPlans(); repaintJourney(); if (LIVE.rows) drawRows(false); }, 0); });
 })();

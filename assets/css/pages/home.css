@@ -377,7 +377,6 @@ body.home { margin: 0; font-family: Cairo, system-ui, sans-serif; color: var(--h
 .h-float-foot.is-wait { opacity: 0; transform: translateY(6px); }
 .h-cursor { position: absolute; z-index: 5; width: 22px; height: 22px; top: 10%; inset-inline-start: 30%; pointer-events: none; animation: h-cursor 12s ease-in-out infinite; }
 .h-cursor svg { width: 100%; height: 100%; fill: #fff; stroke: var(--h-dark); stroke-width: 1.6; stroke-linejoin: round; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .25)); }
-[dir="rtl"] .h-cursor svg { transform: scaleX(-1); }
 .h-cursor i { position: absolute; top: 0; inset-inline-start: 0; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--h-accent); opacity: 0; transform: scale(.3); animation: h-click 12s ease-out infinite; }
 @keyframes h-cursor {
   0%, 6% { top: 60%; inset-inline-start: 70%; }
@@ -445,14 +444,6 @@ body.home { margin: 0; font-family: Cairo, system-ui, sans-serif; color: var(--h
 [dir="rtl"] .h-port-txt { transform-box: fill-box; transform-origin: center; transform: scaleX(-1); }
 .h-port-flag { transform-box: fill-box; transform-origin: left center; animation: h-flag 2.4s ease-in-out infinite; fill: rgba(91, 75, 168, .35) !important; }
 @keyframes h-flag { 0%, 100% { transform: skewY(0); } 50% { transform: skewY(8deg); } }
-.h-story-ship { animation: h-st-ship 26s linear infinite; }
-.h-story-rock { transform-box: fill-box; transform-origin: 50% 90%; animation: h-rock 4.5s ease-in-out infinite; }
-.h-story-box { animation: h-st-box 26s linear infinite; }
-.h-story-trolley { animation: h-st-trolley 26s ease-in-out infinite; }
-.h-story-cable { transform-box: fill-box; transform-origin: top; animation: h-st-cable 26s ease-in-out infinite; }
-.h-story-truck { animation: h-st-truck 26s ease-in-out infinite; }
-.h-story-stamp { transform-box: fill-box; transform-origin: center; animation: h-st-stamp 26s ease-out infinite; }
-.h-port-bar { transform-box: fill-box; transform-origin: right center; animation: h-st-bar 26s ease-in-out infinite; }
 @keyframes h-st-ship {
   0% { transform: translateX(-1000px); opacity: 0; } 2% { opacity: 1; } 24% { transform: translateX(0); }
   82% { transform: translateX(0); } 97% { transform: translateX(-1050px); opacity: 1; } 98%, 100% { transform: translateX(-1050px); opacity: 0; } }
@@ -482,3 +473,9 @@ body.home { margin: 0; font-family: Cairo, system-ui, sans-serif; color: var(--h
 .h-word { text-align: left; }
 .h-word small { direction: rtl; unicode-bidi: isolate; text-align: left; }
 html[lang="en"] .h-word small { direction: ltr; }
+
+/* the port story is driven by assets/js/home.js: the crane unloads every container of the ship one after the other */
+.h-sbox rect { fill: rgba(91, 75, 168, .3); }
+.h-sbox:nth-child(odd) rect { fill: rgba(91, 75, 168, .22); }
+.h-story-stamp { opacity: 0; }
+.h-story-cable { fill: rgba(38, 33, 47, .25); }
