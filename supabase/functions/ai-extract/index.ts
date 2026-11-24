@@ -101,6 +101,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return ready();
   }
 
+  // the office's OWN key of one provider (no platform fallback) for its connection test → found or not; the key stays here
+  async function loadOrgKey(org: string, provider: string): Promise<boolean> {
+    if (PROVIDERS.indexOf(provider) === -1) return false;
+    keys[provider] = '';
+    try {
+      const r = await service().rpc('ai_org_provider_key', { p_org: org, p_provider: provider });
+      if (r && !r.error && typeof r.data === 'string' && r.data !== '') keys[provider] = r.data;
+    } catch (_e) { /* no key */ }
+    return keys[provider] !== '';
+  }
+
   // one reading call to OpenAI / Gemini → {status, json}. Rejects with {notSent: true} when nothing was sent, or with
   // the abort / network error (the call may have run).
   async function send(provider: string, model: string, body: unknown, o: { deadlineMs: number }): Promise<{ status: number; json: unknown }> {
@@ -158,6 +169,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     sdk: Anthropic,
     ready: { openai: keys.openai !== '', gemini: keys.gemini !== '' },
     loadKeys,
+    loadOrgKey,
     send,
     listModels,
     log: (text: string) => console.error(text),

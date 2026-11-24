@@ -142,7 +142,7 @@ async function secFile() {
     !/aal2|mfa_gated_roles\s*\(\)\s*RETURNS|mfa_required_for\s*\(uuid\)\s*RETURNS/.test(s.replace(/^--.*$/gm, '')) || 'aal2 found');
   await check('bucket: images only, no SVG', () => /ARRAY\['image\/png','image\/jpeg','image\/webp'\]/.test(s) && !/svg/i.test(s.replace(/^--.*$/gm, '')) || 'mime list');
   // later phases (each has its own suite) follow it, in order
-  const LATER_PHASES = ['20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261210000100_org_served_ports.sql'];
+  const LATER_PHASES = ['20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261210000100_org_served_ports.sql', '20261211000100_site_profile.sql', '20261212000100_org_ai_keys.sql'];
   await check('this file is the latest migration (later phases excepted)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && J(later) === J(LATER_PHASES)) || 'later ' + J(later);
@@ -186,7 +186,8 @@ async function secRerun() {
   });
   await check('policies: the four marsa_org_assets_* on storage.objects, TO authenticated only', async () => {
     const r = await q(`SELECT policyname, cmd, roles::text roles FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects'
-                         AND policyname LIKE 'marsa_org_assets_%' ORDER BY 1`);
+                         AND policyname LIKE 'marsa_org_assets_%' AND policyname <> 'marsa_org_assets_site_logo' ORDER BY 1`);
+    // marsa_org_assets_site_logo (20261211000100, TO anon: only the current logo of an active office) — site-profile-tests.js
     return (J(r.map(x => x.policyname + ':' + x.cmd)) === J(['marsa_org_assets_delete:DELETE', 'marsa_org_assets_insert:INSERT', 'marsa_org_assets_read:SELECT', 'marsa_org_assets_update:UPDATE'])
       && r.every(x => x.roles === '{authenticated}')) || J(r);
   });

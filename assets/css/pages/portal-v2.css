@@ -1,0 +1,126 @@
+/* =====================================================================
+   portal.html — the client page in the new calm design (owner 2026-11-23). <html class="portal-v2">.
+   Same family as the sign-in page (login-v2.css): a small top bar (office brand, back to the site, language),
+   a calm welcome band (the old page hero: title, the client's name, sign-out), then ONE white work card with the
+   tabs as a segmented control. The office-site header / footer stay in the markup but are hidden here
+   (hide, don't delete). One accent (the office colour from site-profile.js); meaning colours unchanged.
+   ===================================================================== */
+.portal-v2 body {
+  --accent: #5B4BA8; --accent-strong: #4A3C91; --accent-soft: #EFECF8; --accent-line: #D9D3EF; --on-accent: #fff;
+  --blue: var(--accent); --teal: var(--accent); --navy: #3A3344; --navy-dark: #1F1C24;
+  --ring: 0 0 0 3px var(--accent-line);
+  --border: #E7E3DD; --border-strong: #D6D0C7; --muted: #67626E; --pt-bg: #F7F5F2; --info-bg: var(--accent-soft);
+  background: var(--pt-bg); min-height: 100vh; display: flex; flex-direction: column;
+}
+.portal-v2 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* the office-website chrome is not used on this page */
+.portal-v2 .topbar, .portal-v2 .site-header, .portal-v2 .drawer, .portal-v2 .drawer-backdrop,
+.portal-v2 .site-footer, .portal-v2 .to-top, .portal-v2 .page-hero .breadcrumb, .portal-v2 .page-hero-wave { display: none !important; }
+
+/* top bar */
+.pt-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; max-width: 1280px;
+  margin: 0 auto; padding: 12px clamp(16px, 3vw, 32px); }
+.pt-brand { display: inline-flex; align-items: center; min-height: 44px; color: var(--navy-dark); font-weight: 800; font-size: 1.1rem; text-decoration: none; }
+.pt-brand img { display: block; height: 44px; width: auto; }
+.pt-top-actions { display: flex; align-items: center; gap: 8px; }
+.pt-back { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px; border-radius: 10px; color: var(--muted);
+  font-size: .9rem; font-weight: 700; text-decoration: none; }
+.pt-back:hover { background: #fff; color: var(--accent-strong); }
+.pt-back .icon { width: 18px; height: 18px; }
+[dir="ltr"] .pt-back .icon { transform: scaleX(-1); }
+.portal-v2 .pt-lang { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border);
+  background: #fff; color: var(--navy-dark); font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; }
+.portal-v2 .pt-lang:hover { border-color: var(--accent-line); color: var(--accent-strong); }
+
+/* the page body: one column, the full width up to 1280px */
+.portal-v2 main { flex: 1; width: 100%; max-width: 1280px; margin: 0 auto; padding: 0 clamp(16px, 3vw, 32px) 40px; }
+.portal-v2 main .container { max-width: none; padding: 0; }
+
+/* welcome band (the old page hero, restyled) */
+.portal-v2 .page-hero { position: relative; overflow: hidden; margin: 0 0 18px; padding: clamp(20px, 3vw, 30px) clamp(20px, 3vw, 32px);
+  border-radius: 20px; background: var(--accent-soft); color: var(--navy-dark); text-align: start; }
+.portal-v2 .page-hero::after { content: ""; position: absolute; inset-block-start: -90px; inset-inline-end: -70px; width: 240px; height: 240px;
+  border-radius: 50%; background: var(--accent-line); opacity: .55; pointer-events: none; }
+.portal-v2 .page-hero .container { position: relative; z-index: 1; }
+.pt-kicker { margin: 0 0 4px; color: var(--accent-strong); font-weight: 800; font-size: .88rem; }
+.portal-v2 .page-hero h1 { margin: 0 0 6px; color: var(--navy-dark); font-size: clamp(1.5rem, 2.6vw, 2rem); line-height: 1.3; }
+.portal-v2 .page-hero .lead { margin: 0; max-width: 70ch; color: #4A4452; font-size: .98rem; line-height: 1.8; }
+.portal-v2 .portal-user { margin-top: 14px; color: var(--navy-dark); }
+.portal-v2 .portal-user-name { padding: 6px 12px; border-radius: 999px; background: #fff; }
+.portal-v2 .portal-user-name .icon { color: var(--accent); }
+.portal-v2 .portal-user [data-portal-email] { opacity: 1; color: var(--muted); }
+.portal-v2 .portal-user .btn-outline-white { color: var(--navy-dark); background: #fff; border-color: var(--border); }
+.portal-v2 .portal-user .btn-outline-white:hover { color: var(--accent-strong); border-color: var(--accent-line); background: #fff; }
+.portal-v2 .portal-user .shell-org label { color: var(--muted); }
+.portal-v2 .portal-user [data-shell-search] .shell-kbd { border-color: var(--border); }
+
+/* the work card */
+.portal-v2 .section.overlap-up { margin: 0; padding: 0; }
+.portal-v2 .portal-card { border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 10px 30px rgba(40, 32, 60, .06); background: #fff; }
+
+/* tabs: a segmented control, the counts as soft pills */
+.portal-v2 .portal-tabs { background: var(--pt-bg); border: 0; border-radius: 14px; padding: 5px; gap: 4px; }
+.portal-v2 .portal-tabs .tab { border-radius: 10px; color: var(--muted); }
+.portal-v2 .portal-tabs .tab:hover { color: var(--accent-strong); }
+.portal-v2 .portal-tabs .tab[aria-selected="true"] { background: #fff; color: var(--accent-strong); box-shadow: 0 1px 3px rgba(40, 32, 60, .12); }
+.portal-v2 .portal-count { background: var(--accent-soft); color: var(--accent-strong); }
+.portal-v2 .tab[aria-selected="true"] .portal-count { background: var(--accent); color: var(--on-accent); }
+
+/* buttons, fields, tables, links in the one accent */
+.portal-v2 .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); box-shadow: none; }
+.portal-v2 .btn-primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); box-shadow: none; }
+.portal-v2 .form-control:focus { border-color: var(--accent); box-shadow: var(--ring); }
+.portal-v2 .form-control[readonly] { background: var(--pt-bg); }
+.portal-v2 .table thead th { background: var(--pt-bg); color: var(--navy); }
+.portal-v2 .portal-card a:not(.btn) { color: var(--accent-strong); }
+.portal-v2 .portal-card code { background: var(--accent-soft); }
+.portal-v2 .alert:not(.alert-success):not(.alert-warning):not(.alert-danger) { border-color: var(--accent-line); }
+.portal-v2 .portal-detail-grid .card { border: 1px solid var(--border); border-radius: 14px; box-shadow: none; }
+
+@media (max-width: 480px) {
+  .pt-back span { display: none; }
+  .pt-back { padding: 0 8px; }
+  .portal-v2 .page-hero .lead { display: none; }
+  .portal-v2 .page-hero::after { display: none; }
+}
+
+/* == the stage line («خط سير المعاملة», owner 2026-11-23) ==
+   Across the top of a transaction: done stages with a tick, the current one ringed, the rest faded.
+   The configured chain comes from status_labels (portal.js stagesFor); vertical on narrow screens. */
+.tx-line { padding: 20px 22px; margin-bottom: 20px; border: 1px solid var(--border); border-radius: 16px; box-shadow: none; background: #fff; }
+.tx-line-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.tx-line-head h4 { margin: 0; font-size: var(--fs-md); }
+.tx-line-count { padding: 4px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-strong); font-weight: 800; font-size: .85rem; white-space: nowrap; }
+.tx-line-now { margin: 6px 0 20px; color: var(--muted); }
+.tx-line-now strong { color: var(--accent-strong); }
+.tx-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+.tx-step { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 0 4px; text-align: center; }
+/* the connector from the previous stage's dot to this one */
+.tx-step::before { content: ""; position: absolute; top: 15px; inset-inline-end: 50%; width: 100%; height: 3px; background: var(--border); }
+.tx-step:first-child::before { display: none; }
+.tx-step.is-done::before, .tx-step.is-current::before { background: var(--accent); }
+.tx-step-dot { position: relative; z-index: 1; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%;
+  background: #fff; border: 2px solid var(--border-strong); }
+.tx-step-dot .icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 3; }
+.tx-step.is-done .tx-step-dot { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.tx-step.is-current .tx-step-dot { border: 3px solid var(--accent); box-shadow: 0 0 0 6px var(--accent-soft); }
+.tx-step.is-current .tx-step-dot::after { content: ""; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); }
+.tx-step-name { font-size: .82rem; font-weight: 700; line-height: 1.4; color: var(--navy-dark); }
+.tx-step.is-current .tx-step-name { color: var(--accent-strong); font-weight: 800; }
+.tx-step.is-todo .tx-step-name { color: var(--muted); font-weight: 600; }
+/* with the line on top, the old vertical stage list in the side column is hidden (kept in the page) */
+.portal-v2 [data-stage-panel="line"] { display: none; }
+
+/* the list: a short bar and «المرحلة 4 من 10» under the stage badge */
+.tx-mini { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.tx-mini-bar { flex: none; width: 70px; height: 6px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.tx-mini-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.tx-mini-text { font-size: .75rem; color: var(--muted); white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .tx-steps { grid-auto-flow: row; grid-auto-columns: auto; }
+  .tx-step { flex-direction: row; align-items: center; gap: 12px; padding: 0 0 14px; text-align: start; }
+  .tx-step::before { top: auto; bottom: calc(100% - 16px); inset-inline-end: auto; inset-inline-start: 14.5px; width: 3px; height: 100%; }
+  .tx-step-name { font-size: .9rem; }
+}

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl" class="no-js" data-i18n-page>
+<html lang="ar" dir="rtl" class="no-js login-v2" data-i18n-page>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -23,11 +23,23 @@
   <link rel="stylesheet" href="assets/css/style.css">
   <link rel="stylesheet" href="assets/css/app.css">
   <link rel="stylesheet" href="assets/css/pages/login.css">
+  <link rel="stylesheet" href="assets/css/pages/login-v2.css">
 </head>
 <body data-page="login">
   <a class="skip-link" href="#main">تخطَّ إلى المحتوى</a>
 
-  <!-- ============ HEADER (shared) ============ -->
+  <!-- ============ LOGIN v2 top bar (owner 2026-11-23): the office brand, back to the site, language ============ -->
+  <div class="lg-top">
+    <a class="lg-brand" href="index.html" data-site-brand aria-label="مرسى - الصفحة الرئيسية" data-i18n-attr="aria-label:nav.homeAria">
+      <img data-site-logo src="assets/img/logo-header.png" alt="مرسى MARSA" width="72" height="50" data-i18n-attr="alt:nav.logoAlt">
+    </a>
+    <div class="lg-top-actions">
+      <a class="lg-back" href="index.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span data-i18n="login.v2Back">العودة إلى الموقع</span></a>
+      <button class="btn-lang lg-lang" type="button" data-lang-toggle>English</button>
+    </div>
+  </div>
+
+  <!-- ============ HEADER (shared; hidden on login v2) ============ -->
   <div class="topbar">
     <div class="container">
       <span>منصة سعودية للتخليص الجمركي والشحن أونلاين</span>
@@ -123,8 +135,15 @@
             <li aria-current="page" data-i18n="login.pageTitle">الدخول إلى المنصة</li>
           </ol>
         </nav>
-        <h1 id="page-title" data-i18n="login.pageTitle">الدخول إلى المنصة</h1>
-        <p class="lead" data-i18n="login.lead">سجّل الدخول إلى بوابة العملاء لمتابعة طلباتك ومعاملاتك ومستنداتك، أو إلى بوابة الموظفين لإدارة العمليات بحسب صلاحياتك.</p>
+        <p class="lg-kicker" data-i18n="login.v2Kicker">تسجيل الدخول</p>
+        <h1 id="page-title" data-i18n="login.v2Hello">أهلًا بك من جديد</h1>
+        <p class="lead lg-lead" data-i18n="login.v2Lead">ادخل لمتابعة معاملاتك ومستنداتك، أو لإدارة عمل المكتب بحسب صلاحياتك.</p>
+        <ul class="lg-points">
+          <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18M3 12h18M3 17h12"/></svg><span data-i18n="login.v2Pt1">حالة كل معاملة ومرحلتها في مكان واحد</span></li>
+          <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg><span data-i18n="login.v2Pt2">المستندات والفواتير محفوظة ومرتبة</span></li>
+          <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg><span data-i18n="login.v2Pt3">دخول آمن، وكل حساب يرى ما يخصه فقط</span></li>
+        </ul>
+        <p class="lead" hidden data-i18n="login.lead">سجّل الدخول إلى بوابة العملاء لمتابعة طلباتك ومعاملاتك ومستنداتك، أو إلى بوابة الموظفين لإدارة العمليات بحسب صلاحياتك.</p>
       </div>
       <svg class="page-hero-wave" viewBox="0 0 1440 120" preserveAspectRatio="none" aria-hidden="true">
         <path class="w-back" d="M0,40 C180,90 360,10 560,40 C760,70 900,20 1100,35 C1260,48 1360,70 1440,50 L1440,120 L0,120 Z"/>
@@ -584,5 +603,6 @@
   <script src="assets/js/pwa.js" defer></script>
   <script src="assets/js/mfa.js" defer></script>
   <script src="assets/js/auth.js" defer></script>
+  <script src="assets/js/site-profile.js" defer></script>
 </body>
 </html>

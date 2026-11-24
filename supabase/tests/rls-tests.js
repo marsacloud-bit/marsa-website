@@ -777,10 +777,12 @@ async function main() {
     const bad = r.filter(x => !(x.table_name === 'status_labels' && x.privilege_type === 'SELECT'));
     return bad.length === 0 || bad.map(x => x.table_name + ':' + x.privilege_type).join(', ');
   });
-  await check('no policy targets anon/public except status_labels_read', async () => {
+  await check('no policy targets anon/public except status_labels_read and the current office logo (storage, 20261211000100)', async () => {
     const r = await q(`SELECT schemaname, tablename, policyname, roles::text roles FROM pg_policies
                         WHERE schemaname IN ('public','storage') AND (roles::text ~ 'anon' OR roles::text ~ 'public')`);
-    const bad = r.filter(x => x.policyname !== 'status_labels_read');
+    // marsa_org_assets_site_logo: a visitor reads only an active office's current logo (public.site_logo_visible)
+    const bad = r.filter(x => x.policyname !== 'status_labels_read'
+      && !(x.schemaname === 'storage' && x.policyname === 'marsa_org_assets_site_logo' && x.roles === '{anon}'));
     return bad.length === 0 || bad.map(x => x.tablename + '.' + x.policyname + ' ' + x.roles).join(', ');
   });
   await check('G2 internal tables: no privilege at all for anon/authenticated', async () => {
@@ -790,12 +792,13 @@ async function main() {
                         WHERE grantee IN ('anon','authenticated') AND table_schema = 'public' AND table_name = ANY($1)`, [NO_API_TABLES]);
     return (r.length === 0 && c.length === 0) || r.concat(c).map(x => x.grantee + ':' + x.table_name + ':' + (x.privilege_type || 'column')).join(', ');
   });
+  // + site_profile, site_logo_visible (20261211000100): the office website reads the office identity / its current logo
   // + site_served_ports (20261210000100): the office website reads the ports the office chose (nothing else)
-  await check('anon can execute exactly the 7 public RPCs', async () => {
+  await check('anon can execute exactly the 9 public RPCs', async () => {
     const r = await q(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                         WHERE n.nspname = 'public' AND has_function_privilege('anon', p.oid, 'EXECUTE') ORDER BY 1`);
     const got = r.map(x => x.proname).join(',');
-    return got === 'health_check,invitation_preview,log_client_error,public_track,site_served_ports,submit_contact_message,submit_service_request' || 'anon may execute: ' + got;
+    return got === 'health_check,invitation_preview,log_client_error,public_track,site_logo_visible,site_profile,site_served_ports,submit_contact_message,submit_service_request' || 'anon may execute: ' + got;
   });
   await check('privilege tables carry the audit trigger (memberships, invitations, platform_admins)', async () => {
     const r = await q(`SELECT c.relname FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
@@ -873,6 +876,9 @@ async function main() {
       'platform_ai_providers', 'platform_ai_set_key', 'platform_ai_clear_key', 'platform_ai_save_provider',
       // served ports (20261210000100): the office's ports (staff read, admins save) + the public website read
       'get_served_ports', 'save_served_ports', 'site_served_ports',
+      'site_profile', 'site_logo_visible',
+      // office AI keys (20261212000100): the office's own key (org admins) + the platform key's tier (platform admins)
+      'org_ai_keys', 'org_ai_set_key', 'org_ai_clear_key', 'platform_ai_set_key_tier',
       // legacy pay (20261122000100): the payment register (four-eyes review, correct / void, attachments, the transaction panel,
       // the duplicate / transaction checks) and the client custody
       'record_payment_bundle', 'correct_payment', 'void_payment', 'review_payment', 'add_payment_documents', 'remove_payment_document',
@@ -897,7 +903,7 @@ async function main() {
       'legacy_import_commit', 'legacy_import_void', 'legacy_import_get_run', 'legacy_import_list_runs', 'legacy_import_list_rows',
       'legacy_import_skip_rows', 'legacy_import_queue_daftra', 'legacy_import_daftra_candidates'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 322) return 'expected list has ' + exp.length + ' names';   // + get_served_ports, save_served_ports, site_served_ports (20261210000100)   // + 4 platform_ai_* (20261209000100)   // + tx_storage_gate, approve_storage_override (20261206000100)
+    if (exp.length !== 328) return 'expected list has ' + exp.length + ' names';   // + org_ai_keys, org_ai_set_key, org_ai_clear_key, platform_ai_set_key_tier (20261212000100)   // + site_profile, site_logo_visible (20261211000100)   // + get_served_ports, save_served_ports, site_served_ports (20261210000100)   // + 4 platform_ai_* (20261209000100)   // + tx_storage_gate, approve_storage_override (20261206000100)
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');

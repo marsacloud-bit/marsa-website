@@ -261,7 +261,9 @@
   /* ---- Reveal on scroll + counters + progress bars (data-width="72") ---- */
   function initObservers() {
     var reveals = qsa('.reveal');
-    var counters = qsa('[data-count]');
+    // only numeric counters animate: data-count="tx" etc. are named slots (the client page's tab counts) filled by
+    // their own page code, and animating them overwrote the real count with 0
+    var counters = qsa('[data-count]').filter(function (el) { return isFinite(parseFloat(el.getAttribute('data-count'))); });
     var bars = qsa('.progress-bar[data-width]');
     var fill = function (b) { b.style.width = (parseFloat(b.getAttribute('data-width')) || 0) + '%'; };
     if (!('IntersectionObserver' in window)) {

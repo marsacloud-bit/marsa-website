@@ -48,6 +48,9 @@
     /* static markup (login.html): the same Arabic text as the markup, so t() also has it */
     breadcrumbAria: 'مسار التنقل',
     home: 'الرئيسية',
+    v2Back: 'العودة إلى الموقع', v2Kicker: 'تسجيل الدخول', v2Hello: 'أهلًا بك من جديد',
+    v2Lead: 'ادخل لمتابعة معاملاتك ومستنداتك، أو لإدارة عمل المكتب بحسب صلاحياتك.',
+    v2Pt1: 'حالة كل معاملة ومرحلتها في مكان واحد', v2Pt2: 'المستندات والفواتير محفوظة ومرتبة', v2Pt3: 'دخول آمن، وكل حساب يرى ما يخصه فقط',
     pageTitle: 'الدخول إلى المنصة',
     lead: 'سجّل الدخول إلى بوابة العملاء لمتابعة طلباتك ومعاملاتك ومستنداتك، أو إلى بوابة الموظفين لإدارة العمليات بحسب صلاحياتك.',
     formsTitle: 'نماذج الدخول',
@@ -226,6 +229,9 @@
     /* static markup (login.html) */
     breadcrumbAria: 'Breadcrumb',
     home: 'Home',
+    v2Back: 'Back to the website', v2Kicker: 'Sign in', v2Hello: 'Welcome back',
+    v2Lead: 'Sign in to follow your transactions and documents, or to run the office according to your role.',
+    v2Pt1: 'Every transaction and its stage in one place', v2Pt2: 'Documents and invoices kept in order', v2Pt3: 'Secure sign-in; each account sees only what is its own',
     pageTitle: 'Sign in to the platform',
     lead: 'Sign in to the client portal to follow your requests, transactions and documents, or to the staff console to manage operations according to your role.',
     formsTitle: 'Sign-in forms',

@@ -993,6 +993,7 @@
       var k = p.key || null;
       var keyCell = k
         ? [h('span', { class: 'badge badge-success', text: tr('aiKeySaved') }), ' ', h('span', { class: 'pf-mono', dir: 'ltr', text: '•••• ' + k.last4 }),
+           k.tier ? h('span', { class: 'badge ' + (k.tier === 'free' ? 'badge-warning' : 'badge-muted'), text: tr(k.tier === 'free' ? 'aiTierFree' : 'aiTierPaid') }) : null,
            h('span', { class: 'pf-sub', text: tr('aiKeySetAt', { when: fmtDate(k.set_at), who: k.set_by_name || '—' }) })]
         : [h('span', { class: 'badge badge-muted', text: tr('aiKeyNone') })];
       var test = !k ? h('span', { class: 'pf-sub', text: '—' }) : (k.tested_at
@@ -1039,16 +1040,35 @@
     f.input.setAttribute('autocomplete', 'new-password');
     d.body.appendChild(h('p', { class: 'text-muted text-sm', text: tr('aiKeyLead') }));
     d.body.appendChild(f.group);
+    // 20261212000100 (owner decision): a Gemini key is paid or free; a free one only after the warning is ticked
+    var tierFree = null, ack = null;
+    if (p.provider === 'gemini') {
+      var tierPaid = h('input', { type: 'radio', name: 'pf-ai-tier', value: 'paid' });
+      tierFree = h('input', { type: 'radio', name: 'pf-ai-tier', value: 'free' });
+      if (p.key && p.key.tier === 'free') tierFree.checked = true; else tierPaid.checked = true;
+      ack = h('input', { type: 'checkbox' });
+      var warn = h('div', null, [h('div', { class: 'alert alert-warning', text: tr('aiFreeWarning') }), h('label', { class: 'check' }, [ack, ' ', tr('aiFreeAck')])]);
+      var syncTier = function () { warn.hidden = !tierFree.checked; };
+      tierPaid.addEventListener('change', syncTier); tierFree.addEventListener('change', syncTier); syncTier();
+      d.body.appendChild(h('fieldset', { class: 'pf-ai-tier' }, [h('legend', { text: tr('aiTier') }),
+        h('label', { class: 'radio' }, [tierPaid, ' ', tr('aiTierPaid')]), h('label', { class: 'radio' }, [tierFree, ' ', tr('aiTierFree')])]));
+      d.body.appendChild(warn);
+    }
     var ok = footButtons(d, tr('aiKeySave'));
     d.form.addEventListener('submit', function (e) {
       e.preventDefault();
       d.error('');
       var key = inputVal(f.input);
       if (key.length < 20 || key.length > 400 || /\s/.test(key)) { d.error(tr('aiKeyBad')); return; }
+      var free = !!(tierFree && tierFree.checked);
+      if (free && !(ack && ack.checked)) { d.error(tr('aiFreeAckNeeded')); return; }
       busy(ok, true);
       api.platformAiSetKey(p.provider, key).then(function (r) {
-        busy(ok, false);
         f.input.value = '';
+        if (r.error || p.provider !== 'gemini' || typeof api.platformAiSetKeyTier !== 'function') return r;
+        return api.platformAiSetKeyTier(p.provider, free ? 'free' : 'paid', free).then(function (t) { return t.error ? t : r; });
+      }).then(function (r) {
+        busy(ok, false);
         if (r.error) { d.error(errText(r.error)); return; }
         d.close();
         showMsg(tr('aiKeySavedMsg', { name: aiName(p.provider) }), 'success');

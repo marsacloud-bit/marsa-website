@@ -177,7 +177,7 @@ async function secFile() {
   await check('no value list for transaction kinds: operation / mode / transaction_type / cargo_unit_type are format checks only', () =>
     (/operation\s+text CHECK \(operation ~ '\^\[a-z\]/.test(s) && /cargo_unit_type\s+text CHECK \(cargo_unit_type ~ /.test(s)
       && !/operation IN \(/.test(s.replace(/^--.*$/gm, ''))) || 'value list found');
-  const LATER_PHASES = ['20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261210000100_org_served_ports.sql'];
+  const LATER_PHASES = ['20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261210000100_org_served_ports.sql', '20261211000100_site_profile.sql', '20261212000100_org_ai_keys.sql'];
   await check('this file is the latest migration (later phases excepted)', () => J(migFiles().filter(f => f > MIG)) === J(LATER_PHASES) || 'later ' + J(migFiles().filter(f => f > MIG)));
   const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
   await check('all_migrations.sql: appended verbatim under its header (followed only by the later phases); the paste note names it', () => {

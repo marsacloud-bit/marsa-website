@@ -97,15 +97,17 @@ async function secFile() {
   const s = fs.readFileSync(MIG_FILE, 'utf8');
   await check('preflight on ai_keys, its schema_versions row, no BEGIN / COMMIT', () =>
     (/version = '20261209000100'/.test(s) && /VALUES \('20261210000100', 'org_served_ports'\)/.test(s) && !/^\s*(BEGIN|COMMIT)\s*;/im.test(s)) || 'conventions');
-  await check('all_migrations.sql: this file verbatim, last, in order, with its live-DB note', () => {
+  await check('all_migrations.sql: this file verbatim, in order, with its live-DB note', () => {
     const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
     const h = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(h);
     const order = (all.match(/^-- ===== migrations\/(\S+) =====$/gm) || []).map(l => l.split('/')[1].split(' ')[0]);
-    const body = all.slice(i + h.length);
+    const nx = all.indexOf('\n-- ===== migrations/', i + h.length);
+    const body = nx < 0 ? all.slice(i + h.length) : all.slice(i + h.length, nx);
     return (i > 0 && (body === s || body + '\n' === s) && all.indexOf(h, i + 1) < 0 && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles())) || 'bundle';
   });
-  await check('this file is the latest migration', () => migFiles().pop() === MIG || 'latest ' + migFiles().pop());
+  const LATER_PHASES = ['20261211000100_site_profile.sql', '20261212000100_org_ai_keys.sql'];
+  await check('this file is the latest migration (later phases excepted)', () => J(migFiles().filter(f => f > MIG)) === J(LATER_PHASES) || 'later ' + J(migFiles().filter(f => f > MIG)));
 }
 
 /* ------------------------------------------------------------------ 2. preflight + re-run */

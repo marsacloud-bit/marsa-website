@@ -21,6 +21,8 @@
     deps.loadKeys(org)     optional (22 Nov 2026): index.ts reads the keys saved on the platform page for this org (Vault,
                            service RPC ai_provider_keys) into its own request scope → {anthropic, openai, gemini} booleans
     deps.listModels(p)     optional: the provider's model list with the saved key → {status, models} (the key test)
+    deps.loadOrgKey(org, p) optional (23 Nov 2026): index.ts puts the office's OWN key of provider p (no platform
+                           fallback, service RPC ai_org_provider_key) in its request scope → boolean (a key was found)
     deps.now()             optional: the clock in ms (default Date.now; tests)
     deps.sdk               the Anthropic class (typed error classes for classifyCallError)
     deps.log(text)         fixed-text log line (never a token, a key, an error message or document content)
@@ -201,6 +203,39 @@
     return json({ provider, ok, note, models }, 200, origin);
   }
 
+  // owner 23 Nov 2026 — the connection test of an office's own key («مفتاح الذكاء الاصطناعي الخاص بالمكتب»): org admins
+  // only (the caller's own org_ai_keys RPC answers), the office's own key only (index.ts loadOrgKey: no platform fallback),
+  // the result recorded on the office key (ai_record_org_key_test, service role). → {ok, note, models}; never the key.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  async function orgKeyTest(body, userDb, d, X, origin, log) {
+    const provider = body && typeof body.provider === 'string' ? body.provider : '';
+    const org = body && typeof body.org_id === 'string' ? body.org_id : '';
+    if ((X.PROVIDERS || []).indexOf(provider) === -1 || !UUID_RE.test(org)) return fail('bad_request', 400, origin);
+    const who = await userDb.rpc('org_ai_keys', { p_org: org });
+    if (!who || who.error) {
+      const c = mrs(who && who.error);
+      return fail(c === 'MRS_MFA_REQUIRED' ? 'mfa_required' : 'forbidden', 403, origin);
+    }
+    if (typeof d.loadOrgKey !== 'function' || typeof d.listModels !== 'function') return fail('not_configured', 503, origin);
+    let found = false;
+    try { found = !!(await d.loadOrgKey(org, provider)); } catch (e) { log('ai-extract: office key lookup failed'); }
+    let r;
+    if (!found) r = { status: 0, models: [] };
+    else { try { r = await d.listModels(provider); } catch (e) { r = { status: 599, models: [] }; } }
+    const st = r && Number.isInteger(r.status) ? r.status : 599;
+    const ok = st === 200;
+    const note = ok ? 'ok' : (TEST_NOTES[st] || 'unreachable');
+    const models = (r && Array.isArray(r.models) ? r.models : []).filter(m => typeof m === 'string' && /^[a-z0-9][a-z0-9.-]{0,63}$/.test(m)).slice(0, 200);
+    log('ai-extract: office key test ' + provider + ' (' + note + ')');
+    if (found) {
+      try {
+        const rec = await d.serviceClient().rpc('ai_record_org_key_test', { p_org: org, p_provider: provider, p_ok: ok, p_note: note, p_models: models });
+        if (rec && rec.error) log('ai-extract: office key test record failed');
+      } catch (e) { log('ai-extract: office key test record failed'); }
+    }
+    return json({ provider, ok, note, models }, 200, origin);
+  }
+
   async function handleRequest(req, deps) {
     const d = deps || {};
     const now = typeof d.now === 'function' ? d.now : Date.now;
@@ -244,6 +279,8 @@
       const body = JSON.parse(raw);
       // owner 22 Nov 2026: the platform page's key test ({action: 'provider_test', provider}) — no file, no reading
       if (body && body.action === 'provider_test') { raw = ''; return await providerTest(body, userDb, d, X, origin, log); }
+      // owner 23 Nov 2026: the office settings' key test ({action: 'org_key_test', org_id, provider})
+      if (body && body.action === 'org_key_test') { raw = ''; return await orgKeyTest(body, userDb, d, X, origin, log); }
       // a non-PDF body above the image envelope is refused before the base64 is decoded
       if (raw.length > MAX_BODY && !(body && body.file && body.file.media_type === 'application/pdf')) throw new X.AiError('too_large', 413);
       v = X.validateRequest(body);

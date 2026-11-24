@@ -267,7 +267,7 @@ async function secFile() {
       && /OLD\.status = 'draft' AND NEW\.status = 'approved'/.test(s) && /SECURITY DEFINER SET search_path = ''/.test(s)) || 'conventions');
   const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
   // later phases (each has its own suite) follow it, in order
-  const LATER_PHASES = ['20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261210000100_org_served_ports.sql'];
+  const LATER_PHASES = ['20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261210000100_org_served_ports.sql', '20261211000100_site_profile.sql', '20261212000100_org_ai_keys.sql'];
   await check('all_migrations.sql: appended verbatim under its header (followed only by the later phases); the paste note names it', () => {
     const h = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(h);
