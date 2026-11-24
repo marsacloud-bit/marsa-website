@@ -398,16 +398,18 @@ body.home { margin: 0; font-family: Cairo, system-ui, sans-serif; color: var(--h
 /* the sea behind the hero (owner 2026-11-24: «شكل فيكتور خفيف … زي البحر وكأني في السفينة بتتحرك … شادو خفيف خالص»):
    faint waves rolling and a container ship sailing slowly across; decorative only */
 .h-sea { position: absolute; inset: auto 0 0 0; height: 230px; z-index: -1; pointer-events: none; overflow: hidden; }
-.h-wave { position: absolute; bottom: 0; inset-inline-start: 0; width: 200%; height: 90px; }
+.h-wave { position: absolute; bottom: 0; left: 0; width: 200%; height: 90px; }   /* physical left in RTL too: the roll never opens a gap */
 .h-wave path { fill: var(--h-accent); }
 .h-wave-back { height: 110px; opacity: .05; animation: h-wave-roll 38s linear infinite; }
-.h-wave-front { opacity: .07; animation: h-wave-roll 24s linear infinite reverse; }
+.h-wave-front { opacity: .07; animation: h-wave-roll 24s linear infinite; }
 @keyframes h-wave-roll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 .h-ship { position: absolute; bottom: 58px; width: 210px; height: auto; opacity: .08; fill: var(--h-dark); inset-inline-start: -240px;
   animation: h-sail 70s linear infinite; }
 .h-ship > g { transform-origin: 50% 90%; animation: h-rock 5s ease-in-out infinite; }
 .h-ship { transform: scaleX(-1); }   /* the bridge stays at the stern: the drawing faces left */
 [dir="rtl"] .h-ship { transform: none; }
+.h-ship-2 { width: 150px; bottom: 74px; opacity: .055; animation-delay: -35s; }
+.h-ship-2 > g { animation-duration: 6s; animation-delay: -2s; }
 @keyframes h-sail { from { inset-inline-start: -240px; } to { inset-inline-start: calc(100% + 40px); } }
 @keyframes h-rock { 0%, 100% { transform: translateY(0) rotate(-1.2deg); } 50% { transform: translateY(4px) rotate(1.2deg); } }
 .h-gull { position: absolute; width: 26px; fill: none; stroke: var(--h-dark); stroke-width: 1.6; stroke-linecap: round; opacity: .12; }
