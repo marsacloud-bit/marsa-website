@@ -300,6 +300,95 @@
   }
   function repaintJourney() { if (q('[data-h-track]')) { buildTrack(); if (J.i >= 0) show(J.i); paintPlay(); } }
 
+  /* ---------------- the hero panel picture, alive (fake data in a loop; paused off-screen) ---------------- */
+  var LIVE = { on: false, timers: [], ref: 231, pool: 0, rows: null };
+  var POOL = [['mC4', 'mAv4'], ['mC5', 'mAv5'], ['mC6', 'mAv6'], ['mC1', 'mAv1'], ['mC2', 'mAv2'], ['mC3', 'mAv3']];
+  var STATUS = { mS4: '', mS1: 'acc', mS2: 'warn', mS3: 'ok' };
+  var NEXT = { mS4: 'mS1', mS1: 'mS2', mS2: 'mS3', mS3: 'mS3' };
+  function liveRows() {
+    if (!LIVE.rows) LIVE.rows = [{ c: 'mC1', a: 'mAv1', ref: 231, s: 'mS1' }, { c: 'mC2', a: 'mAv2', ref: 230, s: 'mS2' }, { c: 'mC3', a: 'mAv3', ref: 229, s: 'mS3' }];
+    return LIVE.rows;
+  }
+  function rowNode(r, isNew) {
+    return el('div', { class: 'h-row' + (isNew ? ' is-new' : '') }, [
+      el('span', { class: 'h-av', text: t(r.a) }),
+      el('span', { class: 'who' }, [el('b', { text: t(r.c) }), el('small', { class: 'h-num', text: 'CC-2026-' + String(r.ref).padStart(6, '0') })]),
+      el('span', { class: 'h-chip ' + (STATUS[r.s] || 'acc'), text: t(r.s) })
+    ]);
+  }
+  function drawRows(newFirst) {
+    var box = doc.querySelector('[data-h-list]');
+    if (!box) return;
+    box.classList.add('is-live');
+    box.querySelectorAll('.h-row').forEach(function (n) { n.remove(); });
+    liveRows().forEach(function (r, i) { box.appendChild(rowNode(r, newFirst && i === 0)); });
+  }
+  function liveTick() {
+    // a new transaction arrives at the top; the others move one stage on; the oldest leaves
+    var rows = liveRows();
+    var p = POOL[LIVE.pool % POOL.length]; LIVE.pool++;
+    rows.forEach(function (r) { r.s = NEXT[r.s]; });
+    rows.unshift({ c: p[0], a: p[1], ref: ++LIVE.ref, s: 'mS4' });
+    rows.length = 3;
+    drawRows(true);
+    var box = doc.querySelector('[data-h-list]');
+    if (box) box.querySelectorAll('.h-row:not(.is-new) .h-chip').forEach(function (c) { c.classList.add('is-flip'); });
+    // the counters move with it
+    var tiles = doc.querySelectorAll('.h-tile b');
+    [[0, 1], [3, 1]].forEach(function (x) {
+      var b = tiles[x[0]]; if (!b) return;
+      var v = (Number(b.getAttribute('data-count')) || 0) + x[1];
+      b.setAttribute('data-count', String(v)); b.textContent = num(v);
+      b.classList.remove('is-bump'); void b.offsetWidth; b.classList.add('is-bump');
+    });
+  }
+  function liveBars() {
+    doc.querySelectorAll('[data-h-bars] i').forEach(function (b, i) {
+      b.style.animation = 'none';
+      b.style.height = Math.round(30 + 60 * Math.abs(Math.sin((Date.now() / 1700) + i * 0.7)) + i * 1) + '%';
+    });
+  }
+  function liveTabs() {
+    var tabs = doc.querySelectorAll('[data-h-tabs] span');
+    if (!tabs.length) return;
+    var cur = 0; tabs.forEach(function (s, i) { if (s.classList.contains('on')) cur = i; });
+    tabs[cur].classList.remove('on'); tabs[(cur + 1) % Math.min(tabs.length, 4)].classList.add('on');
+  }
+  function liveRead() {
+    // the floating card reads the three documents again, one after the other
+    var fl = doc.querySelector('[data-h-float]'); if (!fl) return;
+    var docs = fl.querySelectorAll('.h-doc'), foot = fl.querySelector('[data-h-ffoot]');
+    fl.classList.add('is-reading');
+    if (foot) foot.classList.add('is-wait');
+    docs.forEach(function (d) { d.classList.add('is-wait'); var b = d.querySelector('b'); if (b) b.textContent = '…'; });
+    docs.forEach(function (d, i) {
+      LIVE.timers.push(setTimeout(function () {
+        var b = d.querySelector('b'), end = Number(b && b.getAttribute('data-count')) || 0, k = 0;
+        d.classList.remove('is-wait');
+        var iv = setInterval(function () { k = Math.min(end, k + 7); if (b) b.textContent = k + '%'; if (k >= end) clearInterval(iv); }, 40);
+        if (i === docs.length - 1) LIVE.timers.push(setTimeout(function () { fl.classList.remove('is-reading'); if (foot) foot.classList.remove('is-wait'); }, 700));
+      }, 900 + i * 900));
+    });
+  }
+  function liveStart() {
+    if (LIVE.on || REDUCED) return;
+    LIVE.on = true;
+    LIVE.timers.push(setInterval(liveTick, 4200));
+    LIVE.timers.push(setInterval(liveBars, 2200));
+    LIVE.timers.push(setInterval(liveTabs, 3000));
+    LIVE.timers.push(setInterval(liveRead, 9000));
+    setTimeout(liveBars, 1800);
+  }
+  function liveStop() { LIVE.on = false; LIVE.timers.forEach(function (x) { clearInterval(x); clearTimeout(x); }); LIVE.timers = []; }
+  function initLive() {
+    var shot = doc.querySelector('.h-shot');
+    if (!shot || REDUCED) return;
+    if (IO) {
+      new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting && !doc.hidden) setTimeout(liveStart, 2200); else liveStop(); }); }, { threshold: 0.25 }).observe(shot);
+    } else setTimeout(liveStart, 2200);
+    doc.addEventListener('visibilitychange', function () { if (doc.hidden) liveStop(); });
+  }
+
   initMarquee();
   paint();
   paintMarquee();
@@ -307,5 +396,6 @@
   revealPlans();
   initCounters();
   initJourney();
-  window.addEventListener('marsa:langchange', function () { setTimeout(function () { paintMarquee(); revealPlans(); repaintJourney(); }, 0); });
+  initLive();
+  window.addEventListener('marsa:langchange', function () { setTimeout(function () { paintMarquee(); revealPlans(); repaintJourney(); if (LIVE.rows) drawRows(false); }, 0); });
 })();

@@ -88,10 +88,11 @@
           <div class="h-app">
             <div class="h-app-top">
               <span class="h-app-dots"><i></i><i></i><i></i></span>
-              <span class="h-app-tabs">
+              <span class="h-app-tabs" data-h-tabs>
                 <span class="on" data-i18n="home.mTab1">مهامي اليوم</span><span data-i18n="home.mTab2">المعاملات</span><span data-i18n="home.mTab3">العملاء</span><span data-i18n="home.mTab4">قراءة المستندات</span><span data-i18n="home.mTab5">المالية</span>
               </span>
             </div>
+            <span class="h-cursor" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.6L10 19z"/></svg><i></i></span>
             <div class="h-app-body">
               <div class="h-card">
                 <h4 data-i18n="home.mSummary">ملخص الشهر</h4>
@@ -105,9 +106,9 @@
               </div>
               <div class="h-card">
                 <h4 data-i18n="home.mChart">المعاملات أسبوعيًا</h4>
-                <div class="h-bars"><i style="height:38%"></i><i style="height:52%"></i><i style="height:44%"></i><i style="height:66%"></i><i style="height:58%"></i><i style="height:74%"></i><i style="height:62%"></i><i style="height:88%"></i><i style="height:80%"></i><i style="height:96%"></i></div>
+                <div class="h-bars" data-h-bars><i style="height:38%"></i><i style="height:52%"></i><i style="height:44%"></i><i style="height:66%"></i><i style="height:58%"></i><i style="height:74%"></i><i style="height:62%"></i><i style="height:88%"></i><i style="height:80%"></i><i style="height:96%"></i></div>
               </div>
-              <div class="h-card h-list">
+              <div class="h-card h-list" data-h-list>
                 <h4 data-i18n="home.mLatest">آخر المعاملات</h4>
                 <div class="h-row"><span class="h-av" data-i18n="home.mAv1">ن</span><span class="who"><b data-i18n="home.mC1">شركة النخيل للاستيراد</b><small class="h-num">CC-2026-000231</small></span><span class="h-chip acc" data-i18n="home.mS1">تحت المعاينة</span></div>
                 <div class="h-row"><span class="h-av" data-i18n="home.mAv2">أ</span><span class="who"><b data-i18n="home.mC2">مؤسسة الأفق التجارية</b><small class="h-num">CC-2026-000230</small></span><span class="h-chip warn" data-i18n="home.mS2">بانتظار السداد</span></div>
@@ -115,12 +116,12 @@
               </div>
             </div>
           </div>
-          <div class="h-float">
+          <div class="h-float" data-h-float><span class="h-scan" aria-hidden="true"></span>
             <h5><i><svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg></i><span data-i18n="home.fTitle">قراءة المستندات</span></h5>
             <div class="h-doc"><span data-i18n="home.fBl">بوليصة الشحن</span><b class="h-num" data-count="94" data-suffix="%">94%</b></div>
             <div class="h-doc"><span data-i18n="home.fInv">الفاتورة التجارية</span><b class="h-num" data-count="93" data-suffix="%">93%</b></div>
             <div class="h-doc"><span data-i18n="home.fDecl">البيان الجمركي</span><b class="h-num" data-count="96" data-suffix="%">96%</b></div>
-            <div class="h-float-foot" data-i18n="home.fFoot">المطابقة: 12 حقلًا متطابقًا</div>
+            <div class="h-float-foot" data-h-ffoot data-i18n="home.fFoot">المطابقة: 12 حقلًا متطابقًا</div>
           </div>
         </div>
       </div>
