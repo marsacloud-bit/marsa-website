@@ -474,3 +474,6 @@ body.home { margin: 0; font-family: Cairo, system-ui, sans-serif; color: var(--h
 /* room for the port story under the hero content (the crane must not hide behind the panel picture) */
 .h-hero { padding-bottom: 170px; }
 @media (max-width: 600px) { .h-hero { padding-bottom: 120px; } }
+/* the platform name is written in English in both languages (owner 2026-11-24): kept left-to-right inside Arabic text */
+[data-brand] { direction: ltr; unicode-bidi: isolate; }
+.h-word b { letter-spacing: .2px; }
