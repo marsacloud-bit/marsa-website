@@ -217,7 +217,7 @@
       default_locale: 'اللغة الافتراضية', admin_email: 'بريد مدير المؤسسة', code: 'رمز الفرع', city: 'المدينة',
       is_active: 'التفعيل', public_intake_enabled: 'استقبال الطلبات العامة', brand_color: 'لون الهوية',
       contact_phone: 'هاتف التواصل', contact_email: 'بريد التواصل', address_ar: 'العنوان بالعربية',
-      address_en: 'العنوان بالإنجليزية', logo_path: 'الشعار', settings: 'الإعدادات', organization: 'المؤسسة',
+      address_en: 'العنوان بالإنجليزية', logo_path: 'الشعار', whatsapp: 'الواتساب', hours_ar: 'مواعيد العمل بالعربية', hours_en: 'مواعيد العمل بالإنجليزية', about_ar: 'نبذة المكتب بالعربية', about_en: 'نبذة المكتب بالإنجليزية', settings: 'الإعدادات', organization: 'المؤسسة',
       branch_id: 'الفرع', client_id: 'العميل', invitation: 'الدعوة', token: 'رمز الدعوة', last_branch: 'آخر فرع مفعّل',
       slug_taken: 'المعرّف المختصر (مستخدم لمؤسسة أخرى)', membership: 'العضوية', filters: 'عوامل التصفية', locale: 'اللغة', idempotencyKey: 'مفتاح العملية',
       // G3 detail codes / fields
@@ -1764,6 +1764,34 @@
       }, function (e) { return { data: null, error: normalizeError(e) }; });
     }, function (e) { return { data: null, error: normalizeError(e) }; });
   }
+  // 20261214000100: the tier of the platform key (gemini 'free' only with consent = true)
+  function platformAiSetKeyTier(provider, tier, consent) {
+    if (AI_PROVIDER_CODES.indexOf(provider) === -1) return Promise.resolve(fail('MRS_INVALID', 'provider'));
+    return rpc('platform_ai_set_key_tier', { p_provider: provider, p_tier: tier === 'free' ? 'free' : 'paid', p_consent: consent === true });
+  }
+  // 20261214000100: an office's own AI key (org admins). orgAiKeys → [{provider, sort, key: {last4, tier, test…} | null,
+  //   platform_key: boolean, platform_tier}]; the key itself is never returned
+  function orgAiKeys(oid) { return rpc('org_ai_keys', { p_org: oid }); }
+  function orgAiSetKey(oid, provider, key, tier, consent) {
+    if (AI_PROVIDER_CODES.indexOf(provider) === -1) return Promise.resolve(fail('MRS_INVALID', 'provider'));
+    var k = String(key == null ? '' : key).trim();
+    if (k.length < 20 || k.length > 400 || /\s/.test(k)) return Promise.resolve(fail('MRS_INVALID', 'key'));
+    var t = tier === 'free' ? 'free' : 'paid';
+    if (t === 'free' && consent !== true) return Promise.resolve(fail('MRS_AI_FREE_CONSENT'));
+    return rpc('org_ai_set_key', { p_org: oid, p_provider: provider, p_key: k, p_tier: t, p_consent: consent === true });
+  }
+  function orgAiClearKey(oid, provider) { return rpc('org_ai_clear_key', { p_org: oid, p_provider: provider }); }
+  // the office key's connection test (the Edge Function, the office's own key only) → {provider, ok, note, models}
+  function orgAiTestKey(oid, provider) {
+    if (!configured) return demoOnly();
+    if (AI_PROVIDER_CODES.indexOf(provider) === -1) return Promise.resolve(fail('MRS_INVALID', 'provider'));
+    return ready().then(function (c) {
+      return c.functions.invoke('ai-extract', { body: { action: 'org_key_test', org_id: oid, provider: provider } }).then(function (res) {
+        if (res && !res.error && res.data && typeof res.data === 'object' && typeof res.data.ok === 'boolean') return ok(res.data);
+        return aiEdgeError(res && res.error);
+      }, function (e) { return { data: null, error: normalizeError(e) }; });
+    }, function (e) { return { data: null, error: normalizeError(e) }; });
+  }
   // → [{org_id, slug, name_ar, name_en, is_active, plan_code, plan_name_ar, plan_name_en, status, period_start, period_end,
   //     limit_overrides, limits, usage, over_limit[], status_reason, suspended_at, updated_at}]
   function platformListSubscriptions() { return rpc('platform_list_subscriptions'); }
@@ -2484,6 +2512,24 @@
     return online(function (c) {
       return c.from('org_service_items').update({ default_price: price }).eq('id', id).select('id,code,default_price').single();
     });
+  }
+  // served ports (20261210000100): every active platform port + served flag (staff of the org) / save the office's
+  // choice in order (org admins) / the public website's read of the chosen ports (anon; demo: data null → static list)
+  function getServedPorts(orgId) {
+    return inActiveOrg(orgId, function (oid) { return rpc('get_served_ports', { p_org: oid }); });
+  }
+  function saveServedPorts(orgId, codes) {
+    return inActiveOrg(orgId, function (oid) {
+      return rpc('save_served_ports', { p_org: oid, p_codes: (codes || []).map(function (c) { return String(c || ''); }) });
+    });
+  }
+  function siteServedPorts() {
+    return rpc('site_served_ports', { p_org_slug: ORG_SLUG }, function () { return { data: null, error: null }; });
+  }
+  // 20261213000100: the office identity for its public website → {name_ar, name_en, brand_color, contact_phone,
+  //   contact_email, address_ar, address_en, logo_path, whatsapp, hours_ar, hours_en, about_ar, about_en} | null (unknown / inactive office); demo mode → null (page defaults)
+  function siteProfile() {
+    return rpc('site_profile', { p_org_slug: ORG_SLUG }, function () { return { data: null, error: null }; });
   }
   // o = { orgId?, name (consignee block or name), vatNumber?, crNumber?, limit? } → { source_name, latin_key, candidates
   //   [{client_id, name_ar, name_en, confidence 0..100, method, review, reasons}], best {client_id, confidence, method} | null,
@@ -4919,6 +4965,7 @@
     platformListPlans: platformListPlans, platformSavePlan: platformSavePlan,
     platformAiProviders: platformAiProviders, platformAiSetKey: platformAiSetKey, platformAiClearKey: platformAiClearKey,
     platformAiSaveProvider: platformAiSaveProvider, platformAiTestKey: platformAiTestKey, platformListSubscriptions: platformListSubscriptions,
+    platformAiSetKeyTier: platformAiSetKeyTier, orgAiKeys: orgAiKeys, orgAiSetKey: orgAiSetKey, orgAiClearKey: orgAiClearKey, orgAiTestKey: orgAiTestKey,
     platformSetOrgPlan: platformSetOrgPlan, platformSuspendOrg: platformSuspendOrg, platformActivateOrg: platformActivateOrg,
     platformOrgUsage: platformOrgUsage, platformRecountUsage: platformRecountUsage, orgSubscription: orgSubscription,
     // requests
@@ -4962,7 +5009,7 @@
     listPayments: listPayments, txDisbursements: txDisbursements, checkPaymentDuplicates: checkPaymentDuplicates,
     matchPaymentTransaction: matchPaymentTransaction, saveCustodyEntry: saveCustodyEntry, voidCustodyEntry: voidCustodyEntry,
     listCustodyEntries: listCustodyEntries, custodyBalances: custodyBalances, clientCustodyBalance: clientCustodyBalance,
-    listServiceItems: listServiceItems, getServiceItemPrice: getServiceItemPrice, setServiceItemPrice: setServiceItemPrice, txStorageGate: txStorageGate, approveStorageOverride: approveStorageOverride, updateContainerStorage: updateContainerStorage, listDriversDirectory: listDriversDirectory, saveDriverEntry: saveDriverEntry,
+    listServiceItems: listServiceItems, getServiceItemPrice: getServiceItemPrice, setServiceItemPrice: setServiceItemPrice, getServedPorts: getServedPorts, saveServedPorts: saveServedPorts, siteServedPorts: siteServedPorts, siteProfile: siteProfile, txStorageGate: txStorageGate, approveStorageOverride: approveStorageOverride, updateContainerStorage: updateContainerStorage, listDriversDirectory: listDriversDirectory, saveDriverEntry: saveDriverEntry,
     // 20261201000100: legacy gaps (client category / Daftra code, follow-up employee)
     setClientLegacyFields: setClientLegacyFields, setTransactionResponsible: setTransactionResponsible, listAssignableStaff: listAssignableStaff,
     listContainers: listContainers, addContainer: addContainer, updateContainer: updateContainer,

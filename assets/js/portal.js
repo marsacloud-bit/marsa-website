@@ -387,7 +387,7 @@
           h('td', null, [num(tx.ref)]),
           h('td', { text: opText(tx.operation, tx.mode) }),
           h('td', null, [tx.bl_number ? num(tx.bl_number) : '—']),
-          h('td', null, [txBadge(tx)]),
+          h('td', null, [txBadge(tx), tx.cancelled_at ? null : stageMini(tx)]),
           h('td', { text: fmtDate(tx.status_changed_at || tx.updated_at) }),
           h('td', null, [h('button', { class: 'btn btn-sm btn-secondary', type: 'button', text: msg('details'),
             'aria-label': msg('details') + ' ' + (tx.ref || ''), onclick: function () { go('tx/' + tx.id); } })])
@@ -463,6 +463,9 @@
       h('div', null, [h('p', { class: 'eyebrow mb-1', text: msg('eyebrowTx') }), h('h3', { class: 'mb-0' }, [num(tx.ref)])]),
       txBadge(tx)
     ]));
+    // the stage line across the top (owner 2026-11-23); a cancelled transaction keeps the «ملغاة» box in the side column
+    var line = tx.cancelled_at ? null : renderStageLine(tx);
+    if (line) txDetail.appendChild(line);
 
     var grid = h('div', { class: 'portal-detail-grid' });
     txDetail.appendChild(grid);
@@ -493,9 +496,62 @@
     main.appendChild(renderAppointments(appts, tx.containers || []));
     main.appendChild(renderTxInvoices(rs[5]));
     main.appendChild(renderDocuments(tx, dr));
-    side.appendChild(renderStages(tx));
+    // the vertical stage list stays in the markup; with the stage line on top it is hidden by CSS (hide, don't delete)
+    var stagePanel = renderStages(tx);
+    if (line) stagePanel.setAttribute('data-stage-panel', 'line');
+    side.appendChild(stagePanel);
     side.appendChild(renderEvents(ev));
     try { txDetail.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { /* ignore */ }
+  }
+
+  /* ---- the stage line (owner 2026-11-23: «خط سير المعاملة») ----
+     The stages come from the configured chain (status_labels 'operational_status', in its sort order), never from a
+     list in this file. The empty-container return is left out for a transaction without containers (air / land /
+     loose cargo), unless it is the current stage. */
+  function stagesFor(tx) {
+    var hasCtr = (tx.containers || []).length > 0 || Number(tx.container_count) > 0 || tx.cargo_unit_type === 'container';
+    return (state.labels.operational_status || []).filter(function (s) {
+      return hasCtr || s.code !== 'empty_return' || s.code === tx.operational_status;
+    });
+  }
+  function stagePos(tx) {
+    var list = stagesFor(tx), cur = sortOf('operational_status', tx.operational_status), n = 0;
+    list.forEach(function (s, i) { if (s.sort <= cur) n = i + 1; });
+    return { list: list, cur: cur, n: n, total: list.length };
+  }
+  function renderStageLine(tx) {
+    var p = stagePos(tx);
+    if (!p.total || !p.n) return null;
+    var ol = h('ol', { class: 'tx-steps' });
+    p.list.forEach(function (s) {
+      var st = s.sort < p.cur ? 'done' : (s.sort === p.cur ? 'current' : 'todo');
+      ol.appendChild(h('li', { class: 'tx-step is-' + st, 'aria-current': st === 'current' ? 'step' : null }, [
+        h('span', { class: 'tx-step-dot', 'aria-hidden': 'true' }, [st === 'done' ? svgIcon('M5 12l5 5L20 7') : null]),
+        h('span', { class: 'tx-step-name', text: label('operational_status', s.code) }),
+        h('span', { class: 'sr-only', text: ' — ' + msg('step_' + st) })
+      ]));
+    });
+    return h('section', { class: 'card tx-line', 'aria-labelledby': 'tx-line-h' }, [
+      h('div', { class: 'tx-line-head' }, [
+        h('h4', { id: 'tx-line-h', text: msg('lineTitle') }),
+        h('span', { class: 'tx-line-count', text: msg('stepOf', { n: p.n, t: p.total }) })
+      ]),
+      h('p', { class: 'tx-line-now' }, [
+        h('span', { text: msg('lineNow') + ' ' }),
+        h('strong', { text: label('operational_status', tx.operational_status) }),
+        tx.status_changed_at ? h('span', { class: 'tx-line-since', text: ' · ' + msg('since', { d: fmtDate(tx.status_changed_at, true) }) }) : null
+      ]),
+      ol
+    ]);
+  }
+  // the list's small progress: a short bar and «المرحلة 4 من 10»
+  function stageMini(tx) {
+    var p = stagePos(tx);
+    if (!p.total || !p.n) return null;
+    var fill = h('span');
+    fill.style.width = Math.round(100 * p.n / p.total) + '%';
+    return h('span', { class: 'tx-mini' }, [h('span', { class: 'tx-mini-bar', 'aria-hidden': 'true' }, [fill]),
+      h('span', { class: 'tx-mini-text', text: msg('stepOf', { n: p.n, t: p.total }) })]);
   }
 
   function renderStages(tx) {

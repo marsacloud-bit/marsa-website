@@ -1,0 +1,76 @@
+/* =====================================================================
+   login.html — the new calm design (owner 2026-11-23). <html class="login-v2">.
+   A small top bar (office brand, back to the site, language), then two halves: the forms card on the start side
+   and a calm welcome panel (the old page hero) on the other. The office-site header / footer stay in the markup
+   but are hidden here (hide, don't delete). One accent (the office colour from site-profile.js); colours for
+   meaning only. Phones: the welcome panel shrinks to a short heading above the card.
+   ===================================================================== */
+.login-v2 body {
+  --accent: #5B4BA8; --accent-strong: #4A3C91; --accent-soft: #EFECF8; --accent-line: #D9D3EF; --on-accent: #fff;
+  --blue: var(--accent); --navy: var(--accent-strong); --navy-dark: #2B2533; --ring: 0 0 0 3px var(--accent-line);
+  --border: #E7E3DD; --muted: #6F6A75; --lg-bg: #F7F5F2;
+  background: var(--lg-bg); min-height: 100vh; display: flex; flex-direction: column;
+}
+.login-v2 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* the office-website chrome is not used on this page */
+.login-v2 .topbar, .login-v2 .site-header, .login-v2 .drawer, .login-v2 .drawer-backdrop,
+.login-v2 .site-footer, .login-v2 .to-top, .login-v2 .page-hero .breadcrumb, .login-v2 .page-hero-wave { display: none !important; }
+
+/* top bar */
+.lg-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px clamp(16px, 4vw, 40px); }
+.lg-brand { display: inline-flex; align-items: center; min-height: 44px; color: var(--navy-dark); font-weight: 800; font-size: 1.1rem; text-decoration: none; }
+.lg-brand img { display: block; height: 44px; width: auto; }
+.lg-top-actions { display: flex; align-items: center; gap: 8px; }
+.lg-back { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px; border-radius: 10px; color: var(--muted); font-size: .9rem; font-weight: 700; text-decoration: none; }
+.lg-back:hover { background: #fff; color: var(--accent-strong); }
+.lg-back .icon { width: 18px; height: 18px; }
+[dir="ltr"] .lg-back .icon { transform: scaleX(-1); }
+.login-v2 .lg-lang { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border);
+  background: #fff; color: var(--navy-dark); font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; }
+.login-v2 .lg-lang:hover { border-color: var(--accent-line); color: var(--accent-strong); }
+
+/* two halves */
+.login-v2 main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(20px, 4vw, 56px);
+  align-items: start; width: 100%; max-width: 1200px; margin: 0 auto; padding: clamp(8px, 2vw, 24px) clamp(16px, 4vw, 40px) 40px; }
+/* the forms on the start side (right in Arabic), the welcome panel beside them */
+.login-v2 main > .section { order: 1; padding: 0; margin: 0; }
+.login-v2 main > .page-hero { order: 2; position: sticky; top: 16px; }
+.login-v2 .auth-wrap { max-width: 520px; width: 100%; padding: 0; margin: 0 auto; }
+.login-v2 .auth-card { border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 10px 30px rgba(40, 32, 60, .07); background: #fff; }
+
+/* welcome panel (the old page hero, restyled) */
+.login-v2 .page-hero { position: relative; margin: 0; padding: clamp(28px, 4vw, 48px); border-radius: 22px; overflow: hidden;
+  background: var(--accent-soft); color: var(--navy-dark); min-height: 420px; display: flex; align-items: center; }
+.login-v2 .page-hero::after { content: ""; position: absolute; inset-block-end: -80px; inset-inline-end: -80px; width: 260px; height: 260px;
+  border-radius: 50%; background: var(--accent-line); opacity: .6; pointer-events: none; }
+.login-v2 .page-hero .container { position: relative; z-index: 1; padding: 0; max-width: none; text-align: start; }
+.lg-kicker { margin: 0 0 6px; color: var(--accent-strong); font-weight: 800; font-size: .9rem; }
+.login-v2 .page-hero h1 { margin: 0 0 10px; color: var(--navy-dark); font-size: clamp(1.6rem, 3vw, 2.2rem); line-height: 1.3; }
+.login-v2 .lg-lead { margin: 0 0 22px; color: #4A4452; font-size: 1rem; line-height: 1.8; max-width: 46ch; }
+.lg-points { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.lg-points li { display: flex; align-items: center; gap: 12px; font-weight: 700; color: var(--navy-dark); }
+.lg-points .icon { flex: none; width: 38px; height: 38px; padding: 9px; border-radius: 12px; background: #fff; color: var(--accent); }
+
+/* tabs and buttons in the one accent */
+.login-v2 .auth-tabs { background: var(--lg-bg); border-radius: 12px; padding: 4px; gap: 4px; border: 0; }
+.login-v2 .auth-tabs .tab { border: 0; border-radius: 9px; font-weight: 700; color: var(--muted); background: transparent; }
+.login-v2 .auth-tabs .tab[aria-selected="true"] { background: #fff; color: var(--accent-strong); box-shadow: 0 1px 3px rgba(40, 32, 60, .12); }
+.login-v2 .auth-tabs .tab::after { display: none; }
+.login-v2 .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); box-shadow: none; }
+.login-v2 .btn-primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); }
+.login-v2 .auth-card .form-control:focus { border-color: var(--accent); box-shadow: var(--ring); }
+.login-v2 .auth-card form .btn-primary[type="submit"] { width: 100%; min-height: 48px; font-size: 1rem; }
+.login-v2 .link-btn, .login-v2 .auth-card a { color: var(--accent-strong); }
+
+/* tablets / phones: one column, the welcome panel becomes a short heading above the card */
+@media (max-width: 900px) {
+  .login-v2 main { grid-template-columns: 1fr; align-items: start; gap: 16px; }
+  .login-v2 main > .page-hero { order: 0; position: static; min-height: 0; padding: 20px 22px; border-radius: 16px; }
+  .login-v2 .page-hero::after, .lg-points, .login-v2 .lg-lead { display: none; }
+  .login-v2 .page-hero h1 { margin: 0; font-size: 1.4rem; }
+}
+@media (max-width: 480px) {
+  .lg-back span { display: none; }
+  .lg-back { padding: 0 8px; }
+}

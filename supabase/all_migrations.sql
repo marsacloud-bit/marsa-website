@@ -142,6 +142,15 @@
 -- supabase/migrations/20261211000100_reconvert.sql alone (re-conversion of a converted org: reconvert_org_preview /
 -- reconvert_org, SQL Editor only; PAY- / CUS- numbering per org; mail tx_ref of any 2-5 letter prefix; re-runnable,
 -- deletes no data — the wipe itself is ONE call after a backup: docs/online/CONVERT_IN_PLACE_AR.md section 15).
+-- A live DB that already has ai_keys (health_check() = 20261211000100 or later) pastes
+-- supabase/migrations/20261210000100_org_served_ports.sql alone (the ports each office serves, shown on its website; land
+-- crossings + the Madinah airport added to customs_ports; re-runnable, no office choice made).
+-- A live DB that already has org_served_ports (20261210000100 in schema_versions) pastes
+-- supabase/migrations/20261213000100_site_profile.sql alone (the office website reads the office name, accent colour, phone, e-mail, addresses and
+-- logo, WhatsApp, working hours and «about» text from its settings; a visitor may read only the current logo; re-runnable, changes no data).
+-- A live DB that already has site_profile (health_check() = 20261213000100) pastes
+-- supabase/migrations/20261214000100_org_ai_keys.sql alone (an office may keep its own AI key in Vault, managed from the office settings; a Gemini key is paid or free, a free one only
+-- with the admin's consent; re-runnable, changes no data).
 DO $guard$
 BEGIN
   -- stops immediately if the Arabic text was pasted with the wrong encoding
@@ -49329,6 +49338,191 @@ REVOKE ALL ON FUNCTION public.ai_provider_keys(uuid), public.ai_record_key_test(
 FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.ai_provider_keys(uuid), public.ai_record_key_test(text, boolean, text, jsonb) TO service_role;
 
+-- ===== migrations/20261210000100_org_served_ports.sql =====
+-- =====================================================================
+-- 20261210000100_org_served_ports — the ports each office serves, shown on its website (2026-11-22, owner;
+-- branch owner/office-home, docs/owner/sections-decisions.md)
+--   Owner: some customs brokers work only at certain ports; each office picks the ports it serves, and only those
+--   appear on its website. The list of ports is the platform's (public.customs_ports, 20261117000100); offices choose
+--   from it. Owner: the land crossings registered in FASAH are two (Salwa, Al Haditha); the airports are four (+ Madinah).
+--   1. public.customs_ports: kind 'land' allowed (the kind CHECK re-created with sea / air / dry / land); three ports
+--      added: Salwa and Al Haditha customs (land), Prince Mohammad bin Abdulaziz airport, Madinah (air).
+--      Their codes follow the table's pattern (5 letters, -AIR for an airport); confirm the official UN/LOCODEs before
+--      any integration relies on them.
+--   2. public.org_served_ports (org_id, port_code → customs_ports, sort): staff of the org read; writes only through
+--      save_served_ports (no direct write grant); audited (app.tg_audit); RLS; nothing for anon.
+--   3. public.get_served_ports(p_org) → [{code, kind, name_ar, name_en, served, sort}] — every active platform port
+--      with the office's choice; staff of the org.
+--   4. public.save_served_ports(p_org, p_codes text[]) → the same list — org admins; the order of p_codes is kept;
+--      unknown / inactive codes → MRS_INVALID port_code; at most 50.
+--   5. public.site_served_ports(p_org_slug) → [{code, kind, name_ar, name_en}] — anon + authenticated, the public
+--      website: only active ports an active office chose; nothing else about the office. Unknown slug → [].
+--   6. the in-place conversion keeps the choice (configuration): app.convert_keep_tables = the 20261209000100 body +
+--      public.org_served_ports.
+--   Re-runnable (IF NOT EXISTS / CREATE OR REPLACE / DROP … IF EXISTS + CREATE / ON CONFLICT).
+--   Data: no office has a choice yet (the website hides the ports block until an admin picks them).
+--   Down-path: re-create app.convert_keep_tables (20261209000100 body); DROP FUNCTION public.site_served_ports(text),
+--   public.save_served_ports(uuid, text[]), public.get_served_ports(uuid), app.served_ports_json(uuid); DROP TABLE
+--   public.org_served_ports; DELETE FROM public.customs_ports WHERE code IN ('SASLW','SAHDT','SAMED-AIR') (only when no
+--   row references them); re-create customs_ports_kind_check with sea / air / dry;
+--   DELETE FROM public.schema_versions WHERE version = '20261210000100'.
+--   No BEGIN/COMMIT (the SQL editor wraps the run).
+-- =====================================================================
+
+DO $pre$
+BEGIN
+  IF to_regclass('public.schema_versions') IS NULL
+     OR NOT EXISTS (SELECT 1 FROM public.schema_versions WHERE version = '20261209000100') THEN
+    RAISE EXCEPTION 'SERVED PORTS preflight: apply ai_keys first (schema_versions lacks 20261209000100)';
+  END IF;
+  IF to_regclass('public.customs_ports') IS NULL OR to_regprocedure('app.is_staff(uuid)') IS NULL
+     OR to_regprocedure('app.has_role(uuid,text[])') IS NULL THEN
+    RAISE EXCEPTION 'SERVED PORTS preflight: customs_ports / is_staff / has_role missing';
+  END IF;
+END $pre$;
+
+INSERT INTO public.schema_versions (version, name) VALUES ('20261210000100', 'org_served_ports')
+ON CONFLICT (version) DO NOTHING;
+
+-- ---------------------------------------------------------------------
+-- 1. land crossings + the Madinah airport
+-- ---------------------------------------------------------------------
+ALTER TABLE public.customs_ports DROP CONSTRAINT IF EXISTS customs_ports_kind_check;
+ALTER TABLE public.customs_ports ADD CONSTRAINT customs_ports_kind_check CHECK (kind IN ('sea','air','dry','land'));
+
+INSERT INTO public.customs_ports (code, unlocode, kind, name_ar, name_en, daftra_value, sort) VALUES
+  ('SAMED-AIR','SAMED','air','مطار الأمير محمد بن عبدالعزيز الدولي بالمدينة المنورة','Prince Mohammad bin Abdulaziz International Airport, Madinah',NULL,8),
+  ('SASLW','SASLW','land','جمرك سلوى','Salwa Customs',NULL,9),
+  ('SAHDT','SAHDT','land','جمرك الحديثة','Al Haditha Customs',NULL,10)
+ON CONFLICT (code) DO UPDATE
+  SET unlocode = EXCLUDED.unlocode, kind = EXCLUDED.kind, name_ar = EXCLUDED.name_ar, name_en = EXCLUDED.name_en, sort = EXCLUDED.sort;
+
+-- ---------------------------------------------------------------------
+-- 2. the office's choice
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.org_served_ports (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id      uuid NOT NULL REFERENCES public.organizations(id) ON DELETE RESTRICT,
+  port_code   text NOT NULL REFERENCES public.customs_ports(code),
+  sort        int  NOT NULL DEFAULT 0 CHECK (sort BETWEEN 0 AND 1000),
+  created_by  uuid,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT org_served_ports_uniq UNIQUE (org_id, port_code),
+  UNIQUE (id, org_id)
+);
+COMMENT ON TABLE public.org_served_ports IS 'Ports the office serves (20261210000100): chosen by an org admin from public.customs_ports; shown on the office website (site_served_ports). Written only through save_served_ports.';
+
+DROP TRIGGER IF EXISTS trg_touch ON public.org_served_ports;
+CREATE TRIGGER trg_touch BEFORE UPDATE ON public.org_served_ports FOR EACH ROW EXECUTE FUNCTION app.touch_updated_at();
+DROP TRIGGER IF EXISTS trg_stamp ON public.org_served_ports;
+CREATE TRIGGER trg_stamp BEFORE INSERT ON public.org_served_ports FOR EACH ROW EXECUTE FUNCTION app.tg_stamp_creator();
+DROP TRIGGER IF EXISTS trg_guard ON public.org_served_ports;
+CREATE TRIGGER trg_guard BEFORE UPDATE ON public.org_served_ports
+  FOR EACH ROW EXECUTE FUNCTION app.tg_guard_generic('id', 'org_id', 'port_code', 'created_by', 'created_at');
+DROP TRIGGER IF EXISTS trg_audit ON public.org_served_ports;
+CREATE TRIGGER trg_audit AFTER INSERT OR UPDATE OR DELETE ON public.org_served_ports FOR EACH ROW EXECUTE FUNCTION app.tg_audit();
+
+ALTER TABLE public.org_served_ports ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.org_served_ports FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.org_served_ports TO authenticated;
+SELECT app.drop_policies('org_served_ports');
+CREATE POLICY org_served_ports_select ON public.org_served_ports FOR SELECT TO authenticated USING (app.is_staff(org_id));
+
+-- ---------------------------------------------------------------------
+-- 3. read the choice (every active port + served flag)
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.served_ports_json(p_org uuid) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT coalesce(jsonb_agg(jsonb_build_object('code', c.code, 'kind', c.kind, 'name_ar', c.name_ar, 'name_en', c.name_en,
+                                               'served', s.id IS NOT NULL, 'sort', s.sort)
+                            ORDER BY (s.id IS NULL), s.sort, c.sort, c.code), '[]'::jsonb)
+    FROM public.customs_ports c
+    LEFT JOIN public.org_served_ports s ON s.org_id = p_org AND s.port_code = c.code
+   WHERE c.is_active
+$$;
+REVOKE ALL ON FUNCTION app.served_ports_json(uuid) FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.get_served_ports(p_org uuid) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  IF p_org IS NULL OR NOT app.is_staff(p_org) THEN PERFORM app.fail('MRS_FORBIDDEN', 'organization'); END IF;
+  RETURN app.served_ports_json(p_org);
+END $$;
+REVOKE EXECUTE ON FUNCTION public.get_served_ports(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_served_ports(uuid) TO authenticated;
+
+-- ---------------------------------------------------------------------
+-- 4. save the choice (org admins)
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.save_served_ports(p_org uuid, p_codes text[]) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_codes text[] := '{}'; v_c text; i int := 0;
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  IF p_org IS NULL OR NOT app.has_role(p_org, ARRAY['admin']) THEN PERFORM app.fail('MRS_FORBIDDEN', 'organization'); END IF;
+  IF p_codes IS NULL THEN PERFORM app.fail('MRS_REQUIRED', 'port_codes'); END IF;
+  IF cardinality(p_codes) > 50 THEN PERFORM app.fail('MRS_INVALID', 'port_codes'); END IF;
+  FOREACH v_c IN ARRAY p_codes LOOP
+    v_c := upper(btrim(coalesce(v_c, '')));
+    IF NOT EXISTS (SELECT 1 FROM public.customs_ports c WHERE c.code = v_c AND c.is_active) THEN
+      PERFORM app.fail('MRS_INVALID', 'port_code');
+    END IF;
+    IF NOT v_c = ANY (v_codes) THEN v_codes := v_codes || v_c; END IF;
+  END LOOP;
+  DELETE FROM public.org_served_ports s WHERE s.org_id = p_org AND NOT s.port_code = ANY (v_codes);
+  FOREACH v_c IN ARRAY v_codes LOOP
+    i := i + 1;
+    INSERT INTO public.org_served_ports (org_id, port_code, sort) VALUES (p_org, v_c, i)
+    ON CONFLICT (org_id, port_code) DO UPDATE SET sort = EXCLUDED.sort
+      WHERE public.org_served_ports.sort IS DISTINCT FROM EXCLUDED.sort;
+  END LOOP;
+  RETURN app.served_ports_json(p_org);
+END $$;
+REVOKE EXECUTE ON FUNCTION public.save_served_ports(uuid, text[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.save_served_ports(uuid, text[]) TO authenticated;
+
+-- ---------------------------------------------------------------------
+-- 5. the public website: the office's ports only
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.site_served_ports(p_org_slug text) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_org uuid;
+BEGIN
+  IF p_org_slug IS NULL OR p_org_slug !~ '^[a-z0-9][a-z0-9-]{1,39}$' THEN RETURN '[]'::jsonb; END IF;
+  SELECT o.id INTO v_org FROM public.organizations o WHERE o.slug = p_org_slug AND o.is_active;
+  IF v_org IS NULL THEN RETURN '[]'::jsonb; END IF;
+  RETURN coalesce((
+    SELECT jsonb_agg(jsonb_build_object('code', c.code, 'kind', c.kind, 'name_ar', c.name_ar, 'name_en', c.name_en)
+                     ORDER BY s.sort, c.sort, c.code)
+      FROM public.org_served_ports s JOIN public.customs_ports c ON c.code = s.port_code AND c.is_active
+     WHERE s.org_id = v_org), '[]'::jsonb);
+END $$;
+REVOKE EXECUTE ON FUNCTION public.site_served_ports(text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.site_served_ports(text) TO anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- 6. the in-place conversion (20261115000100) keeps the choice: configuration, not test data
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION app.convert_keep_tables() RETURNS text[]
+LANGUAGE sql IMMUTABLE SET search_path = '' AS $$
+  SELECT ARRAY[
+    'public.branches', 'public.memberships', 'public.org_counters', 'public.org_usage_counters',
+    'public.msg_channels', 'public.msg_settings', 'public.msg_auto_reply_policies', 'public.msg_templates',
+    'public.msg_instructions', 'public.daftra_connections', 'public.daftra_item_links', 'public.document_requirements',
+    'public.org_subscriptions', 'public.subscription_events', 'app.ai_settings',
+    'public.org_service_items',                                                                         -- LEGACY
+    'public.tx_stage_sets', 'public.tx_stage_steps',                                                    -- owner stages
+    'public.storage_gate_ports',                                                                        -- storage gate (20261206000100)
+    'app.ai_provider_keys',                                                                            -- AI keys (20261209000100): configuration, kept
+    'public.org_served_ports',                                                                          -- served ports (20261210000100): configuration, kept
+    -- append-only / log tables
+    'public.audit_log', 'public.report_exports', 'app.ai_usage', 'public.operational_alert_runs', 'public.client_errors'
+  ]::text[]
+$$;
+REVOKE EXECUTE ON FUNCTION app.convert_keep_tables() FROM PUBLIC, anon, authenticated, service_role;
+
 -- ===== migrations/20261211000100_reconvert.sql =====
 -- =====================================================================
 -- 20261211000100_reconvert — wipe an ALREADY converted (production) organisation's data again and restart its numbering
@@ -49898,3 +50092,361 @@ FROM PUBLIC, anon, authenticated, service_role;
 -- review_msg_extraction: CREATE OR REPLACE keeps its ACL (20261107000100); restated
 REVOKE ALL ON FUNCTION public.review_msg_extraction(uuid, text, text, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.review_msg_extraction(uuid, text, text, text) TO authenticated;
+
+-- ===== migrations/20261213000100_site_profile.sql =====
+-- =====================================================================
+-- 20261213000100_site_profile — the office website reads the office's own identity (2026-11-23)
+--   Owner request: every subscribed office customises its website. Stage A: the website shows what the office already
+--   keeps in its organisation settings (admin_update_org, 20261102000200) — names, accent colour, phone, e-mail,
+--   addresses, logo — instead of fixed text (stage A adds no setting; stage B, item 3, adds five).
+--   1. public.site_profile(p_org_slug) → {name_ar, name_en, brand_color, contact_phone, contact_email, address_ar,
+--      address_en, logo_path, whatsapp, hours_ar, hours_en, about_ar, about_en} or NULL — anon + authenticated (the website). Only an ACTIVE office, only these
+--      public keys (never other settings, ids, members or counters). Unknown / malformed slug → NULL.
+--   2. public.site_logo_visible(name) — true only when the object is the CURRENT logo (settings.logo_path) of an active
+--      office; policy marsa_org_assets_site_logo (SELECT on storage.objects, TO anon) lets a visitor get a short-lived
+--      signed URL for that one object. Every other object of the private bucket 'org-assets' stays members-only.
+--   3. Stage B (same day): five new organisation settings the website shows, set in «إعدادات المؤسسة» —
+--      whatsapp (a Saudi mobile, stored 05xxxxxxxx like contact_phone), hours_ar / hours_en (working hours, ≤ 120),
+--      about_ar / about_en (a short «من نحن» text, ≤ 600). public.admin_update_org (20261102000200 body, re-created;
+--      every existing key and rule unchanged) accepts them; site_profile returns them.
+--   Re-runnable (CREATE OR REPLACE / DROP POLICY IF EXISTS + CREATE / ON CONFLICT); changes no data.
+--   Down-path: DROP POLICY marsa_org_assets_site_logo ON storage.objects; DROP FUNCTION public.site_profile(text),
+--   public.site_logo_visible(text); re-create public.admin_update_org from 20261102000200 (its body, verbatim; saved
+--   whatsapp / hours_* / about_* keys stay in settings, unused); DELETE FROM public.schema_versions
+--   WHERE version = '20261213000100'.
+--   No BEGIN/COMMIT (the SQL editor wraps the run).
+-- =====================================================================
+
+DO $pre$
+BEGIN
+  IF to_regclass('public.schema_versions') IS NULL
+     OR NOT EXISTS (SELECT 1 FROM public.schema_versions WHERE version = '20261210000100') THEN
+    RAISE EXCEPTION 'SITE PROFILE preflight: apply org_served_ports first (schema_versions lacks 20261210000100)';
+  END IF;
+  IF to_regclass('storage.objects') IS NULL OR to_regprocedure('app.org_asset_org(text)') IS NULL THEN
+    RAISE EXCEPTION 'SITE PROFILE preflight: Storage or app.org_asset_org (org_logo, 20261202000100) missing';
+  END IF;
+END $pre$;
+
+INSERT INTO public.schema_versions (version, name) VALUES ('20261213000100', 'site_profile')
+ON CONFLICT (version) DO NOTHING;
+
+-- ---------------------------------------------------------------------
+-- 1. the public identity of one office
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.site_profile(p_org_slug text) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_o public.organizations; v_s jsonb;
+BEGIN
+  IF p_org_slug IS NULL OR p_org_slug !~ '^[a-z0-9][a-z0-9-]{1,39}$' THEN RETURN NULL; END IF;
+  SELECT * INTO v_o FROM public.organizations o WHERE o.slug = p_org_slug AND o.is_active;
+  IF v_o.id IS NULL THEN RETURN NULL; END IF;
+  v_s := CASE WHEN jsonb_typeof(v_o.settings) = 'object' THEN v_o.settings ELSE '{}'::jsonb END;
+  RETURN jsonb_build_object(
+    'name_ar', v_o.name_ar,
+    'name_en', v_o.name_en,
+    'brand_color', CASE WHEN (v_s ->> 'brand_color') ~ '^#[0-9a-fA-F]{6}$' THEN lower(v_s ->> 'brand_color') END,
+    'contact_phone', v_s ->> 'contact_phone',
+    'contact_email', v_s ->> 'contact_email',
+    'address_ar', v_s ->> 'address_ar',
+    'address_en', v_s ->> 'address_en',
+    'logo_path', CASE WHEN app.org_asset_org(v_s ->> 'logo_path') = v_o.id THEN v_s ->> 'logo_path' END,
+    'whatsapp', v_s ->> 'whatsapp',
+    'hours_ar', v_s ->> 'hours_ar',
+    'hours_en', v_s ->> 'hours_en',
+    'about_ar', v_s ->> 'about_ar',
+    'about_en', v_s ->> 'about_en');
+END $$;
+REVOKE EXECUTE ON FUNCTION public.site_profile(text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.site_profile(text) TO anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- 2. a visitor may read exactly the current logo of an active office
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.site_logo_visible(p_name text) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT p_name IS NOT NULL AND EXISTS (
+    SELECT 1 FROM public.organizations o
+     WHERE o.id = app.org_asset_org(p_name) AND o.is_active
+       AND jsonb_typeof(o.settings) = 'object' AND o.settings ->> 'logo_path' = p_name)
+$$;
+-- in public (not app): the anon role has no USAGE on schema app, and a storage policy runs as the caller.
+-- Callable as an RPC too; it only answers whether a given (unguessable) object name is an active office's current logo.
+REVOKE EXECUTE ON FUNCTION public.site_logo_visible(text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.site_logo_visible(text) TO anon, authenticated;
+
+DROP POLICY IF EXISTS marsa_org_assets_site_logo ON storage.objects;
+CREATE POLICY marsa_org_assets_site_logo ON storage.objects FOR SELECT TO anon
+  USING (bucket_id = 'org-assets' AND public.site_logo_visible(name));
+
+-- ---------------------------------------------------------------------
+-- 3. stage B: admin_update_org accepts the website settings (20261102000200 body + 5 keys)
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.admin_update_org(p_org uuid, p_payload jsonb) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE
+  v_o   public.organizations;
+  v_s   jsonb;
+  v_set jsonb;
+  k     text;
+  v     text;
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  IF p_org IS NULL OR NOT app.has_role(p_org, ARRAY['admin']) THEN PERFORM app.fail('MRS_FORBIDDEN'); END IF;
+  PERFORM app.only_keys(p_payload, ARRAY['name_ar','name_en','default_locale','public_intake_enabled','settings']);
+  SELECT * INTO v_o FROM public.organizations o WHERE o.id = p_org FOR UPDATE;
+
+  IF p_payload ? 'name_ar' THEN
+    v_o.name_ar := app.ptext(p_payload, 'name_ar', 160, true);
+    IF char_length(v_o.name_ar) < 2 THEN PERFORM app.fail('MRS_INVALID', 'name_ar'); END IF;
+  END IF;
+  IF p_payload ? 'name_en' THEN v_o.name_en := app.ptext(p_payload, 'name_en', 160); END IF;
+  IF p_payload ? 'default_locale' THEN
+    v_o.default_locale := app.ptext(p_payload, 'default_locale', 2, true);
+    IF v_o.default_locale NOT IN ('ar','en') THEN PERFORM app.fail('MRS_INVALID', 'default_locale'); END IF;
+  END IF;
+  IF p_payload ? 'public_intake_enabled' THEN
+    IF jsonb_typeof(p_payload -> 'public_intake_enabled') <> 'boolean' THEN PERFORM app.fail('MRS_INVALID', 'public_intake_enabled'); END IF;
+    v_o.public_intake_enabled := (p_payload ->> 'public_intake_enabled')::boolean;
+  END IF;
+  IF p_payload ? 'settings' THEN
+    v_s := p_payload -> 'settings';
+    PERFORM app.only_keys(v_s, ARRAY['brand_color','contact_phone','contact_email','address_ar','address_en','logo_path',
+                                     'whatsapp','hours_ar','hours_en','about_ar','about_en']);
+    v_set := coalesce(v_o.settings, '{}'::jsonb);
+    FOR k IN SELECT jsonb_object_keys(v_s) LOOP
+      v := app.ptext(v_s, k, CASE WHEN k IN ('about_ar','about_en') THEN 600 ELSE 300 END);
+      IF v IS NULL THEN v_set := v_set - k; CONTINUE; END IF;
+      IF k = 'brand_color' THEN
+        IF v !~ '^#[0-9A-Fa-f]{6}$' THEN PERFORM app.fail('MRS_INVALID', 'brand_color'); END IF;
+        v := lower(v);
+      ELSIF k = 'contact_phone' THEN
+        v := app.norm_phone(v, true);
+        IF v IS NULL THEN PERFORM app.fail('MRS_INVALID', 'contact_phone'); END IF;
+      ELSIF k = 'whatsapp' THEN
+        v := app.norm_phone(v, false);   -- a mobile number only (wa.me)
+        IF v IS NULL THEN PERFORM app.fail('MRS_INVALID', 'whatsapp'); END IF;
+      ELSIF k = 'contact_email' THEN
+        v := lower(v);
+        IF NOT app.is_email(v) THEN PERFORM app.fail('MRS_INVALID', 'contact_email'); END IF;
+      ELSIF k IN ('address_ar','address_en') THEN
+        IF char_length(v) > 300 THEN PERFORM app.fail('MRS_TOO_LONG', k); END IF;
+      ELSIF k IN ('hours_ar','hours_en') THEN
+        IF char_length(v) > 120 THEN PERFORM app.fail('MRS_TOO_LONG', k); END IF;
+      ELSIF k = 'logo_path' THEN
+        -- a storage object path, never a URL; must live under this org's folder
+        IF v !~ '^[A-Za-z0-9][A-Za-z0-9/_.-]{0,199}$' OR position('..' IN v) > 0
+           OR split_part(v, '/', 1) <> p_org::text THEN
+          PERFORM app.fail('MRS_INVALID', 'logo_path');
+        END IF;
+      END IF;
+      v_set := v_set || jsonb_build_object(k, v);
+    END LOOP;
+    v_o.settings := v_set;
+  END IF;
+
+  UPDATE public.organizations o
+     SET name_ar = v_o.name_ar, name_en = v_o.name_en, default_locale = v_o.default_locale,
+         public_intake_enabled = v_o.public_intake_enabled, settings = v_o.settings
+   WHERE o.id = p_org RETURNING * INTO v_o;
+  RETURN jsonb_build_object('id', v_o.id, 'slug', v_o.slug, 'name_ar', v_o.name_ar, 'name_en', v_o.name_en,
+                            'default_locale', v_o.default_locale, 'public_intake_enabled', v_o.public_intake_enabled,
+                            'settings', v_o.settings, 'updated_at', v_o.updated_at);
+END $$;
+
+-- ===== migrations/20261214000100_org_ai_keys.sql =====
+-- =====================================================================
+-- 20261214000100_org_ai_keys — an office may keep its own AI key; a warning + consent before a free Google key
+-- (2026-11-23, owner request; branch owner/ui-polish)
+--   Owner: «في موقع المشتركين لازم يكون في مكان للمفتاح إذا كان أحدهم يملك مفتاح خاص به». app.ai_provider_keys
+--   (20261209000100) already carries org_id and public.ai_provider_keys(org) already returns the office key first, then
+--   the platform's — so the reading path needs no change. This file adds what the office needs to manage its key, and
+--   the owner's decision on Google's free tier: «الخدمة المجانية من جوجل قد تستخدم المستندات المرسلة لتحسين خدماتها،
+--   وقد يطّلع عليها مراجعون لديها» — a Gemini key is saved as 'paid' or 'free'; a free one only with an explicit consent.
+--   1. app.ai_provider_keys + key_tier ('paid' | 'free', NULL = not stated, the platform keys saved before), free_consent_by,
+--      free_consent_at (CHECK: a free key always has its consent). app.ai_key_json + 'tier', 'free_consent_at'.
+--   2. public.org_ai_keys(org) — org admins: per active provider, the office key (last 4 / tier / test, never the key),
+--      whether the platform has a key, and the platform key's tier (so the page can warn about a free platform key).
+--      public.org_ai_set_key(org, provider, key, tier, consent) / org_ai_clear_key(org, provider) — org admins: store /
+--      replace / remove the office key in Vault (audit row with the office, provider and last 4 only).
+--      public.platform_ai_set_key_tier(provider, tier, consent) — platform admins: the tier of the platform key.
+--   3. service role only (the ai-extract Edge Function): public.ai_org_provider_key(org, provider) — the office's OWN key
+--      (no fallback; the office's connection test), public.ai_record_org_key_test(org, provider, ok, note, models).
+--   Re-runnable (IF NOT EXISTS / CREATE OR REPLACE / DROP CONSTRAINT IF EXISTS). Data: none changed; no key stored.
+--   Down-path: DROP FUNCTION public.ai_record_org_key_test(uuid, text, boolean, text, jsonb),
+--   public.ai_org_provider_key(uuid, text), public.platform_ai_set_key_tier(text, text, boolean),
+--   public.org_ai_clear_key(uuid, text), public.org_ai_set_key(uuid, text, text, text, boolean), public.org_ai_keys(uuid);
+--   re-create app.ai_key_json from 20261209000100; DELETE the office keys' Vault secrets (secret_id of rows with org_id)
+--   and those rows; ALTER TABLE app.ai_provider_keys DROP CONSTRAINT ai_provider_keys_free_consent_chk, DROP COLUMN
+--   free_consent_at, DROP COLUMN free_consent_by, DROP COLUMN key_tier; DELETE FROM public.schema_versions WHERE
+--   version = '20261214000100'.
+--   No BEGIN/COMMIT (the SQL editor wraps the run).
+-- =====================================================================
+
+DO $pre$
+BEGIN
+  IF to_regclass('public.schema_versions') IS NULL
+     OR NOT EXISTS (SELECT 1 FROM public.schema_versions WHERE version = '20261213000100') THEN
+    RAISE EXCEPTION 'ORG AI KEYS preflight: apply site_profile first (schema_versions lacks 20261213000100)';
+  END IF;
+  IF to_regclass('app.ai_provider_keys') IS NULL OR to_regclass('vault.secrets') IS NULL THEN
+    RAISE EXCEPTION 'ORG AI KEYS preflight: app.ai_provider_keys (ai_keys, 20261209000100) or Supabase Vault missing';
+  END IF;
+END $pre$;
+
+INSERT INTO public.schema_versions (version, name) VALUES ('20261214000100', 'org_ai_keys')
+ON CONFLICT (version) DO NOTHING;
+
+-- ---------------------------------------------------------------------
+-- 1. the tier of a key (Google's free tier needs a consent)
+-- ---------------------------------------------------------------------
+ALTER TABLE app.ai_provider_keys ADD COLUMN IF NOT EXISTS key_tier text CHECK (key_tier IS NULL OR key_tier IN ('paid', 'free'));
+ALTER TABLE app.ai_provider_keys ADD COLUMN IF NOT EXISTS free_consent_by uuid;
+ALTER TABLE app.ai_provider_keys ADD COLUMN IF NOT EXISTS free_consent_at timestamptz;
+ALTER TABLE app.ai_provider_keys DROP CONSTRAINT IF EXISTS ai_provider_keys_free_consent_chk;
+ALTER TABLE app.ai_provider_keys ADD CONSTRAINT ai_provider_keys_free_consent_chk
+  CHECK (key_tier IS DISTINCT FROM 'free' OR (free_consent_by IS NOT NULL AND free_consent_at IS NOT NULL));
+COMMENT ON COLUMN app.ai_provider_keys.key_tier IS 'paid | free (20261214000100). A free Google key may let Google use the documents sent to improve its services: saved only with the admin''s consent (free_consent_by / free_consent_at).';
+
+CREATE OR REPLACE FUNCTION app.ai_key_json(k app.ai_provider_keys) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT CASE WHEN k.id IS NULL OR k.secret_id IS NULL THEN NULL ELSE jsonb_build_object('last4', k.key_last4, 'set_at', k.set_at,
+    'set_by_name', (SELECT p.full_name FROM public.profiles p WHERE p.id = k.set_by),
+    'tested_at', k.tested_at, 'test_ok', k.test_ok, 'test_note', k.test_note, 'test_models', coalesce(k.test_models, '[]'::jsonb),
+    'tier', k.key_tier, 'free_consent_at', k.free_consent_at) END
+$$;
+
+-- the tier rule shared by both scopes: tier 'free' only for Gemini (the only provider with a free API tier here) and
+-- only with p_consent = true; NULL tier = 'paid' for a new key
+CREATE OR REPLACE FUNCTION app.ai_check_tier(p_provider text, p_tier text, p_consent boolean) RETURNS text
+LANGUAGE plpgsql IMMUTABLE SET search_path = '' AS $$
+DECLARE v text := coalesce(nullif(btrim(coalesce(p_tier, '')), ''), 'paid');
+BEGIN
+  IF v NOT IN ('paid', 'free') THEN PERFORM app.fail('MRS_INVALID', 'tier'); END IF;
+  IF v = 'free' AND p_provider <> 'gemini' THEN PERFORM app.fail('MRS_INVALID', 'tier'); END IF;
+  IF v = 'free' AND p_consent IS NOT TRUE THEN PERFORM app.fail('MRS_AI_FREE_CONSENT'); END IF;
+  RETURN v;
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 2. the office settings («مفتاح الذكاء الاصطناعي الخاص بالمكتب») and the platform key's tier
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.org_ai_keys(p_org uuid) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  IF p_org IS NULL OR NOT app.has_role(p_org, ARRAY['admin']) THEN PERFORM app.fail('MRS_FORBIDDEN'); END IF;
+  RETURN coalesce((SELECT jsonb_agg(jsonb_build_object(
+      'provider', p.provider, 'sort', p.sort,
+      'key', (SELECT app.ai_key_json(k) FROM app.ai_provider_keys k WHERE k.provider = p.provider AND k.org_id = p_org),
+      'platform_key', EXISTS (SELECT 1 FROM app.ai_provider_keys k WHERE k.provider = p.provider AND k.org_id IS NULL),
+      'platform_tier', (SELECT k.key_tier FROM app.ai_provider_keys k WHERE k.provider = p.provider AND k.org_id IS NULL))
+      ORDER BY p.sort, p.provider) FROM app.ai_providers p WHERE p.is_active), '[]'::jsonb);
+END $$;
+
+-- store or replace the office key of a provider in Vault (same key rule as the platform: 20–400 printable, no spaces)
+CREATE OR REPLACE FUNCTION public.org_ai_set_key(p_org uuid, p_provider text, p_key text, p_tier text DEFAULT NULL, p_consent boolean DEFAULT false)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE k app.ai_provider_keys; v_key text := btrim(coalesce(p_key, '')); v_sid uuid; v_last4 text; v_tier text;
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  IF p_org IS NULL OR NOT app.has_role(p_org, ARRAY['admin']) THEN PERFORM app.fail('MRS_FORBIDDEN'); END IF;
+  IF NOT EXISTS (SELECT 1 FROM app.ai_providers p WHERE p.provider = p_provider AND p.is_active) THEN PERFORM app.fail('MRS_INVALID', 'provider'); END IF;
+  IF char_length(v_key) NOT BETWEEN 20 AND 400 OR v_key !~ '^[\x21-\x7E]+$' THEN PERFORM app.fail('MRS_INVALID', 'key'); END IF;
+  v_tier := app.ai_check_tier(p_provider, p_tier, p_consent);
+  v_last4 := right(v_key, 4);
+  IF v_last4 !~ '^[A-Za-z0-9_-]{4}$' THEN v_last4 := 'xxxx'; END IF;
+  SELECT * INTO k FROM app.ai_provider_keys x WHERE x.provider = p_provider AND x.org_id = p_org FOR UPDATE;
+  IF k.id IS NULL THEN
+    v_sid := vault.create_secret(v_key, 'ai_key:org:' || p_org::text || ':' || p_provider, 'AI provider key (office) — set from the office settings');
+    INSERT INTO app.ai_provider_keys (provider, org_id, secret_id, key_last4, set_by, key_tier, free_consent_by, free_consent_at)
+    VALUES (p_provider, p_org, v_sid, v_last4, auth.uid(), v_tier,
+            CASE WHEN v_tier = 'free' THEN auth.uid() END, CASE WHEN v_tier = 'free' THEN now() END)
+    RETURNING * INTO k;
+  ELSE
+    PERFORM vault.update_secret(k.secret_id, v_key);
+    UPDATE app.ai_provider_keys x SET key_last4 = v_last4, set_by = auth.uid(), set_at = now(), key_tier = v_tier,
+           free_consent_by = CASE WHEN v_tier = 'free' THEN auth.uid() END, free_consent_at = CASE WHEN v_tier = 'free' THEN now() END,
+           tested_at = NULL, test_ok = NULL, test_note = NULL, test_models = NULL
+     WHERE x.id = k.id RETURNING * INTO k;
+  END IF;
+  v_key := NULL;
+  INSERT INTO public.audit_log (org_id, table_name, row_id, action, changed_fields, old_data, new_data, actor, actor_role)
+  VALUES (p_org, 'ai_provider_keys', k.id::text, 'UPDATE', ARRAY['key'], NULL,
+          jsonb_build_object('provider', p_provider, 'scope', 'office', 'last4', v_last4, 'tier', v_tier,
+                             'free_consent', v_tier = 'free'), auth.uid(), auth.jwt() ->> 'role');
+  RETURN app.ai_key_json(k);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.org_ai_clear_key(p_org uuid, p_provider text) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE k app.ai_provider_keys;
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  IF p_org IS NULL OR NOT app.has_role(p_org, ARRAY['admin']) THEN PERFORM app.fail('MRS_FORBIDDEN'); END IF;
+  SELECT * INTO k FROM app.ai_provider_keys x WHERE x.provider = p_provider AND x.org_id = p_org FOR UPDATE;
+  IF k.id IS NULL THEN RETURN jsonb_build_object('provider', p_provider, 'removed', false); END IF;
+  DELETE FROM vault.secrets s WHERE s.id = k.secret_id;
+  DELETE FROM app.ai_provider_keys x WHERE x.id = k.id;
+  INSERT INTO public.audit_log (org_id, table_name, row_id, action, changed_fields, old_data, new_data, actor, actor_role)
+  VALUES (p_org, 'ai_provider_keys', k.id::text, 'DELETE', ARRAY['key'],
+          jsonb_build_object('provider', p_provider, 'scope', 'office', 'last4', k.key_last4), NULL, auth.uid(), auth.jwt() ->> 'role');
+  RETURN jsonb_build_object('provider', p_provider, 'removed', true);
+END $$;
+
+-- the platform page: the tier of the platform key (a free Google key only with the platform admin's consent)
+CREATE OR REPLACE FUNCTION public.platform_ai_set_key_tier(p_provider text, p_tier text, p_consent boolean DEFAULT false) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE k app.ai_provider_keys; v_tier text;
+BEGIN
+  IF auth.uid() IS NULL THEN PERFORM app.fail('MRS_AUTH_REQUIRED'); END IF;
+  IF NOT app.is_platform_admin() THEN PERFORM app.fail('MRS_FORBIDDEN'); END IF;
+  v_tier := app.ai_check_tier(p_provider, p_tier, p_consent);
+  SELECT * INTO k FROM app.ai_provider_keys x WHERE x.provider = p_provider AND x.org_id IS NULL FOR UPDATE;
+  IF k.id IS NULL THEN PERFORM app.fail('MRS_NOT_FOUND', 'key'); END IF;
+  UPDATE app.ai_provider_keys x SET key_tier = v_tier,
+         free_consent_by = CASE WHEN v_tier = 'free' THEN auth.uid() END, free_consent_at = CASE WHEN v_tier = 'free' THEN now() END
+   WHERE x.id = k.id RETURNING * INTO k;
+  INSERT INTO public.audit_log (org_id, table_name, row_id, action, changed_fields, old_data, new_data, actor, actor_role)
+  VALUES (NULL, 'ai_provider_keys', k.id::text, 'UPDATE', ARRAY['key_tier'], NULL,
+          jsonb_build_object('provider', p_provider, 'scope', 'platform', 'tier', v_tier, 'free_consent', v_tier = 'free'), auth.uid(), auth.jwt() ->> 'role');
+  RETURN app.ai_key_json(k);
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 3. the Edge Function (service role): the office's own key for its connection test, and the test result
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.ai_org_provider_key(p_org uuid, p_provider text) RETURNS text
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+BEGIN
+  IF coalesce(auth.role(), '') <> 'service_role' THEN PERFORM app.fail('MRS_FORBIDDEN', 'service_only'); END IF;
+  RETURN (SELECT d.decrypted_secret FROM app.ai_provider_keys k JOIN vault.decrypted_secrets d ON d.id = k.secret_id
+           WHERE k.provider = p_provider AND k.org_id = p_org AND p_org IS NOT NULL);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.ai_record_org_key_test(p_org uuid, p_provider text, p_ok boolean, p_note text, p_models jsonb DEFAULT NULL)
+RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_models jsonb;
+BEGIN
+  IF coalesce(auth.role(), '') <> 'service_role' THEN PERFORM app.fail('MRS_FORBIDDEN', 'service_only'); END IF;
+  IF p_org IS NULL OR p_ok IS NULL OR (p_note IS NOT NULL AND p_note !~ '^[a-z_]{1,40}$') THEN PERFORM app.fail('MRS_INVALID', 'test'); END IF;
+  SELECT jsonb_agg(m ORDER BY m) INTO v_models FROM (
+    SELECT DISTINCT e #>> '{}' m FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_models) = 'array' THEN p_models ELSE '[]'::jsonb END) e
+     WHERE jsonb_typeof(e) = 'string' AND (e #>> '{}') ~ '^[a-z0-9][a-z0-9.-]{0,63}$' LIMIT 200) z;
+  UPDATE app.ai_provider_keys k SET tested_at = now(), test_ok = p_ok, test_note = p_note, test_models = v_models
+   WHERE k.provider = p_provider AND k.org_id = p_org;
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 4. privileges
+-- ---------------------------------------------------------------------
+REVOKE EXECUTE ON FUNCTION app.ai_key_json(app.ai_provider_keys), app.ai_check_tier(text, text, boolean) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.org_ai_keys(uuid), public.org_ai_set_key(uuid, text, text, text, boolean), public.org_ai_clear_key(uuid, text),
+  public.platform_ai_set_key_tier(text, text, boolean) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.org_ai_keys(uuid), public.org_ai_set_key(uuid, text, text, text, boolean), public.org_ai_clear_key(uuid, text),
+  public.platform_ai_set_key_tier(text, text, boolean) TO authenticated;
+REVOKE ALL ON FUNCTION public.ai_org_provider_key(uuid, text), public.ai_record_org_key_test(uuid, text, boolean, text, jsonb)
+FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.ai_org_provider_key(uuid, text), public.ai_record_org_key_test(uuid, text, boolean, text, jsonb) TO service_role;

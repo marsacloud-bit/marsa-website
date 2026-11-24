@@ -228,7 +228,8 @@
       mainMenu: 'القائمة الرئيسية', openMenu: 'فتح القائمة', closeMenu: 'إغلاق القائمة', drawer: 'القائمة الجانبية',
       home: 'الرئيسية', services: 'خدماتنا', calculator: 'حاسبة الرسوم', calculatorFull: 'حاسبة الرسوم الجمركية',
       tracking: 'تتبع الشحنة', bulk: 'الرفع الجماعي', bulkFull: 'الرفع الجماعي للبيانات',
-      ocr: 'قراءة المستندات', ocrFull: 'قراءة المستندات (OCR)', about: 'من نحن', contact: 'تواصل معنا',
+      ocr: 'قراءة المستندات', ocrFull: 'قراءة المستندات (OCR)', about: 'من نحن', contact: 'اتصل بنا',
+      blog: 'المدونة', consult: 'استشارات جمركية',
       request: 'اطلب تخليص', requestNow: 'اطلب تخليص الآن',
       clientLogin: 'دخول العملاء', staffLogin: 'دخول الموظفين', portal: 'بوابتي', platform: 'لوحة المنصة'
     },
@@ -239,6 +240,7 @@
       home: 'Home', services: 'Services', calculator: 'Duty calculator', calculatorFull: 'Customs duty calculator',
       tracking: 'Track shipment', bulk: 'Bulk upload', bulkFull: 'Bulk data upload',
       ocr: 'Read documents', ocrFull: 'Document reading (OCR)', about: 'About us', contact: 'Contact us',
+      blog: 'Blog', consult: 'Customs advice',
       request: 'Request clearance', requestNow: 'Request clearance now',
       clientLogin: 'Client sign-in', staffLogin: 'Staff sign-in', portal: 'My portal', platform: 'Platform console'
     }
@@ -267,6 +269,8 @@
       bulk: 'الرفع الجماعي (Excel / CSV)', aci: 'البيان المسبق ومنصة فسح', hs: 'تصنيف HS Code',
       contactTitle: 'تواصل معنا', address: 'طريق الملك عبدالعزيز، حي الحمراء – جدة', hours: 'الأحد – الخميس: 8 ص – 5 م',
       clearData: 'مسح بياناتي من هذا الجهاز',
+      officeAbout: '{name}: خدمات تخليص جمركي للمستوردين والمصدّرين في المملكة، مع متابعة الشحنات أونلاين خطوة بخطوة.',
+      officeRights: '{name}. جميع الحقوق محفوظة.',
       rights: 'مرسى MARSA. جميع الحقوق محفوظة.',
       disclaimer: 'منصة خاصة لخدمات التخليص الجمركي — غير تابعة لأي جهة حكومية.',
       privacyDemo: '<strong>الخصوصية في نسخة العرض:</strong> ما تُدخله في النماذج والحاسبة يبقى في التخزين المحلي (localStorage) لهذا المتصفح فقط، دون تشفير ودون إرسال إلى أي خادم، فلا تُدخل بيانات حقيقية حساسة. خط الموقع ومكتبة الاتصال مستضافان على الموقع نفسه، فلا يتصل متصفحك بخوادم خارجية لتحميلهما.',
@@ -279,6 +283,8 @@
       bulk: 'Bulk upload (Excel / CSV)', aci: 'Advance declaration & FASAH', hs: 'HS Code classification',
       contactTitle: 'Contact us', address: 'King Abdulaziz Road, Al Hamra District – Jeddah', hours: 'Sunday – Thursday: 8 am – 5 pm',
       clearData: 'Clear my data from this device',
+      officeAbout: '{name}: customs clearance for importers and exporters in the Kingdom, with online step-by-step shipment tracking.',
+      officeRights: '{name}. All rights reserved.',
       rights: 'MARSA. All rights reserved.',
       disclaimer: 'A private customs clearance service — not affiliated with any government body.',
       privacyDemo: '<strong>Privacy in the demo:</strong> what you enter in forms and the calculator stays in this browser\'s local storage (localStorage) only, unencrypted and never sent to a server, so do not enter real sensitive data. The site font and the connection library are hosted on this site, so your browser does not contact third-party servers to load them.',
@@ -322,6 +328,7 @@
       MRS_EXTRACTION_VOIDED: 'هذا السجل مُلغى ولا يمكن تعديله.',
       MRS_EXTRACTION_ATTACHED: 'ربط السجل بمعاملة أو بمستند لا يمكن تغييره بعد تعيينه.',
       // AI document reading (20261114000100)
+      MRS_AI_FREE_CONSENT: 'مفتاح جوجل المجاني يحتاج موافقة صريحة على تنبيه الخدمة المجانية قبل حفظه.',
       MRS_AI_DISABLED: 'القراءة بالذكاء الاصطناعي غير مفعّلة لهذه المؤسسة. يفعّلها مدير المؤسسة من «المؤسسة» في لوحة الموظفين.',
       MRS_AI_DAILY_CAP: 'وصلت المؤسسة إلى الحد اليومي للقراءة بالذكاء الاصطناعي. حاول غدًا أو اطلب من مدير المؤسسة رفع الحد.',
       MRS_AI_BUDGET: 'بلغت تكلفة القراءة بالذكاء الاصطناعي ميزانية هذا الشهر. اطلب من مدير المؤسسة رفع الميزانية.',
@@ -572,6 +579,7 @@
       MRS_EXTRACTION_VOIDED: 'This record is void and cannot be edited.',
       MRS_EXTRACTION_ATTACHED: 'The link to a transaction or document cannot be changed once set.',
       // AI document reading (20261114000100)
+      MRS_AI_FREE_CONSENT: 'A free Google key needs an explicit consent to the free-tier warning before it is saved.',
       MRS_AI_DISABLED: 'AI reading is not enabled for this organization. An organization admin enables it under “Organization” in the staff dashboard.',
       MRS_AI_DAILY_CAP: 'The organization reached today\'s AI reading limit. Try tomorrow or ask an organization admin to raise it.',
       MRS_AI_BUDGET: 'AI reading reached this month\'s budget. Ask an organization admin to raise it.',

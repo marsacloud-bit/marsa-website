@@ -51,7 +51,7 @@
      ------------------------------------------------------------------ */
   var T = {
     views: {
-      dashboard: 'نظرة عامة', requests: 'الطلبات الواردة', transactions: 'المعاملات', clients: 'العملاء',
+      dashboard: 'مهامي اليوم', requests: 'الطلبات الواردة', transactions: 'المعاملات', clients: 'العملاء',
       messages: 'رسائل التواصل', imports: 'سجل الاستيراد', members: 'الأعضاء والدعوات',
       org: 'المؤسسة', branches: 'الفروع', audit: 'سجل التدقيق', errors: 'أخطاء الواجهة'
     },
@@ -344,6 +344,8 @@
       inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.8 1.1z"/>',
       layers: '<path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>',
       clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+      check: '<path d="M5 12l4 4 10-10"/>',   // «مهامي اليوم» (owner 2026-11-23)
+      calendar: '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
       alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
       chevron: '<path d="m9 18 6-6-6-6"/>',   // points back in RTL; flipped for LTR in CSS
       'chevron-down': '<path d="m6 9 6 6 6-6"/>',   // nav group fold (same in RTL and LTR)
@@ -1664,8 +1666,8 @@
      an unknown or forbidden tab → the default tab. Without MarsaDash the overview still works.
      ------------------------------------------------------------------ */
   var DASH_FALLBACK = {
-    ar: { tabs_label: 'أقسام لوحة التحكم', tab_overview: 'نظرة عامة', tab_ops: 'التشغيل', tab_finance: 'المالية', tab_management: 'الإدارة' },
-    en: { tabs_label: 'Dashboard sections', tab_overview: 'Overview', tab_ops: 'Operations', tab_finance: 'Finance', tab_management: 'Management' }
+    ar: { tabs_label: 'أقسام لوحة التحكم', tab_today: 'مهامي اليوم', tab_overview: 'نظرة عامة', tab_ops: 'التشغيل', tab_finance: 'المالية', tab_management: 'الإدارة' },
+    en: { tabs_label: 'Dashboard sections', tab_today: 'My day', tab_overview: 'Overview', tab_ops: 'Operations', tab_finance: 'Finance', tab_management: 'Management' }
   };
   function dashT(k, vars) {
     var I = window.MarsaI18n, key = 'dash.' + k;
@@ -1674,12 +1676,15 @@
   }
   function dashModule() { var D = window.MarsaDash; return D && typeof D.render === 'function' ? D : null; }
   function dashTabs() {
-    var tabs = ['overview', 'ops'];
+    var tabs = ['today', 'overview', 'ops'];   // owner 2026-11-23 (ق5): «مهامي اليوم» first, for every staff member
     if (canAny(R.finRead)) tabs.push('finance');
     if (canAny(R.mgmt)) tabs.push('management');
     return tabs;
   }
   function dashDefaultTab() {
+    return 'today';   // owner 2026-11-23: every staff member opens on «مهامي اليوم» (the role tabs stay, one click away)
+  }
+  function dashDefaultTabOld() {   // the role default before «مهامي اليوم» (kept)
     if (!dashModule()) return 'overview';
     if (canAny(R.mgmt)) return 'management';
     if (canAny(['accountant', 'accounts_manager'])) return 'finance';
@@ -1697,6 +1702,7 @@
     var tabs = dashTabs();
     var tab = param && tabs.indexOf(param) !== -1 ? param : dashDefaultTab();
     var strip = dashTabStrip(tab, tabs);
+    if (tab === 'today') return renderToday(strip);
     if (tab === 'overview') return renderOverview(strip);
     var out = frag(dHead(viewLabel('dashboard'), t('dash_sub')));
     out.appendChild(strip);
@@ -1716,6 +1722,119 @@
     if (I && typeof I.t === 'function') { var s = I.t(key, vars); if (s && s !== key) return s; }
     return fallback;
   }
+  /* ------------------------------------------------------------------
+     «مهامي اليوم» (owner 2026-11-23, suggestion ق5; picture docs/owner/designs/staff-panel-mockup.html): what needs
+     this employee's work today — one main action, four counts (late / to review / today's appointments / containers
+     not returned), the open alerts with the action they need, today's appointments, the latest open transactions.
+     Everything comes from the existing reads (RLS: only what the caller may see, by branch and role); a failed read
+     shows its own message and the rest of the page still works. Colours carry meaning only, always with a word.
+     ------------------------------------------------------------------ */
+  function todayChip(tone, text) {
+    var ic = tone === 'ok' ? 'check' : (tone === 'bad' ? 'alert' : 'clock');
+    return el('span', { class: 'tdy-chip tdy-' + tone }, [svgIcon(ic), text]);
+  }
+  function todayTime(iso) {
+    var d = iso ? new Date(iso) : null;
+    if (!d || isNaN(d)) return '—';
+    var h = d.getHours(), m = d.getMinutes();
+    return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+  }
+  function renderToday(strip) {
+    var ops = canAny(R.opsWriter);
+    var statsP = typeof (api && api.dashboardStats) === 'function' ? call('dashboardStats', S.orgId) : Promise.resolve({ data: null, error: { code: 'MRS_UNAVAILABLE' } });
+    return Promise.all([
+      statsP.then(function (r) { return fillStats(r.error ? {} : normStats(r.data)); }),
+      call('listAlerts', { orgId: S.orgId, limit: 50 }),
+      call('listAppointments', { orgId: S.orgId, from: todayISO(0) + 'T00:00:00', to: todayISO(1) + 'T00:00:00' }),
+      api.listTransactions({ orgId: S.orgId, cancelled: 'exclude', limit: 30 })
+    ]).then(function (res) {
+      var st = res[0], ar = res[1], pr = res[2], tr = res[3];
+      var g3 = opsDashCounts(ar, pr);
+      var out = frag();
+      var p = (S.ctx && S.ctx.profile) || {};
+      var hour = new Date().getHours();
+      var hello = t(hour < 12 ? 'tdy_morning' : 'tdy_evening') + (p.full_name ? t('tdy_name_sep') + p.full_name : '');
+      var actions = [];
+      if (ops) {
+        actions.push(el('a', { class: 'btn btn-ghost', href: '#requests', text: t('tdy_requests') }));
+        actions.push(el('a', { class: 'btn btn-primary', href: 'ocr.html#new-tx', 'data-act': 'new-tx-read' }, [svgIcon('plus'), t('tdy_new_read')]));
+      }
+      out.appendChild(el('div', { class: 'tdy-head' }, [
+        el('div', null, [el('h1', { class: 'tdy-title', text: t('tdy_title') }), el('p', { class: 'tdy-sub', text: hello + t('tdy_sub_sep') + t('tdy_sub') })]),
+        actions.length ? el('div', { class: 'tdy-actions' }, actions) : null
+      ]));
+      if (strip) out.appendChild(strip);
+
+      // four counts (a count that could not be read shows «—», never 0)
+      var late = g3.alerts ? g3.alerts.critical : null, review = st.docs, appts = g3.appts ? g3.appts.total : null;
+      var tile = function (o) {
+        return el('a', { class: 'tdy-tile tdy-tile-' + o.tone, href: o.href }, [
+          el('span', { class: 'tdy-tile-lbl' }, [el('span', { class: 'tdy-dot', 'aria-hidden': 'true' }), o.label]),
+          el('span', { class: 'tdy-tile-val num', text: fmtCount(o.value) }),
+          el('span', { class: 'tdy-tile-sub', text: o.sub })
+        ]);
+      };
+      out.appendChild(el('div', { class: 'tdy-tiles' }, [
+        tile({ tone: late ? 'bad' : 'calm', label: t('tdy_late'), value: late, href: '#alerts', sub: t('tdy_late_sub') }),
+        tile({ tone: review ? 'warn' : 'calm', label: t('tdy_review'), value: review, href: '#transactions', sub: t('tdy_review_sub') }),
+        tile({ tone: 'acc', label: t('tdy_appts'), value: appts, href: '#schedule', sub: g3.appts ? t('tdy_appts_sub', { c: fmtCount(g3.appts.confirmed), r: fmtCount(g3.appts.requested) }) : t('kpi_unavailable') }),
+        tile({ tone: st.overdue ? 'bad' : 'acc', label: t('tdy_returns'), value: st.overdue, href: '#transactions?status=', sub: st.due3 != null ? t('tdy_returns_sub', { n: fmtCount(st.due3) }) : '' })
+      ]));
+
+      // the open alerts, the most urgent first, each with the action it needs
+      var SEV = { critical: 0, warning: 1, info: 2 };
+      var alerts = ar && !ar.error ? rowsOf(ar.data).filter(function (x) { return x && x.status !== 'resolved'; })
+        .sort(function (x, y) { return (SEV[x.severity] == null ? 3 : SEV[x.severity]) - (SEV[y.severity] == null ? 3 : SEV[y.severity]); }).slice(0, 6) : [];
+      var alertBody = ar && ar.error ? dAlert('danger', errText(ar.error)) : (!alerts.length ? emptyState('check', t('tdy_no_alerts')) : el('ul', { class: 'tdy-list' }, alerts.map(function (x) {
+        var tone = x.severity === 'critical' ? 'bad' : (x.severity === 'warning' ? 'warn' : 'info');
+        var title = (isEn() && x.title_en) || x.title_ar || x.title_en || x.kind || '';
+        var ref = x.transaction_ref || x.ref;
+        return el('li', null, [
+          todayChip(tone, t('tdy_sev_' + tone)),
+          el('div', { class: 'tdy-what' }, [el('b', { text: title }), ref ? el('small', null, [el('bdi', { dir: 'ltr', class: 'num', text: ref })]) : null]),
+          el('a', { class: 'tdy-go', href: x.transaction_id ? '#tx/' + x.transaction_id : '#alerts', text: t('tdy_open') })
+        ]);
+      })));
+      // today's appointments
+      var apptRows = pr && !pr.error ? rowsOf(pr.data).filter(function (x) { return x && x.status !== 'cancelled' && x.status !== 'rescheduled'; }).slice(0, 8) : [];
+      var apptBody = pr && pr.error ? dAlert('danger', errText(pr.error)) : (!apptRows.length ? emptyState('calendar', t('tdy_no_appts')) : el('ul', { class: 'tdy-list' }, apptRows.map(function (x) {
+        var tone = x.status === 'confirmed' || x.status === 'completed' ? 'ok' : (x.status === 'missed' ? 'bad' : 'warn');
+        var ctr = x.containers && x.containers.container_no, ref = x.transactions && x.transactions.ref;
+        return el('li', null, [
+          el('span', { class: 'tdy-time num', dir: 'ltr', text: todayTime(x.appointment_at) }),
+          el('div', { class: 'tdy-what' }, [el('b', null, [ctr ? el('bdi', { dir: 'ltr', class: 'num', text: ctr }) : t('tdy_appt')]),
+            ref ? el('small', null, [el('bdi', { dir: 'ltr', class: 'num', text: ref })]) : null]),
+          todayChip(tone, t('tdy_appt_' + (['requested', 'confirmed', 'completed', 'missed'].indexOf(x.status) >= 0 ? x.status : 'requested'))),
+          x.transaction_id ? el('a', { class: 'tdy-go', href: '#tx/' + x.transaction_id, text: t('tdy_open') }) : null
+        ]);
+      })));
+      out.appendChild(el('div', { class: 'tdy-cols' }, [
+        dCard(t('tdy_alerts'), alertBody, [el('a', { class: 'btn btn-sm btn-ghost', href: '#alerts', text: t('see_all') })]),
+        dCard(t('tdy_appts_title'), apptBody, [el('a', { class: 'btn btn-sm btn-ghost', href: '#schedule', text: t('tdy_schedule') })])
+      ]));
+
+      // the latest open transactions (the office's, as the caller may see them); operationally finished ones
+      // (complete / billing / billed / closed) are not today's work
+      var TDY_DONE = { operationally_complete: 1, under_billing: 1, billed: 1, closed: 1 };
+      var txRows = tr && !tr.error ? rowsOf(tr.data).filter(function (x) { return x && !TDY_DONE[x.operational_status]; }).slice(0, 8) : [];
+      var txBody = tr && tr.error ? dAlert('danger', errText(tr.error)) : (!txRows.length ? emptyState('layers', t('tdy_no_tx')) : el('div', { class: 'tdy-table-wrap' }, el('table', { class: 'tdy-table' }, [
+        el('thead', null, el('tr', null, [t('col_ref'), t('tdy_col_client'), t('tdy_col_bl'), t('col_port'), t('tdy_col_stage')].map(function (h) { return el('th', { scope: 'col', text: h }); }))),
+        el('tbody', null, txRows.map(function (x) {
+          return el('tr', null, [
+            el('td', { class: 'tdy-nowrap' }, [el('a', { href: '#tx/' + x.id }, el('bdi', { dir: 'ltr', class: 'num', text: x.ref || '' })),
+              x.is_draft && !x.cancelled_at ? [' ', pillNode('warning', draftText())] : null]),   // a draft is marked as on the register
+            el('td', { text: (x.clients && x.clients.name_ar) || '—' }),
+            el('td', { class: 'tdy-nowrap' }, x.bl_number ? el('bdi', { dir: 'ltr', class: 'num', text: x.bl_number }) : '—'),
+            el('td', { class: 'tdy-nowrap', dir: 'ltr', text: x.port_code || '—' }),
+            el('td', null, el('span', { class: 'tdy-chip tdy-stage', text: lbl('operational_status', x.operational_status) }))
+          ]);
+        }))
+      ])));
+      out.appendChild(dCard(t('tdy_tx'), txBody, [el('a', { class: 'btn btn-sm btn-ghost', href: '#register', text: t('tdy_all_tx') })]));
+      return out;
+    });
+  }
+
   function renderOverview(strip) {
     var ops = canAny(R.opsWriter);
     var statsP = typeof (api && api.dashboardStats) === 'function' ? call('dashboardStats', S.orgId) : Promise.resolve({ data: null, error: { code: 'MRS_UNAVAILABLE' } });
@@ -3686,6 +3805,56 @@
     });
   }
   var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  // owner 2026-11-22 (20261210000100): «الموانئ التي نخدمها» — the ports this office serves, chosen from the platform list
+  // (sea / dry / air / land); only these show on the office website. Staff see the choice, the org admin saves it.
+  // Before the migration the RPC does not exist: the card says so instead of failing the page.
+  var PORT_KINDS = ['sea', 'dry', 'air', 'land'];
+  function servedPortsCard() {
+    if (!api || typeof api.getServedPorts !== 'function') return Promise.resolve(null);
+    var orgId = S.orgId;
+    return call('getServedPorts', orgId).then(function (r) {
+      if (S.orgId !== orgId) return null;
+      if (r.error) {
+        var raw = r.error.raw || {};
+        var missing = /get_served_ports|does not exist|PGRST202/.test([r.error.message, r.error.code, raw.code, raw.message].join(' '));
+        return dCard(t('ports_title'), [dAlert(missing ? 'info' : 'warning', missing ? t('ports_not_ready') : apiErr(r.error))]);
+      }
+      var rows = Array.isArray(r.data) ? r.data : [];
+      var canEdit = S.memberships.some(function (m) { return m.role === 'admin' && !m.branch_id; });
+      var en = isEn();
+      var box = el('div', { class: 'adm-ports', 'data-served-ports': '' });
+      PORT_KINDS.forEach(function (kind) {
+        var list = rows.filter(function (p) { return p.kind === kind; });
+        if (!list.length) return;
+        var grid = el('div', { class: 'adm-ports-grid' });
+        list.forEach(function (p) {
+          var cb = el('input', { type: 'checkbox', value: p.code });
+          cb.checked = !!p.served;
+          cb.disabled = !canEdit;
+          grid.appendChild(el('label', { class: 'adm-port' }, [cb, el('span', { text: en ? (p.name_en || p.name_ar) : p.name_ar })]));
+        });
+        box.appendChild(el('fieldset', { class: 'adm-ports-kind' }, [el('legend', { text: t('ports_kind_' + kind) }), grid]));
+      });
+      var msg = el('p', { class: 'form-hint', role: 'status' });
+      var btn = canEdit ? el('button', { class: 'btn btn-primary', type: 'button', text: t('ports_save') }) : null;
+      if (btn) btn.addEventListener('click', function () {
+        var codes = Array.prototype.map.call(box.querySelectorAll('input[type="checkbox"]:checked'), function (c) { return c.value; });
+        btn.disabled = true; msg.textContent = '';
+        call('saveServedPorts', orgId, codes).then(function (res) {
+          btn.disabled = false;
+          if (res.error) { msg.textContent = apiErr(res.error); return; }
+          toast(T.common.saved, 'success');
+          msg.textContent = codes.length ? t('ports_saved') : t('ports_saved_none');
+        });
+      });
+      return dCard(t('ports_title'), [
+        el('p', { class: 'text-sm text-muted', text: t('ports_sub') }),
+        box,
+        canEdit ? null : el('p', { class: 'text-sm text-muted', text: t('ports_read_only') }),
+        msg, btn ? el('div', { class: 'btn-group' }, [btn]) : null
+      ]);
+    });
+  }
   function renderOrg() {
     return L.getOrgRow(S.orgId).then(function (r) {
       var out = frag(dHead(t('org_title'), t('org_sub')));
@@ -3713,6 +3882,11 @@
           dField({ name: 'contact_email', label: t('f_contact_email'), value: st.contact_email, ltr: true, max: 160, type: 'email' }),
           dField({ name: 'address_ar', label: t('f_address_ar'), value: st.address_ar, type: 'textarea', max: 300 }),
           dField({ name: 'address_en', label: t('f_address_en'), value: st.address_en, type: 'textarea', max: 300, ltr: true }),
+          dField({ name: 'whatsapp', label: t('f_whatsapp'), value: st.whatsapp, ltr: true, max: 30, type: 'tel', hint: t('f_whatsapp_hint') }),
+          dField({ name: 'hours_ar', label: t('f_hours_ar'), value: st.hours_ar, max: 120, placeholder: t('f_hours_ph') }),
+          dField({ name: 'hours_en', label: t('f_hours_en'), value: st.hours_en, max: 120, ltr: true, placeholder: 'Sun – Thu: 8 am – 5 pm' }),
+          dField({ name: 'about_ar', label: t('f_about_ar'), value: st.about_ar, type: 'textarea', max: 600, hint: t('f_about_hint') }),
+          dField({ name: 'about_en', label: t('f_about_en'), value: st.about_en, type: 'textarea', max: 600, ltr: true }),
           dField({ name: 'public_intake_enabled', label: t('f_public_intake'), type: 'checkbox', value: o.public_intake_enabled !== false, hint: t('f_public_intake_hint'), full: true })
         ]),
         msg, el('div', { class: 'btn-group' }, saveBtn)
@@ -3735,7 +3909,8 @@
           public_intake_enabled: !!form.elements.public_intake_enabled.checked,
           settings: {
             brand_color: color, contact_phone: v('contact_phone'), contact_email: mail ? mail.toLowerCase() : null,
-            address_ar: v('address_ar'), address_en: v('address_en')
+            address_ar: v('address_ar'), address_en: v('address_en'),
+            whatsapp: v('whatsapp'), hours_ar: v('hours_ar'), hours_en: v('hours_en'), about_ar: v('about_ar'), about_en: v('about_en')
           }   // settings.logo_path is left as is (keys not sent are kept): «شعار المؤسسة» below changes it
         };
         saveBtn.disabled = true;
@@ -3747,8 +3922,10 @@
       });
       out.appendChild(dCard(t('org_settings'), [dAlert('info', t('org_settings_info')), form]));
       out.appendChild(orgLogoCard(st));
-      return clearancePriceCard().then(function (pc) { if (pc) out.appendChild(pc); }).then(function () {
-        return aiSettingsCard().then(function (card) { if (card) out.appendChild(card); return out; });
+      return clearancePriceCard().then(function (pc) { if (pc) out.appendChild(pc); })
+        .then(function () { return servedPortsCard().then(function (sp) { if (sp) out.appendChild(sp); }); }).then(function () {
+        return aiSettingsCard().then(function (card) { if (card) out.appendChild(card); })
+          .then(function () { return orgAiKeysCard().then(function (card) { if (card) out.appendChild(card); return out; }); });
       });
     });
   }
@@ -3855,6 +4032,98 @@
       });
       return dCard(t('ai_title'), [el('p', { class: 'text-sm text-muted', text: t('ai_sub') }), status,
         el('h4', { text: t('ai_usage') }), usage, form, dAlert('info', t('ai_privacy'))]);
+    });
+  }
+
+  /* ------------------------------------------------------------------
+     «مفتاح الذكاء الاصطناعي الخاص بالمكتب» (owner 2026-11-23, migration 20261214000100) — org admins only.
+     Optional: an office key is used for the office's readings before the platform's. The key is typed once and kept
+     in Vault: never shown again (last 4 characters only), never put in the page after saving. A Gemini key is
+     «مدفوع» or «مجاني»; a free one only after the admin ticks the warning (owner decision: Google's free tier may use
+     the documents sent to improve its services and reviewers may read them).
+     ------------------------------------------------------------------ */
+  function orgAiKeysCard() {
+    if (!api || typeof api.orgAiKeys !== 'function' || !isOrgAdmin()) return Promise.resolve(null);
+    return call('orgAiKeys', S.orgId).then(function (r) {
+      if (r.error) {
+        // migration 20261214000100 not applied yet → a calm «not ready» note, not an error
+        var raw = r.error.raw || {};
+        var missing = /org_ai_keys|does not exist|could not find the function|PGRST202|42883/i.test([r.error.message, r.error.code, raw.code, raw.message].join(' '));
+        return dCard(t('okey_title'), [dAlert(missing ? 'info' : 'danger', missing ? t('okey_not_ready') : apiErr(r.error))]);
+      }
+      var rows = Array.isArray(r.data) ? r.data : [];
+      var provName = function (c) { var k = 'ai_prov_' + c, v = t(k); return v && v !== k ? v : c; };
+      var body = [el('p', { class: 'text-sm text-muted', text: t('okey_sub') })];
+      if (rows.some(function (x) { return x && !x.key && x.platform_tier === 'free'; })) body.push(dAlert('warning', t('okey_platform_free')));
+      rows.forEach(function (x) {
+        if (!x || !x.provider) return;
+        var k = x.key, p = x.provider;
+        var state = k ? [dBadge('success', t('okey_saved')), ' ', dLtr('…' + (k.last4 || '')), ' ',
+            k.tier === 'free' ? dBadge('warning', t('okey_tier_free')) : dBadge('navy', t('okey_tier_paid'))]
+          : [x.platform_key ? dBadge('navy', t('okey_uses_platform')) : dBadge('warning', t('okey_none'))];
+        if (k && k.tested_at) state.push(' ', k.test_ok ? dBadge('success', t('okey_test_ok')) : dBadge('danger', t('okey_test_bad')));
+        var msg = el('p', { class: 'form-error', role: 'alert', hidden: true });
+        var formBox = el('div', { class: 'adm-okey-form', hidden: true });
+        var btns = [dBtn(k ? t('okey_replace') : t('okey_add'), 'btn-secondary', function () { formBox.hidden = !formBox.hidden; })];
+        if (k) {
+          btns.push(dBtn(t('okey_test'), 'btn-ghost', function (b) {
+            b.disabled = true; msg.hidden = true;
+            call('orgAiTestKey', S.orgId, p).then(function (res) {
+              b.disabled = false;
+              if (res.error) { msg.textContent = apiErr(res.error); msg.hidden = false; return; }
+              toast(res.data && res.data.ok ? t('okey_test_ok') : t('okey_test_bad'), res.data && res.data.ok ? 'success' : 'error'); rerender();
+            });
+          }));
+          btns.push(dBtn(t('okey_remove'), 'btn-ghost adm-text-danger', function (b) {
+            if (!window.confirm(t('okey_remove_confirm', { p: provName(p) }))) return;
+            b.disabled = true;
+            call('orgAiClearKey', S.orgId, p).then(function (res) {
+              b.disabled = false;
+              if (res.error) { msg.textContent = apiErr(res.error); msg.hidden = false; return; }
+              toast(T.common.saved, 'success'); rerender();
+            });
+          }));
+        }
+        // the add / replace form: the key (never echoed), and for Gemini the tier + the free-tier consent
+        var keyIn = el('input', { class: 'form-control', type: 'password', autocomplete: 'off', spellcheck: 'false', dir: 'ltr', maxlength: '400',
+          'aria-label': t('okey_key_label', { p: provName(p) }), placeholder: t('okey_key_ph') });
+        var tierBox = null, freeWarn = null, freeAck = null;
+        if (p === 'gemini') {
+          var paid = el('input', { type: 'radio', name: 'okey_tier_' + p, value: 'paid', checked: true });
+          var free = el('input', { type: 'radio', name: 'okey_tier_' + p, value: 'free' });
+          freeAck = el('input', { type: 'checkbox' });
+          freeWarn = el('div', { hidden: true }, [dAlert('warning', t('okey_free_warning')),
+            el('label', { class: 'check' }, [freeAck, ' ', t('okey_free_ack')])]);
+          var sync = function () { freeWarn.hidden = !free.checked; };
+          paid.addEventListener('change', sync); free.addEventListener('change', sync);
+          tierBox = el('fieldset', { class: 'adm-okey-tier' }, [el('legend', { text: t('okey_tier') }),
+            el('label', { class: 'radio' }, [paid, ' ', t('okey_tier_paid')]), el('label', { class: 'radio' }, [free, ' ', t('okey_tier_free')])]);
+        }
+        var save = el('button', { class: 'btn btn-primary', type: 'button', text: T.common.save });
+        save.addEventListener('click', function () {
+          msg.hidden = true;
+          var v = keyIn.value.trim();
+          var tier = tierBox && tierBox.querySelector('input[value="free"]').checked ? 'free' : 'paid';
+          var bad = v.length < 20 || v.length > 400 || /\s/.test(v) ? t('okey_err_key') : (tier === 'free' && !(freeAck && freeAck.checked) ? t('okey_err_ack') : null);
+          if (bad) { msg.textContent = bad; msg.hidden = false; return; }
+          save.disabled = true;
+          call('orgAiSetKey', S.orgId, p, v, tier, tier === 'free' && !!(freeAck && freeAck.checked)).then(function (res) {
+            save.disabled = false;
+            keyIn.value = '';   // never kept in the page
+            if (res.error) { msg.textContent = apiErr(res.error); msg.hidden = false; return; }
+            toast(T.common.saved, 'success'); rerender();
+          });
+        });
+        formBox.appendChild(el('div', { class: 'form-group' }, [keyIn, el('span', { class: 'form-hint', text: t('okey_key_hint') })]));
+        if (tierBox) { formBox.appendChild(tierBox); formBox.appendChild(freeWarn); }
+        formBox.appendChild(el('div', { class: 'btn-group' }, [save]));
+        body.push(el('div', { class: 'adm-okey-row' }, [
+          el('div', { class: 'adm-okey-head' }, [el('strong', { text: provName(p) }), el('span', { class: 'adm-okey-state' }, state)]),
+          el('div', { class: 'btn-group' }, btns), formBox, msg
+        ]));
+      });
+      body.push(dAlert('info', t('okey_privacy')));
+      return dCard(t('okey_title'), body);
     });
   }
 

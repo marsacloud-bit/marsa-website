@@ -242,3 +242,8 @@ button.ops-kpi { font: inherit; color: inherit; width: 100%; cursor: pointer; }
 .drv2-tx-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px; }
 @media (max-width: 640px) { .drv2-tx-grid { grid-template-columns: 1fr; } }
 .drv2-plate { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+/* owner (23 Nov 2026): the storage-invoice reminder on the draft card catches the eye (same as ocr.css .ocr-nt-remind) */
+.txd-step-remind { display: block; padding: 10px 12px; border: 1px solid #E8B900; border-inline-start: 5px solid #E8B900; font-weight: 700; color: #5A4500; animation: marsa-remind-glow2 2.4s ease-in-out infinite; }
+@keyframes marsa-remind-glow2 { 0%, 100% { box-shadow: 0 0 0 0 rgba(232, 185, 0, 0); background: #FEF6D8; } 50% { box-shadow: 0 0 0 5px rgba(232, 185, 0, .28); background: #FDEDB0; } }
+@media (prefers-reduced-motion: reduce) { .txd-step-remind { animation: none; } }

@@ -653,6 +653,8 @@ const TENANT_TABLES = [
   ['tx_storage_overrides', `SELECT id::text id FROM public.tx_storage_overrides WHERE org_id = $1 LIMIT 1`, 'id::text', 'reason = reason'],
   // the storage answer of a container: staff of the transaction read (never a portal client), written only by set_container_storage
   ['container_storage', `SELECT id::text id FROM public.container_storage WHERE org_id = $1 LIMIT 1`, 'id::text', 'storage_note = storage_note'],
+  // served ports (20261210000100): the ports the office chose for its website (staff read; written only through save_served_ports)
+  ['org_served_ports', `SELECT id::text id FROM public.org_served_ports WHERE org_id = $1 LIMIT 1`, 'id::text', 'sort = sort'],
   ['port_appointments',  `SELECT id::text id FROM public.port_appointments WHERE org_id = $1 LIMIT 1`,  'id::text',  'status = status'],
   ['transport_trips',    `SELECT id::text id FROM public.transport_trips WHERE org_id = $1 LIMIT 1`,    'id::text',  'status = status'],
   ['operational_exceptions', `SELECT id::text id FROM public.operational_exceptions WHERE org_id = $1 LIMIT 1`, 'id::text', 'status = status'],
@@ -739,6 +741,9 @@ async function main() {
   try { await importFixtures();
   await rxFixtures(); pass('legacy import fixtures: one run + one staged row per org'); }
   catch (e) { fail('legacy import fixtures', errText(e)); return finish(); }
+  // served ports (20261210000100): one chosen port per org (written as the owner of the tables; the API path is save_served_ports)
+  try { await db.exec(`INSERT INTO public.org_served_ports (org_id, port_code) SELECT o.id, 'SAJED' FROM public.organizations o ON CONFLICT (org_id, port_code) DO NOTHING`); pass('served ports fixtures: one chosen port per org'); }
+  catch (e) { fail('served ports fixtures', errText(e)); return finish(); }
   // owner stages (20261204000100): the seed orgs are created after the migrations, so they get their default set here
   try { await db.exec(`SELECT app.seed_tx_stage_sets(o.id) FROM public.organizations o`); pass('owner stages fixtures: a default stage set (7 steps) per org'); }
   catch (e) { fail('owner stages fixtures', errText(e)); return finish(); }
@@ -778,10 +783,12 @@ async function main() {
     const bad = r.filter(x => !(x.table_name === 'status_labels' && x.privilege_type === 'SELECT'));
     return bad.length === 0 || bad.map(x => x.table_name + ':' + x.privilege_type).join(', ');
   });
-  await check('no policy targets anon/public except status_labels_read', async () => {
+  await check('no policy targets anon/public except status_labels_read and the current office logo (storage, 20261211000100)', async () => {
     const r = await q(`SELECT schemaname, tablename, policyname, roles::text roles FROM pg_policies
                         WHERE schemaname IN ('public','storage') AND (roles::text ~ 'anon' OR roles::text ~ 'public')`);
-    const bad = r.filter(x => x.policyname !== 'status_labels_read');
+    // marsa_org_assets_site_logo: a visitor reads only an active office's current logo (public.site_logo_visible)
+    const bad = r.filter(x => x.policyname !== 'status_labels_read'
+      && !(x.schemaname === 'storage' && x.policyname === 'marsa_org_assets_site_logo' && x.roles === '{anon}'));
     return bad.length === 0 || bad.map(x => x.tablename + '.' + x.policyname + ' ' + x.roles).join(', ');
   });
   await check('G2 internal tables: no privilege at all for anon/authenticated', async () => {
@@ -791,11 +798,13 @@ async function main() {
                         WHERE grantee IN ('anon','authenticated') AND table_schema = 'public' AND table_name = ANY($1)`, [NO_API_TABLES]);
     return (r.length === 0 && c.length === 0) || r.concat(c).map(x => x.grantee + ':' + x.table_name + ':' + (x.privilege_type || 'column')).join(', ');
   });
-  await check('anon can execute exactly the 6 public RPCs', async () => {
+  // + site_profile, site_logo_visible (20261211000100): the office website reads the office identity / its current logo
+  // + site_served_ports (20261210000100): the office website reads the ports the office chose (nothing else)
+  await check('anon can execute exactly the 9 public RPCs', async () => {
     const r = await q(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                         WHERE n.nspname = 'public' AND has_function_privilege('anon', p.oid, 'EXECUTE') ORDER BY 1`);
     const got = r.map(x => x.proname).join(',');
-    return got === 'health_check,invitation_preview,log_client_error,public_track,submit_contact_message,submit_service_request' || 'anon may execute: ' + got;
+    return got === 'health_check,invitation_preview,log_client_error,public_track,site_logo_visible,site_profile,site_served_ports,submit_contact_message,submit_service_request' || 'anon may execute: ' + got;
   });
   await check('privilege tables carry the audit trigger (memberships, invitations, platform_admins)', async () => {
     const r = await q(`SELECT c.relname FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
@@ -871,6 +880,11 @@ async function main() {
       'list_drivers', 'save_driver',
       // AI keys (20261209000100): the platform page «مفاتيح الذكاء الاصطناعي» (platform admins only, checked inside)
       'platform_ai_providers', 'platform_ai_set_key', 'platform_ai_clear_key', 'platform_ai_save_provider',
+      // served ports (20261210000100): the office's ports (staff read, admins save) + the public website read
+      'get_served_ports', 'save_served_ports', 'site_served_ports',
+      'site_profile', 'site_logo_visible',
+      // office AI keys (20261212000100): the office's own key (org admins) + the platform key's tier (platform admins)
+      'org_ai_keys', 'org_ai_set_key', 'org_ai_clear_key', 'platform_ai_set_key_tier',
       // legacy pay (20261122000100): the payment register (four-eyes review, correct / void, attachments, the transaction panel,
       // the duplicate / transaction checks) and the client custody
       'record_payment_bundle', 'correct_payment', 'void_payment', 'review_payment', 'add_payment_documents', 'remove_payment_document',
@@ -895,7 +909,7 @@ async function main() {
       'legacy_import_commit', 'legacy_import_void', 'legacy_import_get_run', 'legacy_import_list_runs', 'legacy_import_list_rows',
       'legacy_import_skip_rows', 'legacy_import_queue_daftra', 'legacy_import_daftra_candidates'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 320) return 'expected list has ' + exp.length + ' names';   // + set_container_storage (20261206000100: container_storage written only through it)   // + 4 platform_ai_* (20261209000100)   // + tx_storage_gate, approve_storage_override (20261206000100)
+    if (exp.length !== 329) return 'expected list has ' + exp.length + ' names';   // + set_container_storage (20261206000100)   // + org_ai_keys, org_ai_set_key, org_ai_clear_key, platform_ai_set_key_tier (20261212000100)   // + site_profile, site_logo_visible (20261211000100)   // + get_served_ports, save_served_ports, site_served_ports (20261210000100)   // + 4 platform_ai_* (20261209000100)   // + tx_storage_gate, approve_storage_override (20261206000100)
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');
@@ -2347,6 +2361,24 @@ async function main() {
     return (n === 2 && r.length === 0) || JSON.stringify({ n, bad: r });
   });
 
+
+  // served ports (20261210000100): staff of the org read, org admins save, the website reads only the chosen ports
+  await expectErr('staffB cannot read the served ports of org A', () => as('staffB', `SELECT public.get_served_ports('${A}')`), /MRS_FORBIDDEN/, 'app.is_staff(p_org)');
+  await expectErr('staffA cannot save the served ports of org A (admins only)', () => as('staffA', `SELECT public.save_served_ports('${A}', ARRAY['SAJED'])`), /MRS_FORBIDDEN/, 'app.has_role(p_org, admin)');
+  await expectErr('clientA cannot save the served ports of org A', () => as('clientA', `SELECT public.save_served_ports('${A}', ARRAY['SAJED'])`), /MRS_FORBIDDEN/, 'app.has_role(p_org, admin)');
+  await expectErr('anon cannot read get_served_ports', () => as('anon', `SELECT public.get_served_ports('${A}')`), /permission denied/, 'REVOKE FROM anon');
+  await expectErr('anon cannot save served ports', () => as('anon', `SELECT public.save_served_ports('${A}', ARRAY['SAJED'])`), /permission denied/, 'REVOKE FROM anon');
+  await expectErr('authenticated cannot write org_served_ports directly', () => as('adminA', `INSERT INTO public.org_served_ports (org_id, port_code) VALUES ('${A}', 'SAJED')`), /permission denied/, 'no write grant');
+  await check('adminA saves the served ports; anon reads only code / kind / names of the chosen ones; org B unaffected', async () => {
+    await as('adminA', `SELECT public.save_served_ports('${A}', ARRAY['SADMM', 'SAJED'])`);
+    const slugA = (await q(`SELECT slug FROM public.organizations WHERE id = $1`, [A]))[0].slug;
+    const pub = (await as('anon', `SELECT public.site_served_ports($1) r`, [slugA]))[0].r;
+    const pubB = (await as('anon', `SELECT public.site_served_ports('org-b') r`))[0].r;
+    const keys = pub.length ? Object.keys(pub[0]).sort().join(',') : '';
+    const staffBSees = (await as('staffB', `SELECT count(*)::int n FROM public.org_served_ports WHERE org_id = $1`, [A]))[0].n;
+    return (JSON.stringify(pub.map(x => x.code)) === JSON.stringify(['SADMM', 'SAJED']) && keys === 'code,kind,name_ar,name_en' && JSON.stringify(pubB.map(x => x.code)) === JSON.stringify(['SAJED']) && staffBSees === 0)   // org B keeps its own fixture choice
+      || JSON.stringify({ pub, pubB, staffBSees });
+  });
   return finish();
 }
 

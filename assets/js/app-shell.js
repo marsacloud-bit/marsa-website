@@ -37,6 +37,7 @@
      signOut() signOutAll()     (signOutAll asks first)   refresh() → Promise (re-reads my_context)
      refreshAlertBadge() → Promise   open-alerts count on the 'alerts' nav item
      t(key, vars)               'app.*' strings
+     icon(name, cls?)           <svg class="icon"> of a built-in icon (the platform chrome, plat-chrome.js)
    }
    Declarative hooks (all optional, wired by delegation, safe to add later):
      [data-shell-search]        click opens the palette (an empty one is filled with icon + label + shortcut)
@@ -329,7 +330,12 @@
     // G7 help / user guide
     help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 1c0 1.8-2.5 2.3-2.5 4"/><path d="M12 17.3h.01"/>',
     // staff dashboard «القائمة» toggle
-    menu: '<path d="M4 6h16M4 12h16M4 18h16"/>'
+    menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+    // platform chrome (plat-chrome.js, owner 2026-11-23)
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    chevron: '<path d="m6 9 6 6 6-6"/>',
+    fold: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 10l-2 2 2 2"/>'
   };
   function icon(name, cls) {
     var s = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -1628,7 +1634,7 @@
     refresh: refresh, refreshAlertBadge: function () { return refreshBadge(); },
     progress: { track: progTrack, eta: progEta, record: progRecord, active: function () { return progOpen; } },
     responseBadge: responseBadge, techText: function (e) { return techText(e) || pt('tech_unknown'); }, techKnown: techText,
-    NAV: NAV, R: R, t: t
+    NAV: NAV, R: R, t: t, icon: icon
   };
   window.MarsaShell = Shell;
 

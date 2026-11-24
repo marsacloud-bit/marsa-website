@@ -326,3 +326,65 @@ a.adm-mini-row:focus-visible { outline: none; box-shadow: var(--ring); }
 .adm-upload-more > summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .adm-upload-more > summary::-webkit-details-marker { display: none; }
 .adm-upload-more[open] > summary { margin-block-end: 10px; }
+
+/* «الموانئ التي نخدمها» (20261210000100): checkboxes grouped by kind */
+.adm-ports { display: grid; gap: 14px; margin: 10px 0; }
+.adm-ports-kind { border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px 12px; margin: 0; min-width: 0; }
+.adm-ports-kind legend { font-weight: 700; font-size: var(--fs-sm); padding: 0 6px; }
+.adm-ports-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px 18px; }
+.adm-port { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: var(--fs-sm); min-width: 0; }
+.adm-port input { width: 18px; height: 18px; flex-shrink: 0; }
+.adm-port input:disabled + span { color: var(--muted); }
+
+/* «مفتاح الذكاء الاصطناعي الخاص بالمكتب» (owner 2026-11-23) */
+.adm-okey-row { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-block: 10px; display: grid; gap: 10px; }
+.adm-okey-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.adm-okey-state { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.adm-okey-form { display: grid; gap: 10px; max-width: 560px; }
+.adm-okey-form[hidden] { display: none; }
+.adm-okey-tier { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; }
+.adm-okey-tier legend { font-weight: 700; margin-bottom: 4px; }
+/* the row's message (bad key, missing consent, server answer): style.css hides .form-error unless .has-error */
+.adm-okey-row > .form-error:not([hidden]) { display: block; }
+.adm-okey-row > .form-error[hidden] { display: none; }
+
+/* «مهامي اليوم» (owner 2026-11-23; picture docs/owner/designs/staff-panel-mockup.html). Meaning colours only, always with a word. */
+.tdy-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; margin-bottom: 14px; }
+.tdy-title { margin: 0; font-size: 1.5rem; }
+.tdy-sub { margin: 2px 0 0; color: var(--muted); }
+.tdy-actions { margin-inline-start: auto; display: flex; flex-wrap: wrap; gap: 10px; }
+.tdy-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-block: 14px 18px; }
+.tdy-tile { display: grid; gap: 6px; padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); text-decoration: none; }
+.tdy-tile:hover { border-color: var(--accent-line, #D9D3EF); color: var(--text); }
+.tdy-tile-lbl { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .85rem; }
+.tdy-tile-val { font-size: 1.75rem; font-weight: 800; line-height: 1; }
+.tdy-tile-sub { font-size: .8rem; color: var(--muted); }
+.tdy-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent, #5B4BA8); }
+.tdy-tile-bad .tdy-tile-val { color: var(--danger, #B42318); } .tdy-tile-bad .tdy-dot { background: var(--danger, #B42318); }
+.tdy-tile-warn .tdy-tile-val { color: #8A6100; } .tdy-tile-warn .tdy-dot { background: #D99A00; }
+.tdy-tile-calm .tdy-dot { background: var(--border-strong, #D6D0C7); }
+.tdy-cols { display: grid; grid-template-columns: 1.15fr 1fr; gap: 18px; align-items: start; margin-bottom: 18px; }
+.tdy-list { list-style: none; margin: 0; padding: 0; }
+.tdy-list li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.tdy-list li:last-child { border-bottom: 0; }
+.tdy-what { flex: 1; min-width: 0; display: grid; }
+.tdy-what b { font-size: .95rem; }
+.tdy-what small { color: var(--muted); }
+.tdy-time { width: 52px; font-weight: 700; color: var(--accent-strong, #4A3C91); }
+.tdy-chip { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 2px 10px; font-size: .78rem; font-weight: 700; white-space: nowrap; }
+.tdy-chip .icon { width: 13px; height: 13px; }
+.tdy-ok { background: #E6F4EC; color: #1F7A4D; }
+.tdy-warn { background: #FDF3D7; color: #8A6100; }
+.tdy-bad { background: #FCE8E6; color: #B42318; }
+.tdy-info { background: #EEECE8; color: var(--text); }
+.tdy-stage { background: var(--accent-soft, #EFECF8); color: var(--accent-strong, #4A3C91); }
+.tdy-go { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 4px 12px; font-size: .8rem; font-weight: 700; color: var(--accent-strong, #4A3C91); text-decoration: none; white-space: nowrap; }
+.tdy-go:hover { background: var(--accent-soft, #EFECF8); }
+.tdy-table-wrap { overflow-x: auto; }
+.tdy-table { width: 100%; border-collapse: collapse; }
+.tdy-table th { text-align: start; font-size: .8rem; color: var(--muted); font-weight: 700; padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--bg, #F8F7F4); }
+.tdy-table td { padding: 10px; border-bottom: 1px solid var(--border); }
+.tdy-table td.tdy-nowrap { white-space: nowrap; }
+.tdy-table td[dir=ltr] { text-align: end; }
+@media (max-width: 1100px) { .tdy-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .tdy-cols { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .tdy-tiles { grid-template-columns: 1fr; } .tdy-actions { margin-inline-start: 0; } }

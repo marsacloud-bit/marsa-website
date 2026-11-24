@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl" class="no-js" data-i18n-page>
+<html lang="ar" dir="rtl" class="no-js portal-v2" data-i18n-page>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -18,9 +18,21 @@
   <link rel="stylesheet" href="assets/css/style.css">
   <link rel="stylesheet" href="assets/css/app.css">
   <link rel="stylesheet" href="assets/css/pages/portal.css">
+  <link rel="stylesheet" href="assets/css/pages/portal-v2.css">
 </head>
 <body data-page="portal">
   <a class="skip-link" href="#main">تخطَّ إلى المحتوى</a>
+
+  <!-- ============ CLIENT PAGE TOP BAR (portal v2: office brand, back to the site, language) ============ -->
+  <div class="pt-top">
+    <a class="pt-brand" href="index.html" data-site-brand aria-label="مرسى - الصفحة الرئيسية" data-i18n-attr="aria-label:nav.homeAria">
+      <img data-site-logo src="assets/img/logo-header.png" alt="مرسى MARSA" width="72" height="50" data-i18n-attr="alt:nav.logoAlt">
+    </a>
+    <div class="pt-top-actions">
+      <a class="pt-back" href="index.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span data-i18n="portal.v2Back">العودة إلى الموقع</span></a>
+      <button class="btn-lang pt-lang" type="button" data-lang-toggle>English</button>
+    </div>
+  </div>
 
   <!-- ============ HEADER (shared) ============ -->
   <div class="topbar">
@@ -118,6 +130,7 @@
             <li aria-current="page" data-i18n="portal.title">بوابة العميل</li>
           </ol>
         </nav>
+        <p class="pt-kicker" data-i18n="portal.v2Kicker">صفحتك لدى المكتب</p>
         <h1 id="page-title"><span data-shell-title>بوابة العميل</span></h1>
         <p class="lead" data-i18n="portal.lead">طلباتك ومعاملاتك في مكان واحد: المراحل التشغيلية، والحاويات وحالة إرجاعها، والفواتير الصادرة، والمستندات الأصلية مع إمكانية رفع مستندات جديدة.</p>
         <div class="portal-user" data-portal-view="app" hidden>
@@ -370,6 +383,7 @@
   <script src="assets/i18n/app.js" defer></script>
   <script src="assets/js/main.js" defer></script>
   <script src="assets/js/supa.js" defer></script>
+  <script src="assets/js/site-profile.js" defer></script>
   <script src="assets/js/app-shell.js" defer></script>
   <script src="assets/js/pwa.js" defer></script>
   <script src="assets/js/portal.js" defer></script>

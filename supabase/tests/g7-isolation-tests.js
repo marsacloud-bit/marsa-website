@@ -186,7 +186,10 @@ const leaks = (result, argText) => { const t = J(result); return NEEDLES.filter(
 const PUBLIC_BY_DESIGN = {
   health_check: 'public health probe (no tenant data)', invitation_preview: 'token-gated preview (anon)', public_track: 'ref + token gated (anon)',
   submit_service_request: 'public intake: any visitor may submit into an org with intake open (by design)',
-  submit_contact_message: 'public contact form (by design)', log_client_error: 'client error log (own session only)'
+  submit_contact_message: 'public contact form (by design)', log_client_error: 'client error log (own session only)',
+  // the office website (20261210000100 / 20261211000100): the public identity, ports and current logo of an active office
+  site_served_ports: 'public office website: the ports an office serves', site_profile: 'public office website: name, colour, contacts, logo path',
+  site_logo_visible: 'storage policy helper: is this object the current logo of an active office (a boolean, no row)'
 };
 let B_IDS = {};
 async function collectBIds() {

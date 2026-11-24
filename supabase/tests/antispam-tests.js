@@ -166,7 +166,7 @@ async function secFile() {
   await check('this file is present; only the listed later phases follow it', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => ['20261114000100_ai_documents.sql', '20261115000100_convert_in_place.sql', '20261116000100_doc_match.sql',
-      '20261117000100_legacy_core.sql', '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261211000100_reconvert.sql'].includes(f))) || 'unexpected later files: ' + later.join(', ');
+      '20261117000100_legacy_core.sql', '20261118000100_legacy_tx.sql', '20261119000100_legacy_docs.sql', '20261120000100_legacy_decl.sql', '20261121000100_legacy_appt.sql', '20261122000100_legacy_pay.sql', '20261123000100_legacy_daftra.sql', '20261124000100_legacy_reports.sql', '20261125000100_legacy_import.sql', '20261126000100_doc_match_packing.sql', '20261127000100_tx_draft_approval.sql', '20261128000100_return_extension.sql', '20261129000100_mfa_off.sql', '20261130000100_tx_container_count.sql', '20261201000100_legacy_gaps.sql', '20261202000100_org_logo.sql', '20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261210000100_org_served_ports.sql', '20261211000100_reconvert.sql', '20261213000100_site_profile.sql', '20261214000100_org_ai_keys.sql'].includes(f))) || 'unexpected later files: ' + later.join(', ');
   });
   await check('all_migrations.sql holds this file verbatim (appended like the earlier phases; later phases follow it) + a header line', () => {
     const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
@@ -257,10 +257,12 @@ async function secGrants() {
     const bad = r.filter(x => x.a || x.u || (x.s && x.proname !== 'client_errors_purge'));
     return (r.length === 5 && bad.length === 0) || J(r);
   });
-  await check('anon can execute exactly the 6 public RPCs (unchanged)', async () => {
+  // + site_profile, site_logo_visible (20261211000100): the office website reads the office identity / its current logo
+  // + site_served_ports (20261210000100): the office website reads the ports the office chose (read-only, public fields)
+  await check('anon can execute exactly the 9 public RPCs', async () => {
     const r = await q(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                         WHERE n.nspname = 'public' AND has_function_privilege('anon', p.oid, 'EXECUTE') ORDER BY 1`);
-    return r.map(x => x.proname).join(',') === 'health_check,invitation_preview,log_client_error,public_track,submit_contact_message,submit_service_request' || J(r);
+    return r.map(x => x.proname).join(',') === 'health_check,invitation_preview,log_client_error,public_track,site_logo_visible,site_profile,site_served_ports,submit_contact_message,submit_service_request' || J(r);
   });
   await check('one function per public name (no overload added): submit_* (jsonb), public_track (text, text)', async () => {
     const r = await q(`SELECT p.proname, count(*)::int n FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace

@@ -50,7 +50,20 @@
       // roles (same wording as the admin console)
       role_client: 'عميل', role_clearance_staff: 'موظف تخليص', role_transport_staff: 'موظف نقل', role_accountant: 'محاسب',
       role_accounts_manager: 'مدير حسابات', role_operations_manager: 'مدير عمليات', role_branch_manager: 'مدير فرع',
-      role_supervisor: 'مشرف', role_admin: 'مدير المؤسسة'
+      role_supervisor: 'مشرف', role_admin: 'مدير المؤسسة',
+      // platform chrome (plat-chrome.js, owner 2026-11-23): the platform's own menu + top bar
+      pl_tagline: 'منصة التخليص الجمركي', pl_menu_aria: 'قائمة المنصة', pl_fold: 'طي القائمة أو فتحها', pl_open_menu: 'فتح القائمة',
+      pl_today: 'تاريخ اليوم', pl_security: 'أمان الحساب',
+      pl_preview: 'معاينة الموقع وصفحة العميل', pl_preview_site: 'موقع المكتب', pl_preview_portal: 'صفحة العميل',
+      pl_grp_daily: 'العمل اليومي', pl_grp_ops: 'التشغيل', pl_grp_msg: 'المراسلات', pl_grp_finance: 'المالية', pl_grp_reports: 'التقارير',
+      pl_grp_settings: 'الإعدادات', pl_grp_platform: 'المنصة', pl_grp_account: 'حسابي', pl_grp_more: 'أخرى',
+      // menu labels decided by the owner (same as the staff dashboard)
+      pnav_register: 'المعاملات', pnav_billing: 'الفوترة', pnav_daftra: 'الربط المحاسبي', pnav_dashboard: 'مهامي اليوم',
+      // two panels (owner 2026-11-23): the platform panel (platform owner) and the office panel (office staff)
+      pl_platform_panel: 'لوحة المنصة', pl_office_panel: 'لوحة المكتب',
+      pl_grp_pf_offices: 'المكاتب المشتركة', pl_grp_pf_subs: 'الاشتراكات', pl_grp_pf_ai: 'الذكاء الاصطناعي', pl_grp_pf_system: 'النظام',
+      pl_pf_orgs: 'المؤسسات المشتركة', pl_pf_create: 'إضافة مؤسسة', pl_pf_subs: 'الاشتراكات والاستخدام', pl_pf_plans: 'الباقات',
+      pl_pf_ai: 'مفاتيح الذكاء الاصطناعي', pl_pf_health: 'صحة الخادم', pl_pf_errors: 'أخطاء الواجهة'
     },
     en: {
       brand: 'MARSA', title_suffix: 'MARSA', loading: 'Loading…',
@@ -86,7 +99,17 @@
       confirm_title: 'Confirm', ok: 'OK', cancel: 'Cancel', close: 'Close', toast_close: 'Dismiss',
       role_client: 'Client', role_clearance_staff: 'Clearance officer', role_transport_staff: 'Transport officer', role_accountant: 'Accountant',
       role_accounts_manager: 'Accounts manager', role_operations_manager: 'Operations manager', role_branch_manager: 'Branch manager',
-      role_supervisor: 'Supervisor', role_admin: 'Organization admin'
+      role_supervisor: 'Supervisor', role_admin: 'Organization admin',
+      pl_tagline: 'Customs clearance platform', pl_menu_aria: 'Platform menu', pl_fold: 'Fold or open the menu', pl_open_menu: 'Open the menu',
+      pl_today: 'Today', pl_security: 'Account security',
+      pl_preview: 'Preview the website and client page', pl_preview_site: 'Office website', pl_preview_portal: 'Client page',
+      pl_grp_daily: 'Daily work', pl_grp_ops: 'Operations', pl_grp_msg: 'Communications', pl_grp_finance: 'Finance', pl_grp_reports: 'Reports',
+      pl_grp_settings: 'Settings', pl_grp_platform: 'Platform', pl_grp_account: 'My account', pl_grp_more: 'More',
+      pnav_register: 'Transactions', pnav_billing: 'Billing', pnav_daftra: 'Accounting link', pnav_dashboard: 'My day',
+      pl_platform_panel: 'Platform panel', pl_office_panel: 'Office panel',
+      pl_grp_pf_offices: 'Subscribed offices', pl_grp_pf_subs: 'Subscriptions', pl_grp_pf_ai: 'AI', pl_grp_pf_system: 'System',
+      pl_pf_orgs: 'Organisations', pl_pf_create: 'Add an organisation', pl_pf_subs: 'Subscriptions & usage', pl_pf_plans: 'Plans',
+      pl_pf_ai: 'AI keys', pl_pf_health: 'Server health', pl_pf_errors: 'Interface errors'
     }
   };
   window.MarsaAppDict = DICT;

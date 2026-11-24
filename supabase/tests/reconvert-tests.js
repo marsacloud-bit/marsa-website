@@ -191,7 +191,7 @@ async function secFiles() {
       && /NOT EXISTS \(SELECT 1 FROM app\.org_conversions c WHERE c\.org_id = p_org\) THEN\s+v_out := v_out \|\| 'never_converted'/.test(code)
       && !code.includes('blue-sea') && !code.includes('0b5e0000-')
       && !/mfa_factors|totp|aal2/i.test(code)) || 'body');
-  const LATER = [];
+  const LATER = ['20261213000100_site_profile.sql', '20261214000100_org_ai_keys.sql'];
   await check('this file is the last migration (or followed only by listed later phases)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && later.every(f => LATER.includes(f))) || 'unexpected later files: ' + later.join(', ');

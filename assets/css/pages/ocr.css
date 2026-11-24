@@ -837,3 +837,11 @@ button.ocr-mx-recent-open { background: none; border: 0; padding: 0; font: inher
 .ocr-nt-match { margin: 0; }
 .ocr-nt-mark { font-weight: 800; }
 .ocr-nt-remind { margin: 4px 0 0; padding: 6px 10px; border-radius: 8px; background: #FEF6D8; border: 1px solid #F2D675; color: #6B5300; font-size: var(--fs-sm, .9rem); }
+
+/* owner (23 Nov 2026): the storage-invoice reminder must catch the eye — stronger yellow box, bold text,
+   a soft pulsing glow and a blinking «!» (yellow = needs attention); still for users who ask for less motion */
+.ocr-nt-remind { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid #E8B900; border-inline-start: 5px solid #E8B900; font-weight: 700; color: #5A4500; animation: marsa-remind-glow 2.4s ease-in-out infinite; }
+.ocr-nt-remind .ocr-nt-mark { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: #E8B900; color: #fff; font-size: .95rem; animation: marsa-remind-blink 1.2s steps(2, jump-none) infinite; }
+@keyframes marsa-remind-glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(232, 185, 0, 0); background: #FEF6D8; } 50% { box-shadow: 0 0 0 5px rgba(232, 185, 0, .28); background: #FDEDB0; } }
+@keyframes marsa-remind-blink { 0% { opacity: 1; } 100% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .ocr-nt-remind, .ocr-nt-remind .ocr-nt-mark { animation: none; } }
