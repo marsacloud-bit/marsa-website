@@ -477,3 +477,8 @@ body.home { margin: 0; font-family: Cairo, system-ui, sans-serif; color: var(--h
 /* the platform name is written in English in both languages (owner 2026-11-24): kept left-to-right inside Arabic text */
 [data-brand] { direction: ltr; unicode-bidi: isolate; }
 .h-word b { letter-spacing: .2px; }
+/* the logo lockup never mirrors (owner 2026-11-24: «Blue Sea» always right beside the mark): mark on the left, name next to it */
+.h-logo { direction: ltr; gap: 8px; }
+.h-word { text-align: left; }
+.h-word small { direction: rtl; unicode-bidi: isolate; text-align: left; }
+html[lang="en"] .h-word small { direction: ltr; }
