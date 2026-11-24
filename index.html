@@ -64,6 +64,7 @@
   <main id="main">
     <!-- ============ HERO ============ -->
     <section class="h-hero">
+      <span class="h-blob h-blob-a" aria-hidden="true"></span><span class="h-blob h-blob-b" aria-hidden="true"></span>
       <div class="h-wrap h-hero-in">
         <div>
           <span class="h-pill"><i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg></i><span data-i18n="home.pill">منصة سحابية مصمّمة لمكاتب التخليص الجمركي</span></span>
@@ -95,12 +96,12 @@
               <div class="h-card">
                 <h4 data-i18n="home.mSummary">ملخص الشهر</h4>
                 <div class="h-tiles">
-                  <div class="h-tile"><small data-i18n="home.mOpen">معاملات مفتوحة</small><b class="h-num">42</b></div>
-                  <div class="h-tile"><small data-i18n="home.mWait">بانتظار الفسح</small><b class="h-num">9</b></div>
-                  <div class="h-tile"><small data-i18n="home.mAppt">مواعيد اليوم</small><b class="h-num">6</b></div>
-                  <div class="h-tile"><small data-i18n="home.mDone">أُنجزت هذا الشهر</small><b class="h-num">128</b></div>
+                  <div class="h-tile"><small data-i18n="home.mOpen">معاملات مفتوحة</small><b class="h-num" data-count="42">42</b></div>
+                  <div class="h-tile"><small data-i18n="home.mWait">بانتظار الفسح</small><b class="h-num" data-count="9">9</b></div>
+                  <div class="h-tile"><small data-i18n="home.mAppt">مواعيد اليوم</small><b class="h-num" data-count="6">6</b></div>
+                  <div class="h-tile"><small data-i18n="home.mDone">أُنجزت هذا الشهر</small><b class="h-num" data-count="128">128</b></div>
                 </div>
-                <div class="h-goal"><span data-i18n="home.mGoal">نسبة الإنجاز في الوقت</span> <b class="h-num">78%</b><div class="h-goal-bar"><i></i></div></div>
+                <div class="h-goal"><span data-i18n="home.mGoal">نسبة الإنجاز في الوقت</span> <b class="h-num" data-count="78" data-suffix="%">78%</b><div class="h-goal-bar"><i></i></div></div>
               </div>
               <div class="h-card">
                 <h4 data-i18n="home.mChart">المعاملات أسبوعيًا</h4>
@@ -116,14 +117,21 @@
           </div>
           <div class="h-float">
             <h5><i><svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg></i><span data-i18n="home.fTitle">قراءة المستندات</span></h5>
-            <div class="h-doc"><span data-i18n="home.fBl">بوليصة الشحن</span><b class="h-num">94%</b></div>
-            <div class="h-doc"><span data-i18n="home.fInv">الفاتورة التجارية</span><b class="h-num">93%</b></div>
-            <div class="h-doc"><span data-i18n="home.fDecl">البيان الجمركي</span><b class="h-num">96%</b></div>
+            <div class="h-doc"><span data-i18n="home.fBl">بوليصة الشحن</span><b class="h-num" data-count="94" data-suffix="%">94%</b></div>
+            <div class="h-doc"><span data-i18n="home.fInv">الفاتورة التجارية</span><b class="h-num" data-count="93" data-suffix="%">93%</b></div>
+            <div class="h-doc"><span data-i18n="home.fDecl">البيان الجمركي</span><b class="h-num" data-count="96" data-suffix="%">96%</b></div>
             <div class="h-float-foot" data-i18n="home.fFoot">المطابقة: 12 حقلًا متطابقًا</div>
           </div>
         </div>
       </div>
     </section>
+
+    <!-- a moving strip (decorative; the same items are in the features below) -->
+    <div class="h-marquee" aria-hidden="true">
+      <div class="h-marquee-track" data-h-marquee>
+        <span data-i18n="home.mq1">قراءة البوليصة</span><span data-i18n="home.mq2">قراءة الفاتورة التجارية</span><span data-i18n="home.mq3">قراءة البيان الجمركي</span><span data-i18n="home.mq4">مطابقة ثلاثية</span><span data-i18n="home.mq5">بطاقات المواعيد</span><span data-i18n="home.mq6">دليل السائقين</span><span data-i18n="home.mq7">تنبيه الأرضيات</span><span data-i18n="home.mq8">الربط المحاسبي</span><span data-i18n="home.mq9">بوابة العميل</span><span data-i18n="home.mq10">موقع المكتب</span>
+      </div>
+    </div>
 
     <!-- ============ FEATURES ============ -->
     <section class="h-sec" id="features">
@@ -146,6 +154,45 @@
             <h3 data-i18n="home.f5t">الفوترة والربط المحاسبي</h3><p data-i18n="home.f5d">مسودات فواتير تُرسل إلى برنامج المحاسبة، مع السدادات والعهد ومستحقات الموردين في مكان واحد.</p></article>
           <article class="h-feat"><i><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg></i>
             <h3 data-i18n="home.f6t">موقع لمكتبك وبوابة لعملائك</h3><p data-i18n="home.f6d">موقع باسم مكتبك وشعاره، وبوابة يتابع منها العميل معاملاته ومراحلها دون اتصال.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ JOURNEY (motion: one transaction from the first document to the invoice, fake people) ============ -->
+    <section class="h-sec h-journey-sec" id="journey">
+      <div class="h-wrap">
+        <div class="h-head">
+          <span class="h-kicker" data-i18n="home.jKicker">رحلة المعاملة</span>
+          <h2 data-i18n="home.jTitle">من أول مستند حتى الفاتورة، والكل يعرف أين وصلت</h2>
+          <p data-i18n="home.jLead">كل موظف يُنجز مرحلته، والمعاملة تنتقل وحدها إلى من بعده، والعميل يصله إشعار في كل خطوة.</p>
+        </div>
+        <div class="h-journey" data-h-journey>
+          <ol class="h-track" data-h-track aria-label="مراحل المعاملة" data-i18n-attr="aria-label:home.jTrackAria"></ol>
+          <div class="h-scene">
+            <div class="h-scene-card" data-h-scene aria-live="polite">
+              <div class="h-scene-top">
+                <span class="h-num h-scene-ref">CC-2026-000231</span>
+                <span class="h-scene-step" data-h-step></span>
+              </div>
+              <div class="h-scene-main">
+                <span class="h-person" data-h-person aria-hidden="true"></span>
+                <div class="h-scene-who">
+                  <b data-h-name></b>
+                  <small data-h-role></small>
+                </div>
+                <span class="h-chip-lg" data-h-status></span>
+              </div>
+              <p class="h-bubble" data-h-msg></p>
+              <div class="h-scene-bar"><i data-h-bar></i></div>
+            </div>
+            <div class="h-toast" data-h-toast aria-hidden="true">
+              <span class="h-person h-person-sm" data-h-client></span>
+              <div><b data-i18n="home.jToastT">إشعار للعميل</b><small data-h-toast-msg></small></div>
+            </div>
+            <button class="h-play" type="button" data-h-play aria-pressed="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg><span data-h-play-label></span>
+            </button>
+          </div>
         </div>
       </div>
     </section>

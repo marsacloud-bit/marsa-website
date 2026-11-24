@@ -105,5 +105,207 @@
     doc.addEventListener('keydown', function (e) { if (e.key === 'Escape' && dr.classList.contains('is-open')) { setMenu(false); mb.focus(); } });
   }
 
+  /* ================= motion (owner 2026-11-24) — all of it off under prefers-reduced-motion ================= */
+  var REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var IO = 'IntersectionObserver' in window;
+  function whenSeen(node, fn, opts) {
+    if (!node) return;
+    if (!IO) { fn(); return; }
+    var o = new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting) { o.disconnect(); fn(); } }); }, opts || { threshold: 0.2 });
+    o.observe(node);
+  }
+
+  // reveal sections as they scroll in (staggered inside a group)
+  function initReveal() {
+    if (REDUCED || !IO) return;
+    var groups = ['.h-head', '.h-feats > *', '.h-steps > *', '.h-faq > *', '.h-band', '.h-journey'];
+    groups.forEach(function (sel) {
+      doc.querySelectorAll(sel).forEach(function (n, i) {
+        n.classList.add('h-reveal');
+        n.style.setProperty('--d', (Math.min(i % 6, 5) * 0.08) + 's');
+        whenSeen(n, function () { n.classList.add('is-in'); }, { threshold: 0.15 });
+      });
+    });
+  }
+  function revealPlans() {
+    if (REDUCED || !IO) return;
+    doc.querySelectorAll('.h-plan').forEach(function (n, i) {
+      n.classList.add('h-reveal'); n.style.setProperty('--d', (i * 0.1) + 's');
+      whenSeen(n, function () { n.classList.add('is-in'); }, { threshold: 0.15 });
+    });
+  }
+
+  // numbers count up from 0 (latin digits)
+  function initCounters() {
+    doc.querySelectorAll('[data-count]').forEach(function (n) {
+      var end = Number(n.getAttribute('data-count')) || 0, suf = n.getAttribute('data-suffix') || '';
+      if (REDUCED) { n.textContent = num(end) + suf; return; }
+      n.textContent = '0' + suf;
+      whenSeen(n, function () {
+        var t0 = null, dur = 1400;
+        function step(ts) {
+          if (t0 == null) t0 = ts;
+          var p = Math.min(1, (ts - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+          n.textContent = num(Math.round(end * e)) + suf;
+          if (p < 1) requestAnimationFrame(step);
+        }
+        setTimeout(function () { requestAnimationFrame(step); }, 500);
+      });
+    });
+  }
+
+  // moving strip: the items twice, so the loop has no gap
+  function initMarquee() {
+    var tr = doc.querySelector('[data-h-marquee]');
+    if (!tr || tr.getAttribute('data-doubled')) return;
+    Array.prototype.slice.call(tr.children).forEach(function (s) { var c = s.cloneNode(true); c.removeAttribute('data-i18n'); c.setAttribute('data-mq-copy', s.getAttribute('data-i18n')); tr.appendChild(c); });
+    tr.setAttribute('data-doubled', '1');
+  }
+  function paintMarquee() {
+    doc.querySelectorAll('[data-mq-copy]').forEach(function (c) { c.textContent = I ? I.t(c.getAttribute('data-mq-copy')) : c.textContent; });
+  }
+
+  /* ---------------- the journey: one transaction, stage by stage, fake people ---------------- */
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  function svg(markup, vb) {
+    var s = doc.createElementNS(SVGNS, 'svg');
+    s.setAttribute('viewBox', vb || '0 0 64 64'); s.setAttribute('aria-hidden', 'true');
+    s.innerHTML = markup;   // static, trusted markup defined below (no user data)
+    return s;
+  }
+  // simple illustrated people (fake): skin, clothes and a head style each
+  var PEOPLE = {
+    client: { name: 'pClient', role: 'pClientR', skin: '#D9A77E', body: '#F4F1EA', head: 'ghutra' },
+    noura:  { name: 'pNoura', role: 'pNouraR', skin: '#E8B48F', body: '#5B4BA8', head: 'hijab', hijab: '#3A3344' },
+    ahmed:  { name: 'pAhmed', role: 'pAhmedR', skin: '#C98E66', body: '#2F6B5E', head: 'short', hair: '#2B2420' },
+    khaled: { name: 'pKhaled', role: 'pKhaledR', skin: '#B97D57', body: '#D9822B', head: 'cap', cap: '#26212F' },
+    reem:   { name: 'pReem', role: 'pReemR', skin: '#F0C3A0', body: '#8F7EDB', head: 'hijab', hijab: '#B4436C' }
+  };
+  function personSvg(key) {
+    var p = PEOPLE[key], h = '';
+    h += '<rect width="64" height="64" fill="#EFECF8"/>';
+    h += '<path d="M10 64c2-13 11-20 22-20s20 7 22 20z" fill="' + p.body + '"/>';
+    if (p.head === 'hijab') h += '<path d="M15 50c-1-16 6-30 17-30s18 14 17 30c-6 4-28 4-34 0z" fill="' + p.hijab + '"/>';
+    if (p.head === 'ghutra') h += '<path d="M14 52c0-18 7-31 18-31s18 13 18 31l-6-2c0-10-5-18-12-18s-12 8-12 18z" fill="#fff" stroke="#E2DED6" stroke-width="1"/>';
+    h += '<circle cx="32" cy="31" r="11" fill="' + p.skin + '"/>';
+    if (p.head === 'short') h += '<path d="M21 29c0-8 5-12 11-12s11 4 11 12c-3-4-7-5-11-5s-8 1-11 5z" fill="' + p.hair + '"/>';
+    if (p.head === 'cap') h += '<path d="M20 27c1-7 6-10 12-10s11 3 12 10z" fill="' + p.cap + '"/><path d="M30 26h18c0 2-2 3-4 3H30z" fill="' + p.cap + '"/>';
+    if (p.head === 'hijab') h += '<path d="M20 28c1-8 6-12 12-12s11 4 12 12c-3-3-7-5-12-5s-9 2-12 5z" fill="' + p.hijab + '"/>';
+    if (p.head === 'ghutra') h += '<path d="M19 27c1-7 6-11 13-11s12 4 13 11c-4-3-8-4-13-4s-9 1-13 4z" fill="#fff" stroke="#E2DED6" stroke-width="1"/><path d="M21 23h22" stroke="#26212F" stroke-width="2.5" stroke-linecap="round"/>';
+    h += '<circle cx="28" cy="31" r="1.3" fill="#26212F"/><circle cx="36" cy="31" r="1.3" fill="#26212F"/><path d="M28.5 36c2 1.6 5 1.6 7 0" stroke="#26212F" stroke-width="1.4" fill="none" stroke-linecap="round"/>';
+    return svg(h);
+  }
+  var ICONS = [
+    '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/>',
+    '<path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/>',
+    '<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h4"/>',
+    '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+    '<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="17.5" r="1.5"/><circle cx="17" cy="17.5" r="1.5"/>',
+    '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>',
+    '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>'
+  ];
+  var STAGES = [
+    { who: 'client', s: 'jS1', m: 'jM1', c: 'jC1', st: 'jT1' }, { who: 'noura', s: 'jS2', m: 'jM2', c: 'jC2', st: 'jT2' },
+    { who: 'ahmed', s: 'jS3', m: 'jM3', c: 'jC3', st: 'jT3' }, { who: 'ahmed', s: 'jS4', m: 'jM4', c: 'jC4', st: 'jT4' },
+    { who: 'khaled', s: 'jS5', m: 'jM5', c: 'jC5', st: 'jT5' }, { who: 'khaled', s: 'jS6', m: 'jM6', c: 'jC6', st: 'jT6' },
+    { who: 'reem', s: 'jS7', m: 'jM7', c: 'jC7', st: 'jT7' }
+  ];
+  var J = { i: -1, timer: null, typer: null, playing: !REDUCED, seen: false, dur: 3600 };
+  function q(sel) { return doc.querySelector(sel); }
+  function buildTrack() {
+    var tr = q('[data-h-track]');
+    if (!tr) return;
+    tr.textContent = '';
+    tr.appendChild(el('span', { class: 'h-track-fill', 'data-h-fill': '' }));
+    var truck = el('span', { class: 'h-truck', 'data-h-truck': '' });
+    truck.appendChild(svg('<rect x="2" y="6" width="24" height="15" rx="2" fill="#5B4BA8"/><path d="M26 10h7l5 5v6H26z" fill="#4A3C91"/><rect x="29" y="12" width="5" height="4" rx="1" fill="#EFECF8"/>'
+      + '<circle cx="10" cy="23" r="3.5" fill="#26212F"/><circle cx="32" cy="23" r="3.5" fill="#26212F"/><path d="M6 10h16M6 14h16" stroke="#EFECF8" stroke-width="1.2"/>', '0 0 44 28'));
+    tr.appendChild(truck);
+    STAGES.forEach(function (s, i) {
+      var dot = el('span', { class: 'h-node-dot' });
+      dot.appendChild(svg(ICONS[i], '0 0 24 24'));
+      tr.appendChild(el('li', { class: 'h-node', 'data-node': String(i) }, [dot, el('span', { text: t(s.s) })]));
+    });
+  }
+  function typeText(node, text) {
+    clearInterval(J.typer);
+    if (REDUCED) { node.textContent = text; return; }
+    var k = 0, caret = el('span', { class: 'h-caret' });
+    node.textContent = ''; node.appendChild(doc.createTextNode('')); node.appendChild(caret);
+    J.typer = setInterval(function () {
+      k = Math.min(text.length, k + 2);
+      node.firstChild.nodeValue = text.slice(0, k);
+      if (k >= text.length) { clearInterval(J.typer); setTimeout(function () { if (caret.parentNode) caret.remove(); }, 900); }
+    }, 28);
+  }
+  function show(i) {
+    J.i = i;
+    var s = STAGES[i], p = PEOPLE[s.who], n = STAGES.length;
+    doc.querySelectorAll('.h-node').forEach(function (nd, k) {
+      nd.classList.toggle('is-done', k < i || (k === i && i === n - 1));
+      nd.classList.toggle('is-now', k === i && i !== n - 1);
+    });
+    var pct = n > 1 ? i / (n - 1) : 1, span = 86;   // track runs from 7% to 93%
+    var fill = q('[data-h-fill]'), truck = q('[data-h-truck]');
+    if (fill) fill.style.width = (pct * span) + '%';
+    if (truck) truck.style.insetInlineStart = (7 + pct * span) + '%';
+    var card = q('[data-h-scene]');
+    if (card) { card.classList.remove('is-swap'); void card.offsetWidth; if (!REDUCED) card.classList.add('is-swap'); }
+    var ph = q('[data-h-person]'); if (ph) { ph.textContent = ''; ph.appendChild(personSvg(s.who)); }
+    var nm = q('[data-h-name]'); if (nm) nm.textContent = t(p.name);
+    var rl = q('[data-h-role]'); if (rl) rl.textContent = t(p.role);
+    var stp = q('[data-h-step]'); if (stp) stp.textContent = t('jStep', { n: i + 1, t: n });
+    var chip = q('[data-h-status]'); if (chip) { chip.textContent = t(s.st); chip.classList.toggle('is-final', i === n - 1); }
+    var msg = q('[data-h-msg]'); if (msg) typeText(msg, t(s.m));
+    var bar = q('[data-h-bar]');
+    if (bar) { bar.classList.remove('is-run'); bar.style.width = '0'; void bar.offsetWidth; if (J.playing) { bar.style.removeProperty('width'); bar.style.setProperty('--h-dur', (J.dur / 1000) + 's'); bar.classList.add('is-run'); } }
+    var toast = q('[data-h-toast]'), tm = q('[data-h-toast-msg]'), cl = q('[data-h-client]');
+    if (toast && tm) {
+      toast.classList.remove('is-show');
+      if (cl && !cl.firstChild) cl.appendChild(personSvg('client'));
+      setTimeout(function () { tm.textContent = t(s.c); toast.classList.add('is-show'); }, REDUCED ? 0 : 1300);
+    }
+  }
+  function schedule() {
+    clearTimeout(J.timer);
+    if (!J.playing || !J.seen) return;
+    var last = J.i === STAGES.length - 1;
+    J.timer = setTimeout(function () { show(last ? 0 : J.i + 1); schedule(); }, last ? J.dur + 1800 : J.dur);
+  }
+  function paintPlay() {
+    var b = q('[data-h-play]'); if (!b) return;
+    b.setAttribute('aria-pressed', J.playing ? 'false' : 'true');
+    var lab = b.querySelector('[data-h-play-label]'); if (lab) lab.textContent = J.playing ? t('jPause') : t('jPlay');
+    var ic = b.querySelector('svg path'); if (ic) ic.setAttribute('d', J.playing ? 'M8 5v14M16 5v14' : 'M7 4l13 8-13 8z');
+  }
+  function initJourney() {
+    var box = q('[data-h-journey]');
+    if (!box) return;
+    buildTrack();
+    show(REDUCED ? STAGES.length - 1 : 0);
+    paintPlay();
+    var b = q('[data-h-play]');
+    if (b) b.addEventListener('click', function () { J.playing = !J.playing; paintPlay(); if (J.playing) { show(J.i === STAGES.length - 1 ? 0 : J.i); } schedule(); });
+    doc.querySelectorAll('.h-node').forEach(function (nd) {
+      nd.style.cursor = 'pointer';
+      nd.addEventListener('click', function () { show(Number(nd.getAttribute('data-node'))); schedule(); });
+    });
+    if (REDUCED) return;
+    if (IO) {
+      new IntersectionObserver(function (es) {
+        es.forEach(function (e) { J.seen = e.isIntersecting; if (J.seen) schedule(); else clearTimeout(J.timer); });
+      }, { threshold: 0.3 }).observe(box);
+    } else { J.seen = true; schedule(); }
+    doc.addEventListener('visibilitychange', function () { if (doc.hidden) clearTimeout(J.timer); else schedule(); });
+  }
+  function repaintJourney() { if (q('[data-h-track]')) { buildTrack(); if (J.i >= 0) show(J.i); paintPlay(); } }
+
+  initMarquee();
   paint();
+  paintMarquee();
+  initReveal();
+  revealPlans();
+  initCounters();
+  initJourney();
+  window.addEventListener('marsa:langchange', function () { setTimeout(function () { paintMarquee(); revealPlans(); repaintJourney(); }, 0); });
 })();
