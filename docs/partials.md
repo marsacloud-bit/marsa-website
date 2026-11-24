@@ -71,12 +71,12 @@ Change only the `<title>` (pattern: `اسم الصفحة | مرسى MARSA`) and 
   </div>
   <header class="site-header">
     <div class="container header-inner">
-      <a class="brand" href="index.html" aria-label="مرسى - الصفحة الرئيسية">
+      <a class="brand" href="office.html" aria-label="مرسى - الصفحة الرئيسية">
         <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="84" height="58">
       </a>
       <nav class="main-nav" aria-label="القائمة الرئيسية">
         <ul class="nav-list">
-          <li><a class="nav-link" href="index.html">الرئيسية</a></li>
+          <li><a class="nav-link" href="office.html">الرئيسية</a></li>
           <li><a class="nav-link" href="services.html">خدماتنا</a></li>
           <li><a class="nav-link" href="calculator.html">حاسبة الرسوم</a></li>
           <li><a class="nav-link" href="tracking.html">تتبع الشحنة</a></li>
@@ -114,7 +114,7 @@ Change only the `<title>` (pattern: `اسم الصفحة | مرسى MARSA`) and 
       </button>
     </div>
     <ul class="drawer-nav">
-      <li><a href="index.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/></svg>الرئيسية</a></li>
+      <li><a href="office.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/></svg>الرئيسية</a></li>
       <li><a href="services.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>خدماتنا</a></li>
       <li><a href="calculator.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15v3M8 18h4"/></svg>حاسبة الرسوم الجمركية</a></li>
       <li><a href="tracking.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>تتبع الشحنة</a></li>
@@ -147,7 +147,7 @@ The footer wave is filled with `--bg` (#F4F8FB). If the LAST section before the 
     <div class="container">
       <div class="footer-grid">
         <div class="footer-brand">
-          <a class="footer-logo" href="index.html" aria-label="مرسى - الصفحة الرئيسية">
+          <a class="footer-logo" href="office.html" aria-label="مرسى - الصفحة الرئيسية">
             <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="107" height="74">
           </a>
           <p>مرسى منصة سعودية لخدمات التخليص الجمركي والشحن أونلاين، تساعد المستوردين والمصدّرين في المملكة على تخليص شحناتهم بسرعة وشفافية.</p>
@@ -160,7 +160,7 @@ The footer wave is filled with `--bg` (#F4F8FB). If the LAST section before the 
         <div class="footer-col">
           <h3>روابط سريعة</h3>
           <ul class="footer-links">
-            <li><a href="index.html">الرئيسية</a></li>
+            <li><a href="office.html">الرئيسية</a></li>
             <li><a href="services.html">خدماتنا</a></li>
             <li><a href="about.html">من نحن</a></li>
             <li><a href="about.html#faq">الأسئلة الشائعة</a></li>
@@ -213,7 +213,7 @@ The footer wave is filled with `--bg` (#F4F8FB). If the LAST section before the 
   <div class="container">
     <nav class="breadcrumb" aria-label="مسار التنقل">
       <ol>
-        <li><a href="index.html">الرئيسية</a></li>
+        <li><a href="office.html">الرئيسية</a></li>
         <li aria-current="page">خدماتنا</li>
       </ol>
     </nav>

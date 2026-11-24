@@ -25,7 +25,7 @@ check('portal.html: class portal-v2, portal-v2.css after portal.css, site-profil
     && html.indexOf('js/supa.js') < html.indexOf('js/site-profile.js') && html.indexOf('js/site-profile.js') < html.indexOf('js/portal.js')) || 'html');
 check('top bar: office brand (data-site-brand / data-site-logo), back to the site, one language button', () =>
   (/class="pt-top"/.test(html) && /class="pt-brand"[^>]*data-site-brand/.test(html) && /<img data-site-logo/.test(html)
-    && /class="pt-back" href="index.html"/.test(html) && (html.match(/data-lang-toggle/g) || []).length === 1) || 'top bar');
+    && /class="pt-back" href="office.html"/.test(html) && (html.match(/data-lang-toggle/g) || []).length === 1) || 'top bar');
 check('every view, tab, form and hook portal.js uses is kept', () => {
   const hooks = ['data-portal-view="demo"', 'data-portal-view="loading"', 'data-portal-view="error"', 'data-portal-view="app"', 'data-portal-name',
     'data-portal-email', 'data-sign-out', 'data-sign-out-all', 'data-staff-note', 'data-notlinked-note', 'data-tx-list', 'data-tx-detail',

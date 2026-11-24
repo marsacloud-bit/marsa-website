@@ -229,7 +229,7 @@ async function secFront() {
   const supa = fs.readFileSync(path.join(ROOT, 'assets', 'js', 'supa.js'), 'utf8');
   const admin = fs.readFileSync(path.join(ROOT, 'assets', 'js', 'admin.js'), 'utf8');
   const i18n = fs.readFileSync(path.join(ROOT, 'assets', 'i18n', 'admin.js'), 'utf8');
-  const idx = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const idx = fs.readFileSync(path.join(ROOT, 'office.html'), 'utf8');   // the office website moved from index.html (2026-11-24)
   const home = fs.readFileSync(path.join(ROOT, 'assets', 'js', 'site-ports.js'), 'utf8');
   await check('supa.js wraps the three RPCs and exports them', () =>
     (/rpc\('get_served_ports'/.test(supa) && /rpc\('save_served_ports'/.test(supa) && /rpc\('site_served_ports'/.test(supa)
@@ -244,7 +244,7 @@ async function secFront() {
     const keys = ['ports_title', 'ports_sub', 'ports_save', 'ports_saved', 'ports_kind_sea', 'ports_kind_air', 'ports_kind_dry', 'ports_kind_land'];
     return (reg && keys.every(k => reg.ar[k] && reg.en[k])) || 'missing: ' + keys.filter(k => !(reg && reg.ar[k] && reg.en[k])).join(',');
   });
-  await check('index.html: the ports block is filled from the office choice (site-ports.js after supa.js)', () =>
+  await check('office.html: the ports block is filled from the office choice (site-ports.js after supa.js)', () =>
     (/data-site-ports/.test(idx) && idx.indexOf('<script src="assets/js/supa.js"') > 0
       && idx.indexOf('<script src="assets/js/supa.js"') < idx.indexOf('<script src="assets/js/site-ports.js"')
       && /siteServedPorts/.test(home) && /textContent/.test(home) && !/innerHTML\s*=\s*[^'"]*name_/.test(home)) || 'home');

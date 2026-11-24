@@ -307,7 +307,22 @@
     badge.hidden = false;
   }
 
-  function init() { applyMode(); initForm(); initBranches(); initOpenStatus(); }
+  /* ---------- a plan chosen on the platform home page (index.html → contact.html?plan=<code>, owner 2026-11-24) ----------
+     Until a payment gateway is connected the plan buttons land here: subject «partnership» + a prefilled message. */
+  var PLAN_NAMES = { basic: 'الأساسية', pro: 'الاحترافية', enterprise: 'المؤسسية' };
+  function initPlan() {
+    var code = '';
+    try { code = new URLSearchParams(location.search).get('plan') || ''; } catch (e) { code = ''; }
+    if (!Object.prototype.hasOwnProperty.call(PLAN_NAMES, code)) return;
+    var subj = $('#cf-subject'), msg = $('#cf-message');
+    if (subj && !subj.value) { subj.value = 'partnership'; subj.dispatchEvent(new Event('change', { bubbles: true })); }
+    if (msg && !msg.value) {
+      msg.value = 'أرغب في الاشتراك في باقة «' + PLAN_NAMES[code] + '» على المنصة لمكتبنا. نرجو التواصل معنا لإتمام التفعيل.';
+      msg.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
+
+  function init() { applyMode(); initForm(); initBranches(); initOpenStatus(); initPlan(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 })();

@@ -220,7 +220,7 @@ async function secFront() {
   const js = fs.readFileSync(path.join(ROOT, 'assets', 'js', 'site-profile.js'), 'utf8');
   await check('supa.js wraps site_profile and exports it', () =>
     (/rpc\('site_profile', \{ p_org_slug: ORG_SLUG \}/.test(supa) && /siteProfile: siteProfile/.test(supa)) || 'wrapper');
-  for (const p of ['index', 'blog', 'consult', 'about', 'contact']) {
+  for (const p of ['office', 'blog', 'consult', 'about', 'contact']) {
     const h = fs.readFileSync(path.join(ROOT, p + '.html'), 'utf8');
     await check(p + '.html: the hooks, and supa.js loaded before site-profile.js', () => {
       const n = k => (h.match(new RegExp(k, 'g')) || []).length;

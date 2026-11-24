@@ -25,7 +25,7 @@ check('login.html: class login-v2, login-v2.css after login.css, site-profile.js
     && html.indexOf('js/auth.js') < html.indexOf('js/site-profile.js')) || 'html');
 check('top bar: office brand (data-site-brand / data-site-logo), back to the site, one language button', () =>
   (/class="lg-top"/.test(html) && /class="lg-brand"[^>]*data-site-brand/.test(html) && /<img data-site-logo/.test(html)
-    && /class="lg-back" href="index.html"/.test(html) && (html.match(/data-lang-toggle/g) || []).length === 1) || 'top bar');
+    && /class="lg-back" href="office.html"/.test(html) && (html.match(/data-lang-toggle/g) || []).length === 1) || 'top bar');
 check('every sign-in form and field id the code uses is kept', () => {
   const ids = ['client-signin-form', 'client-signup-form', 'staff-signin-form', 'otp-request-form', 'otp-verify-form', 'forgot-form', 'reset-form',
     'invite-signin-form', 'invite-signup-form', 'ci-email', 'ci-password', 'st-email', 'st-password', 'tab-client', 'tab-staff', 'page-title'];

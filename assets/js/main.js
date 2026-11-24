@@ -414,7 +414,7 @@
 
   /* ---- Shared chrome outside <header>/<footer>: tag with data-i18n keys (pages keep Arabic markup) ---- */
   var HREF_KEYS = {        // href → [main-nav / topbar key, drawer key]
-    'index.html': ['nav.home', 'nav.home'], 'services.html': ['nav.services', 'nav.services'],
+    'index.html': ['nav.home', 'nav.home'], 'office.html': ['nav.home', 'nav.home'], 'services.html': ['nav.services', 'nav.services'],
     'calculator.html': ['nav.calculator', 'nav.calculatorFull'], 'tracking.html': ['nav.tracking', 'nav.tracking'],
     'request.html': ['nav.request', 'nav.request'], 'bulk-upload.html': ['nav.bulk', 'nav.bulkFull'],
     'ocr.html': ['nav.ocr', 'nav.ocrFull'], 'about.html': ['nav.about', 'nav.about'],

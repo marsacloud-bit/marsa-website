@@ -1,6 +1,6 @@
 /* =====================================================================
    Office website — «المنافذ التي نعمل فيها» from the office's own choice (owner 2026-11-22, 20261210000100)
-   index.html: <section id="ports" hidden> … <ul data-site-ports> (static example list inside).
+   office.html: <section id="ports" hidden> … <ul data-site-ports> (static example list inside).
    Online: MarsaApi.siteServedPorts() → only the ports the office chose (staff settings «الموانئ التي نخدمها»);
            none chosen → the section stays hidden.
    Demo (no config.js / no database): the static example list is shown.

@@ -573,7 +573,7 @@
     var title, text, actions = '', ico = 'lock';
     if (kind === 'demo') {
       title = T.gate.demoTitle; text = api && api.isMisconfigured && api.isMisconfigured() ? T.gate.misconfigured : T.gate.demo;
-      actions = '<a class="btn btn-primary" href="index.html">' + esc(t('gate_home')) + '</a>'; ico = 'info';
+      actions = '<a class="btn btn-primary" href="office.html">' + esc(t('gate_home')) + '</a>'; ico = 'info';
     } else if (kind === 'signin') {
       title = T.gate.signInTitle; text = T.gate.signIn;
       actions = '<a class="btn btn-primary" href="login.html#staff">' + esc(t('gate_signin_btn')) + '</a>';
@@ -1062,7 +1062,7 @@
   var NAV_PAGES = {
     p_tx: 'portal.html#tx', p_containers: 'portal.html#containers', p_invoices: 'portal.html#invoices', p_req: 'portal.html#req',
     p_link: 'portal.html#link', p_profile: 'portal.html#profile',
-    s_home: 'index.html', s_services: 'services.html', s_calculator: 'calculator.html', s_tracking: 'tracking.html',
+    s_home: 'office.html', s_services: 'services.html', s_calculator: 'calculator.html', s_tracking: 'tracking.html',
     s_request: 'request.html', s_about: 'about.html', s_contact: 'contact.html', s_login: 'login.html'
   };
   var NAV_OPEN_DEFAULT = { daily: true };

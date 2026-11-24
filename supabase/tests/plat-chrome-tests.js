@@ -23,7 +23,7 @@ function check(name, fn) {
 }
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const PLATFORM = ['admin', 'ocr', 'bulk-upload', 'help', 'platform'];
-const SITE = ['index', 'blog', 'consult', 'about', 'contact'];
+const SITE = ['office', 'index', 'blog', 'consult', 'about', 'contact'];   // office.html = the office website (moved 2026-11-24); index.html = the platform home page
 const chrome = read('assets/js/plat-chrome.js');
 const css = read('assets/css/plat-v2.css');
 

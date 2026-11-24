@@ -195,14 +195,14 @@
     var foot = el('div', { class: 'pl-foot' });
     if (status === 'ready') {
       var pvList = el('ul', { class: 'pl-preview-list', id: 'pl-preview', hidden: true }, [
-        el('li', null, [el('a', { href: 'index.html', target: '_blank', rel: 'noopener', text: t('pl_preview_site') })]),
+        el('li', null, [el('a', { href: 'office.html', target: '_blank', rel: 'noopener', text: t('pl_preview_site') })]),
         el('li', null, [el('a', { href: 'portal.html', target: '_blank', rel: 'noopener', text: t('pl_preview_portal') })])
       ]);
       var pv = el('a', { class: 'pl-link', href: '#', role: 'button', 'aria-expanded': 'false', 'aria-controls': 'pl-preview', title: t('pl_preview') },
         [ico('eye'), el('span', { text: t('pl_preview') })]);
       pv.addEventListener('click', function (e) {
         e.preventDefault();
-        if (body.classList.contains('pl-mini')) { window.open('index.html', '_blank', 'noopener'); return; }
+        if (body.classList.contains('pl-mini')) { window.open('office.html', '_blank', 'noopener'); return; }
         pvList.hidden = !pvList.hidden;
         pv.setAttribute('aria-expanded', pvList.hidden ? 'false' : 'true');
       });

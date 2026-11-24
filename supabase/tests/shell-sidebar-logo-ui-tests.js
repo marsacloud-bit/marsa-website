@@ -424,7 +424,7 @@ function key(P, k) { P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: k
     await check('client portal (6 tabs) and website pages (8) are links to their pages', () => {
       const hrefs = id => Array.prototype.map.call(g(id).querySelectorAll('a'), a => a.getAttribute('href'));
       return (J(hrefs('portal')) === J(['portal.html#tx', 'portal.html#containers', 'portal.html#invoices', 'portal.html#req', 'portal.html#link', 'portal.html#profile'])
-        && J(hrefs('site')) === J(['index.html', 'services.html', 'calculator.html', 'tracking.html', 'request.html', 'about.html', 'contact.html', 'login.html'])
+        && J(hrefs('site')) === J(['office.html', 'services.html', 'calculator.html', 'tracking.html', 'request.html', 'about.html', 'contact.html', 'login.html'])
         && g('portal').querySelector('a').textContent === 'معاملاتي' && g('site').querySelector('a').textContent === 'الرئيسية') || J([hrefs('portal'), hrefs('site')]);
     });
     await check('items sit in their groups (dashboard / transactions → daily, org / members / audit / errors → settings)', () =>
