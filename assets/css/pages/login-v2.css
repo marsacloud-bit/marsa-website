@@ -63,6 +63,20 @@
 .login-v2 .auth-card form .btn-primary[type="submit"] { width: 100%; min-height: 48px; font-size: 1rem; }
 .login-v2 .link-btn, .login-v2 .auth-card a { color: var(--accent-strong); }
 
+/* the three office tiers (organisation / management / staff): equal tabs sharing one form */
+.login-v2 .auth-tiers { display: flex; width: 100%; margin-bottom: 20px; }
+.login-v2 .auth-tiers .tab { flex: 1 1 0; min-width: 0; min-height: 44px; padding: 8px 6px; line-height: 1.35; white-space: normal; text-align: center; }
+/* the small client link under the tiers (and the way back from the client panel) */
+.lg-client-link { display: flex; justify-content: center; margin: 20px 0 0; padding-top: 16px; border-top: 1px solid var(--border);
+  font-size: .88rem; text-align: center; }
+.lg-client-link[hidden] { display: none; }
+.login-v2 .lg-client-link .link-btn { font-weight: 700; color: var(--muted); text-decoration-color: var(--accent-line); }
+.login-v2 .lg-client-link .link-btn:hover { color: var(--accent-strong); }
+/* the message with an optional action (the tier mismatch → «go to the right tab») */
+.lg-msg-body { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0; }
+.lg-msg-action { min-height: 40px; }
+.lg-msg-action[hidden] { display: none !important; }
+
 /* tablets / phones: one column, the welcome panel becomes a short heading above the card */
 @media (max-width: 900px) {
   .login-v2 main { grid-template-columns: 1fr; align-items: start; gap: 16px; }
@@ -72,5 +86,6 @@
 }
 @media (max-width: 480px) {
   .lg-back span { display: none; }
+  .login-v2 .auth-tiers .tab { font-size: .82rem; padding: 8px 4px; }
   .lg-back { padding: 0 8px; }
 }

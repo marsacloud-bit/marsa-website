@@ -33,7 +33,7 @@
     { id: 'msg', items: ['inbox', 'messages', 'contacts', 'templates', 'channels'] },
     { id: 'finance', items: ['costs', 'payables', 'payments', 'custody', 'margins', 'demurrage', 'billing', 'daftra'] },
     { id: 'reports', items: ['reports', 'fasah_recon', 'changes'] },
-    { id: 'settings', items: ['org', 'branches', 'members', 'requirements', 'attention_rules', 'audit', 'errors', 'legacy_import'] },
+    { id: 'settings', items: ['team', 'org', 'branches', 'requirements', 'attention_rules', 'audit', 'errors', 'legacy_import'] },
     { id: 'account', items: ['portal', 'request', 'tracking'] }
   ];
   var TOP_ONLY = { search: 1, help: 1, platform: 1 };   // in the top bar / the user menu, not in the office menu
@@ -47,7 +47,7 @@
   ];
   var PF_PAGE = (document.body.getAttribute('data-page') || '') === 'platform';
   // the old list merged into «المعاملات» (owner 2026-11-18): its detail routes light the register item
-  var ADMIN_ACTIVE = { tx: 'register', transactions: 'register', request: 'requests', client: 'clients', import: 'imports' };
+  var ADMIN_ACTIVE = { tx: 'register', transactions: 'register', request: 'requests', client: 'clients', import: 'imports', members: 'team' };
   var PAGE_ACTIVE = { ocr: 'ocr', 'bulk-upload': 'bulk', help: 'help', platform: 'platform' };
 
   function SH() { return window.MarsaShell || null; }

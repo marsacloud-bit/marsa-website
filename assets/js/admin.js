@@ -52,7 +52,7 @@
   var T = {
     views: {
       dashboard: 'مهامي اليوم', requests: 'الطلبات الواردة', transactions: 'المعاملات', clients: 'العملاء',
-      messages: 'رسائل التواصل', imports: 'سجل الاستيراد', members: 'الأعضاء والدعوات',
+      messages: 'رسائل التواصل', imports: 'سجل الاستيراد', members: 'الأعضاء والدعوات', team: 'الفريق',
       org: 'المؤسسة', branches: 'الفروع', audit: 'سجل التدقيق', errors: 'أخطاء الواجهة'
     },
     gate: {
@@ -456,6 +456,25 @@
       if (typeof api.listMembers === 'function') return api.listMembers(orgId);   // G2 supa.js wrapper
       return local(function (c) { return c.rpc('admin_list_members', { p_org: orgId }); });
     },
+    // «الفريق» read-only list (supervisor): the org's memberships with the owner flag (20261215000100), flattened
+    // like admin_list_members rows; a database without the flag yet → MarsaApi.listMemberships (no is_owner)
+    teamMemberships: function (orgId) {
+      var flat = function (r) {
+        if (r.error) return r;
+        return { data: (r.data || []).map(function (m) {
+          var p = m.profiles || {};
+          var row = { id: m.id, user_id: m.user_id, full_name: p.full_name, phone: p.phone, role: m.role, branch_id: m.branch_id, is_active: m.is_active, created_at: m.created_at };
+          if (typeof m.is_owner === 'boolean') row.is_owner = m.is_owner;
+          return row;
+        }), error: null };
+      };
+      return local(function (c) {
+        return c.from('memberships').select('id,user_id,org_id,branch_id,role,is_active,is_owner,created_at,profiles(full_name,phone)').eq('org_id', orgId).order('created_at');
+      }).then(function (r) {
+        if (!r.error) return flat(r);
+        return Promise.resolve(api.listMemberships(orgId)).then(flat);
+      });
+    },
     getOrgRow: function (orgId) {
       return local(function (c) {
         return c.from('organizations').select('id,slug,name_ar,name_en,ref_prefix,environment,public_intake_enabled,default_locale,settings,is_active')
@@ -723,7 +742,8 @@
     { id: 'imports', allow: R.opsWriter },
     { id: 'org', allow: R.orgAdmin },
     { id: 'branches', allow: R.orgAdmin },
-    { id: 'members', allow: R.membersRead },
+    // «الفريق» (owner 2026-12-15): the team view; the old #members opens it too (see route())
+    { id: 'team', allow: R.membersRead },
     { id: 'audit', allow: R.auditRead },
     { id: 'errors', allow: R.orgAdmin }
   ];
@@ -1039,7 +1059,7 @@
     'search', 'reports', 'fasah_recon',
     'inbox', 'contacts', 'templates', 'channels',
     'costs', 'payables', 'payments', 'custody', 'margins', 'demurrage', 'billing', 'daftra',
-    'org', 'branches', 'members', 'requirements', 'attention_rules', 'audit', 'changes', 'errors', 'legacy_import'];
+    'team', 'org', 'branches', 'requirements', 'attention_rules', 'audit', 'changes', 'errors', 'legacy_import'];
   // Owner decision 2026-11-19 (docs/owner/sections-decisions.md, the nine headings of the sections list): the nav is
   // grouped under headings that fold open / closed, in the order of that list. Every view keeps its own role rule (a
   // group shows only when the user may open at least one of its items). 'ext:<id>' = a staff page elsewhere
@@ -1053,7 +1073,7 @@
     { id: 'reports', items: ['search', 'reports', 'fasah_recon'] },
     { id: 'msg', items: ['inbox', 'contacts', 'templates', 'channels'] },
     { id: 'finance', items: ['costs', 'payables', 'payments', 'custody', 'margins', 'demurrage', 'billing', 'daftra'] },
-    { id: 'settings', items: ['org', 'branches', 'members', 'requirements', 'attention_rules', 'audit', 'changes', 'errors', 'legacy_import'] },
+    { id: 'settings', items: ['team', 'org', 'branches', 'requirements', 'attention_rules', 'audit', 'changes', 'errors', 'legacy_import'] },
     { id: 'pages', items: ['ext:bulk', 'ext:ocr', 'ext:help', 'ext:platform'] },
     { id: 'portal', items: ['page:p_tx', 'page:p_containers', 'page:p_invoices', 'page:p_req', 'page:p_link', 'page:p_profile'] },
     { id: 'site', items: ['page:s_home', 'page:s_services', 'page:s_calculator', 'page:s_tracking', 'page:s_request', 'page:s_about', 'page:s_contact', 'page:s_login'] },
@@ -1292,6 +1312,11 @@
   function route(keepDialog) {
     if (!keepDialog && dlg && dlg.open) closeDialog();
     var r = parseHash(), name = r.name, id = r.id;
+    // the old «الأعضاء والدعوات» link: one team screen only (#members → #team)
+    if (name === 'members') {
+      try { history.replaceState(null, '', '#team'); } catch (e) { /* ignore */ }
+      r = { name: 'team', id: null, query: '' }; name = 'team'; id = null;
+    }
     var rq = registerRedirect(r);
     if (rq != null) {
       try { history.replaceState(null, '', '#register' + (rq ? '?' + rq : '')); } catch (e) { /* ignore */ }
@@ -1319,7 +1344,7 @@
     var fn = {
       dashboard: renderDashboard, requests: renderRequests, request: renderRequest, transactions: renderTransactions,
       tx: renderTx, clients: renderClients, client: renderClient, messages: renderMessages, imports: renderImports,
-      import: renderImport, members: renderMembers,
+      import: renderImport, members: renderMembers, team: renderTeam,
       org: renderOrg, branches: renderBranches, audit: renderAudit, errors: renderErrors
     }[name];
     // G3 module views (#alerts, #schedule, …): the optional param is a short token, never markup
@@ -3652,16 +3677,45 @@
   // --- roles ---------------------------------------------------------
   var BM_MANAGED = ['clearance_staff', 'transport_staff', 'accountant'];
   var INVITE_ROLES_ADMIN = ['admin', 'supervisor', 'operations_manager', 'branch_manager', 'accounts_manager', 'accountant', 'clearance_staff', 'transport_staff', 'client'];
+  // three sign-in tiers (owner decision, migration 20261215000100_team_tiers.sql): the organisation OWNER (one
+  // org-wide admin membership with is_owner) / MANAGEMENT (admin, branch_manager, supervisor) / EMPLOYEES (below);
+  // the «الفريق» panels and their invite dialogs follow these two lists (clients keep their own card)
+  var TEAM_MANAGEMENT = ['admin', 'branch_manager', 'supervisor'];
+  var TEAM_EMPLOYEES = ['clearance_staff', 'transport_staff', 'accountant', 'accounts_manager', 'operations_manager'];
   function isOrgAdmin() { return S.memberships.some(function (m) { return m.role === 'admin' && !m.branch_id; }); }
+  // The org owner as the server sees it (app.is_org_owner): my_context's is_owner is already the EFFECTIVE value
+  // (the owner row, or — LEGACY — every org-wide admin while the org has no active owner). A database without the
+  // flag yet (no is_owner key at all) keeps today's behaviour: every org-wide admin.
+  function isOrgOwner() {
+    var mine = S.memberships.filter(function (m) { return m.role === 'admin' && !m.branch_id; });
+    if (!mine.length) return false;
+    if (mine.every(function (m) { return !('is_owner' in m); })) return true;
+    return mine.some(function (m) { return m.is_owner === true; });
+  }
+  // the flagged owner row of a member list (active or not), or null
+  function flaggedOwner(rows) { return (rows || []).filter(function (m) { return m.is_owner === true; })[0] || null; }
+  // owner_transfer needs a REAL owner (no legacy fallback): the flagged, active owner row is this user's own
+  function isRealOwner(rows) {
+    var o = flaggedOwner(rows);
+    return !!(o && o.is_active && isMe(o) && o.role === 'admin' && !o.branch_id && isOrgOwner());
+  }
   function managedBranches() {
     return S.memberships.filter(function (m) { return m.role === 'branch_manager' && m.branch_id; }).map(function (m) { return m.branch_id; });
   }
-  function inviteRoles() { return isOrgAdmin() ? INVITE_ROLES_ADMIN : (managedBranches().length ? BM_MANAGED.concat(['client']) : []); }
+  // the owner invites every role; another org admin every role but 'admin'; a branch manager its branch roles + clients
+  function inviteRoles() {
+    if (isOrgAdmin()) return isOrgOwner() ? INVITE_ROLES_ADMIN : INVITE_ROLES_ADMIN.filter(function (r) { return r !== 'admin'; });
+    return managedBranches().length ? BM_MANAGED.concat(['client']) : [];
+  }
   function isMe(m) { return !!(m.is_me || (S.ctx && m.user_id === S.ctx.user_id)); }
+  // UI mirror of app.can_manage_member: nobody manages their own row or the owner's row; admins only the owner;
+  // org admins every other role; a branch manager BM_MANAGED in its branches. The server's can_manage (when the
+  // row carries it) may only narrow this.
   function canManageMember(m) {
-    if (isMe(m)) return false;
-    if (isOrgAdmin()) return true;
-    return BM_MANAGED.indexOf(m.role) !== -1 && managedBranches().indexOf(m.branch_id) !== -1;
+    if (isMe(m) || m.is_owner === true) return false;
+    var local = m.role === 'admin' ? isOrgOwner() :
+      (isOrgAdmin() || (BM_MANAGED.indexOf(m.role) !== -1 && managedBranches().indexOf(m.branch_id) !== -1));
+    return typeof m.can_manage === 'boolean' ? (m.can_manage && local) : local;
   }
   function refreshBranches() {
     return api.listBranches(S.orgId).then(function (r) {
@@ -4196,39 +4250,121 @@
   }
 
   /* ------------------------------------------------------------------
-     الأعضاء والدعوات — org admin: all; branch_manager: own branch;
-     supervisor: read-only member names (as before G2)
+     «الفريق» (#team; the old #members opens the same view) — three tiers
+     (migration 20261215000100_team_tiers.sql):
+       * header card: who the organisation owner is (from the flagged row in
+         the list); the "not set yet / legacy" notes for org-wide admins only
+         (a branch manager's list never holds the owner row: no card there);
+       * «الإدارة» (TEAM_MANAGEMENT: admins with the owner badge, branch
+         managers, supervisors): «إضافة مسؤول» and activate / deactivate of
+         admins for the OWNER only; inviting a branch manager / supervisor for
+         the owner and the org admins (as admin_invite allows); «نقل الملكية»
+         only for a real flagged owner (owner_transfer has no legacy fallback);
+       * «الموظفون» (TEAM_EMPLOYEES): invite with those roles only, activate /
+         deactivate for the owner and admins; a branch manager its branch
+         roles (the server's can_manage decides);
+       * portal client accounts (their own invite), then the invitations.
+     Supervisors read the member list only (as before G2). The database is the
+     real gate (app.can_manage_member, admin_invite, owner_transfer).
      ------------------------------------------------------------------ */
-  function renderMembers() {
+  function renderMembers() { return renderTeam(); }
+  // the panel of a member row: clients / employees / management (admin, branch_manager, supervisor, any other role)
+  function teamGroup(m) { return m.role === 'client' ? 'clients' : (TEAM_EMPLOYEES.indexOf(m.role) !== -1 ? 'staff' : 'mgmt'); }
+  // the roles this user may invite, limited to one panel's roles
+  function teamInviteRoles(only) { return inviteRoles().filter(function (r) { return only.indexOf(r) !== -1; }); }
+  // a MRS_FORBIDDEN of the tiers (detail owner_only / owner) in plain words, else the usual message
+  function teamErr(e) {
+    var f = errField(e);
+    if (errCode(e) === 'MRS_FORBIDDEN' && (f === 'owner_only' || f === 'owner')) return t('team_err_' + f);
+    return apiErr(e);
+  }
+  function renderTeam() {
     var manage = isOrgAdmin() || managedBranches().length > 0;
-    if (!manage) {
-      return api.listMemberships(S.orgId).then(function (r) {
-        var out = frag(dHead(viewLabel('members'), t('members_sub_read')));
-        if (r.error) return append(out, dAlert(isForbidden(r.error) ? 'warning' : 'danger', apiErr(r.error)));
-        var list = (r.data || []).map(function (m) {
-          return { id: m.id, user_id: m.user_id, full_name: m.profiles && m.profiles.full_name, phone: m.profiles && m.profiles.phone, role: m.role, branch_id: m.branch_id, is_active: m.is_active, created_at: m.created_at };
-        });
-        return append(out, membersTable(list, false));
-      });
-    }
-    return Promise.all([L.adminListMembers(S.orgId), call('listInvitations', S.orgId)]).then(function (res) {
-      var out = frag(dHead(viewLabel('members'), isOrgAdmin() ? t('members_sub_admin') : t('members_sub_bm'),
-        [dBtn([svgIcon('plus'), t('invite_btn')], 'btn-primary', function () { inviteDialog(); })]));
+    var load = manage ? Promise.all([L.adminListMembers(S.orgId), call('listInvitations', S.orgId)])
+      : Promise.all([L.teamMemberships(S.orgId), Promise.resolve(null)]);
+    return load.then(function (res) {
       var m = res[0], inv = res[1];
-      out.appendChild(dCard(t('members_card'), m.error ? dAlert(isForbidden(m.error) ? 'warning' : 'danger', apiErr(m.error)) : membersTable(rowsOf(m.data), true)));
-      var allToggle = el('label', { class: 'check adm-voided-toggle' }, [el('input', { type: 'checkbox', checked: S.g2.allInvites, onchange: function (e) { S.g2.allInvites = e.target.checked; rerender(); } }), ' ', t('invites_show_all')]);
-      out.appendChild(dCard(t('invites_card'), inv.error ? dAlert(isForbidden(inv.error) ? 'warning' : 'danger', apiErr(inv.error)) : invitesTable(rowsOf(inv.data)), [allToggle]));
+      var rows = m.error ? null : rowsOf(m.data);
+      var owner = isOrgOwner(), real = rows ? isRealOwner(rows) : false;
+      var sub = real ? 'team_sub_owner' : (owner ? 'team_sub_legacy' : (isOrgAdmin() ? 'team_sub_admin' : (manage ? 'team_sub_bm' : 'team_sub_read')));
+      var out = frag(dHead(viewLabel('team'), t(sub)));
+      if (!rows) return append(out, dAlert(isForbidden(m.error) ? 'warning' : 'danger', apiErr(m.error)));
+      var mgmt = rows.filter(function (x) { return teamGroup(x) === 'mgmt'; });
+      var staff = rows.filter(function (x) { return teamGroup(x) === 'staff'; });
+      var clients = rows.filter(function (x) { return teamGroup(x) === 'clients'; });
+      var ownerCard = teamOwnerCard(rows);
+      if (ownerCard) out.appendChild(ownerCard);
+      if (mgmt.length || isOrgAdmin()) out.appendChild(teamMgmtCard(mgmt, rows, owner, manage));
+      out.appendChild(teamStaffCard(staff, manage));
+      var clientRoles = manage ? teamInviteRoles(['client']) : [];
+      if (clients.length || clientRoles.length) {
+        var cActs = clientRoles.length ? [dBtn([svgIcon('plus'), t('team_invite_client')], 'btn-ghost', function () { inviteDialog({ only: ['client'], title: 'team_invite_client_title' }); }, { 'data-team': 'invite-client' })] : [];
+        out.appendChild(dCard(t('team_clients_card'), membersTable(clients, manage), cActs, 'adm-team-card adm-team-clients'));
+      }
+      if (manage) {
+        var allToggle = el('label', { class: 'check adm-voided-toggle' }, [el('input', { type: 'checkbox', checked: S.g2.allInvites, onchange: function (e) { S.g2.allInvites = e.target.checked; rerender(); } }), ' ', t('invites_show_all')]);
+        out.appendChild(dCard(t('invites_card'), inv.error ? dAlert(isForbidden(inv.error) ? 'warning' : 'danger', apiErr(inv.error)) : invitesTable(rowsOf(inv.data)), [allToggle]));
+      }
       return out;
     });
+  }
+  // who the organisation owner is (one line, calm). No flagged row in the list: the "not set yet" note for an
+  // org-wide admin only (its list holds every row, so the absence is real); anyone else gets no card (a branch
+  // manager's list is its branch only, a supervisor's may come from a database without the flag).
+  function teamOwnerCard(rows) {
+    var o = flaggedOwner(rows), body;
+    if (o) {
+      body = el('div', { class: 'adm-team-owner' }, [
+        el('span', { class: 'adm-team-owner-mark', 'aria-hidden': 'true' }, svgIcon('lock')),
+        el('div', { class: 'adm-team-owner-text' }, [
+          el('strong', { text: o.full_name || t('no_name') }), isMe(o) ? [' ', dBadge('teal', t('you'))] : null,
+          o.is_active ? null : [' ', dBadge('danger', t('suspended'))],
+          o.email ? el('span', { class: 'adm-sub' }, dLtr(o.email)) : null,
+          el('span', { class: 'adm-sub', text: t('team_owner_hint') })
+        ])
+      ]);
+      if (!o.is_active) {
+        body = [body, el('p', { class: 'adm-team-note', 'data-team': 'owner-inactive', text: t(isOrgAdmin() ? 'team_owner_inactive_admin' : 'team_owner_inactive') })];
+      }
+    } else if (isOrgAdmin()) {
+      body = el('p', { class: 'adm-team-note', 'data-team': 'owner-legacy', text: t('team_owner_legacy_you') });
+    } else {
+      return null;
+    }
+    return dCard(t('team_owner_card'), body, null, 'adm-team-card adm-team-owner-card');
+  }
+  // «الإدارة»: admins (owner badge), branch managers, supervisors
+  function teamMgmtCard(mgmt, rows, owner, manage) {
+    var acts = [];
+    if (owner && teamInviteRoles(['admin']).length) {
+      acts.push(dBtn([svgIcon('plus'), t('team_add_admin')], 'btn-primary', function () { inviteDialog({ only: ['admin'], adminOnly: true, title: 'team_add_admin_title' }); }, { 'data-team': 'add-admin' }));
+    }
+    var lower = TEAM_MANAGEMENT.filter(function (r) { return r !== 'admin'; });   // branch_manager, supervisor
+    if (manage && teamInviteRoles(lower).length) {
+      acts.push(dBtn([svgIcon('plus'), t('team_invite_mgmt')], owner ? 'btn-ghost' : 'btn-primary', function () { inviteDialog({ only: lower, title: 'team_invite_mgmt_title' }); }, { 'data-team': 'invite-mgmt' }));
+    }
+    if (isRealOwner(rows) && transferTargets(mgmt).length) {
+      acts.push(dBtn(t('team_transfer'), 'btn-ghost', function () { transferDialog(mgmt); }, { 'data-team': 'transfer' }));
+    }
+    var body = [membersTable(mgmt, manage)];
+    if (isOrgAdmin() && !owner) body.unshift(el('p', { class: 'adm-team-note', 'data-team': 'admins-note', text: t('team_admins_note') }));
+    return dCard(t('team_mgmt_card'), body, acts, 'adm-team-card adm-team-admins');
+  }
+  // «الموظفون»: the five employee roles only
+  function teamStaffCard(staff, manage) {
+    var roles = manage ? teamInviteRoles(TEAM_EMPLOYEES) : [];
+    var acts = roles.length ? [dBtn([svgIcon('plus'), t('team_invite_staff')], 'btn-primary', function () { inviteDialog({ only: TEAM_EMPLOYEES, title: 'team_invite_staff_title' }); }, { 'data-team': 'invite-staff' })] : [];
+    return dCard(t('team_staff_card'), membersTable(staff, manage), acts, 'adm-team-card adm-team-staff');
   }
   function membersTable(list, manage) {
     return dTable([t('col_user'), manage ? t('col_email') : t('col_phone'), t('col_role'), t('col_branch'), t('f_status'), t('col_since'), ''], list.map(function (m) {
       var me = isMe(m), act = null;
       if (manage && canManageMember(m)) {
-        act = dBtn(m.is_active ? t('deactivate') : t('activate'), 'btn-ghost' + (m.is_active ? ' adm-text-danger' : ''), function (btn) { memberToggle(m, !m.is_active, btn); });
+        act = dBtn(m.is_active ? t('deactivate') : t('activate'), 'btn-ghost' + (m.is_active ? ' adm-text-danger' : ''), function (btn) { memberToggle(m, !m.is_active, btn); }, { 'data-member': m.id });
       }
-      return el('tr', { class: m.is_active ? null : 'adm-voided' }, [
-        el('td', null, [el('strong', { text: m.full_name || t('no_name') }), me ? [' ', dBadge('teal', t('you'))] : null]),
+      return el('tr', { class: m.is_active ? null : 'adm-voided', 'data-member-row': m.id }, [
+        el('td', null, [el('strong', { text: m.full_name || t('no_name') }), me ? [' ', dBadge('teal', t('you'))] : null,
+          m.is_owner === true ? [' ', el('span', { class: badgeCls('neutral') + ' adm-owner-badge', text: t('team_owner_badge') })] : null]),
         el('td', null, dLtr(manage ? m.email : m.phone)),
         el('td', { text: (isEn() ? m.role_label_en : m.role_label_ar) || roleLabel(m.role) }),
         el('td', { text: m.branch_id ? (m.branch_name_ar && !isEn() ? m.branch_name_ar : (branchName(m.branch_id) || m.branch_code || t('branch_specific'))) : t('all_branches') }),
@@ -4244,10 +4380,54 @@
       btn.disabled = true;
       api.setMembershipActive(m.id, to).then(function (r) {
         btn.disabled = false;
-        if (r.error) return toast(errCode(r.error) === 'MRS_FORBIDDEN' ? t('member_forbidden') : apiErr(r.error), 'error');
+        if (r.error) {
+          var f = errField(r.error);
+          return toast(errCode(r.error) === 'MRS_FORBIDDEN' && f !== 'owner' && f !== 'owner_only' ? t('member_forbidden') : teamErr(r.error), 'error');
+        }
         toast(T.common.saved, 'success'); rerender();
       });
     });
+  }
+  // «نقل الملكية»: the owner hands the flag to another ACTIVE org-wide admin (owner_transfer)
+  function transferTargets(admins) {
+    return admins.filter(function (m) { return m.role === 'admin' && !m.branch_id && m.is_active && m.is_owner !== true && !isMe(m); });
+  }
+  function transferDialog(admins) {
+    var targets = transferTargets(admins);
+    if (!targets.length) return toast(t('team_transfer_none'), 'warning');
+    openDialog({
+      title: t('team_transfer_title'), submit: t('team_transfer_submit'), danger: true, body: '',
+      onOpen: function (body) {
+        body.appendChild(dAlert('warning', t('team_transfer_info')));
+        body.appendChild(dGrid([dField({ name: 'target', label: t('team_transfer_to'), type: 'select', req: true, full: true, value: '',
+          options: [['', t('team_transfer_pick')]].concat(targets.map(function (m) { return [m.id, (m.full_name || t('no_name')) + (m.email ? ' — ' + m.email : '')]; })) })]));
+      },
+      onSubmit: function (form) {
+        var id = fval(form, 'target');
+        var m = targets.filter(function (x) { return x.id === id; })[0];
+        if (!m) return t('team_transfer_required');
+        return askConfirm({ title: t('team_transfer_title'), text: t('team_transfer_confirm', { name: m.full_name || m.email || t('no_name') }), okText: t('team_transfer_submit'), danger: true }).then(function (yes) {
+          if (!yes) return false;
+          return call('ownerTransfer', S.orgId, m.id).then(function (r) {
+            if (r.error) return teamErr(r.error);
+            // the flag moved: this user is no longer the owner (my_context is re-read below)
+            S.memberships.forEach(function (x) { if (x.is_owner === true) x.is_owner = false; });
+            toast(t('team_transfer_done'), 'success');
+            refreshMyContext().then(function () { rerender(); });
+            return true;
+          });
+        });
+      }
+    });
+  }
+  // re-read my_context after a change of this user's own memberships (the owner flag)
+  function refreshMyContext() {
+    if (!api || typeof api.myContext !== 'function') return Promise.resolve();
+    return Promise.resolve(api.myContext(true)).then(function (c) {
+      if (!c || c.error || !c.data) return;
+      S.ctx = c.data;
+      S.memberships = (S.ctx.memberships || []).filter(function (m) { return m.org_id === S.orgId && R.staff.indexOf(m.role) !== -1; });
+    }, function () { /* keep the local change */ });
   }
 
   function inviteStatus(i) {
@@ -4262,8 +4442,10 @@
     var shown = list.filter(function (i) { var s = inviteStatus(i); return S.g2.allInvites || s === 'pending' || s === 'expired'; });
     return dTable([t('col_email'), t('col_role'), t('col_branch'), t('f_status'), t('col_expires'), t('col_created'), ''], shown.map(function (i) {
       var st = inviteStatus(i), acts = [];
-      if (st === 'pending' || st === 'expired') acts.push(dBtn(t('reissue'), 'btn-ghost', function (btn) { inviteReissue(i.id, btn); }));
-      if (st === 'pending') acts.push(dBtn(t('revoke'), 'btn-ghost adm-text-danger', function (btn) { inviteRevoke(i.id, btn); }));
+      // an admin invitation is the owner's to re-issue / revoke (app.invitation_authorized)
+      var mine = i.role !== 'admin' || isOrgOwner();
+      if (mine && (st === 'pending' || st === 'expired')) acts.push(dBtn(t('reissue'), 'btn-ghost', function (btn) { inviteReissue(i.id, btn); }));
+      if (mine && st === 'pending') acts.push(dBtn(t('revoke'), 'btn-ghost adm-text-danger', function (btn) { inviteRevoke(i.id, btn); }));
       var who2 = i.role === 'client' && (i.client_name_ar || i.client_name) ? [el('span', { class: 'adm-sub', text: i.client_name_ar || i.client_name })] : null;
       return el('tr', { class: st === 'revoked' ? 'adm-voided' : null }, [
         el('td', null, [dLtr(i.email), who2]),
@@ -4277,13 +4459,17 @@
     }), S.g2.allInvites ? t('invites_empty_all') : t('invites_empty'));
   }
 
-  function inviteDialog() {
+  // opts.only: the roles of one «الفريق» panel (limited to what this user may invite); opts.title: the dialog
+  // title key; opts.adminOnly: «إضافة مسؤول» (role admin, the owner only: its own info line and refusal)
+  function inviteDialog(opts) {
+    opts = opts || {};
     var roles = inviteRoles(), admin = isOrgAdmin(), own = managedBranches();
-    if (!roles.length) return toast(t('forbidden'), 'error');
+    if (opts.only) roles = roles.filter(function (r) { return opts.only.indexOf(r) !== -1; });
+    if (!roles.length) return toast(opts.adminOnly ? t('team_err_owner_only') : t('forbidden'), 'error');
     var bOpts = admin ? [['', t('all_branches')]] : [];
     S.branches.filter(function (b) { return b.is_active && (admin || own.indexOf(b.id) !== -1); }).forEach(function (b) { bOpts.push([b.id, b.name_ar + ' (' + b.code + ')']); });
     openDialog({
-      title: t('invite_title'), submit: t('invite_submit'), body: '',
+      title: t(opts.title || 'invite_title'), submit: t('invite_submit'), body: '',
       onOpen: function (body) {
         var clientSel = el('select', { class: 'form-control', id: 'adg-client', name: 'client' }, el('option', { value: '', text: t('client_pick') }));
         var clientQ = el('input', { class: 'form-control', type: 'search', id: 'adg-client-q', placeholder: t('client_search_ph'), maxlength: 60, 'aria-label': t('client_search_ph') });
@@ -4302,10 +4488,10 @@
           el('div', { class: 'adm-inline-row' }, [clientQ, dBtn(T.common.search, 'btn-ghost', loadClients)]),
           clientSel, el('span', { class: 'form-hint', text: t('client_hint') })
         ]);
-        body.appendChild(dAlert('info', admin ? t('invite_info_admin') : t('invite_info_bm')));
+        body.appendChild(dAlert('info', opts.adminOnly ? t('team_add_admin_info') : (admin ? t('invite_info_admin') : t('invite_info_bm'))));
         body.appendChild(dGrid([
           dField({ name: 'email', label: t('f_email'), type: 'email', req: true, ltr: true, max: 160, autocomplete: 'off', full: true }),
-          dField({ name: 'role', label: t('col_role'), type: 'select', req: true, value: 'clearance_staff', options: roles.map(function (r) { return [r, roleLabel(r)]; }) }),
+          dField({ name: 'role', label: t('col_role'), type: 'select', req: true, value: roles.indexOf('clearance_staff') !== -1 ? 'clearance_staff' : roles[0], options: roles.map(function (r) { return [r, roleLabel(r)]; }) }),
           dField({ name: 'branch', label: t('col_branch'), type: 'select', req: !admin, value: admin ? '' : (own[0] || ''), options: bOpts, hint: t('branch_hint') }),
           clientBox
         ]));
@@ -4340,7 +4526,7 @@
         return ask.then(function (yes) { return yes ? call('invite', S.orgId, payload) : null; }).then(function (r) {
           if (!r) return false;
           idemSettle('invite', r.error);
-          if (r.error) return errCode(r.error) === 'DUPLICATE' ? t('invite_dup') : apiErr(r.error);
+          if (r.error) return errCode(r.error) === 'DUPLICATE' ? t('invite_dup') : teamErr(r.error);
           showLink(r.data || {}, t('invite_done_title'));
           rerender();
           return false;   // keep the dialog open on the one-time link

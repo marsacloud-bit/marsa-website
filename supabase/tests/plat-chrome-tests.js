@@ -78,6 +78,18 @@ check('owner labels: «المعاملات», «الفوترة», «الربط ا
   return (a.pnav_register === 'المعاملات' && a.pnav_billing === 'الفوترة' && a.pnav_daftra === 'الربط المحاسبي') || JSON.stringify(a);
 });
 
+check('«الفريق» (owner 2026-12-15): team is the first settings item, members is no menu item any more; #members lights team', () => {
+  const st = groups.find(g => g.id === 'settings');
+  const teamNav = /\{ id: 'team', href: 'admin\.html#team', icon: '[a-zA-Z]+', allow: R\.membersRead \}/.test(shell);
+  const alias = /ADMIN_ALIAS = \{[^}]*members: 'team'/.test(shell) && /ADMIN_ACTIVE = \{[^}]*members: 'team'/.test(chrome);
+  return (st && st.items[0] === 'team' && st.items.indexOf('members') === -1 && navIds.indexOf('members') === -1 && teamNav && alias) || JSON.stringify({ st, teamNav, alias });
+});
+check('«الفريق» menu label in Arabic and English', () => {
+  const ctx = { window: {} }; vm.runInNewContext(read('assets/i18n/app.js'), ctx);
+  const D = ctx.window.MarsaAppDict;
+  return (D.ar.nav_team === 'الفريق' && D.en.nav_team === 'Team') || JSON.stringify([D.ar.nav_team, D.en.nav_team]);
+});
+
 check('two panels: platform.html has its own menu (its sections), the office menu has no «platform» item', () => {
   const pf = read('platform.html');
   const ids = [...chrome.matchAll(/\['pf_[a-z]+', '(pf-[a-z]+-title)'/g)].map(m => m[1]);

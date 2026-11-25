@@ -885,6 +885,8 @@ async function main() {
       'site_profile', 'site_logo_visible',
       // office AI keys (20261212000100): the office's own key (org admins) + the platform key's tier (platform admins)
       'org_ai_keys', 'org_ai_set_key', 'org_ai_clear_key', 'platform_ai_set_key_tier',
+      // team tiers (20261215000100): the office owner hands the ownership to another org-wide admin
+      'owner_transfer',
       // legacy pay (20261122000100): the payment register (four-eyes review, correct / void, attachments, the transaction panel,
       // the duplicate / transaction checks) and the client custody
       'record_payment_bundle', 'correct_payment', 'void_payment', 'review_payment', 'add_payment_documents', 'remove_payment_document',
@@ -909,7 +911,7 @@ async function main() {
       'legacy_import_commit', 'legacy_import_void', 'legacy_import_get_run', 'legacy_import_list_runs', 'legacy_import_list_rows',
       'legacy_import_skip_rows', 'legacy_import_queue_daftra', 'legacy_import_daftra_candidates'];
     const got = r.map(x => x.proname);
-    if (exp.length !== 329) return 'expected list has ' + exp.length + ' names';   // + set_container_storage (20261206000100)   // + org_ai_keys, org_ai_set_key, org_ai_clear_key, platform_ai_set_key_tier (20261212000100)   // + site_profile, site_logo_visible (20261211000100)   // + get_served_ports, save_served_ports, site_served_ports (20261210000100)   // + 4 platform_ai_* (20261209000100)   // + tx_storage_gate, approve_storage_override (20261206000100)
+    if (exp.length !== 330) return 'expected list has ' + exp.length + ' names';   // + owner_transfer (20261215000100)   // + set_container_storage (20261206000100)   // + org_ai_keys, org_ai_set_key, org_ai_clear_key, platform_ai_set_key_tier (20261212000100)   // + site_profile, site_logo_visible (20261211000100)   // + get_served_ports, save_served_ports, site_served_ports (20261210000100)   // + 4 platform_ai_* (20261209000100)   // + tx_storage_gate, approve_storage_override (20261206000100)
     const extra = got.filter(x => !exp.includes(x));
     const missing = exp.filter(x => !got.includes(x));
     return (extra.length === 0 && missing.length === 0) || 'unexpected: ' + extra.join(', ') + ' missing: ' + missing.join(', ');

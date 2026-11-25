@@ -112,7 +112,7 @@ async function secFile() {
     const body = nx < 0 ? all.slice(i + h.length) : all.slice(i + h.length, nx);
     return (i > 0 && (body === s || body + '\n' === s) && all.indexOf(h, i + 1) < 0 && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles())) || 'bundle';
   });
-  const LATER_PHASES = ['20261209000100_ai_keys.sql', '20261210000100_org_served_ports.sql', '20261211000100_reconvert.sql', '20261213000100_site_profile.sql', '20261214000100_org_ai_keys.sql'];
+  const LATER_PHASES = ['20261209000100_ai_keys.sql', '20261210000100_org_served_ports.sql', '20261211000100_reconvert.sql', '20261213000100_site_profile.sql', '20261214000100_org_ai_keys.sql', '20261215000100_team_tiers.sql'];
   await check('this file is the latest migration (later phases excepted)', () => JSON.stringify(migFiles().filter(f => f > MIG)) === JSON.stringify(LATER_PHASES) || 'later ' + JSON.stringify(migFiles().filter(f => f > MIG)));
   await check('the extraction trigger is the 20261119000100 body with the engine check only changed', () => {
     const old = fs.readFileSync(path.join(MIG_DIR, '20261119000100_legacy_docs.sql'), 'utf8');

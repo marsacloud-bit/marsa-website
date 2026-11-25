@@ -1700,6 +1700,9 @@
     return rpc('admin_set_member_active', { p_membership: id, p_active: !!active });
   }
   function listMembers(oid) { return rpc('admin_list_members', { p_org: oid }); }
+  // three sign-in tiers (20261215000100): the organisation owner hands the owner flag to another active org-wide
+  // admin of the same org → jsonb; MRS_FORBIDDEN owner_only when the caller is not the owner
+  function ownerTransfer(oid, membershipId) { return rpc('owner_transfer', { p_org: oid, p_membership: membershipId }); }
   function updateOrg(oid, payload) { return rpc('admin_update_org', { p_org: oid, p_payload: payload || {} }); }
   function createBranch(oid, payload) { return rpc('admin_create_branch', { p_org: oid, p_payload: payload || {} }); }
   function updateBranch(id, payload) { return rpc('admin_update_branch', { p_branch: id, p_payload: payload || {} }); }
@@ -4953,7 +4956,7 @@
     newIdemKey: newIdemKey,
     // org admin
     getOrg: getOrg, listBranches: listBranches, listMemberships: listMemberships, addMembership: addMembership,
-    setMembershipActive: setMembershipActive, listMembers: listMembers,
+    setMembershipActive: setMembershipActive, listMembers: listMembers, ownerTransfer: ownerTransfer,
     updateOrg: updateOrg, createBranch: createBranch, updateBranch: updateBranch,
     invite: invite, listInvitations: listInvitations, revokeInvitation: revokeInvitation, reissueInvitation: reissueInvitation,
     auditLog: auditLog, recentErrors: recentErrors,

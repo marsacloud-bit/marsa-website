@@ -1382,7 +1382,7 @@ function rtApi(calls, rows) {
       (/function otpOn\(\) \{ return !!\(otpBox && typeof api\.emailOtpEnabled === 'function' && api\.emailOtpEnabled\(\)/.test(SRC.auth)
         && /if \(r\.error && r\.error\.code === 'MRS_NETWORK'\) \{ showMsg\(errText\(r\.error\), 'danger'\); return; \}\n\s*otpEmail = email;/.test(SRC.auth)
         && /var OTP_COOLDOWN_S = 60, OTP_MAX_TRIES = 5;/.test(SRC.auth)
-        && /return api\.otpGate\(\)\.then\(function \(g\) \{[\s\S]{0,120}if \(gd\.allowed !== true\) \{[\s\S]{0,80}return api\.signOut\(\)[\s\S]{0,400}return routeByRole\(true\);/.test(SRC.auth)
+        && /return api\.otpGate\(\)\.then\(function \(g\) \{[\s\S]{0,120}if \(gd\.allowed !== true\) \{[\s\S]{0,80}return api\.signOut\(\)[\s\S]{0,400}fromStaffForm = true;\s*return routeByRole\(null\);/.test(SRC.auth)
         && /if \(session && typeof api\.otpGate === 'function'\) \{/.test(SRC.auth)) || 'auth.js');
     check('login dictionary: the OTP strings in ar and en (same keys); the message never says whether the account exists', () => {
       const keys = ['otpOr', 'otpOpen', 'otpLead', 'otpSend', 'otpCode', 'otpVerify', 'otpResend', 'otpSent', 'otpWait', 'otpWrong', 'otpLocked', 'otpCodeError', 'otpOrgDisabled', 'otpStaffOnly', 'otpNotAllowed'];

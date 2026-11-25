@@ -142,7 +142,7 @@ async function secFile() {
     !/aal2|mfa_gated_roles\s*\(\)\s*RETURNS|mfa_required_for\s*\(uuid\)\s*RETURNS/.test(s.replace(/^--.*$/gm, '')) || 'aal2 found');
   await check('bucket: images only, no SVG', () => /ARRAY\['image\/png','image\/jpeg','image\/webp'\]/.test(s) && !/svg/i.test(s.replace(/^--.*$/gm, '')) || 'mime list');
   // later phases (each has its own suite) follow it, in order
-  const LATER_PHASES = ['20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261210000100_org_served_ports.sql', '20261211000100_reconvert.sql', '20261213000100_site_profile.sql', '20261214000100_org_ai_keys.sql'];
+  const LATER_PHASES = ['20261203000100_draft_client_hidden.sql', '20261204000100_tx_stage_sets.sql', '20261205000100_service_item_price.sql', '20261206000100_storage_gate.sql', '20261207000100_driver_classes.sql', '20261208000100_ai_providers.sql', '20261209000100_ai_keys.sql', '20261210000100_org_served_ports.sql', '20261211000100_reconvert.sql', '20261213000100_site_profile.sql', '20261214000100_org_ai_keys.sql', '20261215000100_team_tiers.sql'];
   await check('this file is the latest migration (later phases excepted)', () => {
     const later = migFiles().filter(f => f > MIG);
     return (migFiles().includes(MIG) && J(later) === J(LATER_PHASES)) || 'later ' + J(later);
@@ -173,6 +173,8 @@ async function secRerun() {
   await check('re-run on itself: identical catalog (functions, policies, buckets), one schema_versions row', async () => {
     const c1 = J(await catalog());
     await db.exec(fs.readFileSync(MIG_FILE, 'utf8'));
+    // later phases that re-create a function of this file (my_context: 20261215000100) are re-pasted straight after
+    for (const f of ['20261215000100_team_tiers.sql']) if (fs.existsSync(path.join(MIG_DIR, f))) await db.exec(fs.readFileSync(path.join(MIG_DIR, f), 'utf8'));
     return (J(await catalog()) === c1 && (await num(`SELECT count(*) n FROM public.schema_versions WHERE version = '20261202000100'`)) === 1) || 'changed';
   });
   await check('helpers: org_asset_org not executable by API roles; org_asset_can authenticated only; my_context authenticated only', async () => {

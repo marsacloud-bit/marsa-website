@@ -100,7 +100,7 @@ async function secFile() {
     const body = nx < 0 ? all.slice(i + h.length) : all.slice(i + h.length, nx);
     return (i > 0 && (body === s || body + '\n' === s) && all.indexOf(h, i + 1) < 0 && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles())) || 'bundle';
   });
-  const LATER_PHASES = ['20261214000100_org_ai_keys.sql'];
+  const LATER_PHASES = ['20261214000100_org_ai_keys.sql', '20261215000100_team_tiers.sql'];
   await check('only the known later migrations follow this file', () => {
     const later = migFiles().filter(f => f > MIG);
     return later.every(f => LATER_PHASES.includes(f)) || 'unexpected later files: ' + later.join(', ');

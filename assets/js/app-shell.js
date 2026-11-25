@@ -203,7 +203,8 @@
     { id: 'manage', label: 'grp_manage', items: [
       { id: 'org', href: 'admin.html#org', icon: 'building', allow: R.orgAdmin },
       { id: 'branches', href: 'admin.html#branches', icon: 'branch', allow: R.orgAdmin },
-      { id: 'members', href: 'admin.html#members', icon: 'userPlus', allow: R.membersRead },
+      // «الفريق» (owner 2026-12-15): the owner / admins / employees view; the old #members item opens it (ADMIN_ALIAS)
+      { id: 'team', href: 'admin.html#team', icon: 'users', allow: R.membersRead },
       { id: 'requirements', key: 'ops.nav_requirements', href: 'admin.html#requirements', icon: 'listCheck', allow: R.orgAdmin },
       // legacy step 8: aging rules + e-mail code switch (rpt/rules.js, read for staff, edited by the owner) and the
       // operations log with the field diff (rpt/audit-diff.js, admin + supervisor)
@@ -230,7 +231,7 @@
     ] }
   ];
   // admin.js detail routes (#tx/<id> …) belong to their list view
-  var ADMIN_ALIAS = { tx: 'transactions', request: 'requests', client: 'clients', import: 'imports' };
+  var ADMIN_ALIAS = { tx: 'transactions', request: 'requests', client: 'clients', import: 'imports', members: 'team' };
   var PAGE_NAV = { platform: 'platform', ocr: 'ocr', bulk: 'bulk', portal: 'portal', help: 'help', offline: null };
   var OPS_NAV = {
     ar: { 'ops.nav_group': 'العمليات', 'ops.nav_alerts': 'التنبيهات', 'ops.nav_schedule': 'الجدول اليومي', 'ops.nav_exceptions': 'الاستثناءات',

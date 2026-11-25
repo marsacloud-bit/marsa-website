@@ -161,7 +161,9 @@
 
           <div class="alert mb-3" role="status" aria-live="polite" tabindex="-1" data-auth-msg hidden>
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"/><path d="M12 16v-4M12 8h.01"/></svg>
-            <span data-auth-msg-text></span>
+            <span class="lg-msg-body"><span data-auth-msg-text></span>
+              <!-- one optional action under the message (the tier mismatch: «go to the right tab»); auth.js fills and shows it -->
+              <button class="btn btn-secondary btn-sm lg-msg-action" type="button" data-auth-msg-action hidden></button></span>
           </div>
 
           <!-- ===== LOADING (session check; avoids a form flash before a PWA redirect) ===== -->
@@ -338,17 +340,22 @@
             </div>
           </div>
 
-          <!-- ===== TABS: client / staff ===== -->
+          <!-- ===== TABS: three office tiers (organisation / management / staff) + the client portal under them =====
+               The three tier tabs share ONE staff form (#staff); auth.js keeps #staff / #client visible (main.js only
+               moves aria-selected). The client panel opens from the small link under the tabs (#client, #signup). -->
           <div class="tabs" data-tabs data-auth-view="tabs" hidden>
-            <div class="tab-list auth-tabs" role="tablist" aria-label="نوع الدخول" data-i18n-attr="aria-label:login.tabsAria">
-              <button class="tab" type="button" role="tab" id="tab-client" aria-selected="true" aria-controls="client" data-tab-hash="client" data-i18n="login.clientTitle">دخول العملاء</button>
-              <button class="tab" type="button" role="tab" id="tab-staff" aria-selected="false" aria-controls="staff" data-tab-hash="staff" data-i18n="login.staffTitle">دخول الموظفين</button>
+            <div class="lg-tiers" data-tiers>
+              <div class="tab-list auth-tabs auth-tiers" role="tablist" aria-label="نوع الدخول" data-i18n-attr="aria-label:login.tabsAria">
+                <button class="tab" type="button" role="tab" id="tab-org" aria-selected="false" aria-controls="staff" data-tab-hash="org" data-tier="org" data-i18n="login.tierOrgTab">دخول المؤسسة</button>
+                <button class="tab" type="button" role="tab" id="tab-management" aria-selected="false" aria-controls="staff" data-tab-hash="management" data-tier="mgmt" data-i18n="login.tierMgmtTab">دخول الإدارة</button>
+                <button class="tab" type="button" role="tab" id="tab-staff" aria-selected="true" aria-controls="staff" data-tab-hash="staff" data-tier="staff" data-i18n="login.tierStaffTab">دخول الموظفين</button>
+              </div>
             </div>
 
-            <!-- client panel -->
-            <div class="tab-panel" role="tabpanel" id="client" aria-labelledby="tab-client">
+            <!-- client panel (opened from the link under the tiers) -->
+            <div class="tab-panel" role="region" id="client" aria-labelledby="client-title" hidden>
               <div data-client-sub="signin">
-                <h3 class="auth-h" data-i18n="login.clientTitle">دخول العملاء</h3>
+                <h3 class="auth-h" id="client-title" data-i18n="login.clientTitle">دخول العملاء</h3>
                 <p class="text-muted text-sm" data-i18n="login.clientLead">تابع طلباتك ومعاملاتك وارفع مستنداتك من بوابة العميل.</p>
                 <form class="form" id="client-signin-form" data-auth-form novalidate>
                   <div class="form-group">
@@ -422,10 +429,10 @@
               </div>
             </div>
 
-            <!-- staff panel -->
-            <div class="tab-panel" role="tabpanel" id="staff" aria-labelledby="tab-staff" hidden>
-              <h3 class="auth-h" data-i18n="login.staffTitle">دخول الموظفين</h3>
-              <p class="text-muted text-sm" data-i18n="login.staffLead">حسابات الموظفين تُنشأ بدعوة من مدير المؤسسة أو الفرع، والصلاحيات تحددها عضويتك في المؤسسة والفرع. لا يوجد تسجيل ذاتي للموظفين.</p>
+            <!-- staff panel: shared by the three tiers; auth.js swaps the title / lead / button text (data-tier-*) -->
+            <div class="tab-panel" role="tabpanel" id="staff" aria-labelledby="tab-staff">
+              <h3 class="auth-h" data-tier-title data-i18n="login.staffTitle">دخول الموظفين</h3>
+              <p class="text-muted text-sm" data-tier-lead data-i18n="login.staffLead">حسابات الموظفين تُنشأ بدعوة من مدير المؤسسة أو الفرع، والصلاحيات تحددها عضويتك في المؤسسة والفرع. لا يوجد تسجيل ذاتي للموظفين.</p>
               <form class="form" id="staff-signin-form" data-auth-form novalidate>
                 <div class="form-group">
                   <label class="form-label" for="st-email"><span data-i18n="login.workEmail">البريد الإلكتروني للعمل</span> <span class="req">*</span></label>
@@ -440,12 +447,13 @@
                   </div>
                   <span class="form-error" data-i18n="login.errRequired">هذا الحقل مطلوب.</span>
                 </div>
-                <button class="btn btn-primary btn-block" type="submit" data-i18n="login.staffBtn">دخول الموظفين</button>
+                <button class="btn btn-primary btn-block" type="submit" data-tier-btn data-i18n="login.staffBtn">دخول الموظفين</button>
                 <div class="auth-links">
                   <button class="link-btn" type="button" data-go-forgot data-email-from="st-email" data-i18n="login.forgotLink">نسيت كلمة المرور؟</button>
                 </div>
               </form>
-              <!-- legacy step 8: optional e-mail code login (OFF unless MARSA_CONFIG.emailOtpLogin === true; auth.js shows it) -->
+              <!-- legacy step 8: optional e-mail code login (OFF unless MARSA_CONFIG.emailOtpLogin === true; auth.js shows it,
+                   and only on the staff tier tab) -->
               <div class="auth-otp" data-otp hidden>
                 <p class="auth-otp-or text-sm text-muted" data-i18n="login.otpOr">أو</p>
                 <button class="btn btn-secondary btn-block" type="button" data-otp-open aria-expanded="false" aria-controls="otp-request-form" data-i18n="login.otpOpen">الدخول برمز يُرسل إلى البريد</button>
@@ -476,6 +484,15 @@
                 </form>
               </div>
             </div>
+
+            <!-- office clients: a small secondary way to the client portal sign-in, under the three tiers -->
+            <p class="lg-client-link" data-client-link-row>
+              <button class="link-btn" type="button" id="client-link" data-go-client aria-controls="client" data-i18n="login.clientLink">عميل لدى المكتب؟ ادخل من بوابة العملاء</button>
+            </p>
+            <!-- back from the client panel to the office tiers -->
+            <p class="lg-client-link" data-team-link-row hidden>
+              <button class="link-btn" type="button" data-go-team data-i18n="login.teamLink">من فريق المكتب؟ عُد إلى دخول المؤسسة والإدارة والموظفين</button>
+            </p>
           </div>
 
           <!-- ===== FORGOT PASSWORD ===== -->

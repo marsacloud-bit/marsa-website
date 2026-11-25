@@ -118,7 +118,7 @@ async function secFile() {
     const body = nx < 0 ? all.slice(i + h.length) : all.slice(i + h.length, nx);
     return (i > 0 && (body === s || body + '\n' === s) && all.indexOf(h, i + 1) < 0 && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles())) || 'bundle';
   });
-  const LATER_PHASES = ['20261210000100_org_served_ports.sql', '20261211000100_reconvert.sql', '20261213000100_site_profile.sql', '20261214000100_org_ai_keys.sql'];
+  const LATER_PHASES = ['20261210000100_org_served_ports.sql', '20261211000100_reconvert.sql', '20261213000100_site_profile.sql', '20261214000100_org_ai_keys.sql', '20261215000100_team_tiers.sql'];
   await check('this file is the latest migration (later phases excepted)', () => J(migFiles().filter(f => f > MIG)) === J(LATER_PHASES) || 'later ' + J(migFiles().filter(f => f > MIG)));
   await check('the key is never written to a log, a notice or the audit trail by the SQL (only last 4 characters)', () =>
     (!/RAISE\s+(NOTICE|LOG|INFO|WARNING)/i.test(s) && /'last4', v_last4/.test(s) && !/'key', v_key|jsonb_build_object\([^)]*p_key/.test(s) && /v_key := NULL;/.test(s)) || 'logging');

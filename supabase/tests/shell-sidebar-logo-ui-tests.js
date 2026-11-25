@@ -427,8 +427,10 @@ function key(P, k) { P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: k
         && J(hrefs('site')) === J(['office.html', 'services.html', 'calculator.html', 'tracking.html', 'request.html', 'about.html', 'contact.html', 'login.html'])
         && g('portal').querySelector('a').textContent === 'معاملاتي' && g('site').querySelector('a').textContent === 'الرئيسية') || J([hrefs('portal'), hrefs('site')]);
     });
-    await check('items sit in their groups (dashboard / transactions → daily, org / members / audit / errors → settings)', () =>
-      (inGroup('daily', 'dashboard') && inGroup('daily', 'transactions') && ['org', 'members', 'audit', 'errors'].every(x => inGroup('settings', x))) || J(groups));
+    await check('items sit in their groups (dashboard / transactions → daily, team (first) / org / audit / errors → settings; no second members item)', () =>
+      (inGroup('daily', 'dashboard') && inGroup('daily', 'transactions') && ['team', 'org', 'audit', 'errors'].every(x => inGroup('settings', x))
+        && g('settings').querySelector('.adm-nav-sub [data-nav-id]').getAttribute('data-nav-id') === 'team'
+        && !P.d.querySelector('#adm-nav [data-nav-id="members"]')) || J(groups));
     const btnOf = id => g(id).querySelector('.adm-nav-group-btn');
     await check('heading buttons: aria-controls names the item list, Arabic labels, daily open, settings closed by default', () =>
       (btnOf('daily').getAttribute('aria-controls') === g('daily').querySelector('.adm-nav-sub').id && btnOf('daily').textContent.trim() === 'العمل اليومي'
@@ -533,7 +535,7 @@ function key(P, k) { P.d.dispatchEvent(new P.w.KeyboardEvent('keydown', { key: k
     const P = page({ role: 'clearance_staff', store: { marsa_nav_layout: 'side' } });
     await settle(80);
     const ids = navIds(P).map(x => x.split('|')[0]);
-    await check('permissions unchanged in the side menu (clearance staff: no org / members items)', () => (ids.length && ids.indexOf('org') === -1 && ids.indexOf('members') === -1 && ids.indexOf('transactions') !== -1) || J(ids));
+    await check('permissions unchanged in the side menu (clearance staff: no org / team / members items)', () => (ids.length && ids.indexOf('org') === -1 && ids.indexOf('team') === -1 && ids.indexOf('members') === -1 && ids.indexOf('transactions') !== -1) || J(ids));
   }
 
   section('Ctrl+K palette');

@@ -117,15 +117,20 @@ async function secFile() {
   await check('preflight on site_profile + the keys table, its schema_versions row, no BEGIN / COMMIT, no key-like text, no endpoint', () =>
     (/version = '20261213000100'/.test(s) && /to_regclass\('app\.ai_provider_keys'\)/.test(s) && /VALUES \('20261214000100', 'org_ai_keys'\)/.test(s)
       && !/^\s*(BEGIN|COMMIT)\s*;/im.test(s) && !/sk-ant|sk-[A-Za-z0-9]{20}|AIza|api\.openai\.com|googleapis\.com|api\.anthropic\.com/.test(s)) || 'conventions');
-  await check('all_migrations.sql: this file verbatim, last, in order, with its live-DB note', () => {
+  await check('all_migrations.sql: this file verbatim, in order, with its live-DB note', () => {
     const all = fs.readFileSync(path.join(SUPA, 'all_migrations.sql'), 'utf8');
     const h = '-- ===== migrations/' + MIG + ' =====\n';
     const i = all.indexOf(h);
     const order = (all.match(/^-- ===== migrations\/(\S+) =====$/gm) || []).map(l => l.split('/')[1].split(' ')[0]);
-    const body = all.slice(i + h.length);
-    return (i > 0 && (body === s || body + '\n' === s) && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles())) || 'bundle';
+    const nx = all.indexOf('\n-- ===== migrations/', i + h.length);
+    const body = nx < 0 ? all.slice(i + h.length) : all.slice(i + h.length, nx);
+    return (i > 0 && (body === s || body + '\n' === s) && all.indexOf(h, i + 1) < 0 && all.slice(0, 30000).includes(MIG) && J(order) === J(migFiles())) || 'bundle';
   });
-  await check('this file is the latest migration', () => migFiles().pop() === MIG || 'latest ' + migFiles().pop());
+  const LATER_PHASES = ['20261215000100_team_tiers.sql'];
+  await check('only the known later migrations follow this file', () => {
+    const later = migFiles().filter(f => f > MIG);
+    return later.every(f => LATER_PHASES.includes(f)) || 'unexpected later files: ' + later.join(', ');
+  });
   await check('the key is never logged or audited by the SQL (last 4 only; the variable cleared)', () =>
     (!/RAISE\s+(NOTICE|LOG|INFO|WARNING)/i.test(s) && /'last4', v_last4/.test(s) && !/'key', v_key|jsonb_build_object\([^)]*p_key/.test(s) && /v_key := NULL;/.test(s)) || 'logging');
 }

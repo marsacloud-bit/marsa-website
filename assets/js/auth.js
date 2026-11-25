@@ -15,6 +15,19 @@
      user is routed by role from my_context(): staff → admin.html#dashboard (or a
      safe ?next=), platform admins without a staff role → platform.html, everyone
      else → portal.html. Roles are NEVER read from signup data.
+   * Three office tiers (owner 2026-12-15) share the staff form: #org (the office owner),
+     #management (admin / branch_manager / supervisor), #staff (every other non-client role).
+     userTiers(my_context()) gives the tiers of the signed-in user (org = my_context's is_owner,
+     already the effective owner status incl. the server's legacy fallback; only when the key is
+     absent — a server without 20261215000100 — an org-wide admin counts as the owner).
+     A tier is enforced only when the visitor picked it: a tab click / keyboard selection on this
+     page, or arriving on #org / #management. The legacy #staff link (site header, sign-outs,
+     app-shell…) and no hash enforce nothing: the user is routed by their own tiers. The e-mail
+     code login never enforces a tier. routeByRole(expectTier), after the two-step step (aal2):
+     when the picked tier is not one of theirs → signed out at once + a message naming the right
+     tab with a button to it (e-mail kept). Otherwise org → admin.html#team, mgmt / staff →
+     admin.html#dashboard (a safe ?next= still wins). The client panel (#client, #signup) opens
+     from a small link under the tiers. The permissions themselves are enforced by the server.
    * ?source=pwa (installed app start): an existing session is routed at once.
    * ?signedout=1|all: notice after a sign-out started on another page.
    * ?expired=1[&next=…]: sent by supa.js when the session cap (api.sessionMaxHours(), default 12 h)
@@ -91,6 +104,16 @@
     otpValidityNoCap: 'الرمز صالح لمدة محدودة ولمرة واحدة فقط.',
     sessionExpired: 'انتهت مدة الجلسة ({h} ساعة). سجّل الدخول من جديد.',
     sessionExpiredNoCap: 'انتهت مدة الجلسة. سجّل الدخول من جديد.',
+    tierOrgTab: 'دخول المؤسسة',
+    tierMgmtTab: 'دخول الإدارة',
+    tierStaffTab: 'دخول الموظفين',
+    tierOrgLead: 'لمالك المكتب: إدارة الفريق والمديرين وإعدادات المؤسسة.',
+    tierMgmtLead: 'لمديري المكتب والفروع والمشرفين: متابعة العمل وإدارة الموظفين بحسب صلاحياتك.',
+    staffTitle: 'دخول الموظفين',
+    staffLead: 'حسابات الموظفين تُنشأ بدعوة من مدير المؤسسة أو الفرع، والصلاحيات تحددها عضويتك في المؤسسة والفرع. لا يوجد تسجيل ذاتي للموظفين.',
+    staffBtn: 'دخول الموظفين',
+    tierMismatch: 'هذا الحساب لا يدخل من «{chosen}». بحسب صلاحياتك ادخل من «{right}» بالبريد وكلمة المرور نفسيهما.',
+    tierGoTo: 'الانتقال إلى «{right}»',
     roleFallback: { admin: 'مدير المؤسسة', branch_manager: 'مدير الفرع', supervisor: 'مشرف', operations_manager: 'مدير العمليات',
       accounts_manager: 'مدير الحسابات', accountant: 'محاسب', clearance_staff: 'موظف تخليص', transport_staff: 'موظف نقل', client: 'عميل (بوابة العميل)' }
   };
@@ -202,10 +225,19 @@
 
   /* ---- UI helpers ---- */
   var msgBox = $('[data-auth-msg]');
-  function showMsg(text, type) {
+  var msgActionFn = null;   // the optional button under the message (tier mismatch → the right tab)
+  function msgAction() { return msgBox ? msgBox.querySelector('[data-auth-msg-action]') : null; }
+  (function () {
+    var b = msgAction();
+    if (b) b.addEventListener('click', function () { var f = msgActionFn; if (f) f(); });
+  })();
+  function showMsg(text, type, action) {
     if (!msgBox) return;
     msgBox.className = 'alert alert-' + (type || 'info') + ' mb-3';
     msgBox.querySelector('[data-auth-msg-text]').textContent = text;
+    var ab = msgAction();
+    msgActionFn = action ? action.run : null;
+    if (ab) { ab.hidden = !action; ab.textContent = action ? action.label : ''; }
     msgBox.hidden = false;
     try { msgBox.focus({ preventScroll: false }); } catch (e) { msgBox.focus(); }
   }
@@ -224,9 +256,82 @@
   function showInviteSub(name) {   // accept | signin | signup | none
     $$('[data-invite-sub]').forEach(function (el) { el.hidden = el.getAttribute('data-invite-sub') !== name; });
   }
-  function selectTab(which) {
-    var tab = document.getElementById('tab-' + which);
-    if (tab) tab.click();
+  /* ---- the three office tiers + the client panel ----
+     which: 'org' | 'mgmt' | 'management' | 'staff' | 'client'. byUser: the visitor chose it (a click, a #hash link). */
+  var TIER_ORDER = ['org', 'mgmt', 'staff'];
+  var TIER_TABS = { org: 'tab-org', mgmt: 'tab-management', staff: 'tab-staff' };
+  var TIER_HASH = { org: 'org', mgmt: 'management', staff: 'staff' };
+  var HASH_TIER = { org: 'org', management: 'mgmt', staff: 'staff' };
+  var TIER_TEXT = {
+    org: { tab: 'tierOrgTab', title: 'tierOrgTab', lead: 'tierOrgLead', btn: 'tierOrgTab' },
+    mgmt: { tab: 'tierMgmtTab', title: 'tierMgmtTab', lead: 'tierMgmtLead', btn: 'tierMgmtTab' },
+    staff: { tab: 'tierStaffTab', title: 'staffTitle', lead: 'staffLead', btn: 'staffBtn' }
+  };
+  var MGMT_ROLES = ['admin', 'branch_manager', 'supervisor'];
+  var currentTier = 'staff', clientMode = false;
+  var tierFromUser = false;   // only a tier the visitor picked is enforced (expectTier); see the initial state
+  var tabByCode = false;      // a tab click made by selectTab(), not by the visitor
+  var tabsBound = false;      // the #hash handlers of the tabs are bound (after the initial selection)
+  function tierOf(which) { return HASH_TIER[which] || (TIER_TABS[which] ? which : 'staff'); }
+  function tierLabel(tier) { return tr((TIER_TEXT[tier] || TIER_TEXT.staff).tab); }
+  // the tiers of the signed-in user from my_context() (order: org, mgmt, staff); [] = no staff membership
+  function userTiers(ctx) {
+    var ms = (ctx && ctx.memberships) || [], has = { org: false, mgmt: false, staff: false };
+    ms.forEach(function (m) {
+      if (!m || !m.role || m.role === 'client') return;
+      // trust the server: my_context's is_owner is already the effective owner status (its legacy fallback included)
+      if ('is_owner' in m) { if (m.is_owner === true) has.org = true; }
+      // an older server without the key: an org-wide admin counts as the owner (today's behaviour)
+      else if (m.role === 'admin' && !m.branch_id) has.org = true;
+      if (MGMT_ROLES.indexOf(m.role) !== -1) has.mgmt = true; else has.staff = true;
+    });
+    return TIER_ORDER.filter(function (k) { return has[k]; });
+  }
+  function tierDest(tier) { return tier === 'org' ? 'admin.html#team' : 'admin.html#dashboard'; }
+  // the tier the staff form expects (null = route by the user's own tiers)
+  function staffExpect() { return tierFromUser ? currentTier : null; }
+  function setTierText(el, key) {
+    if (!el) return;
+    el.setAttribute('data-i18n', 'login.' + key);   // i18n.js re-applies it on a language change
+    if (!el.getAttribute('data-label')) el.textContent = tr(key);   // not while a busy button shows «working…»
+  }
+  // panels, link rows, the tier texts and the e-mail code block follow currentTier / clientMode
+  function syncTiers() {
+    var cp = document.getElementById('client'), sp = document.getElementById('staff');
+    if (cp) cp.hidden = !clientMode;
+    if (sp) { sp.hidden = clientMode; sp.setAttribute('aria-labelledby', TIER_TABS[currentTier]); }
+    var box = $('[data-tiers]'), cl = $('[data-client-link-row]'), tl = $('[data-team-link-row]');
+    if (box) box.hidden = clientMode;
+    if (cl) cl.hidden = clientMode;
+    if (tl) tl.hidden = !clientMode;
+    var tx = TIER_TEXT[currentTier];
+    setTierText($('[data-tier-title]'), tx.title);
+    setTierText($('[data-tier-lead]'), tx.lead);
+    setTierText($('[data-tier-btn]'), tx.btn);
+    // the e-mail code login lives on the staff tier only
+    if (otpBox && otpOn()) otpBox.hidden = currentTier !== 'staff';
+  }
+  function selectTab(which, byUser) {
+    if (which === 'client') {
+      clientMode = true;
+      if (tabsBound && document.getElementById('client')) {   // as the old client tab did once its #hash handler was bound
+        try { history.replaceState(null, '', location.pathname + searchAtLoad + '#client'); } catch (e) { /* ignore */ }
+      }
+      syncTiers();
+      return;
+    }
+    clientMode = false;
+    currentTier = tierOf(which);
+    if (byUser) tierFromUser = true;
+    var tab = document.getElementById(TIER_TABS[currentTier]);
+    // mark the selection here too: main.js may bind its tab handlers after this runs (it then keeps the selected tab)
+    $$('[data-tier]').forEach(function (t) {
+      t.setAttribute('aria-selected', String(t === tab));
+      t.setAttribute('tabindex', t === tab ? '0' : '-1');
+    });
+    tabByCode = true;
+    try { if (tab) tab.click(); } finally { tabByCode = false; }   // main.js: aria-selected / tabindex; auth.js: the #hash
+    syncTiers();
   }
   function setBusy(form, busy) {
     var btn = form.querySelector('button[type="submit"]');
@@ -280,24 +385,30 @@
     });
   });
 
-  /* ---- routing by role ---- */
-  function routeByRole(preferStaff) {
+  /* ---- routing by role ----
+     expectTier: 'org' | 'mgmt' | 'staff' (the tier tab the visitor signed in from) or null */
+  function routeByRole(expectTier) {
     if (routing) return Promise.resolve();
     routing = true;
     var aalP = typeof api.mfaAal === 'function' ? api.mfaAal() : Promise.resolve({ data: null, error: null });
     return Promise.all([api.myContext(true), aalP]).then(function (rs) {
       var r = rs[0];
       var ctx = r.data || {};
-      // two-step verification before any routing (MFA_SPEC §5.3)
-      if (!r.error && mfaStep(ctx, (rs[1] && rs[1].data) || {}, preferStaff)) { routing = false; return; }
-      // staff in any organization (multi-org users pick the org in admin.html)
-      var staff = !r.error && (ctx.memberships || []).some(function (m) { return m.role && m.role !== 'client'; });
+      // staff in any organization (multi-org users pick the org in admin.html), split into the three tiers
+      var tiers = r.error ? [] : userTiers(ctx);
+      var staff = tiers.length > 0;
+      // two-step verification before any routing (MFA_SPEC §5.3); its onDone calls routeByRole(expectTier) again at aal2
+      if (!r.error && mfaStep(ctx, (rs[1] && rs[1].data) || {}, expectTier)) { routing = false; return; }
+      // the wrong tier tab (after the two-step step): signed out at once, the right tab named
+      if (expectTier && staff && tiers.indexOf(expectTier) === -1) { routing = false; return tierMismatch(expectTier, tiers[0]); }
       var platform = !r.error && !!ctx.is_platform_admin;
       var next = safeNext();
-      // staff: any allowed page; platform-only admin: platform.html; client: portal.html
-      var dest = staff ? (next || 'admin.html#dashboard')
+      var tier = expectTier && tiers.indexOf(expectTier) !== -1 ? expectTier : tiers[0];
+      // staff: any allowed page (else org → #team, mgmt / staff → #dashboard); platform-only admin: platform.html; client: portal.html
+      var dest = staff ? (next || tierDest(tier))
         : (platform ? 'platform.html' : (nextPage(next) === 'portal.html' ? next : 'portal.html'));
-      if (preferStaff && !staff && !platform) {
+      // a client-only account signed in through the office form (any tier, enforced or not): a short notice first
+      if ((expectTier || fromStaffForm) && !staff && !platform) {
         showMsg(tr('notStaff'), 'warning');
         setTimeout(function () { location.replace(dest); }, 1800);
         return;
@@ -307,9 +418,29 @@
     });
   }
 
+  /* ---- the wrong tier tab: sign out, name the right one, a button to it (the e-mail stays in the form) ---- */
+  function tierMismatch(chosen, right) {
+    var em = $('#st-email');
+    var email = (em && em.value) || otpEmail || '';
+    return api.signOut().then(function () {
+      showView('tabs'); showClientSub('signin');
+      selectTab(chosen);
+      if (em && email) em.value = email;
+      var pw = $('#st-password'); if (pw) pw.value = '';
+      showMsg(tr('tierMismatch', { chosen: tierLabel(chosen), right: tierLabel(right) }), 'warning', {
+        label: tr('tierGoTo', { right: tierLabel(right) }),
+        run: function () {
+          hideMsg();
+          selectTab(right, true);
+          var f = $(em && em.value ? '#st-password' : '#st-email'); if (f) f.focus();
+        }
+      });
+    });
+  }
+
   /* ---- two-step verification step (view "mfa") ----
      true when a challenge / enrollment screen is shown instead of routing */
-  function mfaStep(ctx, aal, preferStaff) {
+  function mfaStep(ctx, aal, expectTier) {
     var Mfa = window.MarsaMfa, host = $('[data-mfa-host]');
     if (!Mfa || !host || typeof api.mfaState !== 'function') return false;   // the server still denies admin access at aal1
     var st = api.mfaState(ctx);
@@ -320,10 +451,10 @@
     showView('mfa');
     var opts = {
       required: st.required,
-      onDone: function () { routing = false; routeByRole(preferStaff); },
+      onDone: function () { routing = false; routeByRole(expectTier); },
       onCancel: function () {
         api.signOut().then(function () {
-          showView('tabs'); selectTab(preferStaff || mfaAtLoad ? 'staff' : 'client'); showClientSub('signin');
+          showView('tabs'); selectTab(expectTier || (mfaAtLoad || fromStaffForm ? currentTier : 'client')); showClientSub('signin');
           showMsg(tr('signedOut'), 'info');
         });
       }
@@ -372,22 +503,63 @@
      ====================================================================== */
   document.documentElement.setAttribute('data-auth-ready', 'loading');
   $$('[data-online-only]').forEach(function (el) { el.hidden = false; });
-  var initialTab = /staff/.test(hashAtLoad) ? 'staff' : 'client';
+  // #org / #management / #staff → that tier; #client / #signup (and the client sign-up confirmation) → the client panel;
+  // no hash → the staff tier (the office team is the main way in; clients use the link under the tiers)
+  var hashName = hashAtLoad.replace(/^#/, '');
+  var initialTab = HASH_TIER[hashName] ? hashName
+    : (/staff/.test(hashAtLoad) ? 'staff' : (/client|signup/.test(hashAtLoad) || confirmedAtLoad ? 'client' : 'staff'));
+  // a tier is enforced only when the visitor picked it: arriving on the new #org / #management links — not the legacy
+  // #staff link (linked from the site header, sign-outs, the admin gate, app-shell), not the tab a sign-out,
+  // session-cap, two-step or e-mail-code redirect lands on, and not the default tab
+  tierFromUser = !!HASH_TIER[hashName] && hashName !== 'staff' && !(expiredAtLoad || mfaAtLoad || otpAtLoad || signedOutAtLoad);
   // until the session is known: a neutral loading state (no form flash before a PWA redirect)
   if (inviteToken) { showView('invite'); showInviteSub('none'); }
   else showView('loading');
   selectTab(initialTab);
   showClientSub(/signup/.test(hashAtLoad) ? 'signup' : 'signin');
 
-  // keep the #client / #staff anchors working after load
+  // keep the #org / #management / #staff / #client / #signup anchors working after load
   window.addEventListener('hashchange', function () {
-    var h = location.hash;
-    if (h === '#staff') { showView('tabs'); showClientSub('signin'); selectTab('staff'); }
+    var h = location.hash, ht = HASH_TIER[h.replace(/^#/, '')];
+    // only the new #org / #management links pick a tier; a #staff link lands on the staff tab without enforcing it
+    if (ht) { if (ht === 'staff') tierFromUser = false; showView('tabs'); showClientSub('signin'); selectTab(ht, ht !== 'staff'); }
     else if (h === '#client' || h === '#signup') { showView('tabs'); selectTab('client'); showClientSub(h === '#signup' ? 'signup' : 'signin'); }
   });
   $$('[data-tab-hash]').forEach(function (t) {
     t.addEventListener('click', function () {
       try { history.replaceState(null, '', location.pathname + searchAtLoad + '#' + t.getAttribute('data-tab-hash')); } catch (e) { /* ignore */ }
+      var tier = t.getAttribute('data-tier');
+      if (!tier) return;
+      // main.js ran first (aria-selected) and toggled #staff per tab: the shared panel is put right here
+      if (!tabByCode) tierFromUser = true;
+      currentTier = tier; clientMode = false;
+      syncTiers();
+    });
+  });
+  tabsBound = true;
+  // keyboard selection (main.js moves aria-selected without a click): follow it
+  if (typeof MutationObserver === 'function') {
+    var tierObs = new MutationObserver(function () {
+      var on = $$('[data-tier]').filter(function (t) { return t.getAttribute('aria-selected') === 'true'; })[0];
+      if (!on || tabByCode) return;
+      var tier = on.getAttribute('data-tier');
+      // in the client panel main.js may still re-select a tier tab (its late init): only put the panels back
+      if (!clientMode && tier !== currentTier) {
+        currentTier = tier; tierFromUser = true;
+        try { history.replaceState(null, '', location.pathname + searchAtLoad + '#' + TIER_HASH[tier]); } catch (e) { /* ignore */ }
+      }
+      syncTiers();
+    });
+    $$('[data-tier]').forEach(function (t) { tierObs.observe(t, { attributes: true, attributeFilter: ['aria-selected'] }); });
+  }
+  // the small client link under the tiers, and back to the tiers from the client panel
+  $$('[data-go-client]').forEach(function (b) {
+    b.addEventListener('click', function () { hideMsg(); selectTab('client'); showClientSub('signin'); var f = $('#ci-email'); if (f) f.focus(); });
+  });
+  $$('[data-go-team]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      hideMsg(); showClientSub('signin'); selectTab(currentTier);   // back to the tiers: not a tier choice by itself
+      var tab = document.getElementById(TIER_TABS[currentTier]); if (tab) tab.focus();
     });
   });
 
@@ -410,7 +582,9 @@
 
   /* ---- sign-in (client + staff share Supabase auth) ---- */
   // onSignedIn(): what happens after a successful sign-in (default: route by role)
-  function bindSignIn(form, emailId, pwId, preferStaff, onSignedIn) {
+  // expect: the expected tier (a value, or a function read at submit time), null for the client form
+  var fromStaffForm = false;
+  function bindSignIn(form, emailId, pwId, expect, onSignedIn) {
     if (!form) return;
     form.addEventListener('submit', function (e) {
       e.preventDefault();
@@ -420,23 +594,25 @@
       if (!pw.value) { fieldError(pw, tr('required')); bad = true; }
       if (bad) { (form.querySelector('[aria-invalid="true"]') || em).focus(); return; }
       setBusy(form, true);
+      fromStaffForm = form.id === 'staff-signin-form';
+      var tier = typeof expect === 'function' ? expect() : (expect || null);
       api.signIn(em.value.trim(), pw.value).then(function (r) {
         if (r.error) { setBusy(form, false); pw.value = ''; showMsg(errText(r.error), 'danger'); return; }
         pw.value = '';
-        var next = onSignedIn ? onSignedIn(r.data) : routeByRole(preferStaff);
+        var next = onSignedIn ? onSignedIn(r.data) : routeByRole(tier);
         return Promise.resolve(next).then(function () { setBusy(form, false); });
       });
     });
   }
-  bindSignIn($('#client-signin-form'), 'ci-email', 'ci-password', false);
-  bindSignIn($('#staff-signin-form'), 'st-email', 'st-password', true);
+  bindSignIn($('#client-signin-form'), 'ci-email', 'ci-password', null);
+  bindSignIn($('#staff-signin-form'), 'st-email', 'st-password', staffExpect);
 
   /* ---- legacy step 8: optional e-mail code login (staff only; docs/online/LEGACY_REPORTS_AR.md) ----
      Shown only when the platform switch of this site is on (MARSA_CONFIG.emailOtpLogin === true → api.emailOtpEnabled()).
      signInWithOtp never creates a user (shouldCreateUser: false) and the page shows ONE message whatever the answer, so
      nobody learns whether an address has an account. 60 s between codes, at most 5 wrong codes per code on this page (Supabase
      keeps its own expiry / rate limits). After the code: otpGate() (otp_session_check + the platform switch) — not allowed →
-     signed out at once; allowed → routeByRole, where the two-step verification (aal2) is asked as for a password session. */
+     signed out at once; allowed → routeByRole(null) (no tier enforced), where the two-step verification (aal2) is asked as for a password session. */
   var OTP_COOLDOWN_S = 60, OTP_MAX_TRIES = 5;
   var otpBox = $('[data-otp]'), otpReq = $('#otp-request-form'), otpVer = $('#otp-verify-form');
   var otpEmail = '', otpTries = 0, otpUntil = 0, otpTimer = null;
@@ -471,7 +647,7 @@
   }
   function otpBlockedText(reason) { return tr(reason === 'org_disabled' ? 'otpOrgDisabled' : reason === 'no_staff_membership' ? 'otpStaffOnly' : 'otpNotAllowed'); }
   if (otpOn()) {
-    otpBox.hidden = false;
+    otpBox.hidden = currentTier !== 'staff';   // the staff tier only (syncTiers keeps it so)
     otpNote();
     window.addEventListener('marsa:langchange', otpNote);
     var opener = $('[data-otp-open]');
@@ -514,7 +690,8 @@
             });
           }
           setBusy(otpVer, false);
-          return routeByRole(true);
+          fromStaffForm = true;
+          return routeByRole(null);   // the e-mail code login never enforces a tier: routed by the user's own tiers
         });
       });
     });
@@ -542,7 +719,7 @@
         setBusy(su, false);
         pw.value = ''; pw2.value = '';
         if (r.error) { showMsg(errText(r.error), 'danger'); return; }
-        if (r.data && r.data.session) { return routeByRole(false); }   // email confirmation disabled on this project
+        if (r.data && r.data.session) { return routeByRole(null); }   // email confirmation disabled on this project
         su.reset();
         showClientSub('signin');
         showMsg(tr('signupSent'), 'success');
@@ -588,7 +765,7 @@
         if (M.toast) M.toast(tr('resetDone'), 'success');
         showMsg(tr('resetDone'), 'success');
         if (inviteToken) return api.getSession().then(function (s2) { startInvite(s2.data, false); });
-        routeByRole(false);
+        routeByRole(null);
       });
     });
   });
@@ -615,7 +792,7 @@
       });
     });
   });
-  $$('[data-continue]').forEach(function (b) { b.addEventListener('click', function () { routeByRole(false); }); });
+  $$('[data-continue]').forEach(function (b) { b.addEventListener('click', function () { routeByRole(null); }); });
   $$('[data-go-security]').forEach(function (b) { b.addEventListener('click', function () { showSecurity(); }); });
   $$('[data-go-session]').forEach(function (b) {
     b.addEventListener('click', function () {
@@ -748,7 +925,7 @@
     });
   });
   // sign in with the invited e-mail → accept right away (no role routing first)
-  bindSignIn($('#invite-signin-form'), 'iv-email', 'iv-password', false, function () { return acceptNow(); });
+  bindSignIn($('#invite-signin-form'), 'iv-email', 'iv-password', null, function () { return acceptNow(); });
 
   // sign up with the invited e-mail; accept after confirmation + sign-in
   var ivs = $('#invite-signup-form');
@@ -839,9 +1016,9 @@
         if (expiredAtLoad) dropQueryParam('expired');   // signed in again meanwhile (another tab): no notice
         if (securityAtLoad) return showSecurity();
         // sent here for two-step verification (app-shell / admin / platform gates): that step at once
-        if (mfaAtLoad) return routeByRole(false);
+        if (mfaAtLoad) return routeByRole(null);
         // back from the confirmation link, or the installed app starting: go straight in
-        if (confirmedAtLoad || fromPwa) { cleanUrl(); return routeByRole(false); }
+        if (confirmedAtLoad || fromPwa) { cleanUrl(); return routeByRole(null); }
         showSession(session.user);
         return;
       }

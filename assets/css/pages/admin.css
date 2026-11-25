@@ -388,3 +388,17 @@ a.adm-mini-row:focus-visible { outline: none; box-shadow: var(--ring); }
 .tdy-table td[dir=ltr] { text-align: end; }
 @media (max-width: 1100px) { .tdy-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .tdy-cols { grid-template-columns: 1fr; } }
 @media (max-width: 520px) { .tdy-tiles { grid-template-columns: 1fr; } .tdy-actions { margin-inline-start: 0; } }
+
+/* ---- «الفريق» (#team): owner card, management / employees panels (calm, logical sides only) ---- */
+.adm-team-owner { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.adm-team-owner-mark { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; background: var(--accent-soft); color: var(--teal); }
+.adm-team-owner-mark .icon { width: 18px; height: 18px; }
+.adm-team-owner-text { display: grid; gap: 2px; min-width: 0; }
+.adm-team-owner-text strong { overflow-wrap: anywhere; }
+.adm-team-note { margin: 0; color: var(--muted); font-size: var(--fs-sm); }
+.adm-team-owner + .adm-team-note { margin-block-start: 8px; }   /* the «deactivated» line under the owner */
+.adm-owner-badge { white-space: nowrap; }
+@media (max-width: 640px) {
+  .adm-team-card .card-header .btn-group { width: 100%; }
+  .adm-team-card .card-header .btn-group .btn { flex: 1 1 auto; }
+}
