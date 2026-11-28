@@ -253,6 +253,12 @@
   };
 
   function initBranches() {
+    // The branches section and map card are hidden until a public branches source exists
+    // (branches table RPC — later). While hidden/absent, do nothing so BRANCH_INFO never renders.
+    var section = $('#branches');
+    if (!section || section.hidden || section.closest('[hidden]')) return;
+    var mapCard = $('.map-card');
+    if (!mapCard || mapCard.hidden || mapCard.closest('[hidden]')) return;
     var cards = $$('.branch-card[data-branch]');
     var pins = $$('.map-pin[data-branch]');
     if (!cards.length) return;
@@ -295,6 +301,8 @@
   function initOpenStatus() {
     var badge = $('#open-status');
     if (!badge) return;
+    // Built-in hours are not the office's settings: the badge stays hidden (class site-c-off in the markup).
+    if (badge.classList.contains('site-c-off')) return;
     var now = new Date();
     var day = now.getDay(); // 0 = Sunday … 4 = Thursday
     var h = now.getHours() + now.getMinutes() / 60;

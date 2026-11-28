@@ -121,6 +121,9 @@
 .port-detail { margin-top: 16px; min-height: 76px; font-size: var(--fs-sm); }
 .port-detail p { margin: 0; color: #C3D6EA; }
 .port-detail strong { color: #fff; }
+/* the office's own ports (assets/js/site-ports.js fills .hm-ports from site-v2.css): light-on-dark chips */
+.section-dark .about-ports li { background: rgba(255, 255, 255, .06); border-color: rgba(255, 255, 255, .14); color: #fff; }
+.section-dark .about-ports .hm-ico { background: rgba(63, 193, 208, .18); color: var(--aqua); }
 
 /* ---- Compliance ---- */
 .compliance-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 20px; align-items: start; }

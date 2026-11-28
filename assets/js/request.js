@@ -40,6 +40,9 @@
       savedToast: 'تم الحفظ محليًا على هذا الجهاز (نسخة عرض تجريبية) — لم يُرسل إلى أي جهة. الرقم المرجعي المحلي ',
       statusOnline: 'جديد — بانتظار مراجعة الفريق',
       docsOnline: 'تُرفع لاحقًا من بوابة العملاء',
+      // documents are optional: the office contacts the client, or the client uploads them in the portal
+      docsPending: 'سنتواصل معك لاستكمالها، أو ارفعها من بوابة العملاء بعد ربط طلبك بحسابك',
+      docsReview: 'لم تُرفق — سنتواصل معك بشأنها',
       sendFailed: 'لم يُرسل الطلب. بياناتك ما زالت في النموذج؛ صحّح المطلوب ثم حاول مرة أخرى.',
       copiedRef: 'تم نسخ الرقم المرجعي ',
       copiedRefLocal: 'تم نسخ الرقم المرجعي المحلي ',
@@ -63,6 +66,7 @@
     /* ---------------------------------------------------------------
        Reference data
        --------------------------------------------------------------- */
+    // static list: demo mode, or when the office's chosen ports cannot be loaded (see loadOfficePorts)
     var PORTS = {
       sea: ['ميناء جدة الإسلامي', 'ميناء الملك عبدالعزيز بالدمام', 'ميناء الجبيل التجاري', 'ميناء الملك عبدالله برابغ', 'الميناء الجاف بالرياض'],
       air: ['مطار الملك خالد الدولي بالرياض', 'مطار الملك عبدالعزيز الدولي بجدة'],
@@ -337,6 +341,7 @@
       return true;
     }
 
+    // documents are optional (owner decision): nothing blocks step 3; kept for when uploads return
     function validateDocs() {
       var ok = true;
       var later = val('docsLater');
@@ -355,7 +360,7 @@
       (STEP_FIELDS[n] || []).forEach(function (name) {
         if (!checkField(name) && !firstBad) firstBad = el(name);
       });
-      if (n === 3 && !validateDocs()) firstBad = firstBad || qs('[data-doc].has-error input[type=file]', form);
+      if (n === 3) qsa('[data-doc]', form).forEach(clearError);
       if (n === 4) {
         if (!val('terms')) { setError(el('terms'), 'يجب الموافقة على الإقرار والشروط قبل إرسال الطلب.'); firstBad = el('terms'); }
         else clearError(el('terms'));
@@ -404,10 +409,45 @@
       var mode = val('mode') || 'sea';
       var prev = portSel.value;
       var exp = val('direction') === 'export';
-      portSel.innerHTML = '<option value="">' + (exp ? 'اختر ميناء الشحن' : 'اختر ميناء الوصول') + '</option>' +
-        PORTS[mode].map(function (p) { return '<option>' + esc(p) + '</option>'; }).join('');
-      if (PORTS[mode].indexOf(prev) !== -1) portSel.value = prev;
-      else if (PORTS[mode].length === 1) portSel.value = PORTS[mode][0];
+      var list = PORTS[mode] || [];
+      portSel.textContent = '';
+      var first = document.createElement('option');
+      first.value = '';
+      first.textContent = exp ? 'اختر ميناء الشحن' : 'اختر ميناء الوصول';
+      portSel.appendChild(first);
+      // the submitted value stays the Arabic port name (the RPC stores free text «port», max 80)
+      list.forEach(function (p) {
+        var o = document.createElement('option');
+        o.value = p;
+        o.textContent = p;
+        portSel.appendChild(o);
+      });
+      if (list.indexOf(prev) !== -1) portSel.value = prev;
+      else if (list.length === 1) portSel.value = list[0];
+    }
+    // Online: the ports the office chose (staff settings «الموانئ التي نخدمها», site_served_ports).
+    // kind sea / dry → the sea list (the static list keeps the dry port there), air → air, land → land.
+    // Failure, an old database without the function, or no chosen port → the static list stays.
+    function loadOfficePorts() {
+      if (!ONLINE || !API || typeof API.siteServedPorts !== 'function') return;
+      var p;
+      try { p = API.siteServedPorts(); } catch (e) { return; }
+      if (!p || typeof p.then !== 'function') return;
+      p.then(function (r) {
+        if (!r || r.error || !Array.isArray(r.data)) return;
+        var next = { sea: [], air: [], land: [] };
+        r.data.forEach(function (x) {
+          if (!x || typeof x !== 'object') return;
+          var name = typeof x.name_ar === 'string' ? x.name_ar.trim().slice(0, 80) : '';
+          var kind = x.kind === 'dry' ? 'sea' : x.kind;
+          if (!name || !next[kind] || next[kind].indexOf(name) !== -1) return;
+          next[kind].push(name);
+        });
+        if (!next.sea.length && !next.air.length && !next.land.length) return;
+        // a mode the office does not serve keeps the static list (the mode radios stay as they are)
+        Object.keys(next).forEach(function (k) { if (next[k].length) PORTS[k] = next[k]; });
+        fillPorts();
+      }, function () { /* network error: the static list stays */ });
     }
     function countLabel() {
       var mode = val('mode');
@@ -427,7 +467,7 @@
         'إجمالي عدد الطرود أو الكراتين كما في قائمة التعبئة.';
       qs('#f-country-label').innerHTML = (exp ? 'بلد الوجهة' : 'بلد المنشأ / الشحن') + ' <span class="req" aria-hidden="true">*</span>';
       qs('#f-port-label').innerHTML = (exp ? 'ميناء / منفذ الشحن' : 'ميناء / منفذ الوصول') + ' <span class="req" aria-hidden="true">*</span>';
-      qs('#f-port-hint').textContent = mode === 'air' ? 'الشحن الجوي عبر مطار الملك خالد الدولي بالرياض أو مطار الملك عبدالعزيز الدولي بجدة.' : mode === 'land' ? 'الشحن البري عبر منفذ البطحاء البري.' : 'الموانئ المتاحة تتغير حسب وسيلة الشحن.';
+      qs('#f-port-hint').textContent = 'الموانئ والمنافذ المتاحة تتغير حسب وسيلة الشحن.';
       // customs declaration number applies to imports only
       var declGroup = groupOf(el('declarationNo'));
       declGroup.hidden = exp;
@@ -444,6 +484,7 @@
       var blTitle = qs('[data-doc="bl"] .dropzone-title');
       if (blTitle) blTitle.textContent = bl[2];
       DOCS.bl = bl[0] + ' ' + bl[1];
+      renderDocsChecklist();
       fillPorts();
     }
     qsa('input[name="mode"], input[name="direction"], input[name="containerType"]', form).forEach(function (r) {
@@ -470,6 +511,21 @@
        Documents: drag & drop (kept in memory; only names/sizes saved)
        --------------------------------------------------------------- */
     function docLabel(key) { return DOCS[key] || key; }
+    // step 3: the documents to prepare (no upload from this public form)
+    var DOCS_CHECKLIST = [['bl', ''], ['invoice', ''], ['packing', ''], ['origin', ' (إن وُجدت)']];
+    function renderDocsChecklist() {
+      var ul = qs('#docs-checklist');
+      if (!ul) return;
+      ul.textContent = '';
+      DOCS_CHECKLIST.forEach(function (d) {
+        var li = document.createElement('li');
+        li.innerHTML = icon(ICON_CHECK);   // constant markup
+        var span = document.createElement('span');
+        span.textContent = docLabel(d[0]) + d[1];
+        li.appendChild(span);
+        ul.appendChild(li);
+      });
+    }
     function renderFiles(key) {
       var g = qs('[data-doc="' + key + '"]', form);
       var list = qs('.file-list', g);
@@ -759,7 +815,7 @@
         var missing = !n;
         if ((k === 'other' || k === 'saber') && missing) return '';
         return '<li class="' + (missing ? 'is-missing' : '') + '">' + icon(missing ? ICON_CLOCK : ICON_CHECK) +
-          '<span>' + esc(docLabel(k)) + ': ' + (missing ? (val('docsLater') ? 'سيُرسل لاحقًا' : 'لم يُرفق') : n + (n === 1 ? ' ملف' : ' ملفات')) + '</span></li>';
+          '<span>' + esc(docLabel(k)) + ': ' + (missing ? STR.docsReview : n + (n === 1 ? ' ملف' : ' ملفات')) + '</span></li>';
       }).join('') + '</ul>';
       var html = block('بيانات العميل', 1, client) + block('بيانات الشحنة', 2, ship) +
         block('وصف البضاعة', 2, goods) + block('المستندات', 3, docs);
@@ -867,7 +923,7 @@
           acc[k] = files[k].map(function (f) { return { name: f.name, size: f.size }; });
           return acc;
         }, {}),
-        docsLater: !!val('docsLater'),
+        docsLater: true,   // documents follow later (office contact / client portal)
         notes: val('notes'),
         calc: calcAttached ? calc : null
       };
@@ -961,7 +1017,7 @@
         if (lostEl) { lostEl.hidden = !tokenLost; lostEl.textContent = tokenLost ? STR.tokenAlreadyShown : ''; }
       }
       var docsCount = Object.keys(r.documents).reduce(function (n, k) { return n + r.documents[k].length; }, 0);
-      var docsText = docsCount ? docsCount + (docsCount === 1 ? ' ملف' : ' ملفات') : 'لم تُرفق بعد';
+      var docsText = docsCount ? docsCount + (docsCount === 1 ? ' ملف' : ' ملفات') : (ONLINE ? STR.docsPending : 'لم تُرفق بعد');
       if (ONLINE && docsCount) docsText = docsCount + (docsCount === 1 ? ' ملف مُعلَن' : ' ملفات مُعلَنة') + ' — ' + STR.docsOnline;
       qs('#success-kv').innerHTML = [
         ['الخدمة', r.shipment.serviceLabel],
@@ -1030,6 +1086,7 @@
     applyCalc();
     applyOcr();
     syncShipmentUI();
+    loadOfficePorts();
     // min date for ETA = today
     try {
       var t = new Date();

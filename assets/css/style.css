@@ -857,6 +857,14 @@ body.drawer-open { overflow: hidden; }
 .bg-white { background: #fff; } .bg-tint { background: var(--bg); }
 .divider { height: 1px; background: var(--border); border: 0; margin: 24px 0; }
 .hidden, [hidden] { display: none !important; }
+/* office contacts (site-profile.js): a phone / e-mail / WhatsApp / address / hours hook, its row or its group stays
+   hidden until the organisation settings give a valid value — never a default value */
+.site-c-off { display: none !important; }
+/* no office contact after the sign-in links: no stray divider; the footer drops the empty contact column;
+   the last visible row of a contact list keeps no dashed line */
+.topbar-auth:not(:has(~ :not(.site-c-off))) { border-inline-end: 0; padding-inline-end: 0; }
+@media (min-width: 1025px) { .footer-grid:has(> .footer-col.site-c-off[data-site-group]) { grid-template-columns: 1.4fr 1fr 1fr; } }
+.kv li:not(.site-c-off):not(:has(~ li:not(.site-c-off))) { border-bottom: 0; }
 /* environment-specific text: main.js sets html[data-marsa-env] (production | staging); scripts/build-release.sh
    writes data-marsa-env="production" into the release pages so the first paint is already right */
 html[data-marsa-env="production"] [data-show-env="staging"],

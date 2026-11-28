@@ -18,7 +18,8 @@
   <link rel="stylesheet" href="assets/css/style.css">
   <link rel="stylesheet" href="assets/css/pages/services.css">
 </head>
-<body data-page="services">
+<!-- old-design page: site-profile.js fills only the office contacts (look and titles unchanged) -->
+<body data-page="services" data-site-contact-only>
   <a class="skip-link" href="#main">تخطَّ إلى المحتوى</a>
   <!-- ============ HEADER (shared) ============ -->
   <div class="topbar">
@@ -30,8 +31,8 @@
           <a href="login.html#staff"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/></svg>دخول الموظفين</a>
           <a href="portal.html" data-account-link hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>بوابتي</a>
         </nav>
-        <a href="tel:+966126143270"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><span dir="ltr">+966 12 614 3270</span></a>
-        <a href="mailto:info@marsa-sa.com"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span dir="ltr">info@marsa-sa.com</span></a>
+        <a class="site-c-off" data-site-phone><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><span dir="ltr"></span></a>
+        <a class="site-c-off" data-site-email><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span dir="ltr"></span></a>
       </div>
     </div>
   </div>
@@ -97,8 +98,8 @@
     </ul>
     <div class="drawer-foot">
       <a class="btn btn-primary btn-block" href="request.html">اطلب تخليص الآن</a>
-      <a href="tel:+966126143270"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><span dir="ltr">+966 12 614 3270</span></a>
-      <a href="mailto:info@marsa-sa.com"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span dir="ltr">info@marsa-sa.com</span></a>
+      <a class="site-c-off" data-site-phone><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><span dir="ltr"></span></a>
+      <a class="site-c-off" data-site-email><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span dir="ltr"></span></a>
     </div>
   </aside>
   <div class="drawer-backdrop" aria-hidden="true"></div>
@@ -113,7 +114,7 @@
           </ol>
         </nav>
         <h1 id="page-title">خدمات تخليص وشحن متكاملة من الباب للباب</h1>
-        <p class="lead">خدماتنا الأساسية: التخليص الجمركي للواردات والصادرات عبر مخلّصين جمركيين مرخّصين، والبيان المسبق عبر منصة فسح، والتصنيف الجمركي، والنقل الداخلي. أما الشحن الدولي البحري والجوي والتخزين فننسّقها عبر شركاء.</p>
+        <p class="lead">خدماتنا الأساسية: التخليص الجمركي للواردات والصادرات بفريقنا الجمركي المرخّص، والبيان المسبق عبر منصة فسح، والتصنيف الجمركي، والنقل الداخلي. أما الشحن الدولي البحري والجوي والتخزين فننسّقها عبر شركاء.</p>
       </div>
       <svg class="page-hero-wave" viewBox="0 0 1440 120" preserveAspectRatio="none" aria-hidden="true">
         <path class="w-back" d="M0,40 C180,90 360,10 560,40 C760,70 900,20 1100,35 C1260,48 1360,70 1440,50 L1440,120 L0,120 Z"/>
@@ -158,8 +159,8 @@
             </div>
             <h2 id="import-title">التخليص الجمركي للواردات<small dir="ltr">Import Customs Clearance</small></h2>
             <svg class="svc-wave" viewBox="0 0 120 14" aria-hidden="true"><path d="M2 7c10-8 20 8 30 0s20 8 30 0 20 8 30 0 20 8 26 2"/></svg>
-            <p class="lead">نستلم ملف شحنتك منذ وصول إشعار الوصول، ونرافقك في جميع مراحل الفسح التي ينفّذها مخلّص جمركي مرخّص: من تقديم البيان الجمركي عبر منصة فسح لدى هيئة الزكاة والضريبة والجمارك، مرورًا بالمعاينة والتقييم وموافقات الجهات الرقابية، حتى خروج البضاعة من بوابة الميناء.</p>
-            <p>نتابع الشحنة في الموانئ والمطارات عبر المخلّصين المرخّصين وشركائنا الميدانيين، ونراجع المستندات قبل وصول الشحنة لنكتشف أي ملاحظة مبكرًا ونقلّل احتمال الغرامات وفروق التقييم وأيام التخزين.</p>
+            <p class="lead">نستلم ملف شحنتك منذ وصول إشعار الوصول، وننفّذ بأنفسنا، بصفتنا مخلّصًا جمركيًا مرخّصًا، جميع مراحل الفسح: من تقديم البيان الجمركي عبر منصة فسح لدى هيئة الزكاة والضريبة والجمارك، مرورًا بالمعاينة والتقييم وموافقات الجهات الرقابية، حتى خروج البضاعة من بوابة الميناء.</p>
+            <p>نتابع الشحنة في الموانئ والمطارات عبر مخلّصينا الجمركيين المرخّصين وفريقنا الميداني، ونراجع المستندات قبل وصول الشحنة لنكتشف أي ملاحظة مبكرًا ونقلّل احتمال الغرامات وفروق التقييم وأيام التخزين.</p>
             <div class="svc-tags"><span class="badge badge-teal">بحري وجوي</span><span class="badge badge-teal">حاويات وبضائع صب</span><span class="badge badge-teal">تجاري وشخصي</span></div>
             <div class="btn-group">
               <a class="btn btn-primary" href="request.html?service=import">اطلب تخليص وارد <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></a>
@@ -204,7 +205,7 @@
             </div>
             <h2 id="export-title">التخليص الجمركي للصادرات<small dir="ltr">Export Clearance</small></h2>
             <svg class="svc-wave" viewBox="0 0 120 14" aria-hidden="true"><path d="M2 7c10-8 20 8 30 0s20 8 30 0 20 8 30 0 20 8 26 2"/></svg>
-            <p class="lead">جهّز بضاعتك للتصدير ونحن ننسّق الباقي مع المخلّص المرخّص: المستندات، وشهادات المنشأ، والفحص والتحميل، والتنسيق مع الخط الملاحي أو شركة الطيران قبل موعد الإبحار.</p>
+            <p class="lead">جهّز بضاعتك للتصدير ويتولى فريقنا الجمركي المرخّص الباقي: المستندات، وشهادات المنشأ، والفحص والتحميل، والتنسيق مع الخط الملاحي أو شركة الطيران قبل موعد الإبحار.</p>
             <p>نساعدك على الاستفادة من الاتفاقيات التجارية التي تشارك فيها المملكة، مثل السوق الخليجية المشتركة ومنطقة التجارة الحرة العربية الكبرى، باستخراج شهادة المنشأ المناسبة لكل سوق، وتجهيز ملفات استرداد الرسوم عند إعادة التصدير.</p>
             <div class="svc-tags"><span class="badge badge-teal">الخليج والدول العربية</span><span class="badge badge-teal">آسيا وأفريقيا وأوروبا</span><span class="badge badge-teal">منتجات غذائية وبتروكيماوية</span></div>
             <div class="btn-group">
@@ -251,7 +252,7 @@
             <h2 id="aci-title">البيان المسبق ومنصة فسح<small dir="ltr">Pre-Declaration · FASAH</small></h2>
             <svg class="svc-wave" viewBox="0 0 120 14" aria-hidden="true"><path d="M2 7c10-8 20 8 30 0s20 8 30 0 20 8 30 0 20 8 26 2"/></svg>
             <p class="lead">منصة فسح هي المنصة الإلكترونية لإجراءات الاستيراد والتصدير في المملكة، وتقديم البيان الجمركي المسبق عبرها قبل وصول الشحنة يساعد على تسريع الفسح. أي خطأ في بيانات البيان أو المستندات قد يؤخّر الشحنة في الميناء.</p>
-            <p>يُدخل المخلّص المرخّص بيانات الشحنة والمورّد الأجنبي بدقة، ونتابع مع المورّد حتى تكتمل المستندات، ونتأكد من شهادة المطابقة عبر منصة سابر التابعة للهيئة السعودية للمواصفات والمقاييس والجودة (SASO) للمنتجات الخاضعة لها، ونراجع تطابق البيان مع الفاتورة وبوليصة الشحن.</p>
+            <p>يُدخل مخلّصونا الجمركيون المرخّصون بيانات الشحنة والمورّد الأجنبي بدقة، ونتابع مع المورّد حتى تكتمل المستندات، ونتأكد من شهادة المطابقة عبر منصة سابر التابعة للهيئة السعودية للمواصفات والمقاييس والجودة (SASO) للمنتجات الخاضعة لها، ونراجع تطابق البيان مع الفاتورة وبوليصة الشحن.</p>
             <div class="svc-tags"><span class="badge badge-teal">رقم البيان الجمركي</span><span class="badge badge-teal">شهادة المطابقة – سابر</span><span class="badge badge-teal">متابعة المورّد</span></div>
             <div class="btn-group">
               <a class="btn btn-primary" href="request.html?service=aci">قدّم بيانك المسبق عبر فسح <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></a>
@@ -343,7 +344,7 @@
             </div>
             <h2 id="air-title">الشحن الجوي <span class="badge badge-warning">عبر شركاء</span><small dir="ltr">Air Freight</small></h2>
             <svg class="svc-wave" viewBox="0 0 120 14" aria-hidden="true"><path d="M2 7c10-8 20 8 30 0s20 8 30 0 20 8 30 0 20 8 26 2"/></svg>
-            <p class="lead">خدمة مساندة تُقدَّم عبر شركاء شحن جوي. ننسّق شحن العينات وقطع الغيار والبضائع العاجلة إلى مطار الملك خالد الدولي بالرياض ومطار الملك عبدالعزيز الدولي بجدة، ويتولى المخلّص المرخّص تخليصها جمركيًا.</p>
+            <p class="lead">خدمة مساندة تُقدَّم عبر شركاء شحن جوي. ننسّق شحن العينات وقطع الغيار والبضائع العاجلة إلى مطار الملك خالد الدولي بالرياض ومطار الملك عبدالعزيز الدولي بجدة، ويتولى فريقنا الجمركي المرخّص تخليصها جمركيًا.</p>
             <p>نتعامل مع شركات طيران ووكلاء شحن في أهم مطارات العالم، ونحسب السعر على الوزن الفعلي أو الوزن الحجمي أيهما أكبر، بشكل واضح قبل الشحن.</p>
             <div class="svc-tags"><span class="badge badge-teal">مطارا الرياض وجدة</span><span class="badge badge-teal">بوليصة جوية AWB</span><span class="badge badge-teal">بضائع مبرّدة</span></div>
             <div class="btn-group">
@@ -647,7 +648,7 @@
                   <span class="doc-body">
                     <span class="doc-title">توكيل المخلّص الجمركي <span class="badge badge-navy">أساسي</span></span>
                     <span class="doc-en" dir="ltr">Power of Attorney</span>
-                    <span class="doc-desc">تفويض يصدر للمخلّص الجمركي المرخّص لإنهاء الإجراءات باسم المنشأة لدى هيئة الزكاة والضريبة والجمارك.</span>
+                    <span class="doc-desc">تفويض يصدر لمكتبنا بصفته مخلّصًا جمركيًا مرخّصًا لإنهاء الإجراءات باسم المنشأة لدى هيئة الزكاة والضريبة والجمارك.</span>
                   </span>
                 </label>
               </li>
@@ -755,7 +756,7 @@
                   <span class="doc-body">
                     <span class="doc-title">توكيل المخلّص الجمركي <span class="badge badge-navy">أساسي</span></span>
                     <span class="doc-en" dir="ltr">Power of Attorney</span>
-                    <span class="doc-desc">تفويض يصدر للمخلّص الجمركي المرخّص لإنهاء إجراءات الصادر باسم المنشأة.</span>
+                    <span class="doc-desc">تفويض يصدر لمكتبنا بصفته مخلّصًا جمركيًا مرخّصًا لإنهاء إجراءات الصادر باسم المنشأة.</span>
                   </span>
                 </label>
               </li>
@@ -906,7 +907,7 @@
           <div class="social">
             <a href="contact.html" aria-label="فيسبوك" data-i18n-attr="aria-label:footer.facebook"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h-2.5A3.5 3.5 0 0 0 9 6.5V9H7v3.5h2V21h3.5v-8.5H15l.5-3.5h-3V7a1 1 0 0 1 1-1H15z"/></svg></a>
             <a href="contact.html" aria-label="لينكدإن" data-i18n-attr="aria-label:footer.linkedin"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 10v7M8 7v.01M12 17v-4a2 2 0 0 1 4 0v4M12 10v7"/></svg></a>
-            <a href="https://wa.me/966554821937" target="_blank" rel="noopener" aria-label="واتساب" data-i18n-attr="aria-label:footer.whatsapp"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/><path d="M9 9.5c.3 1.8 2 3.8 4 4.5l1-1 2 .8"/></svg></a>
+            <a class="site-c-off" data-site-whatsapp target="_blank" rel="noopener" aria-label="واتساب" data-i18n-attr="aria-label:footer.whatsapp"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/><path d="M9 9.5c.3 1.8 2 3.8 4 4.5l1-1 2 .8"/></svg><span dir="ltr" hidden></span></a>
           </div>
         </div>
         <div class="footer-col">
@@ -933,14 +934,14 @@
             <li><a href="services.html#hs" data-i18n="footer.hs">تصنيف HS Code</a></li>
           </ul>
         </div>
-        <div class="footer-col">
+        <div class="site-c-off footer-col" data-site-group>
           <h3 data-i18n="footer.contactTitle">تواصل معنا</h3>
           <ul class="footer-contact">
-            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg><span data-i18n="footer.address">طريق الملك عبدالعزيز، حي الحمراء – جدة</span></li>
-            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><a href="tel:+966126143270" dir="ltr">+966 12 614 3270</a></li>
-            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><a href="mailto:info@marsa-sa.com" dir="ltr">info@marsa-sa.com</a></li>
-            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/><path d="M9 9.5c.3 1.8 2 3.8 4 4.5l1-1 2 .8"/></svg><a href="https://wa.me/966554821937" target="_blank" rel="noopener" dir="ltr">+966 55 482 1937</a></li>
-            <li><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span data-i18n="footer.hours">الأحد – الخميس: 8 ص – 5 م</span></li>
+            <li class="site-c-off" data-site-row><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg><span class="site-c-off" data-site-address></span></li>
+            <li class="site-c-off" data-site-row><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><a class="site-c-off" data-site-phone dir="ltr"></a></li>
+            <li class="site-c-off" data-site-row><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><a class="site-c-off" data-site-email dir="ltr"></a></li>
+            <li class="site-c-off" data-site-row><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/><path d="M9 9.5c.3 1.8 2 3.8 4 4.5l1-1 2 .8"/></svg><a class="site-c-off" data-site-whatsapp target="_blank" rel="noopener" dir="ltr"></a></li>
+            <li class="site-c-off" data-site-row><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="site-c-off" data-site-hours></span></li>
           </ul>
         </div>
       </div>
@@ -961,6 +962,8 @@
   <script src="assets/js/config.js" defer></script>
   <script src="assets/js/i18n.js" defer></script>
   <script src="assets/js/main.js" defer></script>
+  <script src="assets/js/supa.js" defer></script>
   <script src="assets/js/services.js" defer></script>
+  <script src="assets/js/site-profile.js" defer></script>
 </body>
 </html>

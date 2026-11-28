@@ -2,23 +2,36 @@
    Office website — the office's own identity (owner 2026-11-23, migration 20261213000100)
    Every subscribed office customises its website. Stage A: the pages show what the office keeps in its organisation
    settings («إعدادات المؤسسة»): name, accent colour, phone, e-mail, address, logo.
-   Hooks (fixed markup in the site pages):
-     [data-site-logo]     <img> of the brand (header / drawer / footer): the office logo, or the office name as text
-     [data-site-brand]    the brand link: its aria-label becomes the office name
+   Contacts (owner 2026-11-28): the site never shows a phone / e-mail / WhatsApp / address / working hours that does
+   not come from the organisation settings. The markup carries NO default value: every contact hook starts hidden
+   (class site-c-off, empty text, no href) and is shown only when the office has a valid value. Empty or invalid
+   value, no profile, demo (no config.js), offline or an API error → the contact stays hidden. Never a fallback.
+   Contact hooks (fixed markup in the site pages):
      [data-site-phone]    tel: link (text in its [dir=ltr] child, else itself)
      [data-site-email]    mailto: link (same)
+     [data-site-whatsapp] wa.me link (same); stored 05xxxxxxxx, shown +966 5x xxx xxxx
      [data-site-address]  the address text (ar / en)
+     [data-site-hours]    the working hours text (ar / en)
+     [data-site-row]      a wrapper meaningless without the hook inside it (an <li> with an icon, a label+value row):
+                          shown / hidden together with that hook
+     [data-site-group]    a container whose whole purpose is these contacts (top-bar strip, footer «تواصل معنا»
+                          column, contact card): hidden while no contact hook inside it is shown
+     [data-site-hours-badge]  the «open now» badge (built-in hours only): always hidden
+   Identity hooks:
+     [data-site-logo]     <img> of the brand (header / drawer / footer): the office logo, or the office name as text
+     [data-site-brand]    the brand link: its aria-label becomes the office name
    Stage B (same migration): settings whatsapp / hours_ar / hours_en / about_ar / about_en —
-     [data-site-whatsapp]  wa.me link            [data-site-hours]  the working hours text
-     [data-site-hours-badge]  the «open now» badge (built-in hours only): hidden when the office has its own hours
      [data-site-about-page]   «من نحن»: the office text, shown in place of [data-site-story]; the footer blurb too
      [data-site-platform-only] hidden once an office profile is shown (a text about the platform name itself)
      [data-site-swap]      the platform name inside a fixed text / its aria-label → the office name
+   <body data-site-contact-only>: only the contact hooks are applied (no colour, title, logo, footer text, swaps),
+   for pages whose look must not change.
    Online: MarsaApi.siteProfile() (anon); the last profile is kept in localStorage so the next page opens with it at
-   once. Demo (no config.js) or no data: the page keeps its built-in defaults.
-   The footer texts that name the platform (footer.about / footer.rights) name the office instead.
+   once. The footer texts that name the platform (footer.about / footer.rights) name the office instead.
+   window.MarsaSiteProfile.apply(): re-applies the profile — for code that injects contact markup later (tracking.js).
    Data is set with textContent / attributes only. The accent colour is validated (#rrggbb), the text colour on it is
    chosen for contrast, and a colour too light to read on white is darkened.
+   CSS: .site-c-off { display: none !important } (assets/css/style.css).
    ===================================================================== */
 (function () {
   'use strict';
@@ -56,49 +69,83 @@
     body.style.setProperty('--on-accent', contrast(base, WHITE) >= 4.5 ? '#ffffff' : hex(INK));
   }
 
-  /* ---------------- text / links ---------------- */
-  function textTarget(el) { return el.querySelector('[dir="ltr"]') || el; }
-  function setPhone(v) {
+  /* ---------------- contacts (hidden unless the office has a valid value) ---------------- */
+  var OFF = 'site-c-off';
+  var HOOKS = '[data-site-phone], [data-site-email], [data-site-whatsapp], [data-site-address], [data-site-hours]';
+  function all(sel) { return document.querySelectorAll ? document.querySelectorAll(sel) : []; }
+  function toggle(el, on) {
+    if (!el || !el.classList) return;
+    if (on) { if (el.classList.remove) el.classList.remove(OFF); } else el.classList.add(OFF);
+  }
+  // the hook and the wrapper row that means nothing without it
+  function showHook(el, on) {
+    toggle(el, on);
+    var row = el.closest ? el.closest('[data-site-row]') : null;
+    if (row && row !== el) toggle(row, on);
+  }
+  function textTarget(el) { return (el.querySelector && el.querySelector('[dir="ltr"]')) || el; }
+  // a link hook: filled when the value is valid, else hidden and its link removed
+  function setLink(sel, href, text) {
+    all(sel).forEach(function (a) {
+      if (href) {
+        a.setAttribute('href', href);
+        textTarget(a).textContent = text;
+      } else if (a.removeAttribute) a.removeAttribute('href');
+      showHook(a, !!href);
+    });
+  }
+  // a text hook (address / hours): the office text, else hidden
+  function setText(sel, v) {
+    all(sel).forEach(function (el) {
+      el.removeAttribute('data-i18n');   // the office text, never the built-in translation
+      if (v) el.textContent = v;
+      showHook(el, !!v);
+    });
+  }
+  function phoneOf(v) {
     var digits = v.replace(/[^0-9+]/g, '');
-    if (!/^\+?[0-9]{6,16}$/.test(digits)) return;
-    document.querySelectorAll('[data-site-phone]').forEach(function (a) {
-      a.setAttribute('href', 'tel:' + digits);
-      textTarget(a).textContent = v;
-    });
+    return /^\+?[0-9]{6,16}$/.test(digits) ? digits : '';
   }
-  function setEmail(v) {
-    if (!/^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(v)) return;
-    document.querySelectorAll('[data-site-email]').forEach(function (a) {
-      a.setAttribute('href', 'mailto:' + v);
-      textTarget(a).textContent = v;
-    });
-  }
-  function setAddress(p) {
-    var v = lang() === 'en' ? (str(p.address_en) || str(p.address_ar)) : str(p.address_ar);
-    if (!v) return;
-    document.querySelectorAll('[data-site-address]').forEach(function (el) {
-      el.removeAttribute('data-i18n');   // the office text, not the built-in translation
-      el.textContent = v;
-    });
-  }
-  // stage B: WhatsApp (stored 05xxxxxxxx) → wa.me/9665xxxxxxxx, shown +966 5x xxx xxxx
-  function setWhatsapp(v) {
+  function emailOf(v) { return /^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(v) ? v : ''; }
+  // stage B: WhatsApp (stored 05xxxxxxxx) → 9665xxxxxxxx, else ''
+  function whatsappOf(v) {
     var d = v.replace(/[^0-9]/g, '');
     if (/^05[0-9]{8}$/.test(d)) d = '966' + d.slice(1);
     else if (/^5[0-9]{8}$/.test(d)) d = '966' + d;
-    if (!/^9665[0-9]{8}$/.test(d)) return;
-    var shown = '+966 ' + d.slice(3, 5) + ' ' + d.slice(5, 8) + ' ' + d.slice(8);
-    document.querySelectorAll('[data-site-whatsapp]').forEach(function (a) {
-      a.setAttribute('href', 'https://wa.me/' + d);
-      textTarget(a).textContent = shown;
-    });
+    return /^9665[0-9]{8}$/.test(d) ? d : '';
+  }
+  function setPhone(v) { var d = phoneOf(v); setLink('[data-site-phone]', d ? 'tel:' + d : '', v); }
+  function setEmail(v) { var e = emailOf(v); setLink('[data-site-email]', e ? 'mailto:' + e : '', e); }
+  function setWhatsapp(v) {
+    var d = whatsappOf(v);
+    var shown = d ? '+966 ' + d.slice(3, 5) + ' ' + d.slice(5, 8) + ' ' + d.slice(8) : '';
+    setLink('[data-site-whatsapp]', d ? 'https://wa.me/' + d : '', shown);
+  }
+  function setAddress(p) {
+    setText('[data-site-address]', lang() === 'en' ? (str(p.address_en) || str(p.address_ar)) : str(p.address_ar));
   }
   function setHours(p) {
-    var v = lang() === 'en' ? (str(p.hours_en, 120) || str(p.hours_ar, 120)) : str(p.hours_ar, 120);
-    if (!v) return;
-    document.querySelectorAll('[data-site-hours]').forEach(function (el) { el.removeAttribute('data-i18n'); el.textContent = v; });
-    // the «open now» badge knows only the built-in hours: hidden when the office has its own
-    document.querySelectorAll('[data-site-hours-badge]').forEach(function (el) { el.classList.add('is-site-off'); });
+    setText('[data-site-hours]', lang() === 'en' ? (str(p.hours_en, 120) || str(p.hours_ar, 120)) : str(p.hours_ar, 120));
+    // the «open now» badge knows only the built-in hours, not the office's: always hidden
+    all('[data-site-hours-badge]').forEach(function (el) {
+      if (el.classList) { el.classList.add(OFF); el.classList.add('is-site-off'); }
+    });
+  }
+  // a contacts container is shown only while at least one contact hook inside it is shown
+  function setGroups() {
+    all('[data-site-group]').forEach(function (g) {
+      var hooks = g.querySelectorAll ? g.querySelectorAll(HOOKS) : [], shown = false;
+      for (var i = 0; i < hooks.length && !shown; i++) shown = !(hooks[i].classList && hooks[i].classList.contains(OFF));
+      toggle(g, shown);
+    });
+  }
+  function setContacts(p) {
+    setPhone(str(p.contact_phone, 40));
+    setEmail(str(p.contact_email, 200));
+    setWhatsapp(str(p.whatsapp, 40));
+    setAddress(p);
+    setHours(p);
+    setGroups();
   }
   function aboutOf(p) { return lang() === 'en' ? (str(p.about_en, 600) || str(p.about_ar, 600)) : str(p.about_ar, 600); }
   // «من نحن» page: the office text in place of the platform story
@@ -184,22 +231,22 @@
     });
   }
 
+  function contactOnly() { var b = document.body; return !!(b && b.hasAttribute && b.hasAttribute('data-site-contact-only')); }
+  // also runs with no profile at all (demo / offline / error / none): the contacts then stay hidden
   function apply() {
-    var p = profile;
-    if (!p || typeof p !== 'object') return;
-    var name = nameOf(p);
-    applyColor(str(p.brand_color, 7));
-    setName(name);
-    setLogo(name);
-    setFooter(name, aboutOf(p));
-    setSwaps(name);
-    setAboutPage(p);
-    if (str(p.contact_phone, 40)) setPhone(str(p.contact_phone, 40));
-    if (str(p.contact_email, 200)) setEmail(str(p.contact_email, 200));
-    if (str(p.whatsapp, 40)) setWhatsapp(str(p.whatsapp, 40));
-    setHours(p);
-    setAddress(p);
+    var p = profile && typeof profile === 'object' ? profile : null;
+    if (p && !contactOnly()) {
+      var name = nameOf(p);
+      applyColor(str(p.brand_color, 7));
+      setName(name);
+      setLogo(name);
+      setFooter(name, aboutOf(p));
+      setSwaps(name);
+      setAboutPage(p);
+    }
+    setContacts(p || {});
   }
+  window.MarsaSiteProfile = { apply: apply };
 
   function remember(p) { try { if (p) localStorage.setItem(KEY, JSON.stringify(p)); else localStorage.removeItem(KEY); } catch (e) { /* storage off */ } }
   function recalled() { try { var s = localStorage.getItem(KEY); return s ? JSON.parse(s) : null; } catch (e) { return null; } }
@@ -212,7 +259,7 @@
       if (!r || r.error) return;   // keep what is shown
       profile = r.data && typeof r.data === 'object' ? r.data : null;
       remember(profile);
-      if (!profile) return;
+      if (!profile) { logoUrl = null; apply(); return; }   // no office profile: contacts hidden
       var path = str(profile.logo_path, 200);
       if (!path || typeof API.orgLogoUrl !== 'function') { logoUrl = null; apply(); return; }
       API.orgLogoUrl(path, 3600).then(function (u) {
@@ -223,6 +270,7 @@
   }
 
   function init() {
+    apply();   // hide every contact first (no profile yet): never a default value
     load();
     window.addEventListener('marsa:langchange', function () { apply(); });
   }

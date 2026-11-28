@@ -285,7 +285,7 @@
       facebook: 'فيسبوك', linkedin: 'لينكدإن', whatsapp: 'واتساب',
       quickLinks: 'روابط سريعة', faq: 'الأسئلة الشائعة', tools: 'أدوات المنصة',
       bulk: 'الرفع الجماعي (Excel / CSV)', aci: 'البيان المسبق ومنصة فسح', hs: 'تصنيف HS Code',
-      contactTitle: 'تواصل معنا', address: 'طريق الملك عبدالعزيز، حي الحمراء – جدة', hours: 'الأحد – الخميس: 8 ص – 5 م',
+      contactTitle: 'تواصل معنا', address: '', hours: '',   // office contacts come only from the organisation settings (site-profile.js)
       clearData: 'مسح بياناتي من هذا الجهاز',
       officeAbout: '{name}: خدمات تخليص جمركي للمستوردين والمصدّرين في المملكة، مع متابعة الشحنات أونلاين خطوة بخطوة.',
       officeRights: '{name}. جميع الحقوق محفوظة.',
@@ -299,7 +299,7 @@
       facebook: 'Facebook', linkedin: 'LinkedIn', whatsapp: 'WhatsApp',
       quickLinks: 'Quick links', faq: 'FAQ', tools: 'Platform tools',
       bulk: 'Bulk upload (Excel / CSV)', aci: 'Advance declaration & FASAH', hs: 'HS Code classification',
-      contactTitle: 'Contact us', address: 'King Abdulaziz Road, Al Hamra District – Jeddah', hours: 'Sunday – Thursday: 8 am – 5 pm',
+      contactTitle: 'Contact us', address: '', hours: '',   // office contacts come only from the organisation settings (site-profile.js)
       clearData: 'Clear my data from this device',
       officeAbout: '{name}: customs clearance for importers and exporters in the Kingdom, with online step-by-step shipment tracking.',
       officeRights: '{name}. All rights reserved.',

@@ -457,9 +457,11 @@
   function renderContact() {
     return '<section class="card ts-contact" aria-labelledby="help-h">' +
       '<h3 id="help-h">هل لديك استفسار عن الشحنة؟</h3>' +
-      '<p>فريق المتابعة متاح من الأحد إلى الخميس، 8 ص – 5 م. يرجى ذكر رقم المرجع عند التواصل.</p>' +
-      '<p class="mb-2">' + svg(IC.phone) + ' <a class="tel" href="tel:+966126143270" dir="ltr">+966 12 614 3270</a></p>' +
-      '<p class="mb-2">واتساب: <a class="tel" href="https://wa.me/966554821937" target="_blank" rel="noopener" dir="ltr">+966 55 482 1937</a></p>' +
+      // Contacts and hours come only from the office settings (site-profile.js fills these hooks; empty → hidden)
+      '<p>يرجى ذكر رقم المرجع عند التواصل.</p>' +
+      '<p class="mb-2 site-c-off" data-site-row>ساعات العمل: <span class="site-c-off" data-site-hours></span></p>' +
+      '<p class="mb-2 site-c-off" data-site-row>' + svg(IC.phone) + ' <a class="tel site-c-off" data-site-phone dir="ltr"></a></p>' +
+      '<p class="mb-2 site-c-off" data-site-row>واتساب: <a class="tel site-c-off" data-site-whatsapp target="_blank" rel="noopener" dir="ltr"></a></p>' +
       '<a class="btn btn-white btn-sm" href="contact.html">راسلنا ' + svg(IC.arrow) + '</a>' +
     '</section>';
   }
@@ -698,6 +700,7 @@
     timer = setTimeout(function () {
       var s = find(q);
       result.innerHTML = s ? renderResult(s) : renderNotFound(q);
+      if (window.MarsaSiteProfile && window.MarsaSiteProfile.apply) window.MarsaSiteProfile.apply();   // fill the injected contact hooks
       result.removeAttribute('aria-busy');
       if (submitBtn) submitBtn.disabled = false;
 
@@ -717,6 +720,7 @@
 
   function finishRender(html, found, opts) {
     result.innerHTML = html;
+    if (window.MarsaSiteProfile && window.MarsaSiteProfile.apply) window.MarsaSiteProfile.apply();   // fill the injected contact hooks
     result.removeAttribute('aria-busy');
     if (submitBtn) submitBtn.disabled = false;
     var bar = $('.progress-bar[data-pct]', result);
