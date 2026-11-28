@@ -171,7 +171,7 @@
       errors_sub: 'آخر أخطاء الواجهة المسجّلة من متصفحات المستخدمين (بعد حذف البيانات الشخصية). تساعد على اكتشاف الأعطال مبكرًا.',
       errors_empty: 'لا توجد أخطاء مسجّلة.',
       // ---- app shell console (staff console as an app page) ----
-      doc_title_suffix: 'مرسى MARSA', loading: 'جارٍ التحميل…', who_system: 'النظام', who_user: 'مستخدم {id}',
+      doc_title_suffix: '{brand}', loading: 'جارٍ التحميل…', who_system: 'النظام', who_user: 'مستخدم {id}',
       gate_home: 'العودة للرئيسية', gate_retry: 'إعادة المحاولة', gate_signin_btn: 'دخول الموظفين',
       gate_demo_title: 'لوحة الموظفين تعمل في النسخة المتصلة فقط', gate_signin_title: 'يلزم تسجيل الدخول',
       gate_forbidden_title: 'لا تملك صلاحية موظف', gate_error_title: 'تعذّر تحميل اللوحة',
@@ -453,7 +453,7 @@
       err_actor: 'Actor must be a user id (UUID).',
       errors_sub: 'Latest front-end errors reported by users\' browsers (personal data scrubbed). Helps spot breakages early.',
       errors_empty: 'No errors recorded.',
-      doc_title_suffix: 'MARSA', loading: 'Loading…', who_system: 'System', who_user: 'User {id}',
+      doc_title_suffix: '{brand}', loading: 'Loading…', who_system: 'System', who_user: 'User {id}',
       gate_home: 'Back to home', gate_retry: 'Try again', gate_signin_btn: 'Staff sign-in',
       gate_demo_title: 'The staff console works in the connected version only', gate_signin_title: 'Sign-in required',
       gate_forbidden_title: 'No staff access', gate_error_title: 'The console could not be loaded',

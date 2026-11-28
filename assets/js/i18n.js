@@ -33,6 +33,9 @@
   // shared chrome namespaces; any other namespace means "this page has its own dictionary"
   var SHARED_NS = { common: 1, nav: 1, banner: 1, footer: 1, err: 1, field: 1, label: 1 };
   var pageDict = false;
+  // Platform display name: the ONE source for every page (dictionaries write '{brand}').
+  var BRAND = (window.MARSA_CONFIG && window.MARSA_CONFIG.platformName) || 'Blue Sea';
+  function brandify(s) { return s == null ? s : String(s).replace(/\{brand\}/g, BRAND); }
 
   function norm(l) { return l === 'en' ? 'en' : (l === 'ar' ? 'ar' : null); }
   function initialLang() {
@@ -58,7 +61,7 @@
     var s = dicts[current][key];
     if (s == null) s = dicts.ar[key];
     if (s == null) return key;
-    return interp(s, vars);
+    return interp(brandify(s), vars);
   }
   // value for apply(): current lang → (ar: markup original) → ar dict → markup original
   function pick(key, orig) {
@@ -66,7 +69,7 @@
     if (s == null && current === 'ar' && orig != null) return orig;
     if (s == null) s = dicts.ar[key];
     if (s == null) s = orig;
-    return s;
+    return brandify(s);
   }
 
   function setHtmlAttrs() {
@@ -87,6 +90,15 @@
       if (o.text == null) o.text = el.textContent;
       var v = pick(key, o.text);
       if (v != null && el.textContent !== v) el.textContent = v;
+      return;
+    }
+    // only <span data-brand> inside (markup fallback of a '{brand}' text): the dictionary
+    // value already carries the name, so it replaces the whole text (no doubled name)
+    var kids = el.children, onlyBrand = kids.length > 0;
+    for (var k = 0; k < kids.length; k++) if (!kids[k].hasAttribute('data-brand')) { onlyBrand = false; break; }
+    if (onlyBrand) {
+      var bv = dicts[current][key] != null ? dicts[current][key] : dicts.ar[key];
+      if (bv != null) { bv = brandify(bv); if (el.textContent !== bv) el.textContent = bv; }
       return;
     }
     var nodes = textNodes(el);
@@ -130,6 +142,10 @@
     each('[data-i18n]', function (el) { setText(el, el.getAttribute('data-i18n')); });
     each('[data-i18n-html]', function (el) { setHtml(el, el.getAttribute('data-i18n-html')); });
     each('[data-i18n-attr]', function (el) { setAttrs(el, el.getAttribute('data-i18n-attr')); });
+    each('[data-brand]', function (el) {
+      if (el.textContent !== BRAND) el.textContent = BRAND;
+      el.setAttribute('dir', 'ltr');
+    });
     return root;
   }
 
@@ -198,33 +214,35 @@
   /* ================= shared dictionaries ================= */
   register('common', {
     ar: {
+      brand: '{brand}',
       langToggle: 'English', langToggleAria: 'التبديل إلى اللغة الإنجليزية', langName: 'العربية',
       toTop: 'العودة لأعلى الصفحة', close: 'إغلاق', cancel: 'إلغاء', save: 'حفظ', retry: 'إعادة المحاولة',
       loading: 'جارٍ التحميل…', copy: 'نسخ', copied: 'تم النسخ', yes: 'نعم', no: 'لا', sar: 'ر.س',
       trackInvalid: 'من فضلك أدخل رقم شحنة أو رقم مرجعي صحيح',
       storageFail: 'تعذّر الوصول إلى التخزين المحلي في هذا المتصفح، فلم يُحذف شيء.',
       clearDone: 'تم مسح بياناتك المحفوظة من هذا الجهاز. أعد تحميل الصفحة لتحديث ما يظهر فيها.',
-      clearNone: 'لا توجد بيانات محفوظة لموقع مرسى على هذا الجهاز.',
-      clearConfirmDemo: 'سيتم حذف كل ما حفظه موقع مرسى في هذا المتصفح (الطلبات والحسابات والرسائل والمسودات). لا يمكن التراجع عن ذلك. هل تريد المتابعة؟',
-      clearConfirmStaging: 'سيتم حذف ما حفظه موقع مرسى في هذا المتصفح (الحسابات والمسودات وجلسة الدخول، فستُسجَّل خارج حسابك على هذا الجهاز). البيانات المرسلة إلى الخادم لا تُحذف بهذا الزر؛ لطلب حذفها تواصل معنا. هل تريد المتابعة؟'
+      clearNone: 'لا توجد بيانات محفوظة لموقع {brand} على هذا الجهاز.',
+      clearConfirmDemo: 'سيتم حذف كل ما حفظه موقع {brand} في هذا المتصفح (الطلبات والحسابات والرسائل والمسودات). لا يمكن التراجع عن ذلك. هل تريد المتابعة؟',
+      clearConfirmStaging: 'سيتم حذف ما حفظه موقع {brand} في هذا المتصفح (الحسابات والمسودات وجلسة الدخول، فستُسجَّل خارج حسابك على هذا الجهاز). البيانات المرسلة إلى الخادم لا تُحذف بهذا الزر؛ لطلب حذفها تواصل معنا. هل تريد المتابعة؟'
     },
     en: {
+      brand: '{brand}',
       langToggle: 'العربية', langToggleAria: 'Switch to Arabic', langName: 'English',
       toTop: 'Back to top', close: 'Close', cancel: 'Cancel', save: 'Save', retry: 'Retry',
       loading: 'Loading…', copy: 'Copy', copied: 'Copied', yes: 'Yes', no: 'No', sar: 'SAR',
       trackInvalid: 'Please enter a valid shipment or reference number',
       storageFail: 'This browser blocks local storage, so nothing was deleted.',
       clearDone: 'Your saved data was removed from this device. Reload the page to refresh what it shows.',
-      clearNone: 'There is no Marsa data saved on this device.',
-      clearConfirmDemo: 'Everything Marsa saved in this browser (requests, accounts, messages and drafts) will be deleted. This cannot be undone. Continue?',
-      clearConfirmStaging: 'What Marsa saved in this browser (accounts, drafts and your sign-in session — you will be signed out on this device) will be deleted. Data already sent to the server is not deleted by this button; contact us to request that. Continue?'
+      clearNone: 'There is no {brand} data saved on this device.',
+      clearConfirmDemo: 'Everything {brand} saved in this browser (requests, accounts, messages and drafts) will be deleted. This cannot be undone. Continue?',
+      clearConfirmStaging: 'What {brand} saved in this browser (accounts, drafts and your sign-in session — you will be signed out on this device) will be deleted. Data already sent to the server is not deleted by this button; contact us to request that. Continue?'
     }
   });
 
   register('nav', {
     ar: {
       skip: 'تخطَّ إلى المحتوى', tagline: 'منصة سعودية للتخليص الجمركي والشحن أونلاين',
-      authNav: 'الدخول إلى المنصة', homeAria: 'مرسى - الصفحة الرئيسية', logoAlt: 'مرسى MARSA - تخليص جمركي وشحن', logoAltShort: 'مرسى MARSA',
+      authNav: 'الدخول إلى المنصة', homeAria: '{brand} - الصفحة الرئيسية', logoAlt: '{brand} - تخليص جمركي وشحن', logoAltShort: '{brand}',
       mainMenu: 'القائمة الرئيسية', openMenu: 'فتح القائمة', closeMenu: 'إغلاق القائمة', drawer: 'القائمة الجانبية',
       home: 'الرئيسية', services: 'خدماتنا', calculator: 'حاسبة الرسوم', calculatorFull: 'حاسبة الرسوم الجمركية',
       tracking: 'تتبع الشحنة', bulk: 'الرفع الجماعي', bulkFull: 'الرفع الجماعي للبيانات',
@@ -235,7 +253,7 @@
     },
     en: {
       skip: 'Skip to content', tagline: 'Saudi platform for online customs clearance and shipping',
-      authNav: 'Sign in to the platform', homeAria: 'Marsa - home page', logoAlt: 'MARSA - customs clearance and shipping', logoAltShort: 'MARSA',
+      authNav: 'Sign in to the platform', homeAria: '{brand} - home page', logoAlt: '{brand} - customs clearance and shipping', logoAltShort: '{brand}',
       mainMenu: 'Main menu', openMenu: 'Open menu', closeMenu: 'Close menu', drawer: 'Side menu',
       home: 'Home', services: 'Services', calculator: 'Duty calculator', calculatorFull: 'Customs duty calculator',
       tracking: 'Track shipment', bulk: 'Bulk upload', bulkFull: 'Bulk data upload',
@@ -263,7 +281,7 @@
 
   register('footer', {
     ar: {
-      about: 'مرسى منصة سعودية لخدمات التخليص الجمركي والشحن أونلاين، تساعد المستوردين والمصدّرين في المملكة على تخليص شحناتهم بسرعة وشفافية.',
+      about: '{brand} منصة سعودية لخدمات التخليص الجمركي والشحن أونلاين، تساعد المستوردين والمصدّرين في المملكة على تخليص شحناتهم بسرعة وشفافية.',
       facebook: 'فيسبوك', linkedin: 'لينكدإن', whatsapp: 'واتساب',
       quickLinks: 'روابط سريعة', faq: 'الأسئلة الشائعة', tools: 'أدوات المنصة',
       bulk: 'الرفع الجماعي (Excel / CSV)', aci: 'البيان المسبق ومنصة فسح', hs: 'تصنيف HS Code',
@@ -271,13 +289,13 @@
       clearData: 'مسح بياناتي من هذا الجهاز',
       officeAbout: '{name}: خدمات تخليص جمركي للمستوردين والمصدّرين في المملكة، مع متابعة الشحنات أونلاين خطوة بخطوة.',
       officeRights: '{name}. جميع الحقوق محفوظة.',
-      rights: 'مرسى MARSA. جميع الحقوق محفوظة.',
+      rights: '{brand}. جميع الحقوق محفوظة.',
       disclaimer: 'منصة خاصة لخدمات التخليص الجمركي — غير تابعة لأي جهة حكومية.',
       privacyDemo: '<strong>الخصوصية في نسخة العرض:</strong> ما تُدخله في النماذج والحاسبة يبقى في التخزين المحلي (localStorage) لهذا المتصفح فقط، دون تشفير ودون إرسال إلى أي خادم، فلا تُدخل بيانات حقيقية حساسة. خط الموقع ومكتبة الاتصال مستضافان على الموقع نفسه، فلا يتصل متصفحك بخوادم خارجية لتحميلهما.',
       privacyStaging: '<strong>الخصوصية في البيئة التجريبية (Staging):</strong> هذه بيئة اختبار ببيانات تجريبية، فلا تُدخل بيانات حقيقية أو حساسة. طلبات التخليص ورسائل التواصل والرفع الجماعي وتسجيل الدخول والمستندات المرفوعة تُرسل عبر اتصال مشفّر (HTTPS) إلى قاعدة بيانات الموقع على خدمة Supabase، ويقتصر الاطلاع عليها على الموظفين المخوَّلين وصاحب الطلب وفق صلاحيات قاعدة البيانات. أما الحاسبة والمسودات وجلسة الدخول فتُحفظ في التخزين المحلي (localStorage) لهذا المتصفح. خط الموقع ومكتبة الاتصال مستضافان على الموقع نفسه، فلا يتصل متصفحك بخوادم خارجية لتحميلهما.'
     },
     en: {
-      about: 'Marsa is a Saudi platform for online customs clearance and shipping services, helping importers and exporters in the Kingdom clear their shipments quickly and transparently.',
+      about: '{brand} is a Saudi platform for online customs clearance and shipping services, helping importers and exporters in the Kingdom clear their shipments quickly and transparently.',
       facebook: 'Facebook', linkedin: 'LinkedIn', whatsapp: 'WhatsApp',
       quickLinks: 'Quick links', faq: 'FAQ', tools: 'Platform tools',
       bulk: 'Bulk upload (Excel / CSV)', aci: 'Advance declaration & FASAH', hs: 'HS Code classification',
@@ -285,7 +303,7 @@
       clearData: 'Clear my data from this device',
       officeAbout: '{name}: customs clearance for importers and exporters in the Kingdom, with online step-by-step shipment tracking.',
       officeRights: '{name}. All rights reserved.',
-      rights: 'MARSA. All rights reserved.',
+      rights: '{brand}. All rights reserved.',
       disclaimer: 'A private customs clearance service — not affiliated with any government body.',
       privacyDemo: '<strong>Privacy in the demo:</strong> what you enter in forms and the calculator stays in this browser\'s local storage (localStorage) only, unencrypted and never sent to a server, so do not enter real sensitive data. The site font and the connection library are hosted on this site, so your browser does not contact third-party servers to load them.',
       privacyStaging: '<strong>Privacy in staging:</strong> this is a test environment with test data, so do not enter real or sensitive data. Clearance requests, contact messages, bulk uploads, sign-in and uploaded documents are sent over an encrypted connection (HTTPS) to the site database on Supabase, and only authorised staff and the requester can see them, as enforced by database permissions. The calculator, drafts and sign-in session are kept in this browser\'s local storage (localStorage). The site font and the connection library are hosted on this site, so your browser does not contact third-party servers to load them.'
@@ -399,7 +417,7 @@
       MRS_CUSTODY_LINK: 'ربط حركة العهدة غير صحيح ({f}).',
       // legacy step 7 (20261123000100): Daftra alignment
       MRS_DAFTRA_ACCOUNT_NOT_KSA: 'حساب دفترة ليس حسابًا سعوديًا ({f}): يجب أن تكون العملة الريال السعودي والدولة السعودية وضريبة 15 % مفعّلة. لم يُرسل شيء؛ يحوّل المالك الحساب ثم يعيد فحص الاتصال.',
-      MRS_DAFTRA_UNMAPPED: 'بنود خدمة بلا كود صنف دفترة معتمد: {x}. اضبط كود الصنف وطابقه وأكّده في «إعداد دفترة» (مرسى لا ينشئ أصنافًا في دفترة).',
+      MRS_DAFTRA_UNMAPPED: 'بنود خدمة بلا كود صنف دفترة معتمد: {x}. اضبط كود الصنف وطابقه وأكّده في «إعداد دفترة» ({brand} لا ينشئ أصنافًا في دفترة).',
       MRS_DAFTRA_CUSTOM_REQUIRED: 'حقول دفترة الإضافية المطلوبة ناقصة في المعاملة: {x}. أكمل البيانات ثم أعد المحاولة؛ لم يُرسل شيء.',
       MRS_DAFTRA_DRAFT_LOCKED: 'مسودة دفترة لهذه الفاتورة موجودة، وتعديل المسودات القائمة غير مسموح. نفّذ التغييرات يدويًا في دفترة كما في بند «تعديل يدوي مطلوب»، ثم أكّد التنفيذ.',
       MRS_DAFTRA_CLIENT_CONFLICT: 'عميل فاتورة دفترة يختلف عن عميل المعاملة المربوط بدفترة؛ الربط مرفوض.',
@@ -478,7 +496,7 @@
       cdetail_MRS_PAY_FUNDING_payer_name: 'أدخل اسم الشخص الذي سدد من حسابه الشخصي.',
       cdetail_MRS_PAY_FUNDING_paying_account: 'أدخل البنك / الحساب المسدد منه لهذه العملية (سداد، مدى، تحويل بنكي).',
       cdetail_MRS_PAY_FUNDING_wallet_no_account: 'لا تسجل بنكًا على السداد من المحفظة؛ البنك يُسجل في حركة تغذية المحفظة المنفصلة.',
-      cdetail_MRS_PAY_LOCKED_daftra: 'هذا السداد مرتبط بدفترة، فلا يُلغى ولا يُعدَّل من مرسى.',
+      cdetail_MRS_PAY_LOCKED_daftra: 'هذا السداد مرتبط بدفترة، فلا يُلغى ولا يُعدَّل من {brand}.',
       cdetail_MRS_PAY_LOCKED_invoiced: 'المبلغ المسترد من هذا السداد مفوتر على العميل، فلا يُلغى السداد ولا يُعدَّل.',
       cdetail_MRS_PAY_LOCKED_custody: 'هذا السداد مخصوم من عهدة العميل. ألغِ حركة الخصم أولًا.',
       cdetail_MRS_PAY_ALLOCATION_sum: 'مجموع التوزيعات يجب أن يساوي إجمالي السداد (الفرق: {x} ريال).',
@@ -650,7 +668,7 @@
       MRS_CUSTODY_LINK: 'The custody entry link is not valid ({f}).',
       // legacy step 7 (20261123000100): Daftra alignment
       MRS_DAFTRA_ACCOUNT_NOT_KSA: 'The Daftra account is not a Saudi account ({f}): it must use SAR, Saudi Arabia and an active 15 % VAT. Nothing was sent; the owner switches the account, then re-runs the connection probe.',
-      MRS_DAFTRA_UNMAPPED: 'Service items without a confirmed Daftra product code: {x}. Set the code, match it and confirm it in «Daftra settings» (Marsa never creates products in Daftra).',
+      MRS_DAFTRA_UNMAPPED: 'Service items without a confirmed Daftra product code: {x}. Set the code, match it and confirm it in «Daftra settings» ({brand} never creates products in Daftra).',
       MRS_DAFTRA_CUSTOM_REQUIRED: 'Required Daftra custom fields are missing on the transaction: {x}. Complete the data and retry; nothing was sent.',
       MRS_DAFTRA_DRAFT_LOCKED: 'A Daftra draft already exists for this invoice and editing existing drafts is not allowed. Make the changes by hand in Daftra as listed in the «Change by hand» item, then confirm.',
       MRS_DAFTRA_CLIENT_CONFLICT: 'The Daftra invoice client differs from the linked Daftra client of the transaction; the link is refused.',
@@ -729,7 +747,7 @@
       cdetail_MRS_PAY_FUNDING_payer_name: 'Enter the name of the person who paid from a personal account.',
       cdetail_MRS_PAY_FUNDING_paying_account: 'Enter the bank / account paid from (SADAD, mada, bank transfer).',
       cdetail_MRS_PAY_FUNDING_wallet_no_account: 'Do not record a bank on a wallet payment; the bank belongs to the separate wallet top-up.',
-      cdetail_MRS_PAY_LOCKED_daftra: 'This payment is linked in Daftra, so it is not voided or corrected in Marsa.',
+      cdetail_MRS_PAY_LOCKED_daftra: 'This payment is linked in Daftra, so it is not voided or corrected in {brand}.',
       cdetail_MRS_PAY_LOCKED_invoiced: 'The reimbursable amount of this payment is invoiced to the client, so the payment is not voided or corrected.',
       cdetail_MRS_PAY_LOCKED_custody: 'This payment is deducted from the client custody. Void the deduction first.',
       cdetail_MRS_PAY_ALLOCATION_sum: 'The allocations must add up to the payment total (difference: {x} SAR).',
@@ -857,6 +875,7 @@
 
   window.MarsaI18n = {
     register: register, t: t, has: has, lang: lang, dir: dir, locale: locale,
+    brand: function () { return BRAND; },
     hasPageDict: function () { return pageDict; },
     setLang: setLang, apply: apply, label: label,
     fmtDate: fmtDate, fmtNumber: fmtNumber, fmtMoney: fmtMoney,

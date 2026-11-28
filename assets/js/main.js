@@ -38,6 +38,8 @@
   var qsa = function (sel, ctx) { return Array.prototype.slice.call((ctx || document).querySelectorAll(sel)); };
   var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var I18N = window.MarsaI18n || null;
+  // platform display name: one source (MarsaI18n.brand → MARSA_CONFIG.platformName)
+  var BRAND = I18N && typeof I18N.brand === 'function' ? I18N.brand() : 'Blue Sea';
   // translate with an Arabic fallback when i18n.js is missing (or the key is unknown)
   function tr(key, fallback, vars) {
     if (!I18N) return fallback;
@@ -131,8 +133,8 @@
       production: '<strong>الخصوصية:</strong> طلبات التخليص ورسائل التواصل والرفع الجماعي وتسجيل الدخول والمستندات المرفوعة تُرسل عبر اتصال مشفّر (HTTPS) إلى قاعدة بيانات الموقع على خدمة Supabase، ويقتصر الاطلاع عليها على الموظفين المخوَّلين وصاحب الطلب وفق صلاحيات قاعدة البيانات. أما الحاسبة والمسودات وجلسة الدخول فتُحفظ في التخزين المحلي (localStorage) لهذا المتصفح. خط الموقع ومكتبة الاتصال مستضافان على الموقع نفسه، فلا يتصل متصفحك بخوادم خارجية لتحميلهما.'
     },
     clear: {
-      demo: 'سيتم حذف كل ما حفظه موقع مرسى في هذا المتصفح (الطلبات والحسابات والرسائل والمسودات). لا يمكن التراجع عن ذلك. هل تريد المتابعة؟',
-      staging: 'سيتم حذف ما حفظه موقع مرسى في هذا المتصفح (الحسابات والمسودات وجلسة الدخول، فستُسجَّل خارج حسابك على هذا الجهاز). البيانات المرسلة إلى الخادم لا تُحذف بهذا الزر؛ لطلب حذفها تواصل معنا. هل تريد المتابعة؟'
+      demo: 'سيتم حذف كل ما حفظه موقع ' + BRAND + ' في هذا المتصفح (الطلبات والحسابات والرسائل والمسودات). لا يمكن التراجع عن ذلك. هل تريد المتابعة؟',
+      staging: 'سيتم حذف ما حفظه موقع ' + BRAND + ' في هذا المتصفح (الحسابات والمسودات وجلسة الدخول، فستُسجَّل خارج حسابك على هذا الجهاز). البيانات المرسلة إلى الخادم لا تُحذف بهذا الزر؛ لطلب حذفها تواصل معنا. هل تريد المتابعة؟'
     },
     portal: 'بوابتي'   // staff are sent to admin.html, clients to portal.html
   };
@@ -393,7 +395,7 @@
           return;
         }
         toast(removed ? tr('common.clearDone', 'تم مسح بياناتك المحفوظة من هذا الجهاز. أعد تحميل الصفحة لتحديث ما يظهر فيها.')
-                      : tr('common.clearNone', 'لا توجد بيانات محفوظة لموقع مرسى على هذا الجهاز.'), removed ? 'success' : 'info');
+                      : tr('common.clearNone', 'لا توجد بيانات محفوظة لموقع ' + BRAND + ' على هذا الجهاز.'), removed ? 'success' : 'info');
       });
     });
   }

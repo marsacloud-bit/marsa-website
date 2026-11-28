@@ -27,7 +27,7 @@
   var STR = {
     ar: {
       install: 'تثبيت التطبيق',
-      installAria: 'تثبيت تطبيق مرسى على هذا الجهاز',
+      installAria: 'تثبيت تطبيق {brand} على هذا الجهاز',
       iosHint: 'لتثبيت التطبيق على iPhone أو iPad: اضغط زر «مشاركة» في Safari ثم اختر «إضافة إلى الشاشة الرئيسية».',
       installed: 'تم تثبيت التطبيق.',
       update: 'تحديث',
@@ -37,7 +37,7 @@
     },
     en: {
       install: 'Install app',
-      installAria: 'Install the MARSA app on this device',
+      installAria: 'Install the {brand} app on this device',
       iosHint: 'To install on iPhone or iPad: tap “Share” in Safari, then “Add to Home Screen”.',
       installed: 'The app has been installed.',
       update: 'Update',
@@ -49,7 +49,7 @@
   if (I && typeof I.register === 'function') I.register('pwa', STR);
   function t(k) {
     if (I && typeof I.t === 'function') { var s = I.t('pwa.' + k); if (s && s !== 'pwa.' + k) return s; }
-    return STR.ar[k] || k;
+    return String(STR.ar[k] || k).replace(/\{brand\}/g, (window.MarsaI18n && typeof window.MarsaI18n.brand === 'function' ? window.MarsaI18n.brand() : 'Blue Sea'));
   }
 
   var deferredPrompt = null;   // BeforeInstallPromptEvent

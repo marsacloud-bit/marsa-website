@@ -50,7 +50,7 @@
     var U = F.U, el = U.el;
 
     function I18N() { return window.MarsaI18n; }
-    function interp(s, vars) {
+    function interp(s, vars) { if (s != null) s = String(s).replace(/\{brand\}/g, window.MarsaI18n && typeof window.MarsaI18n.brand === 'function' ? window.MarsaI18n.brand() : 'Blue Sea');
       return vars ? String(s).replace(/\{(\w+)\}/g, function (m, k) { return vars[k] != null ? vars[k] : m; }) : s;
     }
     function dictGet(k) {

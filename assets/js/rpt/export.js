@@ -40,7 +40,7 @@
   function I18N() { return window.MarsaI18n; }
   function lang() { var I = I18N(); return I && typeof I.lang === 'function' ? I.lang() : 'ar'; }
   function isEn() { return lang() === 'en'; }
-  function interp(s, vars) { return vars ? String(s).replace(/\{(\w+)\}/g, function (m, k) { return vars[k] != null ? vars[k] : m; }) : s; }
+  function interp(s, vars) { if (s != null) s = String(s).replace(/\{brand\}/g, window.MarsaI18n && typeof window.MarsaI18n.brand === 'function' ? window.MarsaI18n.brand() : 'Blue Sea'); return vars ? String(s).replace(/\{(\w+)\}/g, function (m, k) { return vars[k] != null ? vars[k] : m; }) : s; }
   function dictGet(k) {
     var D = window.MarsaRptDict || {};
     var s = (D[lang()] || {})[k];
@@ -265,7 +265,7 @@
     }
     var node = el('section', { class: 'rpt-print', dir: dir, lang: isEn() ? 'en' : 'ar' }, [
       el('header', { class: 'rpt-print-head' }, [
-        el('p', { class: 'rpt-print-brand', text: 'مرسى MARSA' }),
+        el('p', { class: 'rpt-print-brand', dir: 'ltr', text: (window.MarsaI18n && typeof window.MarsaI18n.brand === 'function' ? window.MarsaI18n.brand() : 'Blue Sea') }),
         el('h1', { class: 'rpt-print-title', text: o.title || '' }),
         o.org ? el('p', { class: 'rpt-print-org', text: o.org }) : null
       ]),

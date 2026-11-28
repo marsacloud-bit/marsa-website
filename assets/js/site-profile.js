@@ -109,8 +109,13 @@
     document.querySelectorAll('[data-site-platform-only]').forEach(function (el) { el.hidden = true; });   // texts about the platform name
   }
   // [data-site-swap]: the platform name inside a fixed text (and its aria-label) → the office name
-  var PLATFORM_WORD = /مرسى( MARSA)?|MARSA/g;
+  // the platform display name (one source: MarsaI18n.brand) + the provisional names it replaced
+  var BRAND = I18N && typeof I18N.brand === 'function' ? I18N.brand() : 'Blue Sea';
+  var BRAND_RE = BRAND.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  var PLATFORM_WORD = new RegExp(BRAND_RE + '|مرسى( MARSA)?|MARSA', 'g');
   function swapText(el, name) {
+    // [data-brand] inside a swapped text now shows the office: i18n.js must not refill it
+    if (el.querySelectorAll) el.querySelectorAll('[data-brand]').forEach(function (b) { b.removeAttribute('data-brand'); b.removeAttribute('dir'); });
     var walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false), n;
     while ((n = walk.nextNode())) {
       if (n._siteOrig === undefined) n._siteOrig = n.nodeValue;
@@ -133,7 +138,7 @@
   }
   // «مرسى | MARSA — وصف» → «المكتب — وصف»; «من نحن | مرسى MARSA» → «من نحن | المكتب»; «المدونة» → «المدونة | المكتب»
   function titled(t, name) {
-    var PLATFORM = /مرسى|MARSA|Marsa/;
+    var PLATFORM = new RegExp(BRAND_RE + '|مرسى|MARSA|Marsa');
     var bar = t.indexOf(' | '), dash = t.indexOf(' — ');
     if (bar > 0) {
       var head = t.slice(0, bar);

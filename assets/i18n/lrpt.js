@@ -162,7 +162,7 @@
     fld_billing_intents_status: 'حالة الفاتورة', fld_billing_intents_purpose: 'نوع الفاتورة', fld_billing_intents_sync_state: 'حالة المزامنة مع دفترة', fld_billing_intents_origin: 'مصدر الفاتورة', fld_external_invoice_id: 'رقم فاتورة دفترة', fld_daftra_number: 'رقم فاتورة دفترة', fld_daftra_status: 'حالة دفترة', fld_operational_ref: 'المرجع التشغيلي', fld_po_number: 'رقم أمر الشراء', fld_currency: 'العملة', fld_invoice_date: 'تاريخ الفاتورة', fld_issued_at: 'تاريخ الإصدار', fld_lines_total: 'إجمالي البنود', fld_lines_net: 'صافي البنود', fld_lines_vat: 'ضريبة البنود', fld_note: 'ملاحظة', fld_purpose: 'نوع الفاتورة', diff_ref: 'مرجع داخلي', diff_changed: '{f}: تغيّر', diff_changed_word: 'تغيّر',
     code_billing_intent_status_open: 'قيد الإعداد', code_billing_intent_status_draft: 'مسودة في دفترة', code_billing_intent_status_issued: 'صادرة', code_billing_intent_status_cancelled: 'ملغاة',
     code_billing_purpose_final: 'فاتورة نهائية', code_billing_purpose_interim: 'فاتورة مرحلية', code_billing_purpose_supplementary: 'فاتورة إضافية',
-    code_billing_origin_marsa: 'من مرسى', code_billing_origin_opening: 'افتتاحية', code_billing_origin_linked: 'مربوطة يدويًا',
+    code_billing_origin_marsa: 'من {brand}', code_billing_origin_opening: 'افتتاحية', code_billing_origin_linked: 'مربوطة يدويًا',
     code_billing_sync_state_idle: 'لم تُرسل', code_billing_sync_state_pending: 'بانتظار الإرسال', code_billing_sync_state_in_flight: 'قيد الإرسال', code_billing_sync_state_synced: 'متزامنة', code_billing_sync_state_unknown: 'غير معروفة', code_billing_sync_state_conflict: 'تعارض', code_billing_sync_state_error: 'خطأ',
   };
   var en = {
@@ -304,7 +304,7 @@
     fld_billing_intents_status: 'Invoice status', fld_billing_intents_purpose: 'Invoice type', fld_billing_intents_sync_state: 'Daftra sync state', fld_billing_intents_origin: 'Invoice origin', fld_external_invoice_id: 'Daftra invoice no.', fld_daftra_number: 'Daftra invoice no.', fld_daftra_status: 'Daftra status', fld_operational_ref: 'Operational ref', fld_po_number: 'PO number', fld_currency: 'Currency', fld_invoice_date: 'Invoice date', fld_issued_at: 'Issued at', fld_lines_total: 'Lines total', fld_lines_net: 'Lines net', fld_lines_vat: 'Lines VAT', fld_note: 'Note', fld_purpose: 'Invoice type', diff_ref: 'internal reference', diff_changed: '{f}: changed', diff_changed_word: 'changed',
     code_billing_intent_status_open: 'Being prepared', code_billing_intent_status_draft: 'Draft in Daftra', code_billing_intent_status_issued: 'Issued', code_billing_intent_status_cancelled: 'Cancelled',
     code_billing_purpose_final: 'Final invoice', code_billing_purpose_interim: 'Interim invoice', code_billing_purpose_supplementary: 'Supplementary invoice',
-    code_billing_origin_marsa: 'From Marsa', code_billing_origin_opening: 'Opening', code_billing_origin_linked: 'Linked by hand',
+    code_billing_origin_marsa: 'From {brand}', code_billing_origin_opening: 'Opening', code_billing_origin_linked: 'Linked by hand',
     code_billing_sync_state_idle: 'Not pushed', code_billing_sync_state_pending: 'Waiting to push', code_billing_sync_state_in_flight: 'Pushing', code_billing_sync_state_synced: 'In sync', code_billing_sync_state_unknown: 'Unknown', code_billing_sync_state_conflict: 'Conflict', code_billing_sync_state_error: 'Error',
   };
   // label.<domain>.<code> of the step-8 status_labels domains (the server's 20261124000100 rows; admin.js loads only some domains)

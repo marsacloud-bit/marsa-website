@@ -10,7 +10,7 @@
   if (!I) return;
   I.register('home', {
   ar: {
-    brand: 'Blue Sea', logoTag: 'منصة التخليص الجمركي', portCustoms: 'الجمارك', portCleared: 'تم الفسح',
+    brand: '{brand}', logoTag: 'منصة التخليص الجمركي', portCustoms: 'الجمارك', portCleared: 'تم الفسح',
     metaTitle: '{brand} | منصة سحابية لمكاتب التخليص الجمركي في السعودية',
     metaDesc: 'منصة سحابية لمكاتب التخليص الجمركي في السعودية: معاملات بمراحل واضحة، قراءة البوليصة والفاتورة والبيان بالذكاء الاصطناعي، المواعيد والسائقين، والفوترة مع برنامج المحاسبة. باقات شهرية بالريال السعودي.',
     skip: 'تخطَّ إلى المحتوى', homeAria: 'الصفحة الرئيسية', logoAlt: 'شعار المنصة', navAria: 'القائمة الرئيسية', menu: 'القائمة',
@@ -81,7 +81,7 @@
     footRights: 'جميع الحقوق محفوظة.'
   },
   en: {
-    brand: 'Blue Sea', logoTag: 'Customs clearance platform', portCustoms: 'Customs', portCleared: 'Cleared',
+    brand: '{brand}', logoTag: 'Customs clearance platform', portCustoms: 'Customs', portCleared: 'Cleared',
     metaTitle: '{brand} | Cloud platform for customs-clearance offices in Saudi Arabia',
     metaDesc: 'A cloud platform for customs-clearance offices in Saudi Arabia: transactions with clear stages, AI reading of bills of lading, invoices and declarations, appointments and drivers, and billing with your accounting software. Monthly plans in SAR.',
     skip: 'Skip to content', homeAria: 'Home', logoAlt: 'Platform logo', navAria: 'Main menu', menu: 'Menu',

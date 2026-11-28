@@ -141,7 +141,7 @@
       MRS_CUSTODY_LINK: 'ربط حركة العهدة غير صحيح ({f}).',
       // legacy step 7 (20261123000100): Daftra alignment
       MRS_DAFTRA_ACCOUNT_NOT_KSA: 'حساب دفترة ليس حسابًا سعوديًا ({f}): يجب أن تكون العملة الريال السعودي والدولة السعودية وضريبة 15 % مفعّلة. لم يُرسل شيء؛ يحوّل المالك الحساب ثم يعيد فحص الاتصال.',
-      MRS_DAFTRA_UNMAPPED: 'بنود خدمة بلا كود صنف دفترة معتمد: {x}. اضبط كود الصنف وطابقه وأكّده في «إعداد دفترة» (مرسى لا ينشئ أصنافًا في دفترة).',
+      MRS_DAFTRA_UNMAPPED: 'بنود خدمة بلا كود صنف دفترة معتمد: {x}. اضبط كود الصنف وطابقه وأكّده في «إعداد دفترة» ({brand} لا ينشئ أصنافًا في دفترة).',
       MRS_DAFTRA_CUSTOM_REQUIRED: 'حقول دفترة الإضافية المطلوبة ناقصة في المعاملة: {x}. أكمل البيانات ثم أعد المحاولة؛ لم يُرسل شيء.',
       MRS_DAFTRA_DRAFT_LOCKED: 'مسودة دفترة لهذه الفاتورة موجودة، وتعديل المسودات القائمة غير مسموح. نفّذ التغييرات يدويًا في دفترة كما في بند «تعديل يدوي مطلوب»، ثم أكّد التنفيذ.',
       MRS_DAFTRA_CLIENT_CONFLICT: 'عميل فاتورة دفترة يختلف عن عميل المعاملة المربوط بدفترة؛ الربط مرفوض.',
@@ -311,7 +311,7 @@
       service_only: 'هذا الإجراء خاص بعامل المزامنة على الخادم ولا يُستدعى من حساب موظف.',
       not_connected: 'الاتصال بدفترة غير جاهز (غير متصل أو المزامنة موقوفة). افحص الاتصال من «إعداد دفترة» أولًا.',
       capability: 'إمكانات دفترة اللازمة للإرسال غير مثبتة على هذا الحساب ({x}). أعد فحص الإمكانات من «إعداد دفترة».',
-      intent_issued: 'الفاتورة صادرة في دفترة ومجمّدة؛ لا تُعدَّل من مرسى. المبالغ اللاحقة تذهب إلى فاتورة إضافية.',
+      intent_issued: 'الفاتورة صادرة في دفترة ومجمّدة؛ لا تُعدَّل من {brand}. المبالغ اللاحقة تذهب إلى فاتورة إضافية.',
       in_invoice: 'هذا المبلغ على بند فاتورة قائمة؛ احذفه من الفاتورة أولًا قبل تغيير حالته.',
       sync_in_flight: 'عملية مزامنة مع دفترة قيد التنفيذ أو نتيجتها غير معروفة بعد؛ انتظر المطابقة ثم أعد المحاولة.',
       conflict_open: 'يوجد تعارض مفتوح مع دفترة (عُدّلت المسودة هناك)؛ عالج التعارض أولًا.',
@@ -319,7 +319,7 @@
       no_issued_final: 'الفاتورة الإضافية تتطلب فاتورة نهائية صادرة للمعاملة نفسها والعملة نفسها.',
       final_issued: 'صدرت الفاتورة النهائية؛ لا تُنشأ فاتورة مرحلية بعدها. استخدم فاتورة إضافية.',
       intent_taken: 'يوجد غرض فوترة قائم لهذه المعاملة والعملة والغرض. افتحه بدلًا من إنشاء نسخة ثانية.',
-      external_id_taken: 'عميل دفترة هذا مربوط بعميل آخر في مرسى؛ لا يُربط عميل دفترة واحد بعميلين.',
+      external_id_taken: 'عميل دفترة هذا مربوط بعميل آخر في {brand}؛ لا يُربط عميل دفترة واحد بعميلين.',
       not_eligible: 'أحد المبالغ غير مؤهل للفوترة (غير معتمد، أو بعملة أخرى، أو على فاتورة أخرى، أو من معاملة أخرى).',
       tax_rate_unmapped: 'نسبة الضريبة لبعض البنود غير مسموحة في إعداد دفترة ({x}).',
       client_review: 'ربط العميل بدفترة يحتاج مراجعة (وُجد أكثر من عميل محتمل). اختر العميل الصحيح من «إعداد دفترة».',
@@ -429,7 +429,7 @@
       'MRS_PAY_DOCUMENT:in_use': 'المرفق «{x}» مرتبط بسداد آخر.',
       'MRS_PAY_DOCUMENT:allocation': 'اربط كل فاتورة في السداد المشترك بالتوزيع الخاص بها، ولا تربط مرفقًا بتوزيع في السداد الفردي.',
       'MRS_PAY_DOCUMENT:role': 'نوع المرفق غير صحيح (فاتورة الجهة، إثبات السداد، مرفق إضافي).',
-      'MRS_PAY_LOCKED:daftra': 'هذا السداد مرتبط بدفترة، فلا يُلغى ولا يُعدَّل من مرسى.',
+      'MRS_PAY_LOCKED:daftra': 'هذا السداد مرتبط بدفترة، فلا يُلغى ولا يُعدَّل من {brand}.',
       'MRS_PAY_LOCKED:invoiced': 'المبلغ المسترد من هذا السداد مفوتر على العميل، فلا يُلغى السداد ولا يُعدَّل.',
       'MRS_PAY_LOCKED:custody': 'هذا السداد مخصوم من عهدة العميل. ألغِ حركة الخصم أولًا.',
       'MRS_CUSTODY_LINK:transaction_required': 'خصم العهدة يجب أن يكون مرتبطًا بمعاملة.',
@@ -651,7 +651,7 @@
         detail_service_only: 'This action belongs to the server-side sync worker and cannot be called from a staff account.',
         detail_not_connected: 'The Daftra connection is not ready (not connected or sync disabled). Check the connection in "Daftra settings" first.',
         detail_capability: 'The Daftra capabilities needed to push are not proven on this account ({x}). Re-run the capability check in "Daftra settings".',
-        detail_intent_issued: 'The invoice is issued in Daftra and frozen; Marsa never edits it. Later charges go to a supplementary invoice.',
+        detail_intent_issued: 'The invoice is issued in Daftra and frozen; {brand} never edits it. Later charges go to a supplementary invoice.',
         detail_in_invoice: 'This charge is on an invoice line; remove it from the invoice before changing its status.',
         detail_sync_in_flight: 'A Daftra sync is running or its result is still unknown; wait for reconciliation and try again.',
         detail_conflict_open: 'There is an open conflict with Daftra (the draft was edited there); resolve it first.',
@@ -659,7 +659,7 @@
         detail_no_issued_final: 'A supplementary invoice needs an issued final invoice for the same transaction and currency.',
         detail_final_issued: 'The final invoice is issued; no interim invoice after it. Use a supplementary invoice.',
         detail_intent_taken: 'A billing intent already exists for this transaction, currency and purpose. Open it instead of creating a second one.',
-        detail_external_id_taken: 'This Daftra client is linked to another Marsa client; one Daftra client never maps to two.',
+        detail_external_id_taken: 'This Daftra client is linked to another {brand} client; one Daftra client never maps to two.',
         detail_not_eligible: 'A charge is not eligible for billing (not approved, another currency, already on an invoice, or another transaction).',
         detail_tax_rate_unmapped: 'Some lines have a VAT rate that is not allowed in the Daftra settings ({x}).',
         detail_client_review: 'The Daftra client link needs review (several possible clients were found). Choose the right one in "Daftra settings".',
@@ -822,7 +822,8 @@
     if (!tpl && field && Object.prototype.hasOwnProperty.call(AR.details, field)) tpl = i18nStr('err.detail_' + field) || AR.details[field];
     if (!tpl) tpl = i18nStr('err.' + code) || AR.errors[code] || i18nStr('err.UNKNOWN') || AR.errors.UNKNOWN;
     var msg = (PLAN_CODES[code] ? String(tpl).replace(/\{f\}|\{field\}/g, planLabel(code, field)) : fmt(tpl, field))
-      .replace(/\{x\}/g, extra == null ? '' : String(extra)).replace(/\s*\(\)/g, '');
+      .replace(/\{x\}/g, extra == null ? '' : String(extra)).replace(/\s*\(\)/g, '')
+      .replace(/\{brand\}/g, window.MarsaI18n && typeof window.MarsaI18n.brand === 'function' ? window.MarsaI18n.brand() : 'Blue Sea');
     return { code: code, field: field || null, message: msg, raw: raw || null };
   }
   // G4 details may carry a reference after the code ('invoice_number_taken:<uuid>', 'lines_unallocated:1,3'),

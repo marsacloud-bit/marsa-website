@@ -16,7 +16,7 @@
   window.MarsaI18n.register('portal', {
     ar: {
       /* ---- page / shell ---- */
-      docTitle: 'بوابة العميل | مرسى MARSA',
+      docTitle: 'بوابة العميل | {brand}',
       title: 'بوابة العميل',
       crumb: 'حسابي',
       crumbAria: 'مسار التنقل',
@@ -47,12 +47,12 @@
 
       /* ---- link tab (static) ---- */
       linkTitle: 'ربط طلب سابق بحسابك',
-      linkIntro: 'إن أرسلت طلبًا قبل إنشاء حسابك فأدخل رقمه المرجعي ورمز التتبع الذي ظهر لك عند الإرسال. نتحقق منهما ثم نرسل طلب الربط إلى فريق مرسى.',
+      linkIntro: 'إن أرسلت طلبًا قبل إنشاء حسابك فأدخل رقمه المرجعي ورمز التتبع الذي ظهر لك عند الإرسال. نتحقق منهما ثم نرسل طلب الربط إلى فريق {brand}.',
       lkRef: 'الرقم المرجعي', lkRefErr: 'أدخل رقمًا مرجعيًا صحيحًا.',
       lkToken: 'رمز التتبع', lkTokenHint: 'رمز سري من 64 خانة. لا تشاركه مع أحد ولا ترسله في رسالة.', lkTokenErr: 'رمز التتبع غير صحيح.',
       lkSubmit: 'تحقّق من الطلب',
       /* ---- profile tab (static) ---- */
-      pfTitle: 'بياناتي', pfEmail: 'البريد الإلكتروني', pfEmailHint: 'لتغيير البريد تواصل مع فريق مرسى.',
+      pfTitle: 'بياناتي', pfEmail: 'البريد الإلكتروني', pfEmailHint: 'لتغيير البريد تواصل مع فريق {brand}.',
       pfName: 'الاسم الكامل', pfNameErr: 'أدخل الاسم الكامل.', pfPhone: 'رقم الجوال', pfPhoneErr: 'أدخل رقم جوال سعودي صحيحًا.',
       pfSave: 'حفظ البيانات',
       pwTitle: 'تغيير كلمة المرور', pwNew: 'كلمة المرور الجديدة', pwHint: '8 أحرف على الأقل تجمع حروفًا وأرقامًا.', pwWeak: 'كلمة المرور ضعيفة.',
@@ -70,7 +70,7 @@
       listSep: '، ',
 
       /* ---- transactions ---- */
-      noTx: 'لا توجد معاملات مرتبطة بحسابك بعد. تظهر المعاملات هنا بعد أن يربط فريق مرسى ملف منشأتك بحسابك، أو بعد تحويل طلب أرسلته وأنت مسجّل الدخول إلى معاملة.',
+      noTx: 'لا توجد معاملات مرتبطة بحسابك بعد. تظهر المعاملات هنا بعد أن يربط فريق {brand} ملف منشأتك بحسابك، أو بعد تحويل طلب أرسلته وأنت مسجّل الدخول إلى معاملة.',
       txNotFound: 'المعاملة غير موجودة أو لا تملك صلاحية عرضها.',
       colRef: 'الرقم المرجعي', colOperation: 'العملية', colBl: 'رقم البوليصة', colStage: 'المرحلة الحالية', colUpdated: 'آخر تحديث',
       eyebrowTx: 'معاملة',
@@ -83,7 +83,7 @@
       noContainers: 'لا توجد حاويات مسجّلة لهذه المعاملة.',
       colCtrNo: 'رقم الحاوية', colCtrType: 'النوع', colOpState: 'الحالة التشغيلية', colReturn: 'حالة الإرجاع',
       colDeadline: 'آخر موعد للإرجاع', colReturnedAt: 'تاريخ الإرجاع',
-      ctrNote: 'تُعدّ الحاوية مُرجعة فقط بإيصال استلام الفارغ من الساحة أو المشغّل بعد تحقق موظف مرسى؛ تعليمات الإرجاع أو إيصال تسليم الممتلئ ليست إثباتًا.',
+      ctrNote: 'تُعدّ الحاوية مُرجعة فقط بإيصال استلام الفارغ من الساحة أو المشغّل بعد تحقق موظف {brand}؛ تعليمات الإرجاع أو إيصال تسليم الممتلئ ليست إثباتًا.',
       secAppts: 'مواعيد الميناء المؤكدة',
       noAppointments: 'لا توجد مواعيد مؤكدة حاليًا.',
       apptWhole: 'المعاملة كلها',
@@ -102,7 +102,7 @@
       docFileHint: 'PDF أو صورة أو Excel/CSV، حتى 25 ميغابايت. نحفظ الأصل كما هو مع بصمته (SHA-256) ولا يمكن استبداله أو حذفه.',
       upload: 'رفع المستند',
       uploading: 'جارٍ حساب البصمة ورفع الملف…',
-      uploadOk: 'تم رفع المستند وتسجيله. سيراجعه فريق مرسى ويصنّفه.',
+      uploadOk: 'تم رفع المستند وتسجيله. سيراجعه فريق {brand} ويصنّفه.',
       uploadPartial: 'سُجّل المستند لكن تعذّر رفع الملف نفسه. تواصل معنا أو أعد المحاولة بملف جديد.',
       pickFile: 'اختر ملفًا لرفعه.',
       badType: 'نوع الملف غير مدعوم. الأنواع المسموحة: PDF وصور JPG/PNG/WEBP/HEIC وExcel (xlsx) وCSV.',
@@ -157,10 +157,10 @@
       tokenBad: 'رمز التتبع 64 خانة (أرقام وحروف a–f) كما ظهر لك عند إرسال الطلب.',
       lkType: 'النوع', lkTypeTx: 'معاملة', lkTypeReq: 'طلب خدمة', lkStage: 'المرحلة الحالية', lkStatus: 'الحالة',
       lkVerified: 'تم التحقق من الرقم المرجعي ورمز التتبع.',
-      lkExplain: 'الربط بحسابك قرار يتخذه فريق مرسى بعد التحقق (لا يتم تلقائيًا). سنرسل إليهم الرقم المرجعي وبيانات حسابك فقط، دون رمز التتبع.',
+      lkExplain: 'الربط بحسابك قرار يتخذه فريق {brand} بعد التحقق (لا يتم تلقائيًا). سنرسل إليهم الرقم المرجعي وبيانات حسابك فقط، دون رمز التتبع.',
       lkSend: 'اطلب ربطه بحسابي',
       lkNeedPhone: 'أضف رقم جوالك في تبويب «ملفي» أولًا ليتمكن الفريق من التواصل معك.',
-      linkSent: 'أرسلنا طلب الربط إلى فريق مرسى. بعد التحقق من ملكيتك للطلب سيظهر في بوابتك. لم نُرسل رمز التتبع ضمن الطلب.',
+      linkSent: 'أرسلنا طلب الربط إلى فريق {brand}. بعد التحقق من ملكيتك للطلب سيظهر في بوابتك. لم نُرسل رمز التتبع ضمن الطلب.',
       lkMsgRef: 'رقم الرسالة: ',
 
       /* ---- profile / session ---- */
@@ -204,7 +204,7 @@
       'lbl.portal_payment_status.paid': 'مسددة', 'lbl.portal_payment_status.unknown': 'قيد التحديث'
     },
     en: {
-      docTitle: 'Client portal | MARSA',
+      docTitle: 'Client portal | {brand}',
       title: 'Client portal',
       crumb: 'My account',
       crumbAria: 'Breadcrumb',
@@ -234,11 +234,11 @@
       tabTx: 'My transactions', tabContainers: 'My containers', tabInvoices: 'My invoices', tabReq: 'My requests', tabLink: 'Link a request', tabProfile: 'My profile',
 
       linkTitle: 'Link an earlier request to your account',
-      linkIntro: 'If you sent a request before creating your account, enter its reference number and the tracking code shown when you sent it. We verify both, then send the link request to the Marsa team.',
+      linkIntro: 'If you sent a request before creating your account, enter its reference number and the tracking code shown when you sent it. We verify both, then send the link request to the {brand} team.',
       lkRef: 'Reference number', lkRefErr: 'Enter a valid reference number.',
       lkToken: 'Tracking code', lkTokenHint: 'A 64-character secret code. Do not share it or send it in a message.', lkTokenErr: 'Invalid tracking code.',
       lkSubmit: 'Verify the request',
-      pfTitle: 'My details', pfEmail: 'E-mail', pfEmailHint: 'To change your e-mail, contact the Marsa team.',
+      pfTitle: 'My details', pfEmail: 'E-mail', pfEmailHint: 'To change your e-mail, contact the {brand} team.',
       pfName: 'Full name', pfNameErr: 'Enter your full name.', pfPhone: 'Mobile number', pfPhoneErr: 'Enter a valid Saudi mobile number.',
       pfSave: 'Save details',
       pwTitle: 'Change password', pwNew: 'New password', pwHint: 'At least 8 characters mixing letters and digits.', pwWeak: 'Weak password.',
@@ -254,7 +254,7 @@
       dash: '—',
       listSep: ', ',
 
-      noTx: 'No transactions are linked to your account yet. Transactions appear here once the Marsa team links your company file to your account, or once a request you sent while signed in is converted into a transaction.',
+      noTx: 'No transactions are linked to your account yet. Transactions appear here once the {brand} team links your company file to your account, or once a request you sent while signed in is converted into a transaction.',
       txNotFound: 'The transaction does not exist or you do not have permission to view it.',
       colRef: 'Reference', colOperation: 'Operation', colBl: 'B/L number', colStage: 'Current stage', colUpdated: 'Last update',
       eyebrowTx: 'Transaction',
@@ -267,7 +267,7 @@
       noContainers: 'No containers are registered for this transaction.',
       colCtrNo: 'Container no.', colCtrType: 'Type', colOpState: 'Operational state', colReturn: 'Return status',
       colDeadline: 'Return deadline', colReturnedAt: 'Returned on',
-      ctrNote: 'A container counts as returned only with the empty-return receipt from the yard or operator, verified by Marsa staff; return instructions or a full-delivery receipt are not proof.',
+      ctrNote: 'A container counts as returned only with the empty-return receipt from the yard or operator, verified by {brand} staff; return instructions or a full-delivery receipt are not proof.',
       secAppts: 'Confirmed port appointments',
       noAppointments: 'No confirmed appointments at the moment.',
       apptWhole: 'Whole transaction',
@@ -286,7 +286,7 @@
       docFileHint: 'PDF, image or Excel/CSV, up to 25 MB. We keep the original as is with its fingerprint (SHA-256); it cannot be replaced or deleted.',
       upload: 'Upload document',
       uploading: 'Computing the fingerprint and uploading the file…',
-      uploadOk: 'The document was uploaded and recorded. The Marsa team will review and classify it.',
+      uploadOk: 'The document was uploaded and recorded. The {brand} team will review and classify it.',
       uploadPartial: 'The document was recorded but the file itself could not be uploaded. Contact us or try again with a new file.',
       pickFile: 'Choose a file to upload.',
       badType: 'Unsupported file type. Allowed: PDF, JPG/PNG/WEBP/HEIC images, Excel (xlsx) and CSV.',
@@ -337,10 +337,10 @@
       tokenBad: 'The tracking code has 64 characters (digits and letters a–f), as shown when you sent the request.',
       lkType: 'Type', lkTypeTx: 'Transaction', lkTypeReq: 'Service request', lkStage: 'Current stage', lkStatus: 'Status',
       lkVerified: 'The reference number and tracking code were verified.',
-      lkExplain: 'Linking it to your account is a decision the Marsa team takes after verification (not automatic). We send them the reference number and your account details only, without the tracking code.',
+      lkExplain: 'Linking it to your account is a decision the {brand} team takes after verification (not automatic). We send them the reference number and your account details only, without the tracking code.',
       lkSend: 'Ask to link it to my account',
       lkNeedPhone: 'Add your mobile number in the “My profile” tab first so the team can contact you.',
-      linkSent: 'We sent the link request to the Marsa team. Once your ownership is verified, the request will appear in your portal. The tracking code was not sent.',
+      linkSent: 'We sent the link request to the {brand} team. Once your ownership is verified, the request will appear in your portal. The tracking code was not sent.',
       lkMsgRef: 'Message number: ',
 
       kLinkedClients: 'Linked client files', kMemberships: 'Memberships', kCreated: 'Account created',

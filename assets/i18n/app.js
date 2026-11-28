@@ -9,7 +9,7 @@
   'use strict';
   var DICT = {
     ar: {
-      brand: 'مرسى MARSA', title_suffix: 'مرسى MARSA', loading: 'جارٍ التحميل…',
+      brand: '{brand}', title_suffix: '{brand}', loading: 'جارٍ التحميل…',
       // navigation groups + items (single source: NAV in app-shell.js → MarsaShell.navItems())
       grp_work: 'العمل اليومي', grp_manage: 'الإدارة', grp_platform: 'المنصة', grp_client: 'حسابي',
       nav_dashboard: 'نظرة عامة', nav_requests: 'الطلبات الواردة', nav_transactions: 'المعاملات', nav_clients: 'العملاء',
@@ -66,7 +66,7 @@
       pl_pf_ai: 'مفاتيح الذكاء الاصطناعي', pl_pf_health: 'صحة الخادم', pl_pf_errors: 'أخطاء الواجهة'
     },
     en: {
-      brand: 'MARSA', title_suffix: 'MARSA', loading: 'Loading…',
+      brand: '{brand}', title_suffix: '{brand}', loading: 'Loading…',
       grp_work: 'Workspace', grp_manage: 'Administration', grp_platform: 'Platform', grp_client: 'My account',
       nav_dashboard: 'Overview', nav_requests: 'Incoming requests', nav_transactions: 'Transactions', nav_clients: 'Clients',
       nav_messages: 'Contact messages', nav_bulk: 'Bulk upload', nav_ocr: 'Document reader', nav_imports: 'Import history',

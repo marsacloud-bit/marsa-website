@@ -36,7 +36,8 @@
     var D = window.MarsaHelpDict || {};
     var s = (D[l] || {})[k];
     if (s == null) return tr(k, vars);
-    return String(s).replace(/\{(\w+)\}/g, function (m, n) { return vars && vars[n] != null ? String(vars[n]) : m; });
+    return String(s).replace(/\{brand\}/g, (window.MarsaI18n && typeof window.MarsaI18n.brand === 'function' ? window.MarsaI18n.brand() : 'Blue Sea'))
+      .replace(/\{(\w+)\}/g, function (m, n) { return vars && vars[n] != null ? String(vars[n]) : m; });
   }
   function lang() { return I && typeof I.lang === 'function' && I.lang() === 'en' ? 'en' : 'ar'; }
   function h(tag, attrs, kids) {
@@ -225,7 +226,7 @@
   function setTitle(id) {
     var t = tr('guide_' + id);
     if (Shell && typeof Shell.setTitle === 'function') Shell.setTitle(tr('title'), id === DEFAULT_ID ? [] : [{ label: t }]);
-    else document.title = tr('title') + ' | مرسى MARSA';
+    else document.title = tr('title') + ' | ' + (window.MarsaI18n && typeof window.MarsaI18n.brand === 'function' ? window.MarsaI18n.brand() : 'Blue Sea');
     if (Shell && typeof Shell.setActive === 'function') Shell.setActive('help');
   }
   function fetchText(path) {

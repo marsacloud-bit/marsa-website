@@ -86,8 +86,11 @@
      Strings
      ------------------------------------------------------------------ */
   function lang() { return I18N && typeof I18N.lang === 'function' ? I18N.lang() : 'ar'; }
+  // platform display name: one source (MarsaI18n.brand); dictionaries write '{brand}'
+  function brand() { return I18N && typeof I18N.brand === 'function' ? I18N.brand() : 'Blue Sea'; }
   function interp(s, vars) {
-    return vars ? String(s).replace(/\{(\w+)\}/g, function (m, k) { return vars[k] != null ? vars[k] : m; }) : s;
+    s = String(s).replace(/\{brand\}/g, brand());
+    return vars ? s.replace(/\{(\w+)\}/g, function (m, k) { return vars[k] != null ? vars[k] : m; }) : s;
   }
   function t(k, vars) {
     var key = 'app.' + k;

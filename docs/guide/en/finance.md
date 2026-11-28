@@ -44,14 +44,14 @@ For accountants and accounts managers (and branch managers in their branch, and 
 5. The accountant issues the invoice inside Daftra. Then "Refresh status from Daftra" brings the invoice number, status and payment as Daftra shows them.
 6. "Sync queue & review" shows every attempt with its request and response, and what needs a human decision.
 
-> Charges after issue go to a supplementary invoice; an issued invoice is never changed from MARSA. Daftra is the source of the official figures.
+> Charges after issue go to a supplementary invoice; an issued invoice is never changed from Blue Sea. Daftra is the source of the official figures.
 
 ## How do I set up Daftra?
 
 Accounts manager and organization admin, from "Daftra settings" with tabs "Connection", "Clients" and "Items":
 
 1. "Connection": mode (mock), subdomain, sync on / off, tax settings. Then "Probe capabilities".
-2. "Clients": link a MARSA client to a Daftra client (optional; the push searches by reference, then creates). Differences are shown for review and never overwritten automatically on either side.
+2. "Clients": link a Blue Sea client to a Daftra client (optional; the push searches by reference, then creates). Differences are shown for review and never overwritten automatically on either side.
 3. "Items": one item key per Daftra product.
 
 > No API key is stored here, and there is no field to enter one.

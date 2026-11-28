@@ -134,7 +134,7 @@
   document.documentElement.removeAttribute('data-theme');   // no dark theme any more
   function setDocTitle() {
     var v = tr('pageTitle');
-    if (v && v !== 'pageTitle') document.title = v + (lang() === 'en' ? ' | MARSA' : ' | مرسى MARSA');
+    if (v && v !== 'pageTitle') document.title = v + ' | ' + (window.MarsaI18n && typeof window.MarsaI18n.brand === 'function' ? window.MarsaI18n.brand() : 'Blue Sea');
   }
   window.addEventListener('marsa:langchange', setDocTitle);
   setDocTitle();

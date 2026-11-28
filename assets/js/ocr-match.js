@@ -3065,7 +3065,7 @@
       var y = PAD;
       var sx = rtl ? W - PAD : PAD;
       text(T('m_report_title'), sx, y, font(28, 800), '#0B2545');
-      text('MARSA · مرسى', rtl ? PAD : W - PAD, y + 8, font(16, 700), '#14A3A8', rtl ? 'left' : 'right');
+      text((window.MarsaI18n && typeof window.MarsaI18n.brand === 'function' ? window.MarsaI18n.brand() : 'Blue Sea'), rtl ? PAD : W - PAD, y + 8, font(16, 700), '#14A3A8', rtl ? 'left' : 'right');
       y += 54;
       metaLines.forEach(function (m) { text(m, sx, y, font(15), '#475569'); y += 24; });
       y += 20;

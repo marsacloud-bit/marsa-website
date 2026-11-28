@@ -3,18 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>الدخول إلى المنصة | مرسى MARSA</title>
-  <meta name="description" content="دخول العملاء ودخول الموظفين في منصة مرسى للتخليص الجمركي في السعودية: متابعة الطلبات والمعاملات والمستندات بتسجيل دخول آمن. بيئة تجريبية.">
+  <title>الدخول إلى المنصة | Blue Sea</title>
+  <meta name="description" content="دخول العملاء ودخول الموظفين في منصة Blue Sea للتخليص الجمركي في السعودية: متابعة الطلبات والمعاملات والمستندات بتسجيل دخول آمن. بيئة تجريبية.">
   <meta name="theme-color" content="#0B3A6E">
   <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
   <link rel="icon" type="image/png" href="assets/img/favicon.png">
   <link rel="apple-touch-icon" href="assets/img/icons/icon-180.png">
   <!-- social preview (G6a §1): no og:image / canonical until the production domain is decided -->
   <meta property="og:type" content="website">
-  <meta property="og:site_name" content="مرسى MARSA">
+  <meta property="og:site_name" content="Blue Sea">
   <meta property="og:locale" content="ar_SA">
-  <meta property="og:title" content="الدخول إلى المنصة | مرسى MARSA">
-  <meta property="og:description" content="دخول العملاء ودخول الموظفين في منصة مرسى للتخليص الجمركي في السعودية: متابعة الطلبات والمعاملات والمستندات بتسجيل دخول آمن. بيئة تجريبية.">
+  <meta property="og:title" content="الدخول إلى المنصة | Blue Sea">
+  <meta property="og:description" content="دخول العملاء ودخول الموظفين في منصة Blue Sea للتخليص الجمركي في السعودية: متابعة الطلبات والمعاملات والمستندات بتسجيل دخول آمن. بيئة تجريبية.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <link rel="stylesheet" href="assets/fonts/cairo/cairo.css">
@@ -30,8 +30,8 @@
 
   <!-- ============ LOGIN v2 top bar (owner 2026-11-23): the office brand, back to the site, language ============ -->
   <div class="lg-top">
-    <a class="lg-brand" href="office.html" data-site-brand aria-label="مرسى - الصفحة الرئيسية" data-i18n-attr="aria-label:nav.homeAria">
-      <img data-site-logo src="assets/img/logo-header.png" alt="مرسى MARSA" width="72" height="50" data-i18n-attr="alt:nav.logoAlt">
+    <a class="lg-brand" href="office.html" data-site-brand aria-label="Blue Sea - الصفحة الرئيسية" data-i18n-attr="aria-label:nav.homeAria">
+      <img data-site-logo src="assets/img/logo-bluesea.svg" alt="Blue Sea" width="180" height="50" data-i18n-attr="alt:nav.logoAlt">
     </a>
     <div class="lg-top-actions">
       <a class="lg-back" href="office.html"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span data-i18n="login.v2Back">العودة إلى الموقع</span></a>
@@ -56,8 +56,8 @@
   </div>
   <header class="site-header">
     <div class="container header-inner">
-      <a class="brand" href="office.html" aria-label="مرسى - الصفحة الرئيسية" data-i18n-attr="aria-label:nav.homeAria">
-        <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="84" height="58" data-i18n-attr="alt:nav.logoAlt">
+      <a class="brand" href="office.html" aria-label="Blue Sea - الصفحة الرئيسية" data-i18n-attr="aria-label:nav.homeAria">
+        <img src="assets/img/logo-bluesea.svg" alt="Blue Sea - تخليص جمركي وشحن" width="210" height="58" data-i18n-attr="alt:nav.logoAlt">
       </a>
       <nav class="main-nav" aria-label="القائمة الرئيسية" data-i18n-attr="aria-label:nav.mainMenu">
         <ul class="nav-list">
@@ -96,7 +96,7 @@
 
   <aside class="drawer" id="mobile-drawer" aria-label="القائمة الجانبية" aria-hidden="true">
     <div class="drawer-head">
-      <img src="assets/img/logo-header.png" alt="مرسى MARSA" width="72" height="50">
+      <img src="assets/img/logo-bluesea.svg" alt="Blue Sea" width="180" height="50">
       <button class="drawer-close" type="button" aria-label="إغلاق القائمة">
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
       </button>
@@ -176,7 +176,7 @@
           <div data-auth-view="demo" data-show-mode="demo">
             <div class="alert alert-warning">
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>
-              <span data-i18n-html="login.demoNotice"><strong>الدخول غير متاح في نسخة العرض التجريبية.</strong> تسجيل الدخول يعمل فقط بعد ربط الموقع بالبيئة المتصلة (Supabase) في ملف <code dir="ltr">assets/js/config.js</code>. لذلك لا تعرض هذه الصفحة الآن أي حقول لإدخال بيانات الدخول، فلا تُدخل بيانات دخول باسم مرسى في أي مكان آخر من هذه النسخة.</span>
+              <span data-i18n-html="login.demoNotice"><strong>الدخول غير متاح في نسخة العرض التجريبية.</strong> تسجيل الدخول يعمل فقط بعد ربط الموقع بالبيئة المتصلة (Supabase) في ملف <code dir="ltr">assets/js/config.js</code>. لذلك لا تعرض هذه الصفحة الآن أي حقول لإدخال بيانات الدخول، فلا تُدخل بيانات دخول باسم <span data-brand>Blue Sea</span> في أي مكان آخر من هذه النسخة.</span>
             </div>
             <p class="alert alert-danger mt-2" data-demo-misconfig hidden data-i18n="login.demoMisconfig">إعدادات الاتصال في ملف config.js غير صحيحة، لذلك بقي الموقع في وضع نسخة العرض.</p>
             <div class="grid grid-2 mt-3">
@@ -381,7 +381,7 @@
 
               <div data-client-sub="signup" hidden>
                 <h3 class="auth-h" data-i18n="login.signupTitle">إنشاء حساب عميل</h3>
-                <p class="text-muted text-sm" data-i18n="login.signupLead">بعد إنشاء الحساب تظهر في بوابتك الطلبات التي ترسلها وأنت مسجّل الدخول. ربط ملف منشأتك وبقية المعاملات يتم بعد تحقق فريق مرسى.</p>
+                <p class="text-muted text-sm" data-i18n="login.signupLead">بعد إنشاء الحساب تظهر في بوابتك الطلبات التي ترسلها وأنت مسجّل الدخول. ربط ملف منشأتك وبقية المعاملات يتم بعد تحقق فريق <span data-brand>Blue Sea</span>.</p>
                 <form class="form" id="client-signup-form" data-auth-form novalidate>
                   <div class="form-group">
                     <label class="form-label" for="su-name"><span data-i18n="login.fullName">الاسم الكامل</span> <span class="req">*</span></label>
@@ -551,10 +551,10 @@
     <div class="container">
       <div class="footer-grid">
         <div class="footer-brand">
-          <a class="footer-logo" href="office.html" aria-label="مرسى - الصفحة الرئيسية" data-i18n-attr="aria-label:nav.homeAria">
-            <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="107" height="74" data-i18n-attr="alt:nav.logoAlt">
+          <a class="footer-logo" href="office.html" aria-label="Blue Sea - الصفحة الرئيسية" data-i18n-attr="aria-label:nav.homeAria">
+            <img src="assets/img/logo-bluesea.svg" alt="Blue Sea - تخليص جمركي وشحن" width="268" height="74" data-i18n-attr="alt:nav.logoAlt">
           </a>
-          <p data-i18n="footer.about">مرسى منصة سعودية لخدمات التخليص الجمركي والشحن أونلاين، تساعد المستوردين والمصدّرين في المملكة على تخليص شحناتهم بسرعة وشفافية.</p>
+          <p data-i18n="footer.about"><span data-brand>Blue Sea</span> منصة سعودية لخدمات التخليص الجمركي والشحن أونلاين، تساعد المستوردين والمصدّرين في المملكة على تخليص شحناتهم بسرعة وشفافية.</p>
           <div class="social">
             <a href="contact.html" aria-label="فيسبوك" data-i18n-attr="aria-label:footer.facebook"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h-2.5A3.5 3.5 0 0 0 9 6.5V9H7v3.5h2V21h3.5v-8.5H15l.5-3.5h-3V7a1 1 0 0 1 1-1H15z"/></svg></a>
             <a href="contact.html" aria-label="لينكدإن" data-i18n-attr="aria-label:footer.linkedin"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 10v7M8 7v.01M12 17v-4a2 2 0 0 1 4 0v4M12 10v7"/></svg></a>
@@ -602,7 +602,7 @@
       <button class="btn btn-sm btn-outline-white" type="button" data-clear-local data-i18n="footer.clearData">مسح بياناتي من هذا الجهاز</button>
     </div>
     <div class="container footer-bottom">
-      <span>© <span id="year">2026</span> <span data-i18n="footer.rights">مرسى MARSA. جميع الحقوق محفوظة.</span></span>
+      <span>© <span id="year">2026</span> <span data-i18n="footer.rights"><span data-brand>Blue Sea</span>. جميع الحقوق محفوظة.</span></span>
       <span data-i18n="footer.disclaimer">منصة خاصة لخدمات التخليص الجمركي — غير تابعة لأي جهة حكومية.</span>
     </div>
   </footer>

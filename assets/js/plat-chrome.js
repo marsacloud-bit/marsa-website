@@ -55,7 +55,8 @@
     var sh = SH();
     if (sh && typeof sh.t === 'function') return sh.t(k, vars);
     var d = window.MarsaAppDict && (window.MarsaAppDict[lang()] || window.MarsaAppDict.ar);
-    return (d && d[k]) || k;
+    var s = (d && d[k]) || k;
+    return String(s).replace(/\{brand\}/g, I18N && typeof I18N.brand === 'function' ? I18N.brand() : 'Blue Sea');
   }
   function has(k) { var s = t(k); return s && s !== k && s !== 'app.' + k; }
   function lang() { return I18N && I18N.lang && I18N.lang() === 'en' ? 'en' : 'ar'; }

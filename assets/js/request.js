@@ -7,6 +7,8 @@
    ===================================================================== */
 (function () {
   'use strict';
+  // platform display name: one source (MarsaI18n.brand → MARSA_CONFIG.platformName)
+  var BRAND = window.MarsaI18n && typeof window.MarsaI18n.brand === 'function' ? window.MarsaI18n.brand() : 'Blue Sea';
 
   function ready(fn) {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
@@ -745,8 +747,8 @@
         ['الحاوية', mode === 'sea' ? radioTitle('containerType') : ''],
         ['أرقام الحاويات', mode === 'sea' ? parseContainers(val('containerNumbers')).join('، ') : '', true],
         [countLabel(), val('count'), true],
-        ['HS Code', val('hsCode') || 'يحدده فريق مرسى', !!val('hsCode')],
-        ['رقم البيان الجمركي', exp ? '' : (val('declarationNo') || (val('needAci') ? 'مرسى ستقدّم البيان المسبق عبر فسح' : 'غير متوفر حاليًا')), !!val('declarationNo')],
+        ['HS Code', val('hsCode') || 'يحدده فريق ' + BRAND, !!val('hsCode')],
+        ['رقم البيان الجمركي', exp ? '' : (val('declarationNo') || (val('needAci') ? BRAND + ' ستقدّم البيان المسبق عبر فسح' : 'غير متوفر حاليًا')), !!val('declarationNo')],
         ['رقم البوليصة', val('blNumber'), true],
         [mode === 'air' ? 'شركة الطيران' : mode === 'land' ? 'شركة النقل' : 'الخط الملاحي', val('shippingLine')],
         ['الوصول المتوقع', val('eta'), true]

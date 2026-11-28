@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>غير متصل | مرسى MARSA</title>
+  <title>غير متصل | Blue Sea</title>
   <meta name="robots" content="noindex">
   <meta name="theme-color" content="#0B3A6E">
   <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
@@ -36,7 +36,7 @@
 <body data-page="offline">
   <main class="offline-page" id="main">
     <section class="card offline-card" aria-labelledby="offline-title">
-      <img class="offline-logo" src="assets/img/logo-header.png" alt="مرسى MARSA" width="107" height="74" data-i18n-attr="alt:offline.logoAlt">
+      <img class="offline-logo" src="assets/img/logo-bluesea.svg" alt="Blue Sea" width="268" height="74" data-i18n-attr="alt:offline.logoAlt">
       <span class="icon-box icon-box-soft" aria-hidden="true">
         <svg class="icon" viewBox="0 0 24 24"><path d="M2 8.8a15 15 0 0 1 4.2-2.6M10.7 5a15 15 0 0 1 11.3 3.8M5 12.6a10 10 0 0 1 5.2-2.5M16.8 10.9A10 10 0 0 1 19 12.6M8.5 16.1a5 5 0 0 1 7 0M12 20h.01M3 3l18 18"/></svg>
       </span>
@@ -61,12 +61,15 @@
       var I = window.MarsaI18n;
       var STR = {
         ar: { title: 'أنت غير متصل بالإنترنت', text: 'تعذّر تحميل هذه الصفحة لأن الجهاز غير متصل. تحقّق من اتصالك ثم أعد المحاولة. لا تُحفظ أي بيانات تشغيلية على هذا الجهاز، لذلك تحتاج المنصة إلى اتصال لعرض الطلبات والمعاملات.',
-              retry: 'إعادة المحاولة', home: 'صفحة الدخول', waiting: 'بانتظار عودة الاتصال…', back: 'عاد الاتصال. جارٍ إعادة التحميل…', pageTitle: 'غير متصل | مرسى MARSA', logoAlt: 'مرسى MARSA' },
+              retry: 'إعادة المحاولة', home: 'صفحة الدخول', waiting: 'بانتظار عودة الاتصال…', back: 'عاد الاتصال. جارٍ إعادة التحميل…', pageTitle: 'غير متصل | {brand}', logoAlt: '{brand}' },
         en: { title: 'You are offline', text: 'This page could not be loaded because the device is offline. Check your connection and try again. No operational data is stored on this device, so the platform needs a connection to show requests and transactions.',
-              retry: 'Try again', home: 'Sign-in page', waiting: 'Waiting for the connection…', back: 'Back online. Reloading…', pageTitle: 'Offline | MARSA', logoAlt: 'MARSA' }
+              retry: 'Try again', home: 'Sign-in page', waiting: 'Waiting for the connection…', back: 'Back online. Reloading…', pageTitle: 'Offline | {brand}', logoAlt: '{brand}' }
       };
       if (I && I.register) { I.register('offline', STR); if (I.apply) I.apply(document); }
-      function t(k) { var l = I && I.lang ? I.lang() : 'ar'; return (STR[l] || STR.ar)[k]; }
+      function t(k) {
+        var l = I && I.lang ? I.lang() : 'ar', b = I && typeof I.brand === 'function' ? I.brand() : 'Blue Sea';
+        return String((STR[l] || STR.ar)[k]).replace(/\{brand\}/g, b);
+      }
       function title() { document.title = t('pageTitle'); }
       title();
       window.addEventListener('marsa:langchange', title);

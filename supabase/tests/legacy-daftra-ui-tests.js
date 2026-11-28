@@ -198,7 +198,9 @@ check('the 32 worker error codes = the daftra_error dictionary rows (same order)
   return (rows.length === 32 && J(rows.map(r => r[0])) === J(D.ERROR_CODES) && J(Array.from(ADAPTER.DAFTRA_ERROR_CODES)) === J(D.ERROR_CODES)) || [rows.map(r => r[0]), D.ERROR_CODES];
 });
 check('the Arabic / English error texts are the server dictionary texts', () => {
-  const bad = migLabels('daftra_error').filter(r => dicts.ar['dft.err_' + r[0]] !== r[1] || dicts.en['dft.err_' + r[0]] !== r[2]).map(r => r[0]);
+  // the platform name: the page writes '{brand}' (MarsaI18n.brand(), owner decision «Blue Sea»); the server text still says مرسى / Marsa
+  const brandOf = s => String(s).replace(/مرسى/g, '{brand}').replace(/\bMarsa\b/g, '{brand}');
+  const bad = migLabels('daftra_error').filter(r => dicts.ar['dft.err_' + r[0]] !== brandOf(r[1]) || dicts.en['dft.err_' + r[0]] !== brandOf(r[2])).map(r => r[0]);
   return !bad.length || bad;
 });
 check('errorCode / errorFields behave exactly as adapter.js for codes, aliases, kinds and messages', () => {

@@ -599,6 +599,11 @@
     return out;
   }
 
+  // platform name for the file properties (one source: MarsaI18n.brand())
+  function XL_BRAND() {
+    var I = typeof window !== 'undefined' ? window.MarsaI18n : null;
+    return I && typeof I.brand === 'function' ? I.brand() : 'Blue Sea';
+  }
   function xmlEsc(s) {
     return String(s == null ? '' : s)
       .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]/g, '')
@@ -687,11 +692,11 @@
     var iso = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
     files.push({ name: 'docProps/core.xml', data: encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
       '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">' +
-      '<dc:title>' + xmlEsc(opts.title || 'MARSA') + '</dc:title><dc:creator>MARSA</dc:creator>' +
+      '<dc:title>' + xmlEsc(opts.title || XL_BRAND()) + '</dc:title><dc:creator>' + xmlEsc(XL_BRAND()) + '</dc:creator>' +
       '<dcterms:created xsi:type="dcterms:W3CDTF">' + iso + '</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">' + iso + '</dcterms:modified>' +
       '</cp:coreProperties>') });
     files.push({ name: 'docProps/app.xml', data: encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
-      '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>MARSA XlsxLite</Application></Properties>') });
+      '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>' + xmlEsc(XL_BRAND()) + ' XlsxLite</Application></Properties>') });
     files.push({ name: 'xl/workbook.xml', data: encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
       '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
       '<bookViews><workbookView xWindow="0" yWindow="0" windowWidth="16000" windowHeight="9000"/></bookViews><sheets>' +

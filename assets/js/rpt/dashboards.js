@@ -56,7 +56,7 @@
       col_currency: 'العملة', col_issued: 'عدد الفواتير', col_total: 'الإجمالي', col_paid: 'المسدد', col_outstanding: 'المتبقي',
       source_daftra: 'المصدر: دفترة (حقول المزامنة للفواتير الصادرة فقط).',
       cancelled_pending: 'أُلغيت في دفترة وتنتظر قرار المحاسب (غير محسوبة أعلاه): {v}',
-      sec_unofficial: 'قيد الإعداد — غير رسمي', unofficial_note: 'مسودات مرسى قبل الإصدار في دفترة؛ لا تُجمع مع الأرقام الرسمية.',
+      sec_unofficial: 'قيد الإعداد — غير رسمي', unofficial_note: 'مسودات {brand} قبل الإصدار في دفترة؛ لا تُجمع مع الأرقام الرسمية.',
       k_open_intents: 'أغراض فوترة قيد الإعداد', col_lines_total: 'إجمالي البنود (غير رسمي)',
       sec_payables: 'المستحقات للموردين', col_open_amount: 'المستحق المفتوح', col_overdue_amount: 'المتأخر', col_open_count: 'فواتير مفتوحة', col_overdue_count: 'فواتير متأخرة',
       payables_empty: 'لا توجد مستحقات مفتوحة.',
@@ -103,7 +103,7 @@
       col_currency: 'Currency', col_issued: 'Invoices', col_total: 'Total', col_paid: 'Paid', col_outstanding: 'Outstanding',
       source_daftra: 'Source: Daftra (synced fields of issued invoices only).',
       cancelled_pending: 'Cancelled in Daftra, awaiting the accountant (not in the figures above): {v}',
-      sec_unofficial: 'In preparation — not official', unofficial_note: 'Marsa drafts before issue in Daftra; never added to the official figures.',
+      sec_unofficial: 'In preparation — not official', unofficial_note: '{brand} drafts before issue in Daftra; never added to the official figures.',
       k_open_intents: 'Billing intents in preparation', col_lines_total: 'Lines total (not official)',
       sec_payables: 'Supplier payables', col_open_amount: 'Open amount', col_overdue_amount: 'Overdue', col_open_count: 'Open invoices', col_overdue_count: 'Overdue invoices',
       payables_empty: 'No open payables.',
@@ -127,7 +127,7 @@
   if (I && typeof I.register === 'function') { try { I.register('dash', DICT); } catch (e) { /* local fallback below */ } }
 
   function lang(api) { return api && typeof api.isEn === 'function' && api.isEn() ? 'en' : 'ar'; }
-  function interp(s, vars) { return vars ? String(s).replace(/\{(\w+)\}/g, function (m, k) { return vars[k] != null ? vars[k] : m; }) : String(s); }
+  function interp(s, vars) { if (s != null) s = String(s).replace(/\{brand\}/g, window.MarsaI18n && typeof window.MarsaI18n.brand === 'function' ? window.MarsaI18n.brand() : 'Blue Sea'); return vars ? String(s).replace(/\{(\w+)\}/g, function (m, k) { return vars[k] != null ? vars[k] : m; }) : String(s); }
   function t(api, k, vars) {
     var key = 'dash.' + k;
     if (I && typeof I.t === 'function') { var s = I.t(key, vars); if (s && s !== key) return s; }

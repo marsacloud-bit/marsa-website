@@ -25,10 +25,10 @@
   var SAMPLE = {
     ar: { tx_ref: 'MRS-2026-000123', bl_number: 'MEDU1234567', declaration_no: '1234567890', container_list: 'MSCU1234565، TGHU7654321', client_name: 'شركة العميل التجريبية',
       counterpart_name: 'الوكيل الملاحي (مثال)', operation_label: 'استيراد', appointment_at: '2026-11-05 09:00', terminal_name: 'محطة الحاويات (مثال)',
-      return_deadline_list: 'MSCU1234565: 2026-11-10', missing_documents_list: 'شهادة المنشأ، قائمة التعبئة', org_name: 'مرسى', signature: 'فريق العمليات', today: '2026-11-02' },
+      return_deadline_list: 'MSCU1234565: 2026-11-10', missing_documents_list: 'شهادة المنشأ، قائمة التعبئة', org_name: (window.MarsaI18n && typeof window.MarsaI18n.brand === 'function' ? window.MarsaI18n.brand() : 'Blue Sea'), signature: 'فريق العمليات', today: '2026-11-02' },
     en: { tx_ref: 'MRS-2026-000123', bl_number: 'MEDU1234567', declaration_no: '1234567890', container_list: 'MSCU1234565, TGHU7654321', client_name: 'Sample Client Co.',
       counterpart_name: 'Shipping agent (sample)', operation_label: 'Import', appointment_at: '2026-11-05 09:00', terminal_name: 'Container terminal (sample)',
-      return_deadline_list: 'MSCU1234565: 2026-11-10', missing_documents_list: 'Certificate of origin, packing list', org_name: 'MARSA', signature: 'Operations team', today: '2026-11-02' }
+      return_deadline_list: 'MSCU1234565: 2026-11-10', missing_documents_list: 'Certificate of origin, packing list', org_name: (window.MarsaI18n && typeof window.MarsaI18n.brand === 'function' ? window.MarsaI18n.brand() : 'Blue Sea'), signature: 'Operations team', today: '2026-11-02' }
   };
   function fill(tpl, lang) {
     var s = SAMPLE[lang === 'en' ? 'en' : 'ar'];

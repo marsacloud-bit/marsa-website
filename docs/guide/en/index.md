@@ -1,6 +1,6 @@
-# MARSA user guide
+# Blue Sea user guide
 
-MARSA is a platform for customs-clearance and transport work: from the client's request to the customs declaration, containers, transport, empty return, costs, the Daftra draft invoice and reports.
+Blue Sea is a platform for customs-clearance and transport work: from the client's request to the customs declaration, containers, transport, empty return, costs, the Daftra draft invoice and reports.
 
 <!-- env:staging -->
 > This is a staging environment: test data only. Do not upload real or sensitive documents, and do not reuse a password from another service.

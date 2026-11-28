@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>قراءة الفواتير والمستندات (OCR) | مرسى MARSA</title>
+  <title>قراءة الفواتير والمستندات (OCR) | Blue Sea</title>
   <meta name="description" content="حوّل صور الفواتير والبوالص والبيانات الجمركية وملفات PDF الممسوحة إلى نص وبيانات منظمة داخل متصفحك: رقم الفاتورة والتاريخ والرقم الضريبي والمبالغ والبنود وأرقام الحاويات ورمز QR للفاتورة الإلكترونية، مع النسخ إلى Excel والتنزيل والحفظ.">
   <meta name="theme-color" content="#0B3A6E">
   <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
@@ -38,8 +38,8 @@
   </div>
   <header class="site-header">
     <div class="container header-inner">
-      <a class="brand" href="office.html" aria-label="مرسى - الصفحة الرئيسية" data-i18n-attr="aria-label:nav.homeAria">
-        <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="84" height="58" data-i18n-attr="alt:nav.logoAlt">
+      <a class="brand" href="office.html" aria-label="Blue Sea - الصفحة الرئيسية" data-i18n-attr="aria-label:nav.homeAria">
+        <img src="assets/img/logo-bluesea.svg" alt="Blue Sea - تخليص جمركي وشحن" width="210" height="58" data-i18n-attr="alt:nav.logoAlt">
       </a>
       <nav class="main-nav" aria-label="القائمة الرئيسية" data-i18n-attr="aria-label:nav.mainMenu">
         <ul class="nav-list">
@@ -79,7 +79,7 @@
 
   <aside class="drawer" id="mobile-drawer" aria-label="القائمة الجانبية" aria-hidden="true">
     <div class="drawer-head">
-      <img src="assets/img/logo-header.png" alt="مرسى MARSA" width="72" height="50">
+      <img src="assets/img/logo-bluesea.svg" alt="Blue Sea" width="180" height="50">
       <button class="drawer-close" type="button" aria-label="إغلاق القائمة">
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
       </button>
@@ -198,7 +198,7 @@
                 <label class="check"><input type="radio" name="ocr-engine" id="ocr-engine-ai" value="ai" aria-describedby="ocr-ai-note"> <span data-i18n="ocr.engine_ai">القراءة بالذكاء الاصطناعي (Claude) — أدق للمستندات الممسوحة والجداول</span></label>
                 <div class="alert alert-warning mt-2" id="ocr-ai-note" role="note" hidden>
                   <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18h.01"/></svg>
-                  <span><span data-i18n="ocr.ai_note">عند اختيار القراءة بالذكاء الاصطناعي يُرسل الملف إلى خادم مرسى ثم إلى شركة Anthropic (مزوّد نموذج Claude) لمعالجته وإرجاع البيانات. لا تستخدمها لمستند لا يجوز مشاركته مع مزوّد خارجي. الحد: 10 ميغابايت للملف، وصيغ JPG وPNG وWEBP وGIF وPDF.</span> <span id="ocr-ai-remaining"></span></span>
+                  <span><span data-i18n="ocr.ai_note">عند اختيار القراءة بالذكاء الاصطناعي يُرسل الملف إلى خادم <span data-brand>Blue Sea</span> ثم إلى شركة Anthropic (مزوّد نموذج Claude) لمعالجته وإرجاع البيانات. لا تستخدمها لمستند لا يجوز مشاركته مع مزوّد خارجي. الحد: 10 ميغابايت للملف، وصيغ JPG وPNG وWEBP وGIF وPDF.</span> <span id="ocr-ai-remaining"></span></span>
                 </div>
                 <!-- quick reading (2026-11-14): one preference shared with the matching section (ocr.js / ocr-match.js) -->
                 <div class="ocr-quick" id="ocr-quick-wrap" hidden>
@@ -240,7 +240,7 @@
             </div>
             <p class="demo-note mt-2">
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
-              <span>الملفات تُعالج داخل متصفحك ولا تُرسل لأي خادم أثناء القراءة (إلا إذا اخترت «القراءة بالذكاء الاصطناعي»)؛ يتم تنزيل ملفات اللغة فقط (من jsDelivr وcdnjs عند أول استخدام). <span data-show-mode="online" hidden>لا يُرفع شيء إلى خادم مرسى إلا عند ضغطك «حفظ» بحساب موظف.</span></span>
+              <span>الملفات تُعالج داخل متصفحك ولا تُرسل لأي خادم أثناء القراءة (إلا إذا اخترت «القراءة بالذكاء الاصطناعي»)؛ يتم تنزيل ملفات اللغة فقط (من jsDelivr وcdnjs عند أول استخدام). <span data-show-mode="online" hidden>لا يُرفع شيء إلى خادم <span data-brand>Blue Sea</span> إلا عند ضغطك «حفظ» بحساب موظف.</span></span>
             </p>
 
             <ul class="file-list ocr-queue" id="ocr-queue" aria-label="المستندات المضافة"></ul>
@@ -461,7 +461,7 @@
 
           <div class="alert alert-warning" id="ocr-match-note" role="note">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18h.01"/></svg>
-            <span><span data-i18n="ocr.m_note">تُرسل الملفات إلى خادم مرسى ثم إلى شركة Anthropic (مزوّد نموذج Claude) لقراءتها. كل مستند قراءة مستقلة: المطابقة تستهلك قراءتين، وحتى أربع قراءات مع البيان الجمركي وبيان التعبئة، من حصة مؤسستك اليومية (الملف المقروء والمحفوظ سابقًا لا يُحتسب مرة أخرى). الحد: 5 ميغابايت للصورة و10 ميغابايت لملف PDF؛ JPG وPNG وWEBP وGIF وPDF.</span> <span id="ocr-match-remaining"></span></span>
+            <span><span data-i18n="ocr.m_note">تُرسل الملفات إلى خادم <span data-brand>Blue Sea</span> ثم إلى شركة Anthropic (مزوّد نموذج Claude) لقراءتها. كل مستند قراءة مستقلة: المطابقة تستهلك قراءتين، وحتى أربع قراءات مع البيان الجمركي وبيان التعبئة، من حصة مؤسستك اليومية (الملف المقروء والمحفوظ سابقًا لا يُحتسب مرة أخرى). الحد: 5 ميغابايت للصورة و10 ميغابايت لملف PDF؛ JPG وPNG وWEBP وGIF وPDF.</span> <span id="ocr-match-remaining"></span></span>
           </div>
           <!-- quick reading (2026-11-14): the same preference as the single reader -->
           <div class="ocr-quick ocr-match-quick">
@@ -775,10 +775,10 @@
     <div class="container">
       <div class="footer-grid">
         <div class="footer-brand">
-          <a class="footer-logo" href="office.html" aria-label="مرسى - الصفحة الرئيسية" data-i18n-attr="aria-label:nav.homeAria">
-            <img src="assets/img/logo-header.png" alt="مرسى MARSA - تخليص جمركي وشحن" width="107" height="74" data-i18n-attr="alt:nav.logoAlt">
+          <a class="footer-logo" href="office.html" aria-label="Blue Sea - الصفحة الرئيسية" data-i18n-attr="aria-label:nav.homeAria">
+            <img src="assets/img/logo-bluesea.svg" alt="Blue Sea - تخليص جمركي وشحن" width="268" height="74" data-i18n-attr="alt:nav.logoAlt">
           </a>
-          <p data-i18n="footer.about">مرسى منصة سعودية لخدمات التخليص الجمركي والشحن أونلاين، تساعد المستوردين والمصدّرين في المملكة على تخليص شحناتهم بسرعة وشفافية.</p>
+          <p data-i18n="footer.about"><span data-brand>Blue Sea</span> منصة سعودية لخدمات التخليص الجمركي والشحن أونلاين، تساعد المستوردين والمصدّرين في المملكة على تخليص شحناتهم بسرعة وشفافية.</p>
           <div class="social">
             <a href="contact.html" aria-label="فيسبوك" data-i18n-attr="aria-label:footer.facebook"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h-2.5A3.5 3.5 0 0 0 9 6.5V9H7v3.5h2V21h3.5v-8.5H15l.5-3.5h-3V7a1 1 0 0 1 1-1H15z"/></svg></a>
             <a href="contact.html" aria-label="لينكدإن" data-i18n-attr="aria-label:footer.linkedin"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 10v7M8 7v.01M12 17v-4a2 2 0 0 1 4 0v4M12 10v7"/></svg></a>
@@ -826,7 +826,7 @@
       <button class="btn btn-sm btn-outline-white" type="button" data-clear-local data-i18n="footer.clearData">مسح بياناتي من هذا الجهاز</button>
     </div>
     <div class="container footer-bottom">
-      <span>© <span id="year">2026</span> <span data-i18n="footer.rights">مرسى MARSA. جميع الحقوق محفوظة.</span></span>
+      <span>© <span id="year">2026</span> <span data-i18n="footer.rights"><span data-brand>Blue Sea</span>. جميع الحقوق محفوظة.</span></span>
       <span data-i18n="footer.disclaimer">منصة خاصة لخدمات التخليص الجمركي — غير تابعة لأي جهة حكومية.</span>
     </div>
   </footer>

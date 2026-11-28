@@ -263,7 +263,8 @@
     }
     if (!sheets.length) sheets.push({ name: 'Sheet1', columns: [], rows: [], totals: null });
     var iso = new Date(Math.floor(when.getTime() / 1000) * 1000).toISOString().replace(/\.000Z$/, 'Z');
-    var title = esc(spec.title || 'Marsa report');
+    var brand = (root.MarsaI18n && typeof root.MarsaI18n.brand === 'function' ? root.MarsaI18n.brand() : 'Blue Sea');
+    var title = esc(spec.title || (brand + ' report'));
     var files = [];
     files.push({ name: '[Content_Types].xml', data: utf8(XML_HEAD + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
       '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
@@ -281,11 +282,11 @@
       '</Relationships>') });
     files.push({ name: 'docProps/core.xml', data: utf8(XML_HEAD + '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" ' +
       'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" ' +
-      'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>' + title + '</dc:title><dc:creator>MARSA</dc:creator>' +
+      'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>' + title + '</dc:title><dc:creator>' + esc(brand) + '</dc:creator>' +
       '<dcterms:created xsi:type="dcterms:W3CDTF">' + iso + '</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">' + iso + '</dcterms:modified>' +
       '</cp:coreProperties>') });
     files.push({ name: 'docProps/app.xml', data: utf8(XML_HEAD + '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" ' +
-      'xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>MARSA</Application>' +
+      'xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>' + esc(brand) + '</Application>' +
       '<HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>' + sheets.length + '</vt:i4></vt:variant></vt:vector></HeadingPairs>' +
       '<TitlesOfParts><vt:vector size="' + sheets.length + '" baseType="lpstr">' + sheets.map(function (s) { return '<vt:lpstr>' + esc(s.name) + '</vt:lpstr>'; }).join('') + '</vt:vector></TitlesOfParts>' +
       '</Properties>') });

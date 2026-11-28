@@ -276,11 +276,11 @@ async function secFront() {
     const badge = mk({ 'data-site-hours-badge': '' });
     const aboutP = mk({ 'data-site-about-page': '', hidden: '' });
     const story = mk({ 'data-site-story': '' }, 'قصة');
-    const quote = mk({ 'data-site-platform-only': '' }, 'اسمنا مرسى');
-    const swap = mk({ 'data-site-swap': '', 'aria-label': 'خريطة فروع مرسى' }, 'فريق مرسى جاهز');
+    const quote = mk({ 'data-site-platform-only': '' }, 'اسمنا Blue Sea');
+    const swap = mk({ 'data-site-swap': '', 'aria-label': 'خريطة فروع Blue Sea' }, 'فريق Blue Sea جاهز');
     const all = { '[data-site-whatsapp]': [wa], '[data-site-hours]': [hours], '[data-site-hours-badge]': [badge], '[data-site-about-page]': [aboutP],
       '[data-site-story]': [story], '[data-site-platform-only]': [quote], '[data-site-swap]': [swap] };
-    const doc = { readyState: 'complete', body: { style: { setProperty() {} } }, title: 'من نحن | مرسى MARSA',
+    const doc = { readyState: 'complete', body: { style: { setProperty() {} } }, title: 'من نحن | Blue Sea',
       querySelectorAll: s => all[s] || [],
       createTreeWalker: el => { let done = false; return { nextNode: () => (done ? null : (done = true, el.textNode)) }; } };
     const store = { marsa_site_profile: JSON.stringify({ name_ar: 'مكتب أ', whatsapp: '0554000002', hours_ar: 'السبت – الخميس', about_ar: 'نبذة المكتب' }) };

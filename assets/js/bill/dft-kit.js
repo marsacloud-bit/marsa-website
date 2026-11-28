@@ -24,7 +24,7 @@
 
   /* ------------------------------------------------------------------ strings */
   function lang() { var I = window.MarsaI18n; return I && typeof I.lang === 'function' ? I.lang() : 'ar'; }
-  function interp(s, vars) { return vars ? String(s).replace(/\{(\w+)\}/g, function (m, k) { return vars[k] != null ? vars[k] : m; }) : s; }
+  function interp(s, vars) { if (s != null) s = String(s).replace(/\{brand\}/g, window.MarsaI18n && typeof window.MarsaI18n.brand === 'function' ? window.MarsaI18n.brand() : 'Blue Sea'); return vars ? String(s).replace(/\{(\w+)\}/g, function (m, k) { return vars[k] != null ? vars[k] : m; }) : s; }
   function T(k, vars) {
     var I = window.MarsaI18n, key = 'dft.' + k;
     if (I && typeof I.t === 'function') { var s = I.t(key, vars); if (s != null && s !== key) return s; }
